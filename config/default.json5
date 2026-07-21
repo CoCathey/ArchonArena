@@ -74,9 +74,13 @@
     dok: {
         enabled: true,
         apiUrl: 'https://decksofkeyforge.com/public-api/v3/decks/',
+        // Collection-filter endpoint used to list a user's whole DoK library
+        // for bulk import. Defaults are derived from apiUrl if omitted.
+        filterUrl: 'https://decksofkeyforge.com/public-api/v1/decks/filter',
         apiKey: '', // set via DOK_API_KEY
         requestTimeoutMs: 10000,
-        refreshDays: 30 // SAS scores change between AERC versions; refetch this often
+        refreshDays: 30, // SAS scores change between AERC versions; refetch this often
+        maxImportDecks: 500 // safety cap on a single bulk import
     },
 
     gameNode: {

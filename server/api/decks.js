@@ -15,6 +15,10 @@ const deckService = new DeckService(configService, cardService);
 const DokService = require('../services/dok/DokService');
 const dokService = new DokService(configService);
 
+// ARCHON: bulk import from Decks of KeyForge remembers the linked account
+const UserService = require('../services/UserService');
+const userService = new UserService(configService);
+
 module.exports.init = function (server) {
     server.get(
         '/api/standalone-decks',
@@ -140,6 +144,69 @@ module.exports.init = function (server) {
             dokService.enrichDeck(req.body.uuid);
 
             res.send({ success: true, deck: createResult.deck });
+        })
+    );
+
+    // ARCHON: bulk import from Decks of KeyForge. This "prepare" step lists
+    // the user's whole DoK collection, drops decks they already own, and
+    // returns the remainder; the client then imports each id through the
+    // ordinary /api/decks path (which handles Master Vault fetch + SAS), so
+    // one proven import path serves both single and bulk. See
+    // docs/design/dok-import.md.
+    server.post(
+        '/api/decks/import/dok/prepare',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async function (req, res) {
+            const dokUsername = (req.body.dokUsername || '').trim();
+
+            if (!dokUsername) {
+                return res.send({
+                    success: false,
+                    message: 'Enter your Decks of KeyForge username.'
+                });
+            }
+
+            if (!dokService.isEnabled()) {
+                return res.send({
+                    success: false,
+                    message: 'Decks of KeyForge import is not configured on this server yet.'
+                });
+            }
+
+            const result = await dokService.listOwnerDecks(dokUsername);
+
+            if (result.error) {
+                return res.send({
+                    success: false,
+                    message: 'Could not reach Decks of KeyForge. Please try again in a moment.'
+                });
+            }
+
+            if (!result.decks.length) {
+                return res.send({
+                    success: false,
+                    message:
+                        'No public decks found for that Decks of KeyForge user. Double-check the username.'
+                });
+            }
+
+            const ownedUuids = new Set(await deckService.getOwnedDeckUuids(req.user.id));
+            const toImport = result.decks.filter((deck) => !ownedUuids.has(deck.uuid));
+
+            // Remember the linked account for future syncs (best effort).
+            try {
+                await userService.setDokUsername(req.user.id, dokUsername);
+            } catch (err) {
+                logger.warn(`Failed to store DoK username for user ${req.user.id}: ${err.message}`);
+            }
+
+            res.send({
+                success: true,
+                total: result.decks.length,
+                ownedCount: result.decks.length - toImport.length,
+                truncated: !!result.truncated,
+                toImport
+            });
         })
     );
 

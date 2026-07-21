@@ -456,6 +456,15 @@ export const api = createApi({
             }),
             invalidatesTags: [{ type: TAG_TYPES.DECKS, id: DECKS_LIST_ID }]
         }),
+        // ARCHON: bulk import from Decks of KeyForge - lists the collection to
+        // import; the client then imports each uuid via saveDeck.
+        prepareDokImport: builder.mutation({
+            query: (dokUsername) => ({
+                url: '/decks/import/dok/prepare',
+                method: 'POST',
+                body: { dokUsername }
+            })
+        }),
         saveAllianceDeck: builder.mutation({
             query: (deck) => ({
                 url: '/decks/alliance',
@@ -671,6 +680,7 @@ export const {
     useDeleteDeckMutation,
     useDeleteDecksMutation,
     useSaveDeckMutation,
+    usePrepareDokImportMutation,
     useSaveAllianceDeckMutation,
     useGetStandaloneDecksQuery,
     useRefreshAccoladesMutation,

@@ -129,7 +129,12 @@ OpenID Connect.
 -   [x] Config-driven **(admin-config-ready)**: DoK API key (DOK_API_KEY), refresh
         interval, timeout, enable/disable.
 -   [x] Graceful degradation when DoK is down (cached values, SAS simply absent).
--   [x] Tests: enrichment, refresh windows, API failure paths (19 tests).
+-   [x] Tests: enrichment, refresh windows, API failure paths (26 tests).
+-   [x] **Bulk / live import from Decks of KeyForge** (docs/design/dok-import.md): a
+        player enters their DoK username; the DoK filter API lists their whole collection
+        and every deck they don't already own is imported (via Master Vault) with SAS,
+        with a live progress bar. Re-running syncs newly-added decks. In onboarding and
+        the Decks import modal. DoK username remembered (Users.DokUsername).
 -   [ ] Show SAS on deck _lists_, lobby games, and pre-game screen (deck page done).
 -   [ ] Periodic refresh sweep job (currently access-triggered only).
 -   [ ] Wire DoK settings into the runtime admin settings service once it exists.

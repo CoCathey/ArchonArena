@@ -150,7 +150,9 @@ class User {
             verified: this.userData.verified,
             challonge: this.userData.challonge,
             // ARCHON: drives the first-run wizard redirect (Phase 9)
-            onboarded: !!this.userData.onboarded
+            onboarded: !!this.userData.onboarded,
+            // ARCHON: linked Decks of KeyForge account (prefills bulk import)
+            dokUsername: this.userData.dokUsername || null
         };
 
         user = Settings.getUserWithDefaultsSet(user);

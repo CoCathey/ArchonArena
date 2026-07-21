@@ -528,6 +528,15 @@ class UserService extends EventEmitter {
         );
     }
 
+    // ARCHON: remember the Decks of KeyForge account a user imported from so
+    // they can re-sync new decks later.
+    async setDokUsername(userId, dokUsername) {
+        await db.query('UPDATE "Users" SET "DokUsername" = $1 WHERE "Id" = $2', [
+            dokUsername || null,
+            userId
+        ]);
+    }
+
     async anonymizeUser(user, options = {}) {
         const client = await db.startTransaction();
         const anonymizedUsername = options.username || `deleted-user-${user.id}`;
@@ -650,7 +659,9 @@ class UserService extends EventEmitter {
             activationTokenExpiry: dbUser.ActivationTokenExpiry,
             registerIp: dbUser.RegisterIp,
             // ARCHON: first-run wizard flag (Phase 9 onboarding)
-            onboarded: !!dbUser.OnboardedAt
+            onboarded: !!dbUser.OnboardedAt,
+            // ARCHON: linked Decks of KeyForge account for bulk deck import
+            dokUsername: dbUser.DokUsername || null
         };
 
         return user;

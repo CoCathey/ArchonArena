@@ -9,10 +9,12 @@ describe('DokService', function () {
     const enabledConfig = {
         enabled: true,
         apiKey: 'test-key',
-        apiUrl: 'https://dok.example/decks/',
+        apiUrl: 'https://dok.example/public-api/v3/decks/',
         requestTimeoutMs: 1000,
         refreshDays: 30
     };
+
+    const uuid = (n) => `${String(n).padStart(8, '0')}-0000-0000-0000-000000000000`;
 
     const configService = () => ({
         getValue: (key) => (key === 'dok' ? config : undefined)
@@ -61,7 +63,7 @@ describe('DokService', function () {
             expect(stats.aercScore).toBe(68);
             expect(stats.aercVersion).toBe(42);
             expect(fetchMock).toHaveBeenCalledWith(
-                'https://dok.example/decks/uuid-1',
+                'https://dok.example/public-api/v3/decks/uuid-1',
                 expect.objectContaining({ headers: { 'Api-Key': 'test-key' } })
             );
         });
@@ -117,6 +119,111 @@ describe('DokService', function () {
             db.query.mockRejectedValue(new Error('db down'));
 
             await expect(service.enrichDeck('uuid-1')).resolves.toBeUndefined();
+        });
+    });
+
+    describe('listOwnerDecks', function () {
+        const mockPages = (pages) => {
+            let call = 0;
+            fetchMock.mockImplementation(async () => ({
+                ok: true,
+                json: async () => ({ decks: pages[call++] || [] })
+            }));
+        };
+
+        it('derives the filter URL from the apiUrl origin and posts the owner', async function () {
+            mockPages([[{ keyforgeId: uuid(1), name: 'Deck One', sasRating: 70.4 }], []]);
+
+            const result = await service.listOwnerDecks('someplayer');
+
+            expect(result.configured).toBe(true);
+            expect(result.decks).toEqual([{ uuid: uuid(1), name: 'Deck One', sasRating: 70 }]);
+            expect(fetchMock).toHaveBeenCalledWith(
+                'https://dok.example/public-api/v1/decks/filter',
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({ 'Api-Key': 'test-key' })
+                })
+            );
+            const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+            expect(firstBody.owner).toBe('someplayer');
+            expect(firstBody.page).toBe(0);
+        });
+
+        it('pages until the collection runs dry and dedupes ids', async function () {
+            mockPages([
+                [
+                    { keyforgeId: uuid(1), name: 'A', sasRating: 60 },
+                    { keyforgeId: uuid(2), name: 'B', sasRating: 61 }
+                ],
+                [
+                    { keyforgeId: uuid(2), name: 'B dup', sasRating: 61 },
+                    { keyforgeId: uuid(3), name: 'C', sasRating: 62 }
+                ],
+                []
+            ]);
+
+            const result = await service.listOwnerDecks('p');
+
+            expect(result.decks.map((d) => d.uuid)).toEqual([uuid(1), uuid(2), uuid(3)]);
+        });
+
+        it('honours the maxDecks cap and reports truncation', async function () {
+            mockPages([
+                [{ keyforgeId: uuid(1) }, { keyforgeId: uuid(2) }, { keyforgeId: uuid(3) }]
+            ]);
+
+            const result = await service.listOwnerDecks('p', { maxDecks: 2 });
+
+            expect(result.decks).toHaveLength(2);
+            expect(result.truncated).toBe(true);
+        });
+
+        it('skips deck entries without a valid Master Vault uuid', async function () {
+            mockPages([
+                [
+                    { id: 12345, name: 'no keyforge id' },
+                    { keyforgeId: uuid(5), name: 'good' }
+                ],
+                []
+            ]);
+
+            const result = await service.listOwnerDecks('p');
+
+            expect(result.decks).toEqual([{ uuid: uuid(5), name: 'good', sasRating: null }]);
+        });
+
+        it('reports an error when the first page fails', async function () {
+            fetchMock.mockResolvedValue({ ok: false, status: 500 });
+
+            const result = await service.listOwnerDecks('p');
+
+            expect(result).toMatchObject({ configured: true, error: true });
+        });
+
+        it('returns a partial list when a later page fails', async function () {
+            let call = 0;
+            fetchMock.mockImplementation(async () => {
+                call++;
+                if (call === 1) {
+                    return { ok: true, json: async () => ({ decks: [{ keyforgeId: uuid(1) }] }) };
+                }
+                return { ok: false, status: 502 };
+            });
+
+            const result = await service.listOwnerDecks('p');
+
+            expect(result.error).toBeUndefined();
+            expect(result.decks).toEqual([{ uuid: uuid(1), name: null, sasRating: null }]);
+        });
+
+        it('does not call the API when DoK is disabled', async function () {
+            config.enabled = false;
+
+            const result = await service.listOwnerDecks('p');
+
+            expect(result).toEqual({ configured: false, decks: [] });
+            expect(fetchMock).not.toHaveBeenCalled();
         });
     });
 

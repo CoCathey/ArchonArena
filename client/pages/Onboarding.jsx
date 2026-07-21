@@ -6,6 +6,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 
 import Panel from '../Components/Site/Panel';
 import Avatar from '../Components/Site/Avatar';
+import DokImport from '../Components/Decks/DokImport';
 import { COUNTRIES, statesForCountry } from '../geo';
 import { toBase64 } from '../util.jsx';
 import {
@@ -395,9 +396,22 @@ const Onboarding = () => {
 
                 {step === 2 && (
                     <>
+                        <p className='mb-2 text-sm font-semibold text-foreground'>
+                            {t('Import your whole collection from Decks of KeyForge')}
+                        </p>
+                        <DokImport compact />
+
+                        <div className='my-4 flex items-center gap-3'>
+                            <span className='h-px flex-1 bg-border/60' />
+                            <span className='text-xs uppercase tracking-wide text-muted'>
+                                {t('or add a single deck')}
+                            </span>
+                            <span className='h-px flex-1 bg-border/60' />
+                        </div>
+
                         <p className='mb-3 text-sm text-muted'>
                             {t(
-                                'Paste a deck link (or deck code) from the official Master Vault at keyforgegame.com. You can import as many as you like.'
+                                'Paste a deck link (or deck code) from the official Master Vault at keyforgegame.com.'
                             )}
                         </p>
                         <div className='flex gap-2'>

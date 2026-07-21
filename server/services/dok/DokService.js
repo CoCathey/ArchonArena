@@ -80,6 +80,161 @@ class DokService {
         }
     }
 
+    getFilterUrl() {
+        const config = this.getConfig();
+
+        if (config.filterUrl) {
+            return config.filterUrl;
+        }
+
+        // Derive the collection-filter endpoint from the single-deck apiUrl
+        // origin when not explicitly configured.
+        try {
+            return new URL(config.apiUrl).origin + '/public-api/v1/decks/filter';
+        } catch {
+            return null;
+        }
+    }
+
+    isUuid(value) {
+        return (
+            typeof value === 'string' &&
+            /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+                value
+            )
+        );
+    }
+
+    /**
+     * Fetch one page of a DoK user's public decks via the filter endpoint.
+     * Returns an array of { uuid, name, sasRating } (uuid is the Master
+     * Vault id, i.e. what our importer needs) or null on any failure.
+     */
+    async fetchOwnerDeckPage(dokUsername, page) {
+        const config = this.getConfig();
+        const filterUrl = this.getFilterUrl();
+
+        if (!filterUrl) {
+            return null;
+        }
+
+        try {
+            const response = await fetch(filterUrl, {
+                method: 'POST',
+                headers: { 'Api-Key': config.apiKey, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    owner: dokUsername,
+                    page,
+                    pageSize: 100,
+                    sort: 'ADDED_DATE',
+                    sortDirection: 'DESC'
+                }),
+                signal: AbortSignal.timeout(config.requestTimeoutMs || 10000)
+            });
+
+            if (!response.ok) {
+                logger.warn(
+                    `DoK filter API returned ${response.status} for owner ${dokUsername} page ${page}`
+                );
+
+                return null;
+            }
+
+            const body = await response.json();
+            const decks = body && Array.isArray(body.decks) ? body.decks : null;
+
+            if (!decks) {
+                return null;
+            }
+
+            return decks
+                .map((deck) => ({
+                    uuid: this.isUuid(deck.keyforgeId)
+                        ? deck.keyforgeId
+                        : this.isUuid(deck.id)
+                        ? deck.id
+                        : null,
+                    name: typeof deck.name === 'string' ? deck.name : null,
+                    sasRating:
+                        typeof deck.sasRating === 'number' ? Math.round(deck.sasRating) : null
+                }))
+                .filter((deck) => deck.uuid);
+        } catch (err) {
+            logger.warn(
+                `Failed to fetch DoK decks for owner ${dokUsername} page ${page}: ${err.message}`
+            );
+
+            return null;
+        }
+    }
+
+    /**
+     * List a DoK user's whole public collection by paging the filter
+     * endpoint until it runs dry (or a safety cap is hit). Never throws:
+     *  - { configured: false } when DoK is not set up on this server
+     *  - { configured: true, error: true } when the very first page fails
+     *  - { configured: true, decks: [...], truncated } otherwise (a later
+     *    page failing yields a partial-but-usable list)
+     */
+    async listOwnerDecks(dokUsername, { maxDecks } = {}) {
+        if (!this.isEnabled()) {
+            return { configured: false, decks: [] };
+        }
+
+        const owner = String(dokUsername || '').trim();
+
+        if (!owner) {
+            return { configured: true, decks: [] };
+        }
+
+        const config = this.getConfig();
+        const cap = maxDecks || config.maxImportDecks || 500;
+        const all = [];
+        const seen = new Set();
+        let truncated = false;
+
+        // Hard page ceiling as a runaway guard on top of the deck cap.
+        for (let page = 0; page < 100; page++) {
+            const pageDecks = await this.fetchOwnerDeckPage(owner, page);
+
+            if (pageDecks === null) {
+                if (page === 0) {
+                    return { configured: true, error: true, decks: [] };
+                }
+
+                break; // partial success - return what we already have
+            }
+
+            if (pageDecks.length === 0) {
+                break;
+            }
+
+            let added = 0;
+            for (const deck of pageDecks) {
+                if (seen.has(deck.uuid)) {
+                    continue;
+                }
+
+                seen.add(deck.uuid);
+                all.push(deck);
+                added++;
+
+                if (all.length >= cap) {
+                    truncated = true;
+                    break;
+                }
+            }
+
+            // No new decks (endpoint ignored paging, or we hit the cap) -
+            // stop rather than loop forever.
+            if (truncated || added === 0) {
+                break;
+            }
+        }
+
+        return { configured: true, decks: all, truncated };
+    }
+
     async upsertStats(uuid, stats) {
         await this.db.query(
             'INSERT INTO "DeckSas" ("Uuid", "SasRating", "AercScore", "AercVersion", "RawData", "FetchedAt") ' +

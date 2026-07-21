@@ -38,9 +38,10 @@ const About = () => {
                 <Trans i18nKey='about.gettingstarted'>
                     <h3>Getting started</h3>
                     <p>
-                        Create an account, import a deck from the Master Vault on the{' '}
-                        <Link href='/decks'>Decks page</Link>, and jump into a game from{' '}
-                        <Link href='/play'>Play Online</Link>. The{' '}
+                        Create an account, then add your decks on the{' '}
+                        <Link href='/decks'>Decks page</Link> — import your whole collection at once
+                        with your Decks of KeyForge username, or paste a single Master Vault link.
+                        Then jump into a game from <Link href='/play'>Play Online</Link>. The{' '}
                         <Link href='/how-to-play'>How To Play guide</Link> covers the interface in
                         detail. Rated games move your rating; you can watch yourself climb on the{' '}
                         <Link href='/leaderboards'>Leaderboards</Link>.

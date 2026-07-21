@@ -146,6 +146,27 @@ class DeckService {
         return retDeck;
     }
 
+    /**
+     * ARCHON: the Master Vault ids of every deck a user already owns, used
+     * to skip re-importing during a Decks of KeyForge bulk sync.
+     */
+    async getOwnedDeckUuids(userId) {
+        let rows;
+
+        try {
+            rows = await db.query(
+                'SELECT "Uuid" FROM "Decks" WHERE "UserId" = $1 AND "Uuid" IS NOT NULL',
+                [userId]
+            );
+        } catch (err) {
+            logger.error('Failed to list owned deck uuids', err);
+
+            return [];
+        }
+
+        return (rows || []).map((row) => row.Uuid);
+    }
+
     async deckExistsForUser(user, deckId) {
         let deck;
         try {

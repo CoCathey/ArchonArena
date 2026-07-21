@@ -8,6 +8,7 @@ import Panel from '../Components/Site/Panel';
 import DeckList from '../Components/Decks/DeckList';
 import ViewDeck from '../Components/Decks/ViewDeck';
 import ImportDeck from '../Components/Decks/ImportDeck';
+import DokImport from '../Components/Decks/DokImport';
 import ApiStatus from '../Components/Site/ApiStatus';
 import { useDeleteDecksMutation } from '../redux/api';
 import { cardsActions } from '../redux/slices/cardsSlice';
@@ -118,7 +119,20 @@ const DecksComponent = () => {
                         <HeroModal.Header>
                             <HeroModal.Heading>{t('Import Deck')}</HeroModal.Heading>
                         </HeroModal.Header>
-                        <HeroModal.Body className='overflow-visible'>
+                        <HeroModal.Body className='space-y-4 overflow-visible'>
+                            <div>
+                                <h4 className='mb-2 text-sm font-semibold text-foreground'>
+                                    {t('Import your whole collection')}
+                                </h4>
+                                <DokImport />
+                            </div>
+                            <div className='flex items-center gap-3'>
+                                <span className='h-px flex-1 bg-border/60' />
+                                <span className='text-xs uppercase tracking-wide text-muted'>
+                                    {t('or add a single deck')}
+                                </span>
+                                <span className='h-px flex-1 bg-border/60' />
+                            </div>
                             <ImportDeck onClose={() => setShowImportModal(false)} />
                         </HeroModal.Body>
                     </HeroModal.Dialog>
