@@ -4,12 +4,19 @@
     dbPath: 'DB_PATH',
     dbHost: 'DB_HOST',
     dbPort: 'DB_PORT',
+    dbUser: 'DB_USER',
+    dbPassword: 'DB_PASSWORD',
+    dbDatabase: 'DB_NAME',
     redisUrl: 'REDIS_URL',
-    domain: 'archonarena.com',
+    redisKeyPrefix: 'REDIS_KEY_PREFIX',
+    secret: 'SECRET',
+    domain: 'DOMAIN',
     https: 'false',
 
     lobby: {
-        port: 'PORT'
+        port: 'PORT',
+        hmacSecret: 'HMAC_SECRET',
+        emailKey: 'EMAIL_KEY'
     },
 
     gameNode: {

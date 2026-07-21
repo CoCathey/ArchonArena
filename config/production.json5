@@ -1,0 +1,14 @@
+{
+    // Production overrides, loaded when NODE_ENV=production.
+    // Secrets and connection strings come from environment variables
+    // (see custom-environment-variables.json5 and .env.production.example);
+    // only non-secret production defaults belong in this file.
+
+    redisKeyPrefix: 'archonarena:prod',
+
+    lobby: {
+        appName: 'Archon Arena',
+        emailFromAddress: 'noreply@archonarena.com',
+        blockDisposableEmail: true
+    }
+}

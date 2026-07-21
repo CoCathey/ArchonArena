@@ -31,3 +31,6 @@ bin/
 obj/
 .env.development
 tmp/
+
+# Production secrets - never commit
+.env.production

@@ -1,0 +1,26 @@
+# Caddy reverse proxy for Archon Arena.
+# TLS certificates are obtained and renewed automatically via Let's Encrypt
+# for {$DOMAIN} (set through the DOMAIN environment variable, default
+# archonarena.com in docker-compose.prod.yml).
+
+{$DOMAIN} {
+    encode gzip zstd
+
+    # Game node websocket/polling traffic. Game nodes register with the
+    # lobby by identity (node-0, node-1, ...) and listen on
+    # /<identity>/socket.io; browsers connect to those paths on the site
+    # origin. Add a matcher+handle pair per additional node.
+    @node0 path /node-0/socket.io /node-0/socket.io/*
+    handle @node0 {
+        reverse_proxy node-0:9500
+    }
+
+    # Everything else (app, API, lobby websocket) goes to the lobby.
+    handle {
+        reverse_proxy lobby:4000
+    }
+}
+
+www.{$DOMAIN} {
+    redir https://{$DOMAIN}{uri} permanent
+}

@@ -1,0 +1,103 @@
+# Production stack for archonarena.com
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+#
+# Topology: Caddy terminates TLS (automatic Let's Encrypt) and reverse-proxies
+# everything to the lobby, except /node-*/socket.io paths which go to the game
+# nodes. Game nodes advertise no address, so browsers connect to them on the
+# site origin — no extra DNS records or open ports per node.
+#
+# See docs/DEPLOYMENT.md for the full runbook (DNS, first boot, backups).
+
+services:
+    caddy:
+        image: caddy:2-alpine
+        restart: unless-stopped
+        ports:
+            - '80:80'
+            - '443:443'
+        volumes:
+            - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+            - caddy_data:/data
+            - caddy_config:/config
+        environment:
+            - DOMAIN=${DOMAIN:-archonarena.com}
+        depends_on:
+            - lobby
+
+    lobby:
+        build: .
+        image: archonarena
+        restart: unless-stopped
+        expose:
+            - '4000'
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_started
+        environment:
+            - NODE_ENV=production
+            - NODE_CONFIG_ENV=production
+            - PORT=4000
+            - DB_HOST=postgres
+            - DB_PORT=5432
+            - DB_USER=${DB_USER:?set in .env.production}
+            - DB_PASSWORD=${DB_PASSWORD:?set in .env.production}
+            - DB_NAME=${DB_NAME:-archonarena}
+            - REDIS_URL=redis://redis:6379
+            - SECRET=${SECRET:?set in .env.production}
+            - HMAC_SECRET=${HMAC_SECRET:?set in .env.production}
+            - DOMAIN=${DOMAIN:-archonarena.com}
+            - VERSION=${VERSION:-}
+            - SENTRY_DSN=${SENTRY_DSN:-}
+            - CAPTCHA_KEY=${CAPTCHA_KEY:-}
+        command: ['node', '.']
+
+    node-0:
+        image: archonarena
+        restart: unless-stopped
+        expose:
+            - '9500'
+        depends_on:
+            - redis
+            - lobby
+        environment:
+            - NODE_ENV=production
+            - NODE_CONFIG_ENV=production
+            - SERVER=node-0
+            - PORT=9500
+            - REDIS_URL=redis://redis:6379
+            - SECRET=${SECRET:?set in .env.production}
+            - VERSION=${VERSION:-}
+            - SENTRY_DSN=${SENTRY_DSN:-}
+        command: ['node', 'server/gamenode']
+
+    postgres:
+        image: postgres:16-alpine
+        restart: unless-stopped
+        environment:
+            - POSTGRES_USER=${DB_USER:?set in .env.production}
+            - POSTGRES_PASSWORD=${DB_PASSWORD:?set in .env.production}
+            - POSTGRES_DB=${DB_NAME:-archonarena}
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+            - ./server/db/schema:/docker-entrypoint-initdb.d:ro
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    redis:
+        image: redis:7-alpine
+        restart: unless-stopped
+        command: redis-server --appendonly yes
+        volumes:
+            - redis_data:/data
+
+volumes:
+    caddy_data:
+    caddy_config:
+    postgres_data:
+    redis_data:
