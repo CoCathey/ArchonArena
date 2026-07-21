@@ -25,6 +25,8 @@ describe('DokService', function () {
         db = { query: vi.fn().mockResolvedValue([]) };
         service = new DokService(configService(), db);
         fetchMock = vi.spyOn(global, 'fetch');
+        // Shared rate-limit window is process-wide - clear it per test.
+        DokService._resetRateLimiter();
     });
 
     afterEach(function () {
@@ -111,7 +113,20 @@ describe('DokService', function () {
 
             await service.enrichDeck('uuid-1');
 
-            expect(db.query).not.toHaveBeenCalled();
+            expect(db.query).not.toHaveBeenCalledWith(
+                expect.stringContaining('INSERT INTO "DeckSas"'),
+                expect.anything()
+            );
+        });
+
+        it('skips the API call when fresh stats already exist', async function () {
+            db.query.mockResolvedValue([
+                { Uuid: 'uuid-1', SasRating: 70, AercScore: 65, FetchedAt: new Date() }
+            ]);
+
+            await service.enrichDeck('uuid-1');
+
+            expect(fetchMock).not.toHaveBeenCalled();
         });
 
         it('swallows database errors', async function () {
@@ -224,6 +239,50 @@ describe('DokService', function () {
 
             expect(result).toEqual({ configured: false, decks: [] });
             expect(fetchMock).not.toHaveBeenCalled();
+        });
+
+        it('caches SAS from the filter response with no extra API calls', async function () {
+            mockPages([[{ keyforgeId: uuid(1), name: 'A', sasRating: 65 }], []]);
+
+            await service.listOwnerDecks('p');
+
+            expect(db.query).toHaveBeenCalledWith(
+                expect.stringContaining('ON CONFLICT ("Uuid") DO NOTHING'),
+                expect.arrayContaining([uuid(1), 65])
+            );
+        });
+    });
+
+    describe('rate limiting', function () {
+        it('reserves up to the configured number of requests per minute', function () {
+            config.maxRequestsPerMinute = 3;
+
+            expect(service.reserveRequestSlot()).toBe(true);
+            expect(service.reserveRequestSlot()).toBe(true);
+            expect(service.reserveRequestSlot()).toBe(true);
+            expect(service.reserveRequestSlot()).toBe(false);
+        });
+
+        it('defaults to 25 requests per minute when unconfigured', function () {
+            delete config.maxRequestsPerMinute;
+
+            expect(service.getRateLimit()).toBe(25);
+        });
+
+        it('skips best-effort SAS fetches once the budget is spent', async function () {
+            config.maxRequestsPerMinute = 1;
+            mockDokResponse({ sasRating: 70 });
+
+            expect(await service.fetchDeckStats('uuid-1')).not.toBeNull();
+            expect(await service.fetchDeckStats('uuid-2')).toBeNull();
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+        });
+
+        it('gives up waiting for a slot when the budget stays spent', async function () {
+            config.maxRequestsPerMinute = 1;
+
+            expect(service.reserveRequestSlot()).toBe(true);
+            expect(await service.waitForRequestSlot(0)).toBe(false);
         });
     });
 

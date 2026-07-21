@@ -80,7 +80,11 @@
         apiKey: '', // set via DOK_API_KEY
         requestTimeoutMs: 10000,
         refreshDays: 30, // SAS scores change between AERC versions; refetch this often
-        maxImportDecks: 500 // safety cap on a single bulk import
+        maxImportDecks: 500, // safety cap on a single bulk import
+        // DoK's per-minute request cap for the site-wide Api-Key. Free tier
+        // is 25/min; patron tiers raise it (50 / 100 / 250). Change this to
+        // match your DoK subscription (also editable in admin settings).
+        maxRequestsPerMinute: 25
     },
 
     gameNode: {

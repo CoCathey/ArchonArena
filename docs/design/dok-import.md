@@ -62,11 +62,47 @@ import still works.
     a filter that ignores paging), plus a hard 100-page ceiling.
 -   The client import runs at concurrency 3 to be gentle on Master Vault.
 
+## Rate limiting (DoK's per-minute cap)
+
+DoK bills a single site-wide `Api-Key` and caps it at 25 requests/minute on
+the free tier (50 / 100 / 250 for patron tiers). All outbound DoK calls —
+per-deck SAS enrichment **and** the bulk-import list calls — pass through
+one **process-wide sliding-window limiter** (`reserveOutboundSlot`, shared
+across every `DokService` instance, since the key is shared):
+
+-   `maxRequestsPerMinute` (config + admin settings, default 25) is the cap.
+    Bump it to match your DoK subscription with no redeploy.
+-   Best-effort enrichment (`fetchDeckStats`) **skips** when the budget is
+    spent and retries on a later access (`needsRefresh` stays true) — it
+    never queues or blocks.
+-   User-initiated list calls (`fetchOwnerDeckPage`) **wait briefly**
+    (bounded) for a slot rather than skipping, then give up gracefully.
+
+Two changes keep bulk import from devouring the budget:
+
+1.  The filter/list response already includes each deck's SAS, so
+    `listOwnerDecks` caches it (`cacheSummarySas`, `ON CONFLICT DO NOTHING`)
+    — a whole-collection import gets SAS from the couple of list calls it
+    already made, not one call per deck.
+2.  `enrichDeck` skips decks whose stats are already fresh, so the per-deck
+    enrichment fired by `POST /api/decks` during a bulk import is a no-op
+    for decks the list step just cached.
+
+Net effect: importing a 50-deck collection costs ~1–2 DoK calls instead of
+50+, and nothing the app does can exceed the configured per-minute cap.
+
+**Scale note:** the limiter is per-process, correct for the current
+single-lobby deployment. Multiple lobby processes would each hold their own
+window; a Redis-backed shared counter is the follow-up when the app scales
+horizontally.
+
 ## Config (`dok` section, admin-tunable)
 
 -   `filterUrl` — collection filter endpoint (derived from `apiUrl` origin
     if unset).
 -   `maxImportDecks` — per-import safety cap (default 500).
+-   `maxRequestsPerMinute` — outbound DoK request cap (default 25; set to
+    your DoK patron tier: 50 / 100 / 250).
 -   Existing `enabled`, `apiKey`, `requestTimeoutMs`, `refreshDays`.
 
 ## Where it appears

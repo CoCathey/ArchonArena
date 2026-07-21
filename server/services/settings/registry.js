@@ -117,6 +117,13 @@ const REGISTRY = {
                 min: 1000,
                 max: 60000,
                 default: 10000
+            },
+            maxRequestsPerMinute: {
+                type: 'number',
+                label: 'DoK requests per minute (25 free tier; 50/100/250 for patron tiers)',
+                min: 1,
+                max: 250,
+                default: 25
             }
         }
     }

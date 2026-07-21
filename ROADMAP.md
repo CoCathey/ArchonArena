@@ -129,7 +129,12 @@ OpenID Connect.
 -   [x] Config-driven **(admin-config-ready)**: DoK API key (DOK_API_KEY), refresh
         interval, timeout, enable/disable.
 -   [x] Graceful degradation when DoK is down (cached values, SAS simply absent).
--   [x] Tests: enrichment, refresh windows, API failure paths (26 tests).
+-   [x] **Per-minute rate limiting** on all outbound DoK calls (process-wide sliding
+        window; maxRequestsPerMinute, default 25, admin-tunable to match DoK patron
+        tiers 50/100/250). Enrichment skips over budget; bulk import caches SAS from the
+        filter response so a collection costs ~1-2 calls, not one-per-deck. Redis-backed
+        shared counter is the follow-up for multi-process scale.
+-   [x] Tests: enrichment, refresh windows, API failure paths, rate limiting (32 tests).
 -   [x] **Bulk / live import from Decks of KeyForge** (docs/design/dok-import.md): a
         player enters their DoK username; the DoK filter API lists their whole collection
         and every deck they don't already own is imported (via Master Vault) with SAS,

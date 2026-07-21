@@ -1,5 +1,28 @@
 const logger = require('../../log');
 
+// Process-wide sliding-window log of outbound DoK request times. DoK bills
+// a single site-wide Api-Key, so the cap must be global across every
+// DokService instance in the process - not per-instance. Each entry is a
+// request timestamp (ms); anything older than 60s is pruned on access.
+const outboundRequestTimes = [];
+
+function reserveOutboundSlot(limit) {
+    const now = Date.now();
+    const cutoff = now - 60000;
+
+    while (outboundRequestTimes.length && outboundRequestTimes[0] <= cutoff) {
+        outboundRequestTimes.shift();
+    }
+
+    if (outboundRequestTimes.length < limit) {
+        outboundRequestTimes.push(now);
+
+        return true;
+    }
+
+    return false;
+}
+
 /**
  * Integration with Decks of KeyForge (decksofkeyforge.com): fetches SAS /
  * AERC deck statistics and caches them in the DeckSas table, keyed by the
@@ -9,11 +32,20 @@ const logger = require('../../log');
  *  - Deck import and deck listing must never fail or block on DoK being
  *    slow or down; enrichment is best-effort and cached values degrade
  *    gracefully to "no SAS shown".
- *  - All knobs (enabled, API key, refresh interval, timeout) come from
- *    config so the admin settings service can drive them later.
+ *  - Outbound calls are capped to DoK's per-minute request limit
+ *    (maxRequestsPerMinute; 25 on the free tier, higher for patrons) via a
+ *    shared sliding window. Best-effort enrichment skips when the budget is
+ *    spent; user-initiated calls wait briefly for a slot.
+ *  - All knobs (enabled, API key, refresh interval, timeout, rate limit)
+ *    come from config so the admin settings service can drive them.
  *  - The db adapter is injected to keep the service unit-testable.
  */
 class DokService {
+    // Test hook: clear the shared rate-limit window between cases.
+    static _resetRateLimiter() {
+        outboundRequestTimes.length = 0;
+    }
+
     constructor(configService, db = require('../../db'), settingsService = require('../settings')) {
         this.configService = configService;
         this.db = db;
@@ -35,6 +67,38 @@ class DokService {
         return !!config.enabled && !!config.apiKey;
     }
 
+    // DoK's per-minute request cap (25 free; 50/100/250 for patron tiers).
+    getRateLimit() {
+        const limit = parseInt(this.getConfig().maxRequestsPerMinute, 10);
+
+        return Number.isFinite(limit) && limit > 0 ? limit : 25;
+    }
+
+    // Non-blocking: reserve one request against this minute's budget.
+    reserveRequestSlot() {
+        return reserveOutboundSlot(this.getRateLimit());
+    }
+
+    // Blocking (bounded): for user-initiated calls that should prefer to
+    // proceed rather than silently skip. Polls at roughly the slot-refill
+    // spacing until a slot frees or maxWaitMs elapses.
+    async waitForRequestSlot(maxWaitMs = 8000) {
+        const start = Date.now();
+
+        for (;;) {
+            if (this.reserveRequestSlot()) {
+                return true;
+            }
+
+            if (Date.now() - start >= maxWaitMs) {
+                return false;
+            }
+
+            const spacing = Math.min(1000, Math.max(50, Math.ceil(60000 / this.getRateLimit())));
+            await new Promise((resolve) => setTimeout(resolve, spacing));
+        }
+    }
+
     /**
      * Fetch deck statistics from the DoK public API. Returns the extracted
      * stats or null on any failure (never throws).
@@ -43,6 +107,12 @@ class DokService {
         const config = this.getConfig();
 
         if (!this.isEnabled()) {
+            return null;
+        }
+
+        // Enrichment is best-effort: if this minute's budget is spent, skip
+        // and let a later access retry (needsRefresh stays true).
+        if (!this.reserveRequestSlot()) {
             return null;
         }
 
@@ -115,6 +185,15 @@ class DokService {
         const filterUrl = this.getFilterUrl();
 
         if (!filterUrl) {
+            return null;
+        }
+
+        // User-initiated: wait briefly for a slot rather than skipping.
+        if (!(await this.waitForRequestSlot())) {
+            logger.warn(
+                `DoK per-minute rate limit reached; could not fetch owner deck page ${page}`
+            );
+
             return null;
         }
 
@@ -232,7 +311,40 @@ class DokService {
             }
         }
 
+        // The filter response already carries each deck's SAS - cache it now
+        // so bulk-imported decks show SAS with zero extra per-deck API calls.
+        await this.cacheSummarySas(all);
+
         return { configured: true, decks: all, truncated };
+    }
+
+    /**
+     * Persist SAS ratings pulled from a filter/list response. Uses ON
+     * CONFLICT DO NOTHING so a fuller prior per-deck fetch (with AERC
+     * breakdown) is never clobbered by this lighter summary.
+     */
+    async cacheSummarySas(decks) {
+        const rated = (decks || []).filter((deck) => typeof deck.sasRating === 'number');
+
+        if (rated.length === 0) {
+            return;
+        }
+
+        const values = rated.map(
+            (deck, i) => `($${i + 1}, $${rated.length + i + 1}, now() AT TIME ZONE 'utc')`
+        );
+        const params = [...rated.map((deck) => deck.uuid), ...rated.map((deck) => deck.sasRating)];
+
+        try {
+            await this.db.query(
+                'INSERT INTO "DeckSas" ("Uuid", "SasRating", "FetchedAt") VALUES ' +
+                    values.join(', ') +
+                    ' ON CONFLICT ("Uuid") DO NOTHING',
+                params
+            );
+        } catch (err) {
+            logger.warn(`Failed to cache summary SAS from DoK: ${err.message}`);
+        }
     }
 
     async upsertStats(uuid, stats) {
@@ -292,6 +404,14 @@ class DokService {
      */
     async enrichDeck(uuid) {
         if (!uuid || !this.isEnabled() || this.pendingFetches.has(uuid)) {
+            return;
+        }
+
+        // Skip when we already hold fresh stats - e.g. SAS cached from a
+        // bulk-import filter response - so importing a collection does not
+        // spend one API call per deck on data we already have.
+        const stored = await this.getStoredStats([uuid]);
+        if (stored[uuid] && !this.needsRefresh(stored[uuid].FetchedAt)) {
             return;
         }
 
