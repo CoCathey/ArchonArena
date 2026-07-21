@@ -1,0 +1,42 @@
+name: CI
+
+on:
+    push:
+        branches: ['main', 'master', 'claude/**']
+        paths-ignore:
+            - 'infrastructure/**'
+            - 'docs/**'
+    pull_request:
+        paths-ignore:
+            - 'infrastructure/**'
+            - 'docs/**'
+    workflow_dispatch: {}
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout source
+              uses: actions/checkout@v4
+
+            - name: Use Node.js 22
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22.x
+                  cache: 'npm'
+
+            - name: Install dependencies
+              run: npm ci --include=optional
+
+            - name: Typecheck client
+              run: npm run typecheck:client
+
+            - name: Lint
+              run: npm run lint
+
+            - name: Build client
+              run: npm run build
+
+            - name: Test
+              run: npm test
