@@ -12,5 +12,6 @@ export const TAG_TYPES = {
     GAMES: 'Games',
     LOBBY: 'Lobby',
     OIDC: 'Oidc',
-    LOCATION: 'Location'
+    LOCATION: 'Location',
+    TOURNAMENTS: 'Tournaments'
 };

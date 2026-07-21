@@ -5,6 +5,8 @@ const oidc = require('./oidc');
 const ratings = require('./ratings');
 // ARCHON: runtime admin settings
 const adminSettings = require('./admin-settings');
+// ARCHON: native tournament engine
+const tournaments = require('./tournaments');
 const decks = require('./decks');
 const games = require('./games');
 const cards = require('./cards');
@@ -22,6 +24,8 @@ module.exports.init = function (server, options) {
     ratings.init(server);
     // ARCHON: runtime admin settings
     adminSettings.init(server);
+    // ARCHON: native tournament engine
+    tournaments.init(server);
     decks.init(server);
     games.init(server);
     cards.init(server);

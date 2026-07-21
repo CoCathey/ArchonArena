@@ -180,19 +180,25 @@ much stronger deck pays less.
 
 ## Phase 7 — Tournament engine _(PRIORITY)_
 
--   [ ] Standalone **Tournament Service** (own tables, own API; talks to game engine via
-        events/adapters only).
--   [ ] Formats: Swiss, single elim, double elim, round robin; Archon/Sealed/Alliance.
--   [ ] **Online mode:** auto-created games on Archon Arena, result auto-reporting from the
-        game engine, round timers, no-show handling.
--   [ ] **In-person mode:** TO dashboard, manual pairings display, result slips (mobile-first
-        result entry), QR join codes, printable pairings.
--   [ ] Hybrid events (online + paper results feeding one standing).
--   [ ] TO tools: create/edit events, registration windows, deck registration (with SAS
-        caps/bands as an option **(admin-config per event)**), drops, byes, penalties.
+-   [x] Standalone **Tournament Service** (own tables/API, zero gameplay-engine coupling;
+        docs/design/tournament-engine.md; migration 27).
+-   [x] Formats: Swiss (score groups, rematch-avoiding backtracking, byes) and single
+        elimination (seeded, top-seed byes); Archon/Sealed/Alliance per event.
+-   [x] Event lifecycle: create (any logged-in user organizes), registration window,
+        drops (self or TO), round pairing gated on complete results, finish/cancel.
+-   [x] Result flow: participants report open results, organizer can correct; byes
+        auto-win; table numbers per pairing for IRL play.
+-   [x] Standings: points → strength-of-schedule → fewest byes; live on the event page.
+-   [x] Public pages: tournament list + create form, event page with players, per-round
+        pairings, reporting buttons, standings, TO controls.
+-   [x] Tests: pairing algorithms + lifecycle/authorization (26 tests).
+-   [ ] **Online automation (increment 2):** auto-created games per pairing, GAMEWIN
+        auto-reporting, round timers, no-show handling.
 -   [ ] Tournament results feed the Rating Service (weighting **(admin-config)**).
--   [ ] Standings, pairings, and brackets pages (public, spectator-friendly).
--   [ ] Tests: pairing algorithms (Swiss constraints), bracket progression, result flows.
+-   [ ] Formats: double elimination, round robin, Swiss cut to top-N.
+-   [ ] TO tools: deck registration with SAS caps/bands **(admin-config per event)**,
+        penalties, printable pairings, QR join codes.
+-   [ ] Hybrid events (online + paper results feeding one standing).
 
 ## Phase 8 — Modern UI
 

@@ -17,6 +17,8 @@ import CommunityNews from './pages/CommunityNews';
 import Leaderboards from './pages/Leaderboards';
 import Matches from './pages/Matches';
 import Placeholder from './pages/Placeholder';
+import Tournaments from './pages/Tournaments';
+import TournamentDetail from './pages/TournamentDetail';
 import MotdAdmin from './pages/MotdAdmin';
 import NewsAdmin from './pages/NewsAdmin';
 import NodesAdmin from './pages/NodesAdmin';
@@ -122,15 +124,8 @@ const AppRoutes = ({ currentGame, user }) => {
                     />
                 }
             />
-            <Route
-                path='/tournaments'
-                element={
-                    <Placeholder
-                        title='Tournaments'
-                        description='Swiss and bracket events, online and in person, with automatic pairings and results are on the way.'
-                    />
-                }
-            />
+            <Route path='/tournaments' element={<Tournaments />} />
+            <Route path='/tournaments/:id' element={<TournamentDetail />} />
             <Route
                 path='/learn'
                 element={

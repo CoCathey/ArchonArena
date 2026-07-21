@@ -290,6 +290,31 @@ export const api = createApi({
         getRatings: builder.query({
             query: (username) => `/ratings/${encodeURIComponent(username)}`
         }),
+        // ARCHON: native tournament engine ("event" naming avoids clashing
+        // with the legacy Challonge getTournaments endpoint below)
+        listEvents: builder.query({
+            query: (params) => ({ url: '/tournaments', params }),
+            providesTags: [TAG_TYPES.TOURNAMENTS]
+        }),
+        getEventDetail: builder.query({
+            query: (id) => `/tournaments/${id}`,
+            providesTags: (result, error, id) => [{ type: TAG_TYPES.TOURNAMENTS, id }]
+        }),
+        createTournament: builder.mutation({
+            query: (body) => ({ url: '/tournaments', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.TOURNAMENTS]
+        }),
+        tournamentAction: builder.mutation({
+            query: ({ id, action, body }) => ({
+                url: `/tournaments/${id}/${action}`,
+                method: 'POST',
+                body
+            }),
+            invalidatesTags: (result, error, { id }) => [
+                TAG_TYPES.TOURNAMENTS,
+                { type: TAG_TYPES.TOURNAMENTS, id }
+            ]
+        }),
         // ARCHON: runtime admin settings
         getAdminSettings: builder.query({
             query: () => '/admin/settings'
@@ -563,6 +588,10 @@ export const {
     useGetAdminSettingsQuery,
     useSaveAdminSettingsMutation,
     useResetAdminSettingsMutation,
+    useListEventsQuery,
+    useGetEventDetailQuery,
+    useCreateTournamentMutation,
+    useTournamentActionMutation,
     useUnlinkPatreonMutation,
     useGetCardsQuery,
     useGetFactionsQuery,
