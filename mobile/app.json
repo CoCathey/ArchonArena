@@ -12,6 +12,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.archonarena.app",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
