@@ -277,6 +277,67 @@ class OidcService {
 
         return username;
     }
+
+    async getIdentitiesForUser(userId) {
+        const rows = await this.db.query(
+            'SELECT "Provider", "Email", "CreatedAt" FROM "UserOidcIdentities" WHERE "UserId" = $1',
+            [userId]
+        );
+
+        return (rows || []).map((row) => ({
+            provider: row.Provider,
+            email: row.Email,
+            createdAt: row.CreatedAt
+        }));
+    }
+
+    /**
+     * Attach validated claims to a specific, already-authenticated user
+     * (the settings "Link Account" flow). Throws if this provider identity
+     * is already linked to a different account.
+     */
+    async linkClaimsToUser(userId, claims) {
+        const config = this.getConfig();
+        const provider = config.providerName || 'keybringer';
+
+        const identity = await this.getIdentity(provider, claims.sub);
+        if (identity && identity.UserId !== userId) {
+            throw new Error('This identity is already linked to another account');
+        }
+
+        if (!identity) {
+            await this.linkIdentity(userId, provider, claims.sub, claims.email);
+            logger.info(`User ${userId} linked ${provider} identity ${claims.sub} from settings`);
+        }
+    }
+
+    /**
+     * Remove a provider link. Refused when it is the account's only way in
+     * (no usable local password and no other identity) so an account can
+     * never be orphaned.
+     */
+    async unlinkIdentity(userId, provider, hasUsablePassword) {
+        const identities = await this.getIdentitiesForUser(userId);
+
+        if (!identities.some((identity) => identity.provider === provider)) {
+            return { success: false, message: 'No such linked account' };
+        }
+
+        if (!hasUsablePassword && identities.length <= 1) {
+            return {
+                success: false,
+                message:
+                    'Set a password first: this is currently the only way to sign in to your account'
+            };
+        }
+
+        await this.db.query(
+            'DELETE FROM "UserOidcIdentities" WHERE "UserId" = $1 AND "Provider" = $2',
+            [userId, provider]
+        );
+
+        return { success: true };
+    }
 }
 
 module.exports = OidcService;

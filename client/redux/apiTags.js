@@ -10,5 +10,6 @@ export const TAG_TYPES = {
     BANLIST: 'Banlist',
     CHALLONGE: 'Challonge',
     GAMES: 'Games',
-    LOBBY: 'Lobby'
+    LOBBY: 'Lobby',
+    OIDC: 'Oidc'
 };

@@ -1,8 +1,23 @@
 # Design: Keybringer SSO (OpenID Connect)
 
-Status: **Increment 1 shipped** — full authorization-code + PKCE login flow, identity
-linking, and login-page button. Disabled by default until a Keycloak client exists
-(owner action below). Account-settings link/unlink UI and role mapping are follow-ups.
+Status: **Increments 1–2 shipped** — full authorization-code + PKCE login flow,
+register-page sign-up entry, and account-settings link/unlink (Connected Services).
+Disabled by default until a Keycloak client exists (owner action below). Role mapping
+and RP-initiated logout are follow-ups.
+
+Increment 2 adds:
+
+-   `GET /api/account/oidc/identities`, `POST /api/account/oidc/unlink` (JWT-authed).
+    Unlink is refused while the account has no usable password and only one identity,
+    so an account can never be orphaned.
+-   `POST /api/account/oidc/link/start` (JWT-authed XHR): returns the provider
+    authorization URL and sets the signed state cookie with the requesting user's id
+    (`linkUserId`). The callback detects link mode from the cookie, attaches the
+    identity via `linkClaimsToUser` (refusing identities already linked elsewhere), and
+    redirects to `/profile#ssoLinked=1` — no session minting. The user id travels in a
+    server-signed JWT cookie, so it cannot be forged client-side.
+-   Shared `SsoButton` component on Login + Register (renders nothing when SSO is off);
+    Keybringer row in Profile → Connected Services next to the inherited Patreon row.
 
 ## Owner action required to enable
 

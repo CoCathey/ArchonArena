@@ -54,7 +54,11 @@
 -   [x] Rename user-visible strings: site title, page titles, navbar, about/help pages.
 -   [x] package.json name/description, manifest, HTML meta tags, OpenGraph tags.
 -   [x] Replace TCO branding references in client UI components.
--   [ ] New logo / favicon / color theme (needs design assets from owner).
+-   [x] Logo + favicons: Archon Arena mark (amber keyhole in hexagonal arena) generated
+        by scripts/generate-brand-assets.js; theme-color metas updated. Full site color
+        theme pass still open (below).
+-   [ ] Site-wide color theme aligned to the brand mark (accent/amber pass over the UI);
+        owner may also supply custom art to replace the generated mark.
 -   [ ] Email templates (registration, password reset) rebranded.
 -   [ ] Legal pages: ToS, privacy policy, KeyForge/FFG/Ghost Galaxy IP acknowledgement.
 -   [ ] Keep internal code identifiers stable where renaming risks gameplay breakage
@@ -102,7 +106,11 @@ OpenID Connect.
         identity resolution paths (13 tests).
 -   [ ] **Owner action:** register the Keycloak client in the keybringer realm (client
         id/secret, redirect URIs for archonarena.com + localhost) and set OIDC\_\* env vars.
--   [ ] Link/unlink UI in account settings.
+-   [x] Sign-up entry point: "Sign up with Keybringer" on the Register page (shared
+        SsoButton; hidden until SSO is configured).
+-   [x] Link/unlink UI in account settings (Connected Services), with orphan
+        protection: unlink refused while the account has no password and no other
+        identity.
 -   [ ] Admin setting: SSO-only mode (disable local registration) **(admin-config)**.
 -   [ ] RP-initiated logout against Keycloak; session revocation on unlink.
 -   [ ] Role mapping: Keycloak roles/groups → Archon Arena roles (admin, TO, moderator).

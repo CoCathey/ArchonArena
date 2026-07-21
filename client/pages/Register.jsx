@@ -6,6 +6,7 @@ import { Button, Input, Label, toast } from '@heroui/react';
 import AlertPanel from '../Components/Site/AlertPanel.jsx';
 import Panel from '../Components/Site/Panel.jsx';
 import Link from '../Components/Navigation/Link.jsx';
+import SsoButton from '../Components/Site/SsoButton.jsx';
 import { useRegisterAccountMutation } from '../redux/api';
 
 import { Trans, useTranslation } from 'react-i18next';
@@ -69,6 +70,9 @@ const Register = () => {
         <div className='mx-auto w-full max-w-2xl'>
             {errorBar}
             <Panel title={t('Register an account')}>
+                {/* ARCHON: SSO sign-up entry point (same flow as login;
+                    the server auto-creates an account on first sign-in) */}
+                <SsoButton mode='register' />
                 <Trans i18nKey='register.disclosure'>
                     <p>
                         We require information from you in order to service your access to the site.

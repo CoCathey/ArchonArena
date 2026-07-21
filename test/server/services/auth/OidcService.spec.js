@@ -264,4 +264,69 @@ describe('OidcService', function () {
             expect(username).toMatch(/^[A-Za-z0-9_-]{3,15}$/);
         });
     });
+
+    describe('linkClaimsToUser', function () {
+        it('links a fresh identity to the requesting user', async function () {
+            db.query.mockResolvedValueOnce([]); // no existing identity
+
+            await service.linkClaimsToUser(5, { sub: 'subject-1', email: 'p@example.com' });
+
+            expect(db.query).toHaveBeenCalledWith(
+                expect.stringContaining('INSERT INTO "UserOidcIdentities"'),
+                expect.arrayContaining([5, 'keybringer', 'subject-1'])
+            );
+        });
+
+        it('is a no-op when the identity is already linked to this user', async function () {
+            db.query.mockResolvedValueOnce([{ Id: 1, UserId: 5 }]);
+
+            await service.linkClaimsToUser(5, { sub: 'subject-1' });
+
+            const inserts = db.query.mock.calls.filter(([sql]) => sql.includes('INSERT'));
+            expect(inserts.length).toBe(0);
+        });
+
+        it('refuses an identity already linked to a different account', async function () {
+            db.query.mockResolvedValueOnce([{ Id: 1, UserId: 99 }]);
+
+            await expect(service.linkClaimsToUser(5, { sub: 'subject-1' })).rejects.toThrow(
+                /already linked/
+            );
+        });
+    });
+
+    describe('unlinkIdentity', function () {
+        const identityRow = { Provider: 'keybringer', Email: 'p@example.com', CreatedAt: null };
+
+        it('unlinks when the user has a usable password', async function () {
+            db.query.mockResolvedValueOnce([identityRow]);
+
+            const result = await service.unlinkIdentity(5, 'keybringer', true);
+
+            expect(result.success).toBe(true);
+            expect(db.query).toHaveBeenCalledWith(
+                expect.stringContaining('DELETE FROM "UserOidcIdentities"'),
+                [5, 'keybringer']
+            );
+        });
+
+        it('refuses to orphan a passwordless account with a single identity', async function () {
+            db.query.mockResolvedValueOnce([identityRow]);
+
+            const result = await service.unlinkIdentity(5, 'keybringer', false);
+
+            expect(result.success).toBe(false);
+            expect(result.message).toMatch(/password/i);
+            const deletes = db.query.mock.calls.filter(([sql]) => sql.includes('DELETE'));
+            expect(deletes.length).toBe(0);
+        });
+
+        it('reports an error for a provider that is not linked', async function () {
+            db.query.mockResolvedValueOnce([]);
+
+            const result = await service.unlinkIdentity(5, 'keybringer', true);
+
+            expect(result.success).toBe(false);
+        });
+    });
 });

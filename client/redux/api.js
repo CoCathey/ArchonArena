@@ -246,6 +246,28 @@ export const api = createApi({
                 method: 'POST'
             })
         }),
+        // ARCHON: OIDC (Keybringer) linked identities for account settings
+        getOidcIdentities: builder.query({
+            query: () => '/account/oidc/identities',
+            providesTags: [TAG_TYPES.OIDC]
+        }),
+        getOidcStatus: builder.query({
+            query: () => '/account/oidc/status'
+        }),
+        startOidcLink: builder.mutation({
+            query: () => ({
+                url: '/account/oidc/link/start',
+                method: 'POST'
+            })
+        }),
+        unlinkOidc: builder.mutation({
+            query: (provider) => ({
+                url: '/account/oidc/unlink',
+                method: 'POST',
+                body: { provider }
+            }),
+            invalidatesTags: [TAG_TYPES.OIDC]
+        }),
         getCards: builder.query({
             query: () => '/cards',
             providesTags: [{ type: TAG_TYPES.CARDS, id: 'LIST' }]
@@ -491,6 +513,10 @@ export const {
     useActivateAccountMutation,
     useVerifyAuthenticationMutation,
     useLinkPatreonMutation,
+    useGetOidcIdentitiesQuery,
+    useGetOidcStatusQuery,
+    useStartOidcLinkMutation,
+    useUnlinkOidcMutation,
     useUnlinkPatreonMutation,
     useGetCardsQuery,
     useGetFactionsQuery,

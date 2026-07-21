@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const passport = require('passport');
 
 const logger = require('../log.js');
 const { wrapAsync } = require('../util.js');
@@ -42,6 +43,79 @@ module.exports.init = function (server) {
     );
 
     server.get(
+        '/api/account/oidc/identities',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            const identities = await oidcService.getIdentitiesForUser(req.user.id);
+
+            res.send({ success: true, identities: identities });
+        })
+    );
+
+    server.post(
+        '/api/account/oidc/unlink',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!req.body.provider) {
+                return res.send({ success: false, message: 'provider must be specified' });
+            }
+
+            const fullUser = await userService.getFullUserByUsername(req.user.username);
+            const hasUsablePassword = !!(fullUser && fullUser.password);
+
+            const result = await oidcService.unlinkIdentity(
+                req.user.id,
+                req.body.provider,
+                hasUsablePassword
+            );
+
+            res.send(result);
+        })
+    );
+
+    // Settings "Link Account": an authenticated XHR asks for the provider
+    // authorization URL; the signed state cookie additionally carries the
+    // requesting user's id so the callback links instead of logging in.
+    server.post(
+        '/api/account/oidc/link/start',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!oidcService.isEnabled()) {
+                return res.send({ success: false, message: 'SSO is not enabled' });
+            }
+
+            let authRequest;
+            try {
+                authRequest = await oidcService.createAuthRequest();
+            } catch (err) {
+                logger.error('OIDC discovery/auth request failed', err);
+
+                return res.send({ success: false, message: 'SSO provider is unavailable' });
+            }
+
+            const stateToken = jwt.sign(
+                {
+                    state: authRequest.state,
+                    nonce: authRequest.nonce,
+                    verifier: authRequest.codeVerifier,
+                    linkUserId: req.user.id
+                },
+                configService.getValue('secret'),
+                { expiresIn: '10m' }
+            );
+
+            res.cookie(STATE_COOKIE, stateToken, {
+                httpOnly: true,
+                sameSite: 'lax',
+                secure: req.secure || req.get('x-forwarded-proto') === 'https',
+                maxAge: 10 * 60 * 1000
+            });
+
+            res.send({ success: true, url: authRequest.url });
+        })
+    );
+
+    server.get(
         '/api/account/oidc/login',
         wrapAsync(async (req, res) => {
             if (!oidcService.isEnabled()) {
@@ -81,9 +155,14 @@ module.exports.init = function (server) {
     server.get(
         '/api/account/oidc/callback',
         wrapAsync(async (req, res) => {
+            // Link-mode callbacks (started from account settings while
+            // logged in) land back on the profile page; login callbacks on
+            // the login page. Detected from the signed state cookie.
+            let isLinkFlow = false;
             const fail = (message) => {
                 res.clearCookie(STATE_COOKIE);
-                res.redirect(`/login#ssoError=${encodeURIComponent(message)}`);
+                const target = isLinkFlow ? '/profile' : '/login';
+                res.redirect(`${target}#ssoError=${encodeURIComponent(message)}`);
             };
 
             if (!oidcService.isEnabled()) {
@@ -108,6 +187,8 @@ module.exports.init = function (server) {
                 return fail('Sign in session expired, please try again');
             }
 
+            isLinkFlow = !!transient.linkUserId;
+
             if (transient.state !== req.query.state) {
                 return fail('Sign in state mismatch, please try again');
             }
@@ -123,6 +204,22 @@ module.exports.init = function (server) {
                 logger.error('OIDC callback failed', err);
 
                 return fail('Sign in failed, please try again');
+            }
+
+            // Settings link flow: attach the identity to the requesting
+            // account and return to settings — no session minting needed.
+            if (isLinkFlow) {
+                try {
+                    await oidcService.linkClaimsToUser(transient.linkUserId, claims);
+                } catch (err) {
+                    logger.warn(`OIDC link failed for user ${transient.linkUserId}`, err);
+
+                    return fail('That identity is already linked to a different account');
+                }
+
+                res.clearCookie(STATE_COOKIE);
+
+                return res.redirect('/profile#ssoLinked=1');
             }
 
             let ip = req.get('x-real-ip');

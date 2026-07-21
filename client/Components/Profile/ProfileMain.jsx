@@ -14,7 +14,14 @@ import { toast } from '@heroui/react';
 
 import { PatreonClientId } from '../../constants';
 import PatreonImage from '../../assets/img/Patreon_Mark_Coral.jpg';
-import { useDeleteAccountMutation, useUnlinkPatreonMutation } from '../../redux/api';
+import {
+    useDeleteAccountMutation,
+    useGetOidcIdentitiesQuery,
+    useGetOidcStatusQuery,
+    useStartOidcLinkMutation,
+    useUnlinkOidcMutation,
+    useUnlinkPatreonMutation
+} from '../../redux/api';
 import { authActions } from '../../redux/slices/authSlice';
 import { PatreonStatus } from '../../types';
 import Avatar from '../Site/Avatar';
@@ -48,6 +55,42 @@ const ProfileMain = ({ user, formProps, section }) => {
 
     const callbackUrl = `${window.location.origin}/patreon`;
     const patreonUrl = `https://www.patreon.com/oauth2/authorize?response_type=code&client_id=${PatreonClientId}&redirect_uri=${callbackUrl}`;
+
+    // ARCHON: Keybringer (OIDC) link/unlink state
+    const { data: oidcStatus } = useGetOidcStatusQuery();
+    const oidcEnabled = !!oidcStatus?.enabled;
+    const { data: oidcIdentities } = useGetOidcIdentitiesQuery(undefined, {
+        skip: !oidcEnabled
+    });
+    const [startOidcLink] = useStartOidcLinkMutation();
+    const [unlinkOidc] = useUnlinkOidcMutation();
+    const linkedOidc = oidcIdentities?.identities?.length > 0;
+
+    const onOidcLink = async () => {
+        try {
+            const result = await startOidcLink().unwrap();
+            if (result.success && result.url) {
+                window.location.assign(result.url);
+            } else {
+                toast.error(result.message || t('Could not start account linking'));
+            }
+        } catch {
+            toast.error(t('Could not start account linking'));
+        }
+    };
+
+    const onOidcUnlink = async () => {
+        try {
+            const result = await unlinkOidc(oidcIdentities.identities[0].provider).unwrap();
+            if (result.success) {
+                toast.success(t('Account unlinked'));
+            } else {
+                toast.error(result.message || t('Could not unlink account'));
+            }
+        } catch {
+            toast.error(t('Could not unlink account'));
+        }
+    };
 
     if (section === 'account') {
         return (
@@ -235,6 +278,30 @@ const ProfileMain = ({ user, formProps, section }) => {
     return (
         <div className='space-y-3'>
             <Panel type='default' compactHeader title={t('Connected Services')}>
+                {/* ARCHON: Keybringer (OIDC) account linking */}
+                {oidcEnabled && (
+                    <div className='mb-2 flex items-center justify-between gap-3 rounded border border-border/70 bg-surface-secondary/75 px-3 py-2'>
+                        <div>
+                            <div className='text-sm text-foreground'>
+                                {oidcStatus?.providerName || 'Keybringer'}
+                            </div>
+                            <div className='text-xs text-muted'>
+                                {linkedOidc
+                                    ? oidcIdentities.identities[0].email || t('Connected')
+                                    : t('Not connected')}
+                            </div>
+                        </div>
+                        {linkedOidc ? (
+                            <HeroButton size='sm' variant='tertiary' onPress={onOidcUnlink}>
+                                {t('Unlink Account')}
+                            </HeroButton>
+                        ) : (
+                            <HeroButton size='sm' variant='tertiary' onPress={onOidcLink}>
+                                {t('Link Account')}
+                            </HeroButton>
+                        )}
+                    </div>
+                )}
                 <div className='flex items-center justify-between gap-3 rounded border border-border/70 bg-surface-secondary/75 px-3 py-2'>
                     <div className='flex items-center gap-3'>
                         <img className='h-5' src={PatreonImage} alt={t('Patreon Logo')} />

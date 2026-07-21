@@ -24,6 +24,23 @@ const ProfileContainer = () => {
         }
     }, [saveState, t]);
 
+    // ARCHON: result of a Keybringer link redirect arrives in the URL fragment
+    React.useEffect(() => {
+        const hash = window.location.hash?.startsWith('#') ? window.location.hash.slice(1) : '';
+        if (!hash) {
+            return;
+        }
+
+        const params = new URLSearchParams(hash);
+        if (params.get('ssoLinked')) {
+            toast.success(t('Account linked successfully'));
+            window.history.replaceState(null, '', window.location.pathname);
+        } else if (params.get('ssoError')) {
+            toast.error(params.get('ssoError'));
+            window.history.replaceState(null, '', window.location.pathname);
+        }
+    }, [t]);
+
     const apiState = saveState.isUninitialized
         ? null
         : {
