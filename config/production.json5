@@ -6,6 +6,18 @@
 
     redisKeyPrefix: 'archonarena:prod',
 
+    gameNode: {
+        // CRITICAL: leave host empty in production. If set (default.json5
+        // uses 'localhost' for dev), the game node advertises it as its
+        // public address in the HELLO registration, the lobby hands it to
+        // browsers, and every game-board connection dials that host instead
+        // of the site origin - Start appears dead and players are stranded
+        // in started games they can never see. Empty -> no address in the
+        // handoff -> browsers connect same-origin via the Caddy
+        // /node-<n>/socket.io proxy.
+        host: ''
+    },
+
     lobby: {
         appName: 'Archon Arena',
         emailFromAddress: 'noreply@archonarena.com',

@@ -36,7 +36,7 @@ const ProfileContainer = () => {
             toast.success(t('Account linked successfully'));
             window.history.replaceState(null, '', window.location.pathname);
         } else if (params.get('ssoError')) {
-            toast.error(params.get('ssoError'));
+            toast.danger(params.get('ssoError'));
             window.history.replaceState(null, '', window.location.pathname);
         }
     }, [t]);

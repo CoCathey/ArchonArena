@@ -103,10 +103,10 @@ const Onboarding = () => {
             if (result.success) {
                 setStep(1);
             } else {
-                toast.error(result.message || t('Could not save location'));
+                toast.danger(result.message || t('Could not save location'));
             }
         } catch {
-            toast.error(t('Could not save location'));
+            toast.danger(t('Could not save location'));
         }
     };
 
@@ -119,10 +119,10 @@ const Onboarding = () => {
                 setJoinedClubs((current) => [...current, { id: result.id, name: result.name }]);
                 setJoinCode('');
             } else {
-                toast.error(result.message || t('Could not join club'));
+                toast.danger(result.message || t('Could not join club'));
             }
         } catch {
-            toast.error(t('Could not join club'));
+            toast.danger(t('Could not join club'));
         }
     };
 
@@ -134,10 +134,10 @@ const Onboarding = () => {
                 toast.success(t('Joined {{name}}', { name: club.name }));
                 setJoinedClubs((current) => [...current, { id: club.id, name: club.name }]);
             } else {
-                toast.error(result.message || t('Could not join club'));
+                toast.danger(result.message || t('Could not join club'));
             }
         } catch {
-            toast.error(t('Could not join club'));
+            toast.danger(t('Could not join club'));
         }
     };
 
@@ -145,7 +145,7 @@ const Onboarding = () => {
         const match = deckLink.match(DECK_UUID_REGEX);
 
         if (!match) {
-            toast.error(t('That does not look like a Master Vault deck link or code'));
+            toast.danger(t('That does not look like a Master Vault deck link or code'));
             return;
         }
 
@@ -158,10 +158,10 @@ const Onboarding = () => {
                 setImportedDecks((current) => [...current, name]);
                 setDeckLink('');
             } else {
-                toast.error(result.message || t('Could not import that deck'));
+                toast.danger(result.message || t('Could not import that deck'));
             }
         } catch (err) {
-            toast.error(err?.data?.message || t('Could not import that deck'));
+            toast.danger(err?.data?.message || t('Could not import that deck'));
         }
     };
 
@@ -171,7 +171,7 @@ const Onboarding = () => {
         }
 
         if (avatarFile.size > 100 * 1024) {
-            toast.error(t('Image must be less than 100KB in size'));
+            toast.danger(t('Image must be less than 100KB in size'));
             return;
         }
 
@@ -183,10 +183,10 @@ const Onboarding = () => {
                 setAvatarUploaded(true);
                 toast.success(t('Profile picture saved'));
             } else {
-                toast.error(result.message || t('Could not save that image'));
+                toast.danger(result.message || t('Could not save that image'));
             }
         } catch {
-            toast.error(t('Could not save that image'));
+            toast.danger(t('Could not save that image'));
         }
     };
 

@@ -135,6 +135,11 @@ const PendingGame = () => {
             return false;
         }
 
+        // ARCHON: no starting without an opponent (server enforces this too)
+        if (Object.values(currentGame.players).length < 2) {
+            return false;
+        }
+
         if (
             !Object.values(currentGame.players).every((player) => {
                 return !!player.deck.selected;

@@ -37,10 +37,10 @@ const Friends = () => {
                     toast.success(successMessage);
                 }
             } else {
-                toast.error(result.message || t('Action failed'));
+                toast.danger(result.message || t('Action failed'));
             }
         } catch {
-            toast.error(t('Action failed'));
+            toast.danger(t('Action failed'));
         }
     };
 

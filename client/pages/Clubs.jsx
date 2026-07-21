@@ -36,10 +36,10 @@ const Clubs = () => {
                 toast.success(t('Club created'));
                 navigate(`/community/clubs/${result.id}`);
             } else {
-                toast.error(result.message || t('Could not create club'));
+                toast.danger(result.message || t('Could not create club'));
             }
         } catch {
-            toast.error(t('Could not create club'));
+            toast.danger(t('Could not create club'));
         }
     };
 

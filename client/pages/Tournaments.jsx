@@ -54,10 +54,10 @@ const Tournaments = () => {
                 setShowCreate(false);
                 navigate(`/tournaments/${result.id}`);
             } else {
-                toast.error(result.message || t('Could not create tournament'));
+                toast.danger(result.message || t('Could not create tournament'));
             }
         } catch {
-            toast.error(t('Could not create tournament'));
+            toast.danger(t('Could not create tournament'));
         }
     };
 

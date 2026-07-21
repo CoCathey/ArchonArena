@@ -51,7 +51,7 @@ const LoginContainer = () => {
         const ssoPayload = params.get('sso');
 
         if (ssoError) {
-            toast.error(ssoError);
+            toast.danger(ssoError);
             navigate('/login', { replace: true });
 
             return;
@@ -76,7 +76,7 @@ const LoginContainer = () => {
             toast.success(t('Login successful'));
             navigate(decoded.user?.onboarded === false ? '/welcome' : '/', { replace: true });
         } catch (err) {
-            toast.error(t('Login failed, please try again'));
+            toast.danger(t('Login failed, please try again'));
             navigate('/login', { replace: true });
         }
     }, [dispatch, location.hash, navigate, t]);

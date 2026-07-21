@@ -196,10 +196,10 @@ const SettingsAdmin = () => {
                 toast.success(t('Settings saved'));
                 refetch();
             } else {
-                toast.error(result.message || t('Could not save settings'));
+                toast.danger(result.message || t('Could not save settings'));
             }
         } catch {
-            toast.error(t('Could not save settings'));
+            toast.danger(t('Could not save settings'));
         }
     };
 
@@ -211,10 +211,10 @@ const SettingsAdmin = () => {
                 toast.success(t('Settings reset to defaults'));
                 refetch();
             } else {
-                toast.error(result.message || t('Could not reset settings'));
+                toast.danger(result.message || t('Could not reset settings'));
             }
         } catch {
-            toast.error(t('Could not reset settings'));
+            toast.danger(t('Could not reset settings'));
         }
     };
 

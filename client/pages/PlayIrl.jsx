@@ -48,7 +48,7 @@ const PlayIrl = () => {
 
     const submit = async () => {
         if (form.name.trim().length < 2) {
-            toast.error(t('Enter a store name.'));
+            toast.danger(t('Enter a store name.'));
             return;
         }
 
@@ -60,10 +60,10 @@ const PlayIrl = () => {
                 setForm(EMPTY_FORM);
                 setShowForm(false);
             } else {
-                toast.error(result.message || t('Could not add that store.'));
+                toast.danger(result.message || t('Could not add that store.'));
             }
         } catch {
-            toast.error(t('Could not add that store.'));
+            toast.danger(t('Could not add that store.'));
         }
     };
 
@@ -75,10 +75,10 @@ const PlayIrl = () => {
         try {
             const result = await removeStore(store.id).unwrap();
             if (!result.success) {
-                toast.error(result.message || t('Could not remove that store.'));
+                toast.danger(result.message || t('Could not remove that store.'));
             }
         } catch {
-            toast.error(t('Could not remove that store.'));
+            toast.danger(t('Could not remove that store.'));
         }
     };
 

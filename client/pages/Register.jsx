@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useRef } from 'react';
+import { useDispatch } from 'react-redux';
 import { Formik } from 'formik';
 import * as yup from 'yup';
 import { Button, Input, Label, toast } from '@heroui/react';
@@ -7,27 +8,67 @@ import AlertPanel from '../Components/Site/AlertPanel.jsx';
 import Panel from '../Components/Site/Panel.jsx';
 import Link from '../Components/Navigation/Link.jsx';
 import SsoButton from '../Components/Site/SsoButton.jsx';
-import { useRegisterAccountMutation } from '../redux/api';
+import { useRegisterAccountMutation, useLoginAccountMutation } from '../redux/api';
+import { lobbyAuthenticateRequested, lobbyConnectRequested } from '../redux/socketActions';
 
 import { Trans, useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 const Register = () => {
     const navigate = useNavigate();
+    const dispatch = useDispatch();
     const { t } = useTranslation();
     const [registerAccount, registerState] = useRegisterAccountMutation();
-    const accountRegistered = registerState.isSuccess;
+    const [loginAccount] = useLoginAccountMutation();
+    const submitting = useRef(false);
 
-    useEffect(() => {
-        if (!accountRegistered) {
+    // ARCHON: after a successful registration, log the new account straight
+    // in and drop them into the setup wizard. If the server requires email
+    // verification first, the auto-login is refused and we fall back to the
+    // old "verify then log in" flow.
+    const onSubmit = async (values) => {
+        if (submitting.current) {
             return;
+        }
+        submitting.current = true;
+
+        try {
+            await registerAccount({
+                username: values.username,
+                password: values.password,
+                email: values.email
+            }).unwrap();
+        } catch {
+            // errorBar below shows the server's message
+            submitting.current = false;
+
+            return;
+        }
+
+        try {
+            const login = await loginAccount({
+                username: values.username,
+                password: values.password
+            }).unwrap();
+
+            if (login.success) {
+                dispatch(lobbyConnectRequested());
+                dispatch(lobbyAuthenticateRequested());
+                toast.success(t('Welcome to Archon Arena!'));
+                navigate(login.user?.onboarded === false ? '/welcome' : '/');
+
+                return;
+            }
+        } catch {
+            // fall through to the manual-login path below
         }
 
         toast.success(
             t('Your account was successfully registered.  You can now proceed to login.')
         );
         navigate('/login');
-    }, [accountRegistered, navigate, t]);
+        submitting.current = false;
+    };
 
     const errorBar = registerState.isError ? (
         <AlertPanel
@@ -81,17 +122,7 @@ const Register = () => {
                         attention to the section on avatars.
                     </p>
                 </Trans>
-                <Formik
-                    validationSchema={schema}
-                    onSubmit={(values) =>
-                        registerAccount({
-                            username: values.username,
-                            password: values.password,
-                            email: values.email
-                        })
-                    }
-                    initialValues={initialValues}
-                >
+                <Formik validationSchema={schema} onSubmit={onSubmit} initialValues={initialValues}>
                     {(formProps) => (
                         <form onSubmit={formProps.handleSubmit} className='space-y-3'>
                             <div>

@@ -36,10 +36,10 @@ const ProfileLocation = () => {
             if (result.success) {
                 toast.success(t('Location saved'));
             } else {
-                toast.error(result.message || t('Could not save location'));
+                toast.danger(result.message || t('Could not save location'));
             }
         } catch {
-            toast.error(t('Could not save location'));
+            toast.danger(t('Could not save location'));
         }
     };
 

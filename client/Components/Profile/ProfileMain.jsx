@@ -73,10 +73,10 @@ const ProfileMain = ({ user, formProps, section }) => {
             if (result.success && result.url) {
                 window.location.assign(result.url);
             } else {
-                toast.error(result.message || t('Could not start account linking'));
+                toast.danger(result.message || t('Could not start account linking'));
             }
         } catch {
-            toast.error(t('Could not start account linking'));
+            toast.danger(t('Could not start account linking'));
         }
     };
 
@@ -86,10 +86,10 @@ const ProfileMain = ({ user, formProps, section }) => {
             if (result.success) {
                 toast.success(t('Account unlinked'));
             } else {
-                toast.error(result.message || t('Could not unlink account'));
+                toast.danger(result.message || t('Could not unlink account'));
             }
         } catch {
-            toast.error(t('Could not unlink account'));
+            toast.danger(t('Could not unlink account'));
         }
     };
 

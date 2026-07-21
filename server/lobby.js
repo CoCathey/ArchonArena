@@ -585,6 +585,13 @@ class Lobby {
             return;
         }
 
+        // ARCHON: KeyForge is a two-player game - starting solo used to be
+        // allowed and stranded the owner in a board with no opponent.
+        if (Object.values(game.getPlayers()).length < 2) {
+            socket.send('gameerror', 'You need an opponent before the game can start');
+            return;
+        }
+
         if (
             Object.values(game.getPlayers()).some((player) => {
                 return !player.deck;

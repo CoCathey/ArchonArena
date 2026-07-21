@@ -21,19 +21,24 @@ const banlist = require('./banlist');
 const challonge = require('./challonge');
 
 module.exports.init = function (server, options) {
+    // ARCHON: routes with fixed /api/account/* paths MUST register before
+    // account.init - upstream's parameterised PUT /api/account/:username
+    // would otherwise swallow PUT /api/account/location and
+    // PUT /api/account/avatar ('location'/'avatar' parsed as a username ->
+    // 403 Unauthorized). Express matches in registration order.
+    // ARCHON: public rating lookups + player location
+    ratings.init(server);
+    // ARCHON: first-run onboarding wizard (onboarded + avatar)
+    onboarding.init(server, options);
     account.init(server, options);
     // ARCHON: OIDC SSO login (Keybringer)
     oidc.init(server);
-    // ARCHON: public rating lookups
-    ratings.init(server);
     // ARCHON: runtime admin settings
     adminSettings.init(server);
     // ARCHON: native tournament engine
     tournaments.init(server);
     // ARCHON: community (friends, members, clubs)
     community.init(server);
-    // ARCHON: first-run onboarding wizard
-    onboarding.init(server, options);
     decks.init(server);
     games.init(server);
     cards.init(server);
