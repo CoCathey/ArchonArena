@@ -12,6 +12,10 @@ import HowToPlay from './pages/HowToPlay';
 import Lobby from './pages/Lobby';
 import Login from './pages/LoginContainer';
 import Logout from './pages/Logout';
+// ARCHON: new navigation targets
+import CommunityNews from './pages/CommunityNews';
+import Matches from './pages/Matches';
+import Placeholder from './pages/Placeholder';
 import MotdAdmin from './pages/MotdAdmin';
 import NewsAdmin from './pages/NewsAdmin';
 import NodesAdmin from './pages/NodesAdmin';
@@ -89,6 +93,136 @@ const AppRoutes = ({ currentGame, user }) => {
             />
             <Route path='/admin/motd' element={requirePermission('canManageMotd', <MotdAdmin />)} />
             <Route path='/patreon' element={<Patreon code={getParam('code')} />} />
+            {/* ARCHON: game history + community news are live features */}
+            <Route path='/matches' element={<Matches />} />
+            <Route path='/community/news' element={<CommunityNews />} />
+            {/* ARCHON: placeholders for roadmap features (see ROADMAP.md) */}
+            <Route
+                path='/play-irl'
+                element={
+                    <Placeholder
+                        title='Play IRL'
+                        description='In-person play tools - result slips, QR join codes, and paired seating for live events - arrive with the tournament engine.'
+                    />
+                }
+            />
+            <Route
+                path='/stats'
+                element={
+                    <Placeholder
+                        title='Stats'
+                        description='Win rates by house and set, key rates, deck performance, and meta dashboards are coming with the statistics engine.'
+                    />
+                }
+            />
+            <Route
+                path='/tournaments'
+                element={
+                    <Placeholder
+                        title='Tournaments'
+                        description='Swiss and bracket events, online and in person, with automatic pairings and results are on the way.'
+                    />
+                }
+            />
+            <Route
+                path='/learn'
+                element={
+                    <Placeholder
+                        title='Learn'
+                        description='Guides, strategy content, and interactive learning tools are planned. For now, check How To Play under Other.'
+                    />
+                }
+            />
+            <Route
+                path='/watch'
+                element={
+                    <Placeholder
+                        title='Watch'
+                        description='Spectating live games, featured matches, and replays are coming with the replay system.'
+                    />
+                }
+            />
+            <Route
+                path='/community/friends'
+                element={
+                    <Placeholder
+                        title='Friends'
+                        description='Friends lists and presence are coming with player profiles.'
+                    />
+                }
+            />
+            <Route
+                path='/community/clubs'
+                element={
+                    <Placeholder
+                        title='Clubs'
+                        description='Clubs for local scenes and stores - membership, club pages, and club leaderboards - are on the roadmap.'
+                    />
+                }
+            />
+            <Route
+                path='/community/members'
+                element={
+                    <Placeholder
+                        title='Members'
+                        description='A searchable member directory is coming with player profiles.'
+                    />
+                }
+            />
+            <Route
+                path='/community/top-players'
+                element={
+                    <Placeholder
+                        title='Top Players'
+                        description='The best Archon Arena players by rating, updated live, arrive with rankings.'
+                    />
+                }
+            />
+            <Route
+                path='/community/ratings'
+                element={
+                    <Placeholder
+                        title='Ratings'
+                        description='How the Archon Arena rating system works: chess-style Elo adjusted by deck SAS and key differential. A full explainer is coming.'
+                    />
+                }
+            />
+            <Route
+                path='/leaderboards'
+                element={
+                    <Placeholder
+                        title='Leaderboards'
+                        description='Worldwide, regional, country, and state rankings are being built right now.'
+                    />
+                }
+            />
+            <Route
+                path='/community/articles'
+                element={
+                    <Placeholder
+                        title='Articles'
+                        description='Strategy articles and community content are planned.'
+                    />
+                }
+            />
+            <Route
+                path='/community/blogs'
+                element={
+                    <Placeholder
+                        title='Blogs'
+                        description='Player blogs are planned as part of community features.'
+                    />
+                }
+            />
+            <Route
+                path='/community/forums'
+                element={
+                    <Placeholder
+                        title='Forums'
+                        description='Discussion forums are planned as part of community features.'
+                    />
+                }
+            />
             <Route path='*' element={<NotFound />} />
         </Routes>
     );

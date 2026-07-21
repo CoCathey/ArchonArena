@@ -9,17 +9,17 @@ const isExternalLink = (href) =>
     href.startsWith('tel:') ||
     /^https?:\/\//i.test(href);
 
-const Link = React.forwardRef(({ children, className, href }, ref) => {
+const Link = React.forwardRef(({ children, className, href, onClick }, ref) => {
     if (isExternalLink(href)) {
         return (
-            <a ref={ref} href={href} className={className}>
+            <a ref={ref} href={href} className={className} onClick={onClick}>
                 {children}
             </a>
         );
     }
 
     return (
-        <RouterLink ref={ref} to={href} className={className}>
+        <RouterLink ref={ref} to={href} className={className} onClick={onClick}>
             {children}
         </RouterLink>
     );
@@ -30,7 +30,8 @@ Link.displayName = 'Link';
 Link.propTypes = {
     children: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
     className: PropTypes.string,
-    href: PropTypes.string
+    href: PropTypes.string,
+    onClick: PropTypes.func
 };
 
 export default Link;

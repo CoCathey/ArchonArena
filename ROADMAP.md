@@ -191,7 +191,14 @@ much stronger deck pays less.
 
 -   [ ] UI audit of TCO client (React versions, component inventory) — doc.
 -   [ ] Design system: tokens, typography, dark/light themes, component library.
--   [ ] Incremental page-by-page modernization (lobby → decks → profile → game UI last,
+-   [x] Chess.com-style navigation: fixed left sidebar (Play/Learn/Watch/Community/Other
+        with flyout submenus, Sign Up/Log In at bottom) on all non-game screens; in-game
+        keeps the slim top bar so the board keeps full width.
+-   [x] Home page rebuilt as a landing hero (news → Community > News; lobby chat and
+        promo banners removed; admin MOTD/banner notices retained).
+-   [x] Placeholder pages routed for Learn, Watch, Play IRL, Stats, Tournaments, and
+        Community subpages so navigation is complete ahead of the features.
+-   [ ] Incremental page-by-page modernization (decks → profile → game UI last,
         since game UI carries the most gameplay risk).
 -   [ ] Responsive layouts (desktop-first, tablet functional, mobile readable).
 -   [ ] Accessibility pass (keyboard nav, contrast, screen-reader landmarks).

@@ -5,6 +5,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Constants } from './constants';
 import ErrorBoundary from './Components/Site/ErrorBoundary';
 import Navigation from './Components/Navigation/Navigation';
+// ARCHON: chess.com-style sidebar (non-game screens)
+import Sidebar from './Components/Navigation/Sidebar';
 import AppRoutes from './AppRoutes';
 import { tryParseJSON } from './util.jsx';
 import AlertPanel from './Components/Site/AlertPanel';
@@ -194,11 +196,24 @@ const Application = () => {
         );
     }
 
+    // ARCHON: chess.com-style sidebar everywhere except the in-game screen,
+    // where the slim top bar keeps its game controls and the board keeps
+    // its full width.
     return (
         <div className='bg' ref={bgRef}>
-            <Navigation appName='Archon Arena' user={user} />
-            <div className='wrapper'>
-                <div className='mx-auto w-full pt-14 px-3 sm:px-4 lg:max-w-[92vw] lg:px-6 2xl:max-w-screen-2xl'>
+            {gameBoardVisible ? (
+                <Navigation appName='Archon Arena' user={user} />
+            ) : (
+                <Sidebar appName='Archon Arena' user={user} />
+            )}
+            <div className={gameBoardVisible ? 'wrapper' : 'wrapper lg:ml-56'}>
+                <div
+                    className={
+                        gameBoardVisible
+                            ? 'mx-auto w-full pt-14 px-3 sm:px-4 lg:max-w-[92vw] lg:px-6 2xl:max-w-screen-2xl'
+                            : 'mx-auto w-full pt-16 px-3 sm:px-4 lg:max-w-[92vw] lg:px-6 lg:pt-6 2xl:max-w-screen-2xl'
+                    }
+                >
                     <ErrorBoundary
                         navigate={navigate}
                         errorPath={path}

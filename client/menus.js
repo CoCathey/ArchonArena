@@ -59,3 +59,60 @@ export const ProfileMenu = [
     { title: 'Block List', path: '/blocklist' },
     { title: 'Logout', path: '/logout' }
 ];
+
+/**
+ * ARCHON: chess.com-style left sidebar structure. Sections either link
+ * directly (path) or open a flyout (childItems). Same visibility rules as
+ * MenuItem (showOnlyWhenLoggedIn / permission).
+ *
+ * @type {MenuItem[]}
+ */
+export const SidebarMenu = [
+    {
+        title: 'Play',
+        childItems: [
+            { path: '/play', title: 'Play Online' },
+            { path: '/play-irl', title: 'Play IRL' },
+            { path: '/decks', title: 'My Decks', showOnlyWhenLoggedIn: true },
+            { path: '/stats', title: 'Stats' },
+            { path: '/tournaments', title: 'Tournaments' },
+            { path: '/matches', title: 'Game History', showOnlyWhenLoggedIn: true }
+        ]
+    },
+    { title: 'Learn', path: '/learn' },
+    { title: 'Watch', path: '/watch' },
+    {
+        title: 'Community',
+        childItems: [
+            { path: '/community/friends', title: 'Friends' },
+            { path: '/community/clubs', title: 'Clubs' },
+            { path: '/community/members', title: 'Members' },
+            { path: '/community/top-players', title: 'Top Players' },
+            { path: '/community/ratings', title: 'Ratings' },
+            { path: '/leaderboards', title: 'Leaderboards' },
+            { path: '/community/news', title: 'News' },
+            { path: '/community/articles', title: 'Articles' },
+            { path: '/community/blogs', title: 'Blogs' },
+            { path: '/community/forums', title: 'Forums' }
+        ]
+    },
+    {
+        title: 'Other',
+        childItems: [
+            { path: '/how-to-play', title: 'How To Play' },
+            { path: '/about', title: 'About' },
+            { path: '/privacy', title: 'Privacy Policy' },
+            {
+                path: '/tournamentlobby',
+                title: 'Challonge Events',
+                showOnlyWhenLoggedIn: true,
+                permission: 'canManageTournaments'
+            },
+            { path: '/news', title: 'News Admin', permission: 'canEditNews' },
+            { path: '/users', title: 'User Admin', permission: 'canManageUsers' },
+            { path: '/nodes', title: 'Node Admin', permission: 'canManageNodes' },
+            { path: '/banlist', title: 'Ban List', permission: 'canManageBanlist' },
+            { path: '/admin/motd', title: 'Motd Admin', permission: 'canManageMotd' }
+        ]
+    }
+];
