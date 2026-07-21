@@ -14,14 +14,19 @@ const logger = require('../../log');
  *  - The db adapter is injected to keep the service unit-testable.
  */
 class DokService {
-    constructor(configService, db = require('../../db')) {
+    constructor(configService, db = require('../../db'), settingsService = require('../settings')) {
         this.configService = configService;
         this.db = db;
+        this.settingsService = settingsService;
         this.pendingFetches = new Set();
     }
 
     getConfig() {
-        return this.configService.getValue('dok') || {};
+        // Runtime admin overrides (SiteSettings) win over file config.
+        return {
+            ...(this.configService.getValue('dok') || {}),
+            ...this.settingsService.getSection('dok')
+        };
     }
 
     isEnabled() {

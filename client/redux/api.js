@@ -290,6 +290,23 @@ export const api = createApi({
         getRatings: builder.query({
             query: (username) => `/ratings/${encodeURIComponent(username)}`
         }),
+        // ARCHON: runtime admin settings
+        getAdminSettings: builder.query({
+            query: () => '/admin/settings'
+        }),
+        saveAdminSettings: builder.mutation({
+            query: ({ section, value }) => ({
+                url: `/admin/settings/${section}`,
+                method: 'PUT',
+                body: { value }
+            })
+        }),
+        resetAdminSettings: builder.mutation({
+            query: (section) => ({
+                url: `/admin/settings/${section}`,
+                method: 'DELETE'
+            })
+        }),
         getCards: builder.query({
             query: () => '/cards',
             providesTags: [{ type: TAG_TYPES.CARDS, id: 'LIST' }]
@@ -543,6 +560,9 @@ export const {
     useSetLocationMutation,
     useGetLeaderboardQuery,
     useGetRatingsQuery,
+    useGetAdminSettingsQuery,
+    useSaveAdminSettingsMutation,
+    useResetAdminSettingsMutation,
     useUnlinkPatreonMutation,
     useGetCardsQuery,
     useGetFactionsQuery,

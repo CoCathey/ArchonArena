@@ -27,18 +27,27 @@ const DEFAULT_RATING_CONFIG = {
  * game flow itself.
  */
 class RatingService {
-    constructor(configService, db = require('../../db')) {
+    constructor(configService, db = require('../../db'), settingsService = require('../settings')) {
         this.configService = configService;
         this.db = db;
+        this.settingsService = settingsService;
     }
 
     getConfig() {
         const fileConfig = this.configService.getValue('rating') || {};
+        // Runtime admin overrides (SiteSettings) win over file config,
+        // which wins over code defaults.
+        const adminConfig = this.settingsService.getSection('rating');
 
         return {
             ...DEFAULT_RATING_CONFIG,
             ...fileConfig,
-            elo: { ...DEFAULT_RATING_CONFIG.elo, ...(fileConfig.elo || {}) }
+            ...adminConfig,
+            elo: {
+                ...DEFAULT_RATING_CONFIG.elo,
+                ...(fileConfig.elo || {}),
+                ...(adminConfig.elo || {})
+            }
         };
     }
 

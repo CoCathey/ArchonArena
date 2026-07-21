@@ -27,6 +27,7 @@ import Profile from './pages/Profile';
 import Register from './pages/Register';
 import ResetPassword from './pages/ResetPassword';
 import Security from './pages/Security.jsx';
+import SettingsAdmin from './pages/SettingsAdmin';
 import TournamentLobby from './Components/Games/TournamentLobby';
 import Unauthorised from './pages/Unauthorised';
 import UserAdmin from './pages/UserAdmin';
@@ -93,6 +94,11 @@ const AppRoutes = ({ currentGame, user }) => {
                 )}
             />
             <Route path='/admin/motd' element={requirePermission('canManageMotd', <MotdAdmin />)} />
+            {/* ARCHON: runtime site settings (admin only) */}
+            <Route
+                path='/admin/settings'
+                element={requirePermission('isAdmin', <SettingsAdmin />)}
+            />
             <Route path='/patreon' element={<Patreon code={getParam('code')} />} />
             {/* ARCHON: game history + community news are live features */}
             <Route path='/matches' element={<Matches />} />

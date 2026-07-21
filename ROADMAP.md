@@ -286,12 +286,18 @@ much stronger deck pays less.
 
 ## Cross-cutting: Site administration _(build alongside every phase)_
 
--   [ ] **Admin panel** with role-gated sections (settings, users, tournaments, moderation,
-        analytics).
--   [ ] **Settings service**: typed settings registry, DB-backed, cached in Redis, audited
-        (who changed what/when), with sane defaults in code.
--   [ ] Everything marked **(admin-config)** above is wired through this service.
--   [ ] Feature flags for gradual rollout of every new system.
+-   [x] **Settings service**: typed registry, DB-backed (SiteSettings), in-memory
+        snapshot with periodic refresh, who/when audit, defaults in code
+        (docs/design/settings-service.md).
+-   [x] Admin settings UI at /admin/settings (isAdmin): rating engine (all Elo knobs,
+        rated types, leaderboard threshold) and DoK sections editable at runtime.
+-   [ ] Wire remaining **(admin-config)** flags through the registry as their features
+        land (auth SSO-only mode, tournament defaults, region definitions...).
+-   [ ] Redis pub/sub snapshot invalidation for multi-lobby deployments.
+-   [ ] Full audit-log table (currently last-editor only).
+-   [ ] Feature flags section for gradual rollout of new systems.
+-   [ ] Broader **admin panel** (users, tournaments, moderation, analytics) as those
+        systems arrive.
 
 ## Cross-cutting: Quality & operations
 

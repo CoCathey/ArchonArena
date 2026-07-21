@@ -64,6 +64,8 @@ class Server {
         app.use(bodyParser.urlencoded({ extended: false }));
         // ARCHON: cookies carry transient OIDC login state (see server/api/oidc.js)
         app.use(cookieParser());
+        // ARCHON: load runtime admin settings snapshot + periodic refresh
+        require('./services/settings').start();
 
         api.init(app, options);
 
