@@ -24,6 +24,9 @@ import Members from './pages/Members';
 import Clubs from './pages/Clubs';
 import ClubDetail from './pages/ClubDetail';
 import Onboarding from './pages/Onboarding';
+import TopPlayers from './pages/TopPlayers';
+import Ratings from './pages/Ratings';
+import PlayIrl from './pages/PlayIrl';
 import MotdAdmin from './pages/MotdAdmin';
 import NewsAdmin from './pages/NewsAdmin';
 import NodesAdmin from './pages/NodesAdmin';
@@ -111,15 +114,7 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/matches' element={<Matches />} />
             <Route path='/community/news' element={<CommunityNews />} />
             {/* ARCHON: placeholders for roadmap features (see ROADMAP.md) */}
-            <Route
-                path='/play-irl'
-                element={
-                    <Placeholder
-                        title='Play IRL'
-                        description='In-person play tools - result slips, QR join codes, and paired seating for live events - arrive with the tournament engine.'
-                    />
-                }
-            />
+            <Route path='/play-irl' element={<PlayIrl />} />
             <Route
                 path='/stats'
                 element={
@@ -154,24 +149,8 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/community/clubs' element={<Clubs />} />
             <Route path='/community/clubs/:id' element={<ClubDetail />} />
             <Route path='/community/members' element={<Members />} />
-            <Route
-                path='/community/top-players'
-                element={
-                    <Placeholder
-                        title='Top Players'
-                        description='The best Archon Arena players by rating, updated live, arrive with rankings.'
-                    />
-                }
-            />
-            <Route
-                path='/community/ratings'
-                element={
-                    <Placeholder
-                        title='Ratings'
-                        description='How the Archon Arena rating system works: chess-style Elo adjusted by deck SAS and key differential. A full explainer is coming.'
-                    />
-                }
-            />
+            <Route path='/community/top-players' element={<TopPlayers />} />
+            <Route path='/community/ratings' element={<Ratings />} />
             <Route path='/leaderboards' element={<Leaderboards />} />
             <Route
                 path='/community/articles'

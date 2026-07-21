@@ -362,6 +362,19 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.CLUBS]
         }),
+        // ARCHON: local stores / venues for in-person play (Play IRL)
+        getStores: builder.query({
+            query: (params) => ({ url: '/stores', params }),
+            providesTags: [TAG_TYPES.STORES]
+        }),
+        addStore: builder.mutation({
+            query: (body) => ({ url: '/stores', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.STORES]
+        }),
+        removeStore: builder.mutation({
+            query: (id) => ({ url: `/stores/${id}/remove`, method: 'POST' }),
+            invalidatesTags: [TAG_TYPES.STORES]
+        }),
         // ARCHON: first-run onboarding wizard (Phase 9)
         completeOnboarding: builder.mutation({
             query: () => ({
@@ -670,6 +683,9 @@ export const {
     useCreateClubMutation,
     useClubActionMutation,
     useJoinClubByCodeMutation,
+    useGetStoresQuery,
+    useAddStoreMutation,
+    useRemoveStoreMutation,
     useCompleteOnboardingMutation,
     useSetAvatarMutation,
     useUnlinkPatreonMutation,

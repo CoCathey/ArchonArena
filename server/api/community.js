@@ -3,11 +3,13 @@ const passport = require('passport');
 const FriendService = require('../services/community/FriendService');
 const ClubService = require('../services/community/ClubService');
 const MemberDirectoryService = require('../services/community/MemberDirectoryService');
+const StoreService = require('../services/community/StoreService');
 const { wrapAsync } = require('../util.js');
 
 const friendService = new FriendService();
 const clubService = new ClubService();
 const memberDirectory = new MemberDirectoryService();
+const storeService = new StoreService();
 
 const jwt = passport.authenticate('jwt', { session: false });
 
@@ -152,6 +154,36 @@ module.exports.init = function (server) {
         jwt,
         wrapAsync(async (req, res) => {
             res.send(await clubService.disband(parseInt(req.params.id, 10), req.user));
+        })
+    );
+
+    // ----- Local stores / venues for in-person play (reads public, add JWT-authed)
+    server.get(
+        '/api/stores',
+        wrapAsync(async (req, res) => {
+            const stores = await storeService.list({
+                query: req.query.query,
+                country: req.query.country,
+                state: req.query.state
+            });
+
+            res.send({ success: true, stores });
+        })
+    );
+
+    server.post(
+        '/api/stores',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(await storeService.create(req.user.id, req.body));
+        })
+    );
+
+    server.post(
+        '/api/stores/:id/remove',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(await storeService.remove(parseInt(req.params.id, 10), req.user));
         })
     );
 };

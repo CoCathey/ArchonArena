@@ -212,17 +212,31 @@ describe('RatingService', function () {
     });
 
     describe('getRatingsForUsername', function () {
-        it('returns pools with provisional flags', async function () {
+        it('returns pools with provisional flags, rank and field size', async function () {
             db.query.mockResolvedValue([
-                { Pool: 'archon', Rating: 1250, GamesPlayed: 3 },
-                { Pool: 'sealed', Rating: 1400, GamesPlayed: 40 }
+                { Pool: 'archon', Rating: 1250, GamesPlayed: 3, Rank: '12', TotalRated: '340' },
+                { Pool: 'sealed', Rating: 1400, GamesPlayed: 40, Rank: '3', TotalRated: '88' }
             ]);
 
             const ratings = await service.getRatingsForUsername('Player1');
 
             expect(ratings).toEqual([
-                { pool: 'archon', rating: 1250, gamesPlayed: 3, provisional: true },
-                { pool: 'sealed', rating: 1400, gamesPlayed: 40, provisional: false }
+                {
+                    pool: 'archon',
+                    rating: 1250,
+                    gamesPlayed: 3,
+                    provisional: true,
+                    rank: 12,
+                    totalRated: 340
+                },
+                {
+                    pool: 'sealed',
+                    rating: 1400,
+                    gamesPlayed: 40,
+                    provisional: false,
+                    rank: 3,
+                    totalRated: 88
+                }
             ]);
         });
     });

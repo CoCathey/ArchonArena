@@ -5,6 +5,7 @@ import { Button as HeroButton, Input } from '@heroui/react';
 import moment from 'moment';
 
 import Panel from '../Components/Site/Panel';
+import AmberValue from '../Components/Site/AmberValue';
 import { COUNTRIES, countryName } from '../geo';
 import { useGetMembersQuery } from '../redux/api';
 
@@ -98,7 +99,7 @@ const Members = () => {
                             <tr className='border-b border-border/70 text-left text-xs uppercase tracking-wide text-muted'>
                                 <th className='px-2 py-2'>{t('Player')}</th>
                                 <th className='px-2 py-2'>{t('Location')}</th>
-                                <th className='px-2 py-2 text-right'>{t('Rating')}</th>
+                                <th className='px-2 py-2 text-right'>{t('Amber')}</th>
                                 <th className='px-2 py-2 text-right'>{t('Joined')}</th>
                             </tr>
                         </thead>
@@ -116,8 +117,12 @@ const Members = () => {
                                             .filter(Boolean)
                                             .join(', ')}
                                     </td>
-                                    <td className='px-2 py-2 text-right font-bold text-amber-300'>
-                                        {member.rating ?? '-'}
+                                    <td className='px-2 py-2 text-right'>
+                                        {member.rating != null ? (
+                                            <AmberValue value={member.rating} />
+                                        ) : (
+                                            <span className='text-muted'>—</span>
+                                        )}
                                     </td>
                                     <td className='px-2 py-2 text-right text-muted'>
                                         {moment(member.joined).format('MMM YYYY')}

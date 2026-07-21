@@ -5,6 +5,7 @@ import { Button as HeroButton } from '@heroui/react';
 
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
+import AmberValue from '../Components/Site/AmberValue';
 import { countryName } from '../geo';
 import { useGetLeaderboardQuery, useGetLocationQuery } from '../redux/api';
 
@@ -134,7 +135,7 @@ const Leaderboards = () => {
                                         <th className='px-2 py-2 w-12'>#</th>
                                         <th className='px-2 py-2'>{t('Player')}</th>
                                         <th className='px-2 py-2'>{t('Location')}</th>
-                                        <th className='px-2 py-2 text-right'>{t('Rating')}</th>
+                                        <th className='px-2 py-2 text-right'>{t('Amber')}</th>
                                         <th className='px-2 py-2 text-right'>{t('Games')}</th>
                                     </tr>
                                 </thead>
@@ -170,8 +171,8 @@ const Leaderboards = () => {
                                                     .filter(Boolean)
                                                     .join(', ')}
                                             </td>
-                                            <td className='px-2 py-2 text-right font-bold text-amber-300'>
-                                                {entry.rating}
+                                            <td className='px-2 py-2 text-right'>
+                                                <AmberValue value={entry.rating} />
                                             </td>
                                             <td className='px-2 py-2 text-right text-muted'>
                                                 {entry.gamesPlayed}

@@ -285,9 +285,14 @@ class RatingService {
      */
     async getRatingsForUsername(username) {
         const rows = await this.db.query(
-            'SELECT r."Pool", r."Rating", r."GamesPlayed" FROM "Ratings" r ' +
-                'JOIN "Users" u ON u."Id" = r."UserId" WHERE u."Username" = $1 ' +
-                'ORDER BY r."Pool"',
+            'SELECT r."Pool", r."Rating", r."GamesPlayed", ' +
+                // Worldwide rank in the pool (players with a strictly higher
+                // rating, plus one) and the size of the rated field.
+                '(SELECT COUNT(*) + 1 FROM "Ratings" r2 WHERE r2."Pool" = r."Pool" ' +
+                'AND r2."Rating" > r."Rating") AS "Rank", ' +
+                '(SELECT COUNT(*) FROM "Ratings" r3 WHERE r3."Pool" = r."Pool") AS "TotalRated" ' +
+                'FROM "Ratings" r JOIN "Users" u ON u."Id" = r."UserId" ' +
+                'WHERE u."Username" = $1 ORDER BY r."Pool"',
             [username]
         );
 
@@ -297,7 +302,9 @@ class RatingService {
             pool: row.Pool,
             rating: row.Rating,
             gamesPlayed: row.GamesPlayed,
-            provisional: row.GamesPlayed < eloConfig.provisionalGames
+            provisional: row.GamesPlayed < eloConfig.provisionalGames,
+            rank: parseInt(row.Rank, 10),
+            totalRated: parseInt(row.TotalRated, 10)
         }));
     }
 
@@ -400,7 +407,8 @@ class RatingService {
         const offsetIndex = params.length;
 
         const rows = await this.db.query(
-            'SELECT u."Username", u."Country", u."State", r."Rating", r."GamesPlayed" ' +
+            'SELECT u."Username", u."Country", u."State", u."Settings_Avatar", ' +
+                'r."Rating", r."GamesPlayed" ' +
                 'FROM "Ratings" r JOIN "Users" u ON u."Id" = r."UserId" ' +
                 `WHERE ${where} AND (u."Disabled" IS NOT TRUE) ` +
                 'ORDER BY r."Rating" DESC, r."GamesPlayed" DESC, u."Username" ASC ' +
@@ -418,6 +426,7 @@ class RatingService {
                 username: row.Username,
                 country: row.Country,
                 state: row.State,
+                avatar: row.Settings_Avatar,
                 rating: row.Rating,
                 gamesPlayed: row.GamesPlayed,
                 provisional: row.GamesPlayed < eloConfig.provisionalGames

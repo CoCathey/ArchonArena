@@ -184,6 +184,15 @@ much stronger deck pays less.
 -   [x] Leaderboard UI (Community > Leaderboards): scope tabs follow the viewer's saved
         location, pool tabs (Archon/Sealed/Alliance), pagination, own-row highlight.
 -   [x] Public API: GET /api/ratings/leaderboard (paginated, capped limit).
+-   [x] **"Amber" branding**: player ratings are surfaced as Amber (KeyForge Æmber,
+        Clash-Royale-trophies style) via a shared AmberValue component - display only,
+        the Elo math is unchanged. Deck power stays "SAS" to avoid confusion.
+-   [x] **Top Players page** (Community > Top Players): worldwide top 25 by Amber per
+        pool, podium for the top three (with avatars). Leaderboard query now returns
+        avatars; distinct from the scoped Leaderboards explorer.
+-   [x] **Ratings page** (Community > Ratings): personal Amber per pool with world rank
+        (#N of M, added to getRatingsForUsername), games, provisional badge, and a plain
+        "How Amber works" explainer.
 -   [ ] Redis-backed leaderboard cache (sorted sets) once traffic warrants; PG indexes
         carry current scale fine.
 -   [ ] Activity window on boards **(admin-config)**.
@@ -244,6 +253,12 @@ much stronger deck pays less.
         first game" step once casual matchmaking lands.
 -   [x] **Member directory**: public searchable member list (username/country filters,
         rating-sorted, privacy-safe fields only) with joined-24h/total/online stats.
+-   [x] **Play IRL + local stores** (`/play-irl`, docs/design/rankings-amber-and-irl.md):
+        in-person play hub with a community-contributed local game store / venue directory
+        (searchable by name/city + country; adder or admin can remove; Stores schema 38 /
+        migration 31, ON DELETE SET NULL keeps listings if the contributor leaves) and
+        shortcuts to in-person tournaments and clubs. Follow-ups: map view, store-hosted
+        event listings, verified/official store badges.
 -   [ ] **Teams** (competitive): rosters, team events, team rating.
 -   [x] **Friends v1**: requests by username, accept/decline/cancel/remove, mutual-request
         auto-accept, online presence dots (server/services/community/FriendService).
