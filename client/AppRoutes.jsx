@@ -19,6 +19,10 @@ import Matches from './pages/Matches';
 import Placeholder from './pages/Placeholder';
 import Tournaments from './pages/Tournaments';
 import TournamentDetail from './pages/TournamentDetail';
+import Friends from './pages/Friends';
+import Members from './pages/Members';
+import Clubs from './pages/Clubs';
+import ClubDetail from './pages/ClubDetail';
 import MotdAdmin from './pages/MotdAdmin';
 import NewsAdmin from './pages/NewsAdmin';
 import NodesAdmin from './pages/NodesAdmin';
@@ -144,33 +148,10 @@ const AppRoutes = ({ currentGame, user }) => {
                     />
                 }
             />
-            <Route
-                path='/community/friends'
-                element={
-                    <Placeholder
-                        title='Friends'
-                        description='Friends lists and presence are coming with player profiles.'
-                    />
-                }
-            />
-            <Route
-                path='/community/clubs'
-                element={
-                    <Placeholder
-                        title='Clubs'
-                        description='Clubs for local scenes and stores - membership, club pages, and club leaderboards - are on the roadmap.'
-                    />
-                }
-            />
-            <Route
-                path='/community/members'
-                element={
-                    <Placeholder
-                        title='Members'
-                        description='A searchable member directory is coming with player profiles.'
-                    />
-                }
-            />
+            <Route path='/community/friends' element={<Friends />} />
+            <Route path='/community/clubs' element={<Clubs />} />
+            <Route path='/community/clubs/:id' element={<ClubDetail />} />
+            <Route path='/community/members' element={<Members />} />
             <Route
                 path='/community/top-players'
                 element={

@@ -7,6 +7,8 @@ const ratings = require('./ratings');
 const adminSettings = require('./admin-settings');
 // ARCHON: native tournament engine
 const tournaments = require('./tournaments');
+// ARCHON: community (friends, members, clubs)
+const community = require('./community');
 const decks = require('./decks');
 const games = require('./games');
 const cards = require('./cards');
@@ -26,6 +28,8 @@ module.exports.init = function (server, options) {
     adminSettings.init(server);
     // ARCHON: native tournament engine
     tournaments.init(server);
+    // ARCHON: community (friends, members, clubs)
+    community.init(server);
     decks.init(server);
     games.init(server);
     cards.init(server);

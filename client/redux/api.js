@@ -315,6 +315,45 @@ export const api = createApi({
                 { type: TAG_TYPES.TOURNAMENTS, id }
             ]
         }),
+        // ARCHON: community (friends, members, clubs)
+        getFriends: builder.query({
+            query: () => '/friends',
+            providesTags: [TAG_TYPES.FRIENDS]
+        }),
+        friendAction: builder.mutation({
+            query: ({ action, body }) => ({
+                url: `/friends/${action}`,
+                method: 'POST',
+                body
+            }),
+            invalidatesTags: [TAG_TYPES.FRIENDS]
+        }),
+        getMembers: builder.query({
+            query: (params) => ({ url: '/members', params })
+        }),
+        getClubs: builder.query({
+            query: (params) => ({ url: '/clubs', params }),
+            providesTags: [TAG_TYPES.CLUBS]
+        }),
+        getClub: builder.query({
+            query: (id) => `/clubs/${id}`,
+            providesTags: (result, error, id) => [{ type: TAG_TYPES.CLUBS, id }]
+        }),
+        createClub: builder.mutation({
+            query: (body) => ({ url: '/clubs', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.CLUBS]
+        }),
+        clubAction: builder.mutation({
+            query: ({ id, action, body }) => ({
+                url: `/clubs/${id}/${action}`,
+                method: 'POST',
+                body
+            }),
+            invalidatesTags: (result, error, { id }) => [
+                TAG_TYPES.CLUBS,
+                { type: TAG_TYPES.CLUBS, id }
+            ]
+        }),
         // ARCHON: runtime admin settings
         getAdminSettings: builder.query({
             query: () => '/admin/settings'
@@ -592,6 +631,13 @@ export const {
     useGetEventDetailQuery,
     useCreateTournamentMutation,
     useTournamentActionMutation,
+    useGetFriendsQuery,
+    useFriendActionMutation,
+    useGetMembersQuery,
+    useGetClubsQuery,
+    useGetClubQuery,
+    useCreateClubMutation,
+    useClubActionMutation,
     useUnlinkPatreonMutation,
     useGetCardsQuery,
     useGetFactionsQuery,

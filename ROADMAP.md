@@ -60,7 +60,9 @@
 -   [ ] Site-wide color theme aligned to the brand mark (accent/amber pass over the UI);
         owner may also supply custom art to replace the generated mark.
 -   [ ] Email templates (registration, password reset) rebranded.
--   [ ] Legal pages: ToS, privacy policy, KeyForge/FFG/Ghost Galaxy IP acknowledgement.
+-   [x] Legal pages: privacy policy rewritten for Archon Arena (what/why/who/retention,
+        no ads or trackers); About page rewritten (platform intro, ratings explainer,
+        lineage credits, FFG/Ghost Galaxy IP acknowledgement). ToS still open.
 -   [ ] Keep internal code identifiers stable where renaming risks gameplay breakage
         (rename UI-facing only; engine internals renamed opportunistically later).
 
@@ -220,9 +222,15 @@ much stronger deck pays less.
 
 -   [ ] Rich player profiles: avatar, bio, location, ratings, badges, favorite decks,
         match history summary.
--   [ ] **Clubs** (local scenes/stores): membership, club pages, club leaderboards.
+-   [x] **Clubs v1** (local scenes/stores): create/join/leave, club pages with member
+        lists, owner remove/disband (server/services/community/ClubService). Follow-ups:
+        club leaderboards, approval-based joins, ownership transfer.
+-   [x] **Member directory**: public searchable member list (username/country filters,
+        rating-sorted, privacy-safe fields only) with joined-24h/total/online stats.
 -   [ ] **Teams** (competitive): rosters, team events, team rating.
--   [ ] Friends/follow, blocks, DMs (moderated), presence.
+-   [x] **Friends v1**: requests by username, accept/decline/cancel/remove, mutual-request
+        auto-accept, online presence dots (server/services/community/FriendService).
+        Follow-ups: block-list integration, DMs (moderated), friend activity feed.
 -   [ ] Moderation tools: reports, mutes, bans, audit log **(admin-config policies)**.
 
 ## Phase 10 — Match history, replays & spectating

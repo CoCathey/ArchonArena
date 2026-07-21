@@ -25,63 +25,55 @@ const About = () => {
                     <Trans>Report Problems</Trans>
                 </Button>
                 <Trans i18nKey='about.whatisthis'>
-                    <h3>What is this?</h3>
+                    <h3>What is Archon Arena?</h3>
 
                     <p>
-                        Archon Arena is a competitive platform for playing KeyForge, a Unique Deck
-                        Game from Ghost Galaxy, in your browser — with ratings, rankings, and
-                        tournaments. The gameplay engine is based on The Crucible Online (keyteki)
-                        open source project.
+                        Archon Arena is a competitive platform for playing KeyForge, the Unique Deck
+                        Game from Ghost Galaxy, in your browser. Beyond casual games it adds the
+                        things a competitive scene needs: an Elo-style rating that accounts for deck
+                        power (SAS) and margin of victory, worldwide/regional/country/state
+                        leaderboards, tournaments for online and in-person play, clubs, and friends.
                     </p>
                 </Trans>
-                <Trans i18nKey='about.cool'>
-                    <h3>That&apos;s pretty cool! But how does any of this work?</h3>
+                <Trans i18nKey='about.gettingstarted'>
+                    <h3>Getting started</h3>
                     <p>
-                        Head on over to the <Link href='/how-to-play'>How To Play guide</Link> for a
-                        thorough explanation.
+                        Create an account, import a deck from the Master Vault on the{' '}
+                        <Link href='/decks'>Decks page</Link>, and jump into a game from{' '}
+                        <Link href='/play'>Play Online</Link>. The{' '}
+                        <Link href='/how-to-play'>How To Play guide</Link> covers the interface in
+                        detail. Rated games move your rating; you can watch yourself climb on the{' '}
+                        <Link href='/leaderboards'>Leaderboards</Link>.
+                    </p>
+                </Trans>
+                <Trans i18nKey='about.ratings'>
+                    <h3>How do ratings work?</h3>
+                    <p>
+                        Ratings use a chess-style Elo system with two KeyForge twists: your
+                        deck&apos;s SAS score adjusts the expected result (upsetting a stronger deck
+                        pays more than stomping with one), and the key differential of the final
+                        score scales the exchange (a 3-0 moves more points than a 3-2). New players
+                        are provisional for their first games while the system finds their level.
                     </p>
                 </Trans>
                 <Trans i18nKey='about.whydiscarded'>
-                    <h3>
-                        Why do my best cards always get discarded? / Why do I/my opponent draw 6
-                        brobnar cards every turn?
-                    </h3>
+                    <h3>Why do my best cards always get discarded?</h3>
                     <p>
-                        This is question that gets asked a lot (usually less politely!). The shuffle
-                        code is fine. It uses a Fisher-Yates algorithm which is the best card
-                        shuffling algorithm available. Real randomness can be quite jarring when
-                        you&apos;re used to imperfect human shuffling. But why believe me? Believe
-                        the numbers:
-                    </p>
-                    <p>
-                        The discard random card code has been run through a test routine 1 million
-                        times, here are the results for a hand size of 6:
-                    </p>
-                    <pre>
-                        1: 166,840
-                        <br />
-                        2: 166,344
-                        <br />
-                        3: 166,767
-                        <br />
-                        4: 166,594
-                        <br />
-                        5: 166,546
-                        <br />
-                        6: 166,908
-                        <br />
-                    </pre>
-                    <p>
-                        That said, if you can prove there is a bug, please do raise an issue on
-                        GitHub!
+                        The most-asked question in online card gaming! The shuffle uses a
+                        Fisher-Yates algorithm - true randomness - which can feel harsher than the
+                        imperfect human shuffling you are used to at a table. The randomness has
+                        been verified over millions of test draws. If you believe you have found a
+                        genuine card bug, please report it on GitHub.
                     </p>
                 </Trans>
                 <Trans i18nKey='about.thanks'>
-                    <h3>Special Thanks</h3>
+                    <h3>Lineage and thanks</h3>
                     <p>
-                        Archon Arena is built on the shoulders of The Crucible Online and the
-                        keyteki open source project — our thanks to its maintainers and
-                        contributors for years of work on the gameplay engine.
+                        Archon Arena&apos;s gameplay engine is built on the keyteki open source
+                        project - the engine behind The Crucible Online - which itself descends from
+                        the ringteki and jinteki family of card game platforms. Our sincere thanks
+                        to all of their maintainers and contributors: this platform stands on years
+                        of their work.
                     </p>
                 </Trans>
                 <Trans i18nKey='about.colors'>
@@ -99,8 +91,8 @@ const About = () => {
                             who have made significant development contributions to the site
                         </li>
                         <li>
-                            <span className='username role-supporter'>supporter</span> - patreon
-                            supporters
+                            <span className='username role-supporter'>supporter</span> - financial
+                            supporters of the platform
                         </li>
                         <li>
                             <span className='username role-winner'>winner</span> - current
@@ -152,14 +144,14 @@ const About = () => {
                     </p>
                 </Trans>
                 <Trans i18nKey='about.addnotes'>
-                    <h3>Additional Notes</h3>
+                    <h3>Intellectual property</h3>
                     <p>
-                        The Keyforge Unique Deck Game, the artwork and many other things are all
-                        copyright Fantasy Flight Games and I make no claims of ownership or
-                        otherwise of any of the artwork or trademarks. This site exists for
-                        passionate fans to play a game they enjoy and augment, rather than replace,
-                        the in person LCG. Ghost Galaxy does not endorse, support, and is not
-                        involved with, this site in any way.
+                        KeyForge, its artwork, card text, and all related trademarks are the
+                        property of Fantasy Flight Games and Ghost Galaxy. Archon Arena is an
+                        unofficial fan project: we claim no ownership of any of it, and neither
+                        Fantasy Flight Games nor Ghost Galaxy endorses, supports, or is involved
+                        with this site in any way. Archon Arena exists so passionate fans can play
+                        the game they love and, we hope, buy more of it.
                     </p>
                 </Trans>
             </Panel>
