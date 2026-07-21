@@ -183,6 +183,13 @@ const DeckSummary = ({ deck }) => {
                         <span className='font-bold text-foreground'>
                             {deck.winRate?.toFixed(2)}%
                         </span>
+                        {/* ARCHON: SAS from Decks of KeyForge when available */}
+                        {deck.sasRating != null && (
+                            <>
+                                <span className='text-muted'>{t('SAS')}</span>
+                                <span className='font-bold text-foreground'>{deck.sasRating}</span>
+                            </>
+                        )}
                     </div>
                     {Object.keys(enhancements).length > 0 ? (
                         <div className='deck-enhancements flex flex-wrap items-center gap-3 ps-0 pt-3'>

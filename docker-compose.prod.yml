@@ -52,6 +52,7 @@ services:
             - VERSION=${VERSION:-}
             - SENTRY_DSN=${SENTRY_DSN:-}
             - CAPTCHA_KEY=${CAPTCHA_KEY:-}
+            - DOK_API_KEY=${DOK_API_KEY:-}
         command: ['node', '.']
 
     node-0:

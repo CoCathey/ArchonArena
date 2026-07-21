@@ -11,6 +11,10 @@ const cardService = ServiceFactory.cardService(configService);
 
 const deckService = new DeckService(configService, cardService);
 
+// ARCHON: Decks of KeyForge SAS enrichment (see docs/design/deck-sas.md)
+const DokService = require('../services/dok/DokService');
+const dokService = new DokService(configService);
+
 module.exports.init = function (server) {
     server.get(
         '/api/standalone-decks',
@@ -46,6 +50,9 @@ module.exports.init = function (server) {
             if (deck.username !== req.user.username) {
                 return res.status(401).send({ message: 'Unauthorized' });
             }
+
+            // ARCHON: attach cached SAS stats (best effort, non-blocking refresh)
+            await dokService.attachStats([deck]);
 
             res.send({ success: true, deck: deck });
         })
@@ -87,6 +94,9 @@ module.exports.init = function (server) {
 
                     return deck;
                 });
+
+                // ARCHON: attach cached SAS stats (best effort, non-blocking refresh)
+                await dokService.attachStats(decks);
             }
 
             res.send({ success: true, numDecks: numDecks, decks: decks });
@@ -125,6 +135,9 @@ module.exports.init = function (server) {
                             : 'An error occurred importing your deck.  Please check the Url or try again later.'
                 });
             }
+
+            // ARCHON: fire-and-forget SAS fetch for the newly imported deck
+            dokService.enrichDeck(req.body.uuid);
 
             res.send({ success: true, deck: createResult.deck });
         })

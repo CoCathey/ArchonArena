@@ -19,6 +19,10 @@
         emailKey: 'EMAIL_KEY'
     },
 
+    dok: {
+        apiKey: 'DOK_API_KEY'
+    },
+
     gameNode: {
         name: 'SERVER',
         host: 'HOST',

@@ -37,6 +37,17 @@
          */
     },
 
+    // Decks of KeyForge (decksofkeyforge.com) SAS/AERC integration.
+    // Get an API key from your DoK profile page. All values are intended to
+    // become runtime admin settings once the settings service exists.
+    dok: {
+        enabled: true,
+        apiUrl: 'https://decksofkeyforge.com/public-api/v3/decks/',
+        apiKey: '', // set via DOK_API_KEY
+        requestTimeoutMs: 10000,
+        refreshDays: 30 // SAS scores change between AERC versions; refetch this often
+    },
+
     gameNode: {
         name: 'test1',
         host: 'localhost',

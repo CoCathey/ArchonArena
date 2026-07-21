@@ -105,15 +105,20 @@ OpenID Connect.
 
 ## Phase 4 — Deck service: Decks of KeyForge SAS integration _(PRIORITY)_
 
--   [ ] Current-state analysis of TCO deck import (Master Vault API) — doc.
--   [ ] Standalone **Deck Service** module: owns deck storage, import, enrichment.
--   [ ] Integrate Decks of KeyForge (DoK) API: fetch SAS, AERC scores per deck.
--   [ ] Store SAS snapshot + fetch date per deck; periodic refresh job (SAS changes over time).
--   [ ] Admin settings **(admin-config)**: DoK API key, refresh interval, rate limits,
-        enable/disable SAS display.
--   [ ] Show SAS/AERC on deck lists, lobby, and pre-game screen.
--   [ ] Graceful degradation when DoK is down (cached values, "SAS unavailable" state).
--   [ ] Tests: import, enrichment, refresh, API failure paths.
+-   [x] Current-state analysis of TCO deck import (Master Vault API) —
+        docs/design/deck-sas.md.
+-   [x] Integrate Decks of KeyForge (DoK) API: fetch SAS/AERC per deck
+        (server/services/dok/DokService.js; DeckSas table keyed by Master Vault uuid).
+-   [x] Store SAS snapshot + fetch date; stale rows refresh in the background on access
+        (bounded per request).
+-   [x] Config-driven **(admin-config-ready)**: DoK API key (DOK_API_KEY), refresh
+        interval, timeout, enable/disable.
+-   [x] Graceful degradation when DoK is down (cached values, SAS simply absent).
+-   [x] Tests: enrichment, refresh windows, API failure paths (19 tests).
+-   [ ] Show SAS on deck _lists_, lobby games, and pre-game screen (deck page done).
+-   [ ] Periodic refresh sweep job (currently access-triggered only).
+-   [ ] Wire DoK settings into the runtime admin settings service once it exists.
+-   [ ] AERC component breakdown display from stored RawData.
 
 ## Phase 5 — Rating engine: SAS-adjusted Elo _(PRIORITY)_
 
