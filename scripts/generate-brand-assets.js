@@ -130,13 +130,12 @@ function writeIco(name, pngs) {
     console.log(`wrote public/${name} (${ico.length} bytes)`);
 }
 
-function writePinnedTabSvg(name) {
-    // Safari pinned tabs require a single-color SVG; Safari recolors it.
+function hexPointsString() {
     const s = 100;
-    const hexPoints = [];
+    const points = [];
     for (let i = 0; i < 6; i++) {
         const angle = Math.PI / 6 + (i * Math.PI) / 3;
-        hexPoints.push(
+        points.push(
             `${(s / 2 + s * 0.44 * Math.cos(angle)).toFixed(2)},${(
                 s / 2 +
                 s * 0.44 * Math.sin(angle)
@@ -144,17 +143,22 @@ function writePinnedTabSvg(name) {
         );
     }
 
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+    return points.join(' ');
+}
+
+function markSvg(color) {
+    return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <polygon points="${hexPoints.join(
-      ' '
-  )}" fill="none" stroke="#000" stroke-width="6" stroke-linejoin="round"/>
-  <circle cx="50" cy="42" r="14.5" fill="#000"/>
-  <polygon points="44.5,49 55.5,49 61.5,71 38.5,71" fill="#000"/>
+  <polygon points="${hexPointsString()}" fill="none" stroke="${color}" stroke-width="6" stroke-linejoin="round"/>
+  <circle cx="50" cy="42" r="14.5" fill="${color}"/>
+  <polygon points="44.5,49 55.5,49 61.5,71 38.5,71" fill="${color}"/>
 </svg>
 `;
-    fs.writeFileSync(path.join(OUT, name), svg);
-    console.log(`wrote public/${name}`);
+}
+
+function writeSvg(outPath, color, label) {
+    fs.writeFileSync(outPath, markSvg(color));
+    console.log(`wrote ${label}`);
 }
 
 const png16 = writePng('favicon-16x16.png', 16);
@@ -166,6 +170,13 @@ writeIco('favicon.ico', [
     { size: 16, buffer: png16 },
     { size: 32, buffer: png32 }
 ]);
-writePinnedTabSvg('safari-pinned-tab.svg');
+// Safari pinned tabs require a single-color (black) SVG; Safari recolors it.
+writeSvg(path.join(OUT, 'safari-pinned-tab.svg'), '#000', 'public/safari-pinned-tab.svg');
+// Amber vector mark used by the client navbar (crisp on dark and light themes).
+writeSvg(
+    path.join(__dirname, '..', 'client', 'assets', 'img', 'aa_mark.svg'),
+    AMBER,
+    'client/assets/img/aa_mark.svg'
+);
 
 console.log('done');
