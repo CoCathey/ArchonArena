@@ -1,0 +1,82 @@
+const { EVENTS } = require('../Events/types');
+const CardGameAction = require('./CardGameAction');
+
+class ApplyDamageAction extends CardGameAction {
+    setDefaultProperties() {
+        this.amount = null;
+        this.damageDealtEvent = null;
+        this.damageSource = null;
+        this.damageType = 'card effect';
+        this.bonus = false;
+    }
+
+    setup() {
+        this.targetType = ['creature'];
+        this.name = 'damage';
+        this.effectMsg = `apply ${this.amount} damage to {0}`;
+    }
+
+    canAffect(card, context) {
+        return this.amount > 0 && card.location === 'play area' && super.canAffect(card, context);
+    }
+
+    getEvent(card, context) {
+        // If damage is being applied to a different card than the original damage target,
+        // it means the damage was redirected and should bypass ward
+        const isRedirected = this.damageDealtEvent && this.damageDealtEvent.card !== card;
+
+        const params = {
+            card: card,
+            context: context,
+            amount: this.amount,
+            damageType: this.damageType,
+            bonus: this.bonus,
+            damageSource: this.damageSource,
+            damageDealtEvent: this.damageDealtEvent,
+            fightEvent: this.damageDealtEvent ? this.damageDealtEvent.fightEvent : null,
+            isRedirected: isRedirected,
+            destroyEvent: null
+        };
+
+        return super.createEvent(EVENTS.onDamageApplied, params, (event) => {
+            event.noGameStateCheck = true;
+
+            event.card.addToken('damage', event.amount);
+            if (
+                !event.card.moribund &&
+                (event.card.damage >= event.card.power ||
+                    (event.amount > 0 &&
+                        event.fightEvent &&
+                        event.damageType === 'card effect' &&
+                        event.damageSource &&
+                        event.damageSource.getKeywordValue('poison') &&
+                        !(
+                            event.fightEvent.attacker === event.card && event.card.ignores('poison')
+                        )))
+            ) {
+                event.destroyEvent = context.game.actions
+                    .destroy({ damageEvent: event })
+                    .getEvent(event.card, context.game.getFrameworkContext());
+
+                if (event.damageDealtEvent) {
+                    event.damageDealtEvent.destroyEvent = event.destroyEvent;
+                    event.destroyEvent.destroyedByDamageDealt =
+                        event.damageDealtEvent.card === event.card;
+                }
+
+                if (event.fightEvent) {
+                    event.destroyEvent.fightEvent = event.fightEvent;
+                    // Any creature destroyed during a fight is "destroyed fighting",
+                    // including splash-attack X damage to neighbors or damage
+                    // movement like shadow self
+                    event.destroyEvent.destroyedFighting = true;
+                    event.fightEvent.destroyed.push(event.card);
+                }
+
+                event.addSubEvent(event.destroyEvent);
+            }
+        });
+    }
+}
+
+module.exports = ApplyDamageAction;

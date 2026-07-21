@@ -1,0 +1,153 @@
+import classNames from 'classnames';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+
+import CardImage from './CardImage';
+import CardPilePopup from './CardPilePopup';
+
+const CardPileLink = ({
+    cardBack,
+    cards,
+    className,
+    closeOnClick,
+    disableMouseOver,
+    disablePopup,
+    hasActiveHouse,
+    houses,
+    isMe,
+    isPromptTarget,
+    isSpectating,
+    manualMode,
+    numDeckCards,
+    onCardClick,
+    onDragDrop,
+    onMouseOut,
+    onMouseOver,
+    onPopupChange,
+    onTouchMove,
+    orientation = 'vertical',
+    playerName,
+    popupLocation = 'bottom',
+    popupMenu,
+    size,
+    source,
+    title
+}) => {
+    const [showPopup, setShowPopup] = useState(false);
+    const [manualPopup, setManualPopup] = useState(false);
+    const showPopupRef = useRef(false);
+    const updatePopupVisibility = useCallback(
+        (value) => {
+            if (showPopupRef.current === value) {
+                return;
+            }
+
+            showPopupRef.current = value;
+            setShowPopup(value);
+
+            onPopupChange && onPopupChange({ source: source, visible: value });
+        },
+        [source, onPopupChange]
+    );
+
+    useEffect(() => {
+        if (manualPopup) {
+            return;
+        }
+
+        if (isPromptTarget || cards?.some((card) => card.selectable)) {
+            updatePopupVisibility(true);
+        } else {
+            updatePopupVisibility(false);
+        }
+    }, [cards, isPromptTarget, manualPopup, updatePopupVisibility]);
+
+    let classNameStr = classNames('card-pile-link', className, {
+        horizontal: orientation === 'horizontal' || orientation === 'exhausted',
+        vertical: orientation === 'vertical'
+    });
+
+    const topCard = () => {
+        if (cards.length === 0) {
+            return;
+        }
+        let card = cards[0];
+        if (!card.facedown && card.location !== 'deck') {
+            return card;
+        }
+    };
+
+    const card = topCard();
+
+    return (
+        <div
+            className={classNameStr}
+            onClick={() => {
+                if (!disablePopup) {
+                    updatePopupVisibility(!showPopup);
+                    setManualPopup(!showPopup);
+                }
+            }}
+        >
+            {card && (
+                <div
+                    className='icon'
+                    onMouseOver={() =>
+                        onMouseOver({
+                            image: (
+                                <CardImage
+                                    card={{ ...card, location: 'zoom' }}
+                                    cardBack={cardBack}
+                                />
+                            ),
+                            size: 'normal'
+                        })
+                    }
+                    onMouseOut={onMouseOut}
+                >
+                    <CardImage card={card} orientation='vertical' size='icon' />
+                </div>
+            )}
+            <div className={'text ' + title.toLowerCase()}>{title}:</div>&nbsp;
+            <div className={'counter ' + title.toLowerCase()}>
+                {source === 'deck' ? numDeckCards : cards.length}
+            </div>
+            {!disablePopup && showPopup && (
+                <CardPilePopup
+                    cardBack={cardBack}
+                    cards={cards}
+                    disableMouseOver={disableMouseOver}
+                    manualMode={manualMode}
+                    onCardClick={(card) => {
+                        if (closeOnClick) {
+                            updatePopupVisibility(false);
+                            setManualPopup(false);
+                        }
+
+                        onCardClick && onCardClick(card);
+                    }}
+                    onCloseClick={() => {
+                        updatePopupVisibility(!showPopup);
+                        setManualPopup(!showPopup);
+                    }}
+                    onDragDrop={onDragDrop}
+                    onMouseOut={onMouseOut}
+                    onMouseOver={onMouseOver}
+                    onTouchMove={onTouchMove}
+                    popupLocation={popupLocation}
+                    popupMenu={popupMenu}
+                    hasActiveHouse={hasActiveHouse}
+                    houses={houses}
+                    isMe={isMe}
+                    isSpectating={isSpectating}
+                    playerName={playerName}
+                    size={size}
+                    source={source}
+                    title={title}
+                />
+            )}
+        </div>
+    );
+};
+
+CardPileLink.displayName = 'CardPileLink';
+export default CardPileLink;

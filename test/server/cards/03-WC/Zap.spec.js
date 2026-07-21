@@ -1,0 +1,61 @@
+describe('Zap', function () {
+    describe("Zap's ability", function () {
+        beforeEach(function () {
+            this.setupTest({
+                player1: {
+                    house: 'staralliance',
+                    hand: ['zap'],
+                    inPlay: ['spyyyder']
+                },
+                player2: {
+                    inPlay: ['troll', 'snufflegator']
+                }
+            });
+            this.player1.play(this.zap);
+        });
+
+        it('should deal damage for the houses in play [3]', function () {
+            expect(this.player1).toHavePrompt('Zap');
+            expect(this.player1).toBeAbleToSelect(this.troll);
+            expect(this.player1).toBeAbleToSelect(this.spyyyder);
+            expect(this.player1).toBeAbleToSelect(this.snufflegator);
+            this.player1.clickCard(this.troll);
+            this.player1.clickCard(this.troll);
+            this.player1.clickCard(this.troll);
+            expect(this.troll.damage).toBe(3);
+            expect(this.player1).isReadyToTakeAction();
+        });
+
+        it('should not allow the player to select 0 targets', function () {
+            expect(this.player1.currentButtons).not.toContain('Done');
+        });
+
+        it('should deal damage for the houses in play [3] to different creatures', function () {
+            expect(this.player1).toHavePrompt('Zap');
+            expect(this.player1).toBeAbleToSelect(this.troll);
+            expect(this.player1).toBeAbleToSelect(this.spyyyder);
+            expect(this.player1).toBeAbleToSelect(this.snufflegator);
+            this.player1.clickCard(this.troll);
+            this.player1.clickCard(this.spyyyder);
+            this.player1.clickCard(this.snufflegator);
+            expect(this.troll.damage).toBe(1);
+            expect(this.spyyyder.damage).toBe(1);
+            expect(this.snufflegator.damage).toBe(1);
+            expect(this.player1).isReadyToTakeAction();
+        });
+
+        it('should deal deal more damage than a creature has power', function () {
+            expect(this.player1).toHavePrompt('Zap');
+            expect(this.player1).toBeAbleToSelect(this.spyyyder);
+            this.player1.clickCard(this.spyyyder);
+            expect(this.player1).toBeAbleToSelect(this.spyyyder);
+            this.player1.clickCard(this.spyyyder);
+            expect(this.player1).toBeAbleToSelect(this.spyyyder);
+            this.player1.clickCard(this.spyyyder);
+            expect(this.troll.damage).toBe(0);
+            expect(this.spyyyder.location).toBe('discard');
+            expect(this.snufflegator.damage).toBe(0);
+            expect(this.player1).isReadyToTakeAction();
+        });
+    });
+});

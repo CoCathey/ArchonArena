@@ -1,0 +1,104 @@
+const BasePlayAction = require('./BasePlayAction');
+const AttachAction = require('../GameActions/AttachAction');
+const CardLastingEffectAction = require('../GameActions/CardLastingEffectAction');
+const Effects = require('../effects');
+
+class PlayUpgradeAction extends BasePlayAction {
+    constructor(card, parent) {
+        let title = 'Choose a creature to attach this upgrade to';
+        let cardType = 'creature';
+        if (card.anyEffect('canAttachToArtifacts')) {
+            title = 'Choose a card to attached this upgrade to';
+            cardType = [cardType].concat(['artifact']);
+        }
+        super(card, {
+            activePromptTitle: title,
+            cardType: cardType,
+            buttons: [],
+            gameAction: new AttachAction((context) => ({ upgrade: context.source }))
+        });
+        this.title = 'Play this upgrade';
+        this.parent = parent;
+    }
+
+    // Create a new copy of this action with a forced parent, since we can't
+    // use the constructor directly in a GameAction without causing a
+    // dependency cycle.
+    newWithParent(parent) {
+        return new PlayUpgradeAction(this.card, parent);
+    }
+
+    displayMessage(context) {
+        if (context.target) {
+            context.game.addMessage(
+                '{0} plays {1} attaching it to {2}',
+                context.player,
+                context.source,
+                context.target
+            );
+        } else {
+            context.game.addMessage(
+                '{0} plays {1} and it is discarded',
+                context.player,
+                context.source
+            );
+        }
+    }
+
+    resolveTargets(context) {
+        if (this.parent) {
+            context.target = this.parent;
+            return {
+                cancelled: false,
+                payCostsFirst: false,
+                delayTargeting: null
+            };
+        }
+
+        // Mirror the Cancel-button gate from PutIntoPlayAction: only allow
+        // cancelling a direct, user-initiated play of one's own card from hand
+        // with no additional costs paid.
+        const canCancel =
+            context.source.location === 'hand' &&
+            context.source.controller === context.player &&
+            !context.playedByCardEffect &&
+            context.player.getAdditionalCosts(context).length === 0;
+        this.targets[0].properties.buttons = canCancel ? [{ text: 'Cancel', arg: 'cancel' }] : [];
+        return super.resolveTargets(context);
+    }
+
+    meetsRequirements(context = this.createContext(), ignoredRequirements) {
+        if (context.source.printedType === 'creature' && context.source.canPlayAsUpgrade()) {
+            context.source.printedType = 'upgrade';
+            let result = super.meetsRequirements(context, ignoredRequirements);
+            context.source.printedType = 'creature';
+            return result;
+        }
+
+        return super.meetsRequirements(context, ignoredRequirements);
+    }
+
+    addSubEvent(event, context) {
+        super.addSubEvent(event, context);
+        let attachTargetType = ['creature'];
+        if (context.source.anyEffect('canAttachToArtifacts')) {
+            attachTargetType = attachTargetType.concat(['artifact']);
+        }
+        event.addChildEvent(
+            new AttachAction({
+                upgrade: context.source,
+                targetType: attachTargetType
+            }).getEvent(context.target, context)
+        );
+        if (context.source.type === 'creature') {
+            const changeTypeEvent = new CardLastingEffectAction({
+                duration: 'lastingEffect',
+                effect: Effects.changeType('upgrade')
+            }).getEvent(context.source, context);
+            changeTypeEvent.gameAction = null;
+            event.addChildEvent(changeTypeEvent);
+        }
+    }
+}
+
+module.exports = PlayUpgradeAction;

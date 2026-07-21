@@ -1,0 +1,324 @@
+import { io } from 'socket.io-client';
+import * as jsondiffpatch from 'jsondiffpatch';
+
+import { gamesActions } from '../slices/gamesSlice';
+import { lobbyActions } from '../slices/lobbySlice';
+import { adminActions } from '../slices/adminSlice';
+import {
+    gameCloseRequested,
+    gameConnectRequested,
+    gameSendMessage,
+    lobbyAuthenticateRequested,
+    lobbyConnectRequested,
+    lobbyDisconnectRequested,
+    lobbyLeaveGameRequested,
+    lobbySendMessage,
+    lobbyStartGameRequested
+} from '../socketActions';
+import { api } from '../api';
+import { setAuthTokens } from '../slices/authSlice';
+
+let lobbySocket;
+let gameSocket;
+const patcher = jsondiffpatch.create({
+    objectHash: (obj, index) => {
+        return obj.uuid || obj.name || obj.id || obj._id || '$$index:' + index;
+    }
+});
+
+const lobbyMessages = [
+    'newgame',
+    'removegame',
+    'updategame',
+    'games',
+    'users',
+    'newuser',
+    'userleft',
+    'lobbychat',
+    'nochat',
+    'passworderror',
+    'lobbymessages',
+    'banner',
+    'motd',
+    'cleargamestate',
+    'gameerror'
+];
+
+export const socketMiddleware = (store) => (next) => (action) => {
+    const result = next(action);
+    const state = store.getState();
+    const refreshAndAuthenticateLobbySocket = () => {
+        const verifyRequest = store.dispatch(
+            api.endpoints.verifyAuthentication.initiate(undefined, { forceRefetch: true })
+        );
+
+        verifyRequest
+            .unwrap()
+            .then(() => {
+                store.dispatch(lobbyAuthenticateRequested());
+            })
+            .catch(() => {});
+    };
+
+    if (lobbyConnectRequested.match(action)) {
+        if (lobbySocket && lobbySocket.connected) {
+            return result;
+        }
+
+        lobbySocket = io(window.location.origin, {
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: Infinity,
+            auth: {
+                token: state.auth.token || undefined,
+                version: import.meta.env.VITE_VERSION || 'Local build'
+            }
+        });
+
+        store.dispatch(lobbyActions.connecting({ socket: lobbySocket }));
+
+        lobbySocket.on('pong', (responseTime) => {
+            store.dispatch(lobbyActions.responseTimeReceived(responseTime));
+        });
+
+        lobbySocket.on('connect', () => {
+            store.dispatch(lobbyActions.connected());
+        });
+
+        lobbySocket.on('disconnect', () => {
+            store.dispatch(lobbyActions.disconnected());
+        });
+
+        lobbySocket.io.on('reconnect_attempt', () => {
+            store.dispatch(lobbyActions.reconnecting());
+        });
+
+        for (const message of lobbyMessages) {
+            lobbySocket.on(message, (arg) => {
+                store.dispatch(lobbyActions.messageReceived({ message, args: [arg] }));
+            });
+        }
+
+        lobbySocket.on('gamestate', (game) => {
+            const currentState = store.getState();
+            store.dispatch(
+                lobbyActions.messageReceived({
+                    message: 'gamestate',
+                    args: [
+                        game,
+                        currentState.account.user ? currentState.account.user.username : undefined
+                    ]
+                })
+            );
+        });
+
+        lobbySocket.on('handoff', (handoff) => {
+            const standardPorts = [80, 443];
+            let url =
+                handoff.address && handoff.address !== 'undefined'
+                    ? `//${handoff.address}`
+                    : `//${window.location.hostname}`;
+
+            store.dispatch(gamesActions.handoffReceived(handoff));
+
+            if (handoff.port && !standardPorts.includes(handoff.port)) {
+                url += `:${handoff.port}`;
+            }
+
+            store.dispatch(
+                setAuthTokens({
+                    token: handoff.authToken,
+                    refreshToken: state.auth.refreshToken,
+                    user: handoff.user
+                })
+            );
+
+            if (gameSocket && state.games.gameId !== handoff.gameId) {
+                store.dispatch(gameCloseRequested());
+            }
+
+            store.dispatch(gameConnectRequested(url, handoff.name));
+        });
+
+        lobbySocket.on('authfailed', () => {
+            refreshAndAuthenticateLobbySocket();
+        });
+
+        lobbySocket.on('nodestatus', (status) => {
+            store.dispatch(adminActions.nodeStatusReceived(status));
+        });
+
+        lobbySocket.on('removemessage', (messageId, deletedBy) => {
+            store.dispatch(
+                lobbyActions.messageReceived({
+                    message: 'removemessage',
+                    args: [messageId, deletedBy]
+                })
+            );
+        });
+    }
+
+    if (lobbyDisconnectRequested.match(action)) {
+        if (lobbySocket) {
+            lobbySocket.closing = true;
+            lobbySocket.disconnect();
+        }
+    }
+
+    if (lobbyAuthenticateRequested.match(action)) {
+        if (lobbySocket && state.auth.token) {
+            lobbySocket.emit('authenticate', state.auth.token);
+        }
+    }
+
+    if (lobbySendMessage.match(action)) {
+        const { message, args } = action.payload;
+        if (lobbySocket) {
+            lobbySocket.emit(message, ...args);
+        }
+    }
+
+    if (lobbyStartGameRequested.match(action)) {
+        if (lobbySocket) {
+            lobbySocket.emit('startgame', action.payload.gameId);
+        }
+        store.dispatch(lobbyActions.gameStarting());
+    }
+
+    if (lobbyLeaveGameRequested.match(action)) {
+        if (lobbySocket) {
+            lobbySocket.emit('leavegame', action.payload.gameId);
+        }
+        store.dispatch(lobbyActions.gameSocketClosed());
+        store.dispatch(gamesActions.socketClosed());
+    }
+
+    if (gameConnectRequested.match(action)) {
+        const { url, name } = action.payload;
+        const currentState = store.getState();
+        gameSocket = io(url, {
+            path: `/${name}/socket.io`,
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: 5,
+            auth: {
+                token: currentState.auth.token || undefined
+            }
+        });
+
+        store.dispatch(
+            gamesActions.socketConnecting({
+                host: `${url}/${name}`,
+                socket: gameSocket
+            })
+        );
+
+        gameSocket.on('pong', (responseTime) => {
+            store.dispatch(gamesActions.responseTimeReceived(responseTime));
+        });
+
+        gameSocket.on('connect', () => {
+            store.dispatch(gamesActions.socketConnected({ socket: gameSocket }));
+        });
+
+        gameSocket.on('connect_error', () => {
+            if (lobbySocket) {
+                lobbySocket.emit('connectfailed');
+            }
+            store.dispatch(gamesActions.socketConnectError());
+        });
+
+        gameSocket.on('disconnect', () => {
+            store.dispatch(gamesActions.socketDisconnected());
+            store.dispatch(lobbyActions.gameSocketDisconnected());
+        });
+
+        gameSocket.io.on('reconnect_attempt', () => {
+            store.dispatch(gamesActions.socketReconnecting());
+        });
+
+        gameSocket.io.on('reconnect', () => {
+            store.dispatch(gamesActions.socketReconnected());
+        });
+
+        gameSocket.io.on('reconnect_failed', () => {
+            store.dispatch(gamesActions.socketConnectFailed());
+        });
+
+        gameSocket.on('gamestate', (game) => {
+            const latestState = store.getState();
+            let gameState;
+
+            if (latestState.lobby.rootState) {
+                gameState = patcher.patch(jsondiffpatch.clone(latestState.lobby.rootState), game);
+                store.dispatch(lobbyActions.setRootState(gameState));
+            } else {
+                gameState = game;
+                store.dispatch(lobbyActions.setRootState(game));
+            }
+
+            store.dispatch(
+                lobbyActions.messageReceived({
+                    message: 'gamestate',
+                    args: [
+                        gameState,
+                        latestState.account.user ? latestState.account.user.username : undefined
+                    ]
+                })
+            );
+        });
+
+        gameSocket.on('cleargamestate', () => {
+            const currentState = store.getState();
+            // The game socket's `cleargamestate` for a finished game can arrive
+            // *after* the lobby socket has already published a new pending
+            // rematch game into `lobby.currentGame`. We only want to clear the
+            // slot when it still holds the finished game we're being notified
+            // about — not when it has been replaced by the rematch.
+            //
+            // A finished/in-progress game lives in the slot with `started: true`;
+            // a newly created pending rematch arrives with `started: false`
+            // (it doesn't flip to started until both players keep and the game
+            // socket sends the first gamestate). So:
+            //
+            //   - !currentGame              -> nothing to clear (no-op).
+            //   - currentGame.started       -> still the finished game, clear it.
+            //   - currentGame && !started   -> a rematch raced ahead of us; leave it.
+            //
+            // `clearGameState` only resets `currentGame`/`newGame`; `rootState`
+            // (the live board) is cleared separately by `gameSocketClosed` /
+            // the next gamestate patch, so skipping here doesn't leak board data.
+            if (!currentState.lobby.currentGame || currentState.lobby.currentGame.started) {
+                store.dispatch(lobbyActions.clearGameState());
+            }
+        });
+    }
+
+    if (gameCloseRequested.match(action)) {
+        if (gameSocket) {
+            gameSocket.gameClosing = true;
+            // Defer the actual close to the next macrotask so any in-flight
+            // emit() calls dispatched immediately before this (e.g. 'concede'
+            // and 'leavegame' from the Leave Game button) have a chance to
+            // flush over the transport. Without this, closing on the same
+            // tick can drop the just-queued packets and the server never
+            // sees the leave — leaving the user "stuck" in the game until
+            // they refresh.
+            const socketToClose = gameSocket;
+            setTimeout(() => socketToClose.close(), 0);
+        }
+        store.dispatch(gamesActions.socketClosed());
+        store.dispatch(lobbyActions.gameSocketClosed());
+    }
+
+    if (gameSendMessage.match(action)) {
+        const { message, args } = action.payload;
+        if (gameSocket) {
+            gameSocket.emit('game', message, ...args);
+        }
+    }
+
+    return result;
+};

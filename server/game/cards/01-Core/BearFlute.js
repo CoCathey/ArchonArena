@@ -1,0 +1,40 @@
+const Card = require('../../Card.js');
+
+class BearFlute extends Card {
+    // Action: Fully heal an Ancient Bear. If there are no Ancient Bears in play, search your deck and discard pile and put each Ancient Bear from them into your hand. If you do, shuffle your discard pile into your deck.
+    setupCardAbilities(ability) {
+        this.action({
+            target: {
+                cardType: 'creature',
+                cardCondition: (card) => card.name === 'Ancient Bear',
+                gameAction: ability.actions.heal({ fully: true })
+            },
+            effect: '{1}{2}',
+            effectArgs: (context) =>
+                context.target
+                    ? ['heal ', context.target]
+                    : ['search their deck and discard for any Ancient Bears'],
+            gameAction: ability.actions.search((context) => ({
+                cardName: !context.game.creaturesInPlay.some((card) => card.name === 'Ancient Bear')
+                    ? 'Ancient Bear'
+                    : null
+            })),
+            then: {
+                gameAction: ability.actions.returnToDeck((context) => ({
+                    shuffle: true,
+                    target:
+                        context.preThenEvents &&
+                        context.preThenEvents[0] &&
+                        context.preThenEvents[0].searchedCards &&
+                        context.preThenEvents[0].searchedCards.length > 0
+                            ? context.player.discard
+                            : []
+                }))
+            }
+        });
+    }
+}
+
+BearFlute.id = 'bear-flute';
+
+module.exports = BearFlute;

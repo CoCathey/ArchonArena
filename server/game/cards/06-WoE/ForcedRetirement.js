@@ -1,0 +1,24 @@
+const Card = require('../../Card.js');
+
+class ForcedRetirement extends Card {
+    //Play: Destroy a creature. If you do, its controller gains 1A.
+    setupCardAbilities(ability) {
+        this.play({
+            target: {
+                cardType: 'creature',
+                gameAction: ability.actions.destroy()
+            },
+            then: (preThenContext) => ({
+                condition: () => !!preThenContext.target,
+                gameAction: ability.actions.gainAmber({
+                    amount: 1,
+                    target: preThenContext.target && preThenContext.target.controller
+                })
+            })
+        });
+    }
+}
+
+ForcedRetirement.id = 'forced-retirement';
+
+module.exports = ForcedRetirement;

@@ -1,0 +1,66 @@
+describe('Pandemonium', function () {
+    describe("Pandemonium's ability", function () {
+        beforeEach(function () {
+            this.setupTest({
+                player1: {
+                    house: 'dis',
+                    amber: 4,
+                    hand: ['pandemonium'],
+                    inPlay: ['urchin', 'nexus', 'dextre', 'dodger']
+                },
+                player2: {
+                    amber: 6,
+                    inPlay: ['batdrone', 'mother', 'zorg']
+                }
+            });
+            this.nexus.damage = 1;
+            this.mother.damage = 3;
+        });
+
+        it('should cause undamaged creatures to capture 1', function () {
+            this.player1.play(this.pandemonium);
+            expect(this.urchin.amber).toBe(1);
+            expect(this.dextre.amber).toBe(1);
+            expect(this.dodger.amber).toBe(1);
+            expect(this.batdrone.amber).toBe(1);
+            expect(this.zorg.amber).toBe(1);
+            expect(this.nexus.amber).toBe(0);
+            expect(this.mother.amber).toBe(0);
+            expect(this.player1).isReadyToTakeAction();
+        });
+
+        it('should prompt the player to pick creatures when there is insufficient amber', function () {
+            this.player1.amber = 0;
+            this.player2.amber = 2;
+            this.player1.play(this.pandemonium);
+            expect(this.player1).toHavePrompt('Pandemonium');
+            expect(this.player1).toBeAbleToSelect(this.urchin);
+            expect(this.player1).toBeAbleToSelect(this.dextre);
+            expect(this.player1).toBeAbleToSelect(this.dodger);
+            expect(this.player1).not.toBeAbleToSelect(this.nexus);
+            expect(this.player1).not.toBeAbleToSelect(this.batdrone);
+            expect(this.player1).not.toBeAbleToSelect(this.mother);
+            expect(this.player1).not.toBeAbleToSelect(this.zorg);
+            this.player1.clickCard(this.urchin);
+            this.player1.clickCard(this.dodger);
+            this.player1.clickPrompt('Done');
+            expect(this.player1).toHavePrompt('Pandemonium');
+            expect(this.player1).not.toBeAbleToSelect(this.urchin);
+            expect(this.player1).not.toBeAbleToSelect(this.dextre);
+            expect(this.player1).not.toBeAbleToSelect(this.dodger);
+            expect(this.player1).not.toBeAbleToSelect(this.nexus);
+            expect(this.player1).toBeAbleToSelect(this.batdrone);
+            expect(this.player1).not.toBeAbleToSelect(this.mother);
+            expect(this.player1).toBeAbleToSelect(this.zorg);
+            this.player1.clickCard(this.zorg);
+            expect(this.urchin.amber).toBe(1);
+            expect(this.dodger.amber).toBe(1);
+            expect(this.zorg.amber).toBe(1);
+            expect(this.nexus.amber).toBe(0);
+            expect(this.dextre.amber).toBe(0);
+            expect(this.batdrone.amber).toBe(0);
+            expect(this.mother.amber).toBe(0);
+            expect(this.player1).isReadyToTakeAction();
+        });
+    });
+});

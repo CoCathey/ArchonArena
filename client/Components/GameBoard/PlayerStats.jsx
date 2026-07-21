@@ -1,0 +1,377 @@
+import {
+    faCogs,
+    faComment,
+    faCopy,
+    faEye,
+    faEyeSlash,
+    faMinus,
+    faPlus,
+    faWrench
+} from '@fortawesome/free-solid-svg-icons';
+import { toast } from '@heroui/react';
+import classNames from 'classnames';
+import React from 'react';
+import { useTranslation } from 'react-i18next';
+import { useDispatch } from 'react-redux';
+import { gameSendMessage } from '../../redux/socketActions';
+import Icon from '../Icon';
+
+import { Constants } from '../../constants';
+import Avatar from '../Site/Avatar';
+
+import CardPileLink from './CardPileLink';
+import DrawDeck from './DrawDeck';
+import Droppable from './Droppable';
+import IdentityCard from './IdentityCard';
+import Keys from './Keys';
+
+const PlayerStats = ({
+    activeHouse,
+    activePlayer,
+    cardPiles,
+    cardBack,
+    deck,
+    houses,
+    isMe,
+    manualMode,
+    muteSpectators,
+    numDeckCards,
+    numMessages,
+    onCardClick,
+    onDragDrop,
+    onDrawPopupChange,
+    onMenuItemClick,
+    onPopupChange,
+    onTouchMove,
+    onClickTide,
+    onManualModeClick,
+    onMessagesClick,
+    onMuteClick,
+    onSettingsClick,
+    showControls,
+    onMouseOut,
+    onMouseOver,
+    onShuffleClick,
+    showDeckName,
+    showManualMode,
+    showMessages,
+    promptedPiles,
+    side,
+    size,
+    spectating,
+    stats,
+    tideRequired,
+    user
+}) => {
+    const { t } = useTranslation();
+    const dispatch = useDispatch();
+
+    const getStatValueOrDefault = (stat) => {
+        if (!stats) {
+            return 0;
+        }
+
+        return stats[stat] || 0;
+    };
+
+    const renderStatValue = (value) =>
+        String(value)
+            .split('')
+            .map((ch, i) => (
+                <span key={i} className='stat-digit'>
+                    {ch}
+                </span>
+            ));
+
+    const getHouse = (house) => {
+        let houseTitle = t(house);
+        return houseTitle[0].toUpperCase() + houseTitle.slice(1);
+    };
+
+    const getButton = (stat, name, statToSet = stat) => {
+        return (
+            <div className='state' title={t(name)}>
+                {showControls ? (
+                    <a
+                        href='#'
+                        className='btn-stat btn-stat--minus'
+                        onClick={() => {
+                            dispatch(gameSendMessage('changeStat', statToSet, -1));
+                        }}
+                    >
+                        <Icon icon={faMinus} title='-' />
+                    </a>
+                ) : null}
+                <div className='stat-value'>{renderStatValue(getStatValueOrDefault(stat))}</div>{' '}
+                <div className={`stat-image ${stat}`} />
+                {showControls ? (
+                    <a
+                        href='#'
+                        className='btn-stat btn-stat--plus'
+                        onClick={() => {
+                            dispatch(gameSendMessage('changeStat', statToSet, 1));
+                        }}
+                    >
+                        <Icon icon={faPlus} title='+' />
+                    </a>
+                ) : null}
+            </div>
+        );
+    };
+
+    const getKeyCost = () => {
+        return (
+            <div className='state' title={t('Current Key Cost')}>
+                <div className='stat-value'>
+                    {renderStatValue(getStatValueOrDefault('keyCost'))}
+                </div>
+                <div className='stat-image keyCost' />
+            </div>
+        );
+    };
+
+    const getHouses = () => {
+        if (deck.uuid) {
+            return (
+                <div className='state'>
+                    {houses.map((house) => (
+                        <img
+                            key={house}
+                            onClick={() => {
+                                if (showControls) {
+                                    dispatch(gameSendMessage('changeActiveHouse', house));
+                                }
+                            }}
+                            className={`block h-auto max-w-full ${
+                                activeHouse === house ? 'active' : 'inactive'
+                            }-house`}
+                            src={Constants.IdBackHousePaths[house]}
+                            title={getHouse(house)}
+                        />
+                    ))}
+                </div>
+            );
+        }
+    };
+
+    const getTide = () => {
+        if (tideRequired) {
+            return (
+                <div className='state'>
+                    <img
+                        key='tide'
+                        onClick={onClickTide}
+                        className='tide block h-auto max-w-full'
+                        src={Constants.TideImages[stats.tide]}
+                        title={t(`${stats.tide}-tide`)}
+                    />
+                </div>
+            );
+        }
+    };
+
+    const writeChatToClipboard = (event) => {
+        event.preventDefault();
+        const messagePanel =
+            document.querySelector('.chat-scroll .messages') || document.querySelector('.messages');
+        if (!messagePanel) {
+            toast.danger('Could not find game chat to copy.');
+            return;
+        }
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            toast.danger('Clipboard access is unavailable in this browser.');
+            return;
+        }
+        navigator.clipboard
+            .writeText(messagePanel.innerText)
+            .then(() => toast.success('Copied game chat to clipboard'))
+            .catch((err) => toast.danger(`Could not copy game chat: ${err}`));
+    };
+
+    let playerAvatar = (
+        <div className='state player-identity'>
+            <div
+                className={`pr-1 player-info ${activePlayer ? 'active-player' : 'inactive-player'}`}
+            >
+                <Avatar imgPath={user?.avatar} />
+                <span className='player-name'>{user?.username || t('Noone')}</span>
+            </div>
+        </div>
+    );
+
+    let statsClass = classNames('panel player-stats');
+
+    const isPilePromptTarget = (location) =>
+        promptedPiles?.some(
+            (pile) =>
+                pile.location === location &&
+                (pile.controller === (isMe ? 'self' : 'opponent') || pile.controller === 'any')
+        ) || false;
+
+    const pileProps = {
+        hasActiveHouse: isMe && Boolean(activeHouse),
+        isMe,
+        isSpectating: spectating,
+        onMenuItemClick,
+        onPopupChange,
+        onTouchMove,
+        cardBack,
+        manualMode,
+        onCardClick,
+        onDragDrop,
+        onMouseOut,
+        onMouseOver,
+        popupLocation: side,
+        size,
+        houses,
+        playerName: user?.username
+    };
+
+    const renderDroppableList = (source, child) => {
+        return isMe ? (
+            <Droppable onDragDrop={onDragDrop} source={source} manualMode={manualMode}>
+                {child}
+            </Droppable>
+        ) : (
+            child
+        );
+    };
+
+    let draw = (
+        <DrawDeck
+            {...pileProps}
+            className='draw'
+            cardCount={numDeckCards}
+            cards={cardPiles.deck}
+            isMe={isMe}
+            numDeckCards={numDeckCards}
+            onPopupChange={onDrawPopupChange}
+            onShuffleClick={onShuffleClick}
+            showDeckName={showDeckName}
+            spectating={spectating}
+        />
+    );
+
+    const discard = (
+        <CardPileLink
+            {...pileProps}
+            cards={cardPiles.discard}
+            className='discard'
+            title={t('Discard')}
+            source='discard'
+            isPromptTarget={isPilePromptTarget('discard')}
+        />
+    );
+    const archives = (
+        <CardPileLink
+            {...pileProps}
+            cards={cardPiles.archives}
+            className='archives'
+            title={t('Archives')}
+            source='archives'
+            isPromptTarget={isPilePromptTarget('archives')}
+        />
+    );
+    const purged = (
+        <CardPileLink
+            {...pileProps}
+            cards={cardPiles.purged}
+            className='purged'
+            title={t('Purged')}
+            source='purged'
+            isPromptTarget={isPilePromptTarget('purged')}
+        />
+    );
+    const hand = (
+        <CardPileLink
+            {...pileProps}
+            cards={cardPiles.hand}
+            className='hand'
+            title={t('Hand')}
+            source='hand'
+            isPromptTarget={isPilePromptTarget('hand')}
+        />
+    );
+
+    return (
+        <div className={statsClass}>
+            <div className='state'>
+                {playerAvatar}
+                <Keys keys={stats.keys} manualMode={manualMode} />
+                {getButton('amber', t('Amber'))}
+                {getButton('chains', t('Chains'))}
+                {getKeyCost()}
+
+                {houses ? getHouses() : null}
+                {getTide()}
+                <IdentityCard
+                    deck={deck}
+                    showDeckName={showDeckName}
+                    onMouseOut={onMouseOut}
+                    onMouseOver={onMouseOver}
+                />
+
+                {!isMe && <div className='state'>{renderDroppableList('hand', hand)}</div>}
+
+                <div className='state'>{renderDroppableList('draw', draw)}</div>
+                <div className='state'>{renderDroppableList('discard', discard)}</div>
+                {((cardPiles.archives && cardPiles.archives.length > 0) || manualMode) && (
+                    <div className='state'>{renderDroppableList('archives', archives)}</div>
+                )}
+                {((cardPiles.purged && cardPiles.purged.length > 0) || manualMode) && (
+                    <div className='state'>{renderDroppableList('purged', purged)}</div>
+                )}
+            </div>
+
+            {showMessages && (
+                <div className='state'>
+                    <div className='state'>
+                        <a href='#' className='pr-1 pl-1'>
+                            <Icon
+                                icon={muteSpectators ? faEyeSlash : faEye}
+                                onClick={onMuteClick}
+                            ></Icon>
+                        </a>
+                    </div>
+                    <div className='state'>
+                        <a href='#' className='pr-1 pl-1' onClick={writeChatToClipboard}>
+                            <Icon icon={faCopy}></Icon>
+                        </a>
+                    </div>
+                    {showManualMode && (
+                        <div className='state'>
+                            <a
+                                href='#'
+                                className={classNames({ 'manual-mode-indicator': manualMode })}
+                                onClick={onManualModeClick}
+                            >
+                                <Icon icon={faWrench}></Icon>
+                                {t('Manual Mode')}
+                            </a>
+                        </div>
+                    )}
+                    <div className='state'>
+                        <a href='#' onClick={onSettingsClick} className='pr-1 pl-1'>
+                            <Icon icon={faCogs}></Icon>
+                            <span className='ml-1'>{t('Settings')}</span>
+                        </a>
+                    </div>
+                    <div className='state'>
+                        <a href='#' onClick={onMessagesClick} className='pl-1'>
+                            <Icon icon={faComment}></Icon>
+                            {numMessages > 0 && (
+                                <span className='ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-[color:var(--brand)] px-1 text-xs text-[color:var(--accent-foreground)]'>
+                                    {numMessages}
+                                </span>
+                            )}
+                        </a>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+PlayerStats.displayName = 'PlayerStats';
+
+export default PlayerStats;

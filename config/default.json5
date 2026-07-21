@@ -1,0 +1,52 @@
+{
+    env: 'development',
+
+    secret: 'somethingverysecret',
+    redisUrl: 'redis://redis/',
+    redisKeyPrefix: 'keyteki:dev',
+    dbUser: 'keyteki',
+    dbHost: 'postgres',
+    dbDatabase: 'keyteki',
+    dbPassword: 'changemeplease',
+    dbPort: 5432,
+    minLobbyChatTime: 0, // The time (in seconds) an account has to be registered before it can chat in the lobby
+    /*
+     * Other global configurations used, but not specified, include:
+     *  - sentryDsn (for production only)
+     */
+
+    lobby: {
+        port: 4000,
+        appName: 'The Crucible Online',
+        emailFromAddress: 'noreply@thecrucible.online',
+        blockDisposableEmail: false,
+        requireActivation: false,
+        hmacSecret: 'somethingevenmoresecret',
+        lowerDeckThreshold: 1,
+        middleDeckThreshold: 2,
+        upperDeckThreshold: 3
+
+        /*
+         * Other server configurations used, but not specified, include:
+         *  - cookieLifetime
+         *  - emailKey
+         *  - hmacSecret
+         *  - captchaKey (hCaptcha secret key)
+         *  - awsSesRegion, awsAccessKeyId, awsSecretAccessKey (AWS SES credentials)
+         *  - emailFrom, emailReplyTo (email sender addresses)
+         */
+    },
+
+    gameNode: {
+        name: 'test1',
+        host: 'localhost',
+        socketioPort: 9500
+
+        /*
+         * Other game node configurations used, but not specified, include:
+         *  - keyPath
+         *  - certPath
+         *  - maxGames
+         */
+    }
+}

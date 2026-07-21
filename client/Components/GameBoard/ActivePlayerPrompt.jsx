@@ -1,0 +1,396 @@
+import { Button, Tooltip } from '@heroui/react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import Panel from '../Site/Panel';
+import AbilityTargeting from './AbilityTargeting';
+import CardNameLookup from './CardNameLookup';
+import HouseSelect from './HouseSelect';
+import OptionsSelect from './OptionsSelect';
+import TraitNameLookup from './TraitNameLookup';
+
+import CardImage from './CardImage';
+
+/**
+ * @typedef ActivePlayerPromptProps
+ * @property {string} phase current game phase displayed as the prompt header
+ * @property {string|Object} promptTitle a string or a localization object to show as prompt title
+ * @property {string|Object} promptText a string or a localization object to show as prompt text
+ * @property {Object[]} buttons array of buttons
+ * @property {Object[]} cards array of cards
+ * @property {Object[]} controls array of controls
+ * @property {function(Object): void} onButtonClick Called when a button is pressed
+ * @property {function(Object): void} onMouseOut Called when mouse is moved out of a card image
+ * @property {function(Object): void} onMouseOver Called when mouse is moved over of a card image
+ */
+
+/**
+ * @param {ActivePlayerPromptProps} props
+ */
+const ActivePlayerPrompt = (props) => {
+    const { t, i18n } = useTranslation();
+    const [buttonsDisabled, setButtonsDisabled] = useState(false);
+    const [forcePassDisabled, setForcePassDisabled] = useState(false);
+    const prevPromptTitle = useRef(null);
+    const prevForcePass = useRef(false);
+
+    useEffect(() => {
+        const titleText =
+            typeof props.promptTitle === 'string' ? props.promptTitle : props.promptTitle?.text;
+        if (titleText === 'Game Won' && prevPromptTitle.current !== 'Game Won') {
+            setButtonsDisabled(true);
+            const timer = setTimeout(() => setButtonsDisabled(false), 1500);
+            prevPromptTitle.current = titleText;
+            return () => {
+                clearTimeout(timer);
+                setButtonsDisabled(false);
+            };
+        }
+
+        prevPromptTitle.current = titleText;
+    }, [props.promptTitle]);
+
+    useEffect(() => {
+        if (props.forcePassAvailable && !prevForcePass.current) {
+            setForcePassDisabled(true);
+            const timer = setTimeout(() => setForcePassDisabled(false), 5000);
+            prevForcePass.current = true;
+            return () => {
+                clearTimeout(timer);
+                setForcePassDisabled(false);
+            };
+        }
+
+        if (!props.forcePassAvailable) {
+            prevForcePass.current = false;
+        }
+    }, [props.forcePassAvailable]);
+
+    const iconAssetByName = {
+        forgedkeyblue: new URL('../../assets/img/forgedkeyblue.png', import.meta.url).href,
+        forgedkeyred: new URL('../../assets/img/forgedkeyred.png', import.meta.url).href,
+        forgedkeyyellow: new URL('../../assets/img/forgedkeyyellow.png', import.meta.url).href,
+        unforgedkeyblue: new URL('../../assets/img/unforgedkeyblue.png', import.meta.url).href,
+        unforgedkeyred: new URL('../../assets/img/unforgedkeyred.png', import.meta.url).href,
+        unforgedkeyyellow: new URL('../../assets/img/unforgedkeyyellow.png', import.meta.url).href
+    };
+
+    const onButtonClick = (command, arg, uuid, method) => {
+        if (props.onButtonClick) {
+            props.onButtonClick(command, arg, uuid, method);
+        }
+    };
+
+    const onMouseOver = (card) => {
+        if (card && props.onMouseOver) {
+            props.onMouseOver({
+                image: card ? <CardImage card={card} /> : null,
+                size: 'normal'
+            });
+        }
+    };
+
+    const onMouseOut = (card) => {
+        if (card && props.onMouseOut) {
+            props.onMouseOut(card);
+        }
+    };
+
+    const localizedText = (source, text, values) => {
+        if (!isNaN(text)) {
+            // text is just a plain number, avoid translation
+            return text;
+        }
+
+        if (!text) {
+            return '';
+        }
+
+        if (i18n.language !== 'en') {
+            // Avoid locale replacement if language is English
+
+            if (!source || !source.locale || !source.locale[i18n.language]) {
+                // If no source or source does not have locale, simply do the translation
+                return t(text, values);
+            }
+
+            if (values && values.card) {
+                // if there is a {{card}} property in the values, we should use localized source name
+                return t(text, { ...values, card: source.locale[i18n.language].name });
+            }
+
+            if (!values) {
+                // if no values, add a 'card' with localized source name and try to find, worst case, the source name
+                // in the text and replace it for i18n interpolation
+                values = { card: source.locale[i18n.language].name };
+                while (text.includes(source.name)) {
+                    text = text.replace(source.name, '{{card}}');
+                }
+            }
+        }
+
+        return t(text, values);
+    };
+
+    const getButtons = () => {
+        let buttonIndex = 0;
+
+        let buttons = [];
+
+        if (
+            !props.buttons ||
+            props.controls.some((c) => ['house-select', 'options-select'].includes(c.type))
+        ) {
+            return null;
+        }
+
+        for (const button of props.buttons) {
+            const originalButtonText = localizedText(button.card, button.text, button.values);
+            const buttonText = originalButtonText == null ? '' : String(originalButtonText);
+            let tooltipText;
+            if (button.tooltip && typeof button.tooltip === 'object') {
+                const source = { name: button.tooltip.values?.card, locale: button.tooltip.locale };
+                const values = {
+                    ...button.tooltip.values,
+                    title: t(button.tooltip.values?.title)
+                };
+                tooltipText = localizedText(source, button.tooltip.text, values);
+            } else if (button.tooltip) {
+                tooltipText = localizedText(button.card, button.tooltip, button.values);
+            } else {
+                tooltipText = buttonText;
+            }
+            const normalizedButtonText = buttonText.trim().toLowerCase();
+            const isCancel =
+                normalizedButtonText === 'cancel' ||
+                normalizedButtonText === 'cancel prompt' ||
+                String(button.command || '')
+                    .toLowerCase()
+                    .includes('cancel') ||
+                String(button.arg || '')
+                    .toLowerCase()
+                    .includes('cancel');
+            const hasIcon = Boolean(button.icon);
+            const buttonVariant = isCancel ? 'tertiary' : 'primary';
+            const buttonClass = isCancel
+                ? 'w-full justify-center whitespace-nowrap text-sm capitalize !px-2 !py-1.5 !text-foreground/78'
+                : hasIcon
+                ? 'w-full justify-center whitespace-nowrap text-sm capitalize !px-2 !py-1.5'
+                : 'w-full justify-center whitespace-nowrap text-sm capitalize !px-2 !py-1.5';
+
+            const hasTooltip = Boolean(tooltipText) && tooltipText !== buttonText;
+
+            const buttonElement = (
+                <Button
+                    variant={buttonVariant}
+                    key={button.command + buttonIndex.toString()}
+                    className={buttonClass}
+                    onPress={() =>
+                        onButtonClick(button.command, button.arg, button.uuid, button.method)
+                    }
+                    onMouseOver={() => onMouseOver(button.card)}
+                    onMouseOut={() => onMouseOut(button.card)}
+                    isDisabled={button.disabled || buttonsDisabled}
+                >
+                    {hasIcon ? (
+                        <span className='inline-flex min-w-0 items-center justify-center gap-2'>
+                            {iconAssetByName[button.icon] ? (
+                                <img
+                                    src={iconAssetByName[button.icon]}
+                                    alt=''
+                                    className='inline-block h-5 w-5 shrink-0'
+                                />
+                            ) : (
+                                <div
+                                    className={`h-6 w-6 shrink-0 bg-cover bg-center bg-no-repeat icon-${button.icon}`}
+                                />
+                            )}
+                            <span className='min-w-0 truncate text-center'>{buttonText}</span>
+                        </span>
+                    ) : (
+                        <span className='inline-flex w-full min-w-0 items-center justify-center'>
+                            <span className='min-w-0 truncate text-center'>{buttonText}</span>
+                        </span>
+                    )}
+                </Button>
+            );
+
+            const option = hasTooltip ? (
+                <Tooltip key={button.command + buttonIndex.toString()} delay={200} closeDelay={0}>
+                    {buttonElement}
+                    <Tooltip.Content placement='left'>{tooltipText}</Tooltip.Content>
+                </Tooltip>
+            ) : (
+                buttonElement
+            );
+
+            buttonIndex++;
+
+            buttons.push(option);
+        }
+
+        return buttons;
+    };
+
+    const onControlSelected = (command, uuid, method, value) => {
+        if (props.onButtonClick) {
+            props.onButtonClick(command, value, uuid, method);
+        }
+    };
+
+    const onOptionSelected = (option) => {
+        if (props.onButtonClick) {
+            let button = props.buttons.find((button) => '' + button.arg === option);
+            props.onButtonClick(button.command, button.arg, button.uuid, button.method);
+        }
+    };
+
+    const getControls = () => {
+        if (!props.controls) {
+            return null;
+        }
+
+        return props.controls.map((control, index) => {
+            const key = control.uuid || `${control.type}-${index}`;
+            switch (control.type) {
+                case 'targeting':
+                    return (
+                        <AbilityTargeting
+                            key={key}
+                            onMouseOut={props.onMouseOut}
+                            onMouseOver={props.onMouseOver}
+                            source={control.source}
+                            targets={control.targets}
+                        />
+                    );
+                case 'card-name':
+                    return (
+                        <CardNameLookup
+                            key={key}
+                            cards={props.cards}
+                            onCardSelected={(cardName) =>
+                                onControlSelected(
+                                    control.command,
+                                    control.uuid,
+                                    control.method,
+                                    cardName
+                                )
+                            }
+                        />
+                    );
+                case 'trait-name':
+                    return (
+                        <TraitNameLookup
+                            key={key}
+                            cards={props.cards}
+                            onValueSelected={(trait) =>
+                                onControlSelected(
+                                    control.command,
+                                    control.uuid,
+                                    control.method,
+                                    trait
+                                )
+                            }
+                        />
+                    );
+                case 'house-select':
+                    return (
+                        <HouseSelect
+                            key={key}
+                            buttons={props.buttons}
+                            onHouseSelected={onControlSelected}
+                        />
+                    );
+                case 'options-select':
+                    return (
+                        <OptionsSelect
+                            key={key}
+                            options={props.buttons}
+                            onOptionSelected={onOptionSelected}
+                        />
+                    );
+            }
+        });
+    };
+
+    const safePromptText = (promptObject) => {
+        if (promptObject) {
+            return typeof promptObject === 'string' ? promptObject : promptObject.text;
+        }
+
+        return null;
+    };
+
+    let controlSource = null;
+    if (props.controls && props.controls.length > 0 && props.controls[0].source) {
+        controlSource = props.controls[0].source;
+    }
+
+    let promptTitle;
+
+    if (props.promptTitle) {
+        let promptTitleText = safePromptText(props.promptTitle);
+
+        promptTitle = (
+            <div className='-mx-3 -mt-2 mb-3 border-b border-border/70 bg-accent/12 px-3 py-1 text-center text-sm'>
+                {localizedText(controlSource, promptTitleText, props.promptTitle.values)}
+            </div>
+        );
+    }
+
+    let timer = null;
+    let promptText = safePromptText(props.promptText);
+    let promptTexts = [];
+
+    if (promptText) {
+        if (promptText.includes('\n')) {
+            let split = promptText.split('\n');
+            for (let token of split) {
+                const localized = localizedText(controlSource, token, props.promptText.values);
+                promptTexts.push(
+                    <span key={`prompt-text-${promptTexts.length}`}>{localized}</span>
+                );
+                promptTexts.push(<br key={`prompt-br-${promptTexts.length}`} />);
+            }
+        } else {
+            promptTexts.push(
+                <span key='prompt-text-single'>
+                    {localizedText(controlSource, promptText, props.promptText.values)}
+                </span>
+            );
+        }
+    }
+
+    return (
+        <div className='mx-auto w-full max-w-full px-1'>
+            <Panel
+                title={t(props.phase + ' phase')}
+                titleClass='text-sm font-medium uppercase tracking-wide'
+                contentClassName='px-2 py-1.5'
+                className='!w-full !rounded-xl overflow-hidden'
+            >
+                {timer}
+                {promptTitle}
+                <div className='px-1 text-center'>
+                    <h4 className='mb-2 text-base font-medium leading-snug'>{promptTexts}</h4>
+                    <div className='space-y-1.5'>{getControls()}</div>
+                    <div className='mt-2 space-y-1.5'>{getButtons()}</div>
+                    {props.forcePassAvailable && (
+                        <div className='mt-3 border-t border-border/50 pt-3'>
+                            <Button
+                                variant='primary'
+                                className='w-full justify-center whitespace-nowrap text-sm capitalize !px-2 !py-1.5'
+                                onPress={props.onForcePass}
+                                isDisabled={forcePassDisabled}
+                            >
+                                Force Pass Turn
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            </Panel>
+        </div>
+    );
+};
+
+ActivePlayerPrompt.displayName = 'ActivePlayerPrompt';
+export default ActivePlayerPrompt;

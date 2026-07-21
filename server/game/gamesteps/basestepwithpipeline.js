@@ -1,0 +1,55 @@
+const BaseStep = require('./basestep.js');
+const GamePipeline = require('../gamepipeline.js');
+
+class BaseStepWithPipeline extends BaseStep {
+    /**
+     * @param {import('../game')} game
+     */
+    constructor(game) {
+        super(game);
+        this.pipeline = new GamePipeline();
+    }
+
+    queueStep(step) {
+        this.pipeline.queueStep(step);
+    }
+
+    isComplete() {
+        return this.pipeline.length === 0;
+    }
+
+    onCardClicked(player, card) {
+        return this.pipeline.handleCardClicked(player, card);
+    }
+
+    onCardDragged(player, card, from, to) {
+        return this.pipeline.handleCardDragged(player, card, from, to);
+    }
+
+    onTideClicked(player) {
+        return this.pipeline.handleTideClicked(player);
+    }
+
+    onProphecyClicked(player, prophecyCard) {
+        return this.pipeline.handleProphecyClicked(player, prophecyCard);
+    }
+
+    onMenuCommand(player, arg, uuid, method) {
+        return this.pipeline.handleMenuCommand(player, arg, uuid, method);
+    }
+
+    cancelStep() {
+        this.pipeline.cancelStep();
+    }
+
+    continue() {
+        try {
+            return this.pipeline.continue();
+        } catch (e) {
+            this.game.reportError(e);
+            return true;
+        }
+    }
+}
+
+module.exports = BaseStepWithPipeline;

@@ -1,0 +1,1629 @@
+const _ = require('underscore');
+
+const AbilityDsl = require('./abilitydsl.js');
+const CardAction = require('./cardaction.js');
+const Constants = require('../constants.js');
+const Effects = require('./effects.js');
+const EffectSource = require('./EffectSource.js');
+const TriggeredAbility = require('./triggeredability');
+
+const DiscardAction = require('./BaseActions/DiscardAction');
+const PlayAction = require('./BaseActions/PlayAction');
+const PlayCreatureAction = require('./BaseActions/PlayCreatureAction');
+const PlayArtifactAction = require('./BaseActions/PlayArtifactAction');
+const PlayUpgradeAction = require('./BaseActions/PlayUpgradeAction');
+const ResolveFightAction = require('./GameActions/ResolveFightAction');
+const ResolveReapAction = require('./GameActions/ResolveReapAction');
+const ReturnToHandFromDiscardAction = require('./BaseActions/ReturnToHandFromDiscardAction');
+const RemoveStun = require('./BaseActions/RemoveStun');
+const { EVENTS } = require('./Events/types.js');
+
+class Card extends EffectSource {
+    constructor(owner, cardData) {
+        super(owner.game);
+        this.owner = owner;
+        this.cardData = cardData;
+
+        this.id = cardData.id;
+        this.printedName = cardData.name;
+        this.image = cardData.image;
+        this.setDefaultController(owner);
+
+        this.printedType = cardData.type;
+        this.composedPart = null;
+        this.tokens = {};
+        this.gigantic = false;
+
+        /**
+         * Abilities that this card has.
+         *
+         * **IMPORTANT NOTE:** These arrays will include the _sum_ of abilities
+         * put on the card. Specifically, if a card is copying another card (for
+         * example, it’s face-down as a token creature), these arrays will have
+         * both the original card’s effects and the token creature’s effects.
+         *
+         * You in general will want to look at the
+         * actions/reactions/persistentEffects properties instead, as those will
+         * reflect what is actually active in the game, since they are sensitive
+         * both to text box blanking effects as well as copy card effects.
+         */
+        this.abilities = {
+            actions: [],
+            reactions: [],
+            persistentEffects: [],
+            keywordReactions: [],
+            keywordPersistentEffects: []
+        };
+        this.traits = cardData.traits || [];
+        this.printedKeywords = {};
+        for (let keyword of cardData.keywords || []) {
+            let split = keyword.split(':');
+            let value = 1;
+            if (split.length > 1) {
+                value = parseInt(split[1]);
+            }
+
+            this.printedKeywords[split[0]] = value;
+            this.persistentEffect({
+                location: 'any',
+                effect: AbilityDsl.effects.addKeyword({ [split[0]]: value })
+            });
+        }
+
+        this.printedHouse = cardData.house;
+        this.cardPrintedAmber = cardData.amber;
+        this.maverick = cardData.maverick;
+        this.anomaly = cardData.anomaly;
+        this.enhancements = cardData.enhancements;
+
+        this.upgrades = [];
+        this.parent = null;
+        this.purgedBy = null;
+        this.childCards = [];
+        this.purgedCards = [];
+        this.clonedType = null;
+        this.clonedNeighbors = null;
+        this.clonedPurgedCards = null;
+        this.leftNeighborBeforeLeavingPlay = null;
+        this.rightNeighborBeforeLeavingPlay = null;
+
+        this.powerPrinted = cardData.power;
+        this.armorPrinted = cardData.armor;
+        this.armorUsed = 0;
+        this.exhausted = false;
+        this.moribund = false;
+        this.isFighting = false;
+        this.activeProphecy = false;
+        this.abducted = false;
+
+        this.locale = cardData.locale;
+
+        this.menu = [
+            { command: 'exhaust', text: 'Exhaust/Ready', menu: 'main' },
+            { command: 'tokens', text: 'Modify Tokens', menu: 'main' },
+            { command: 'control', text: 'Give control', menu: 'main' },
+            { command: 'main', text: 'Back', menu: 'tokens' },
+            { command: 'addDamage', text: 'Add 1 damage', menu: 'tokens' },
+            { command: 'remDamage', text: 'Remove 1 damage', menu: 'tokens' },
+            { command: 'addPower', text: 'Add 1 power token', menu: 'tokens' },
+            { command: 'remPower', text: 'Remove 1 power token', menu: 'tokens' },
+            { command: 'addAmber', text: 'Add 1 amber', menu: 'tokens' },
+            { command: 'remAmber', text: 'Remove 1 amber', menu: 'tokens' },
+            { command: 'stun', text: 'Stun/Remove Stun', menu: 'tokens' },
+            { command: 'ward', text: 'Ward/Remove Ward', menu: 'tokens' },
+            { command: 'enrage', text: 'Enrage/Remove Enrage', menu: 'tokens' },
+            { command: 'under', text: 'Modify cards under', menu: 'main' },
+            { command: 'main', text: 'Back', menu: 'under' },
+            { command: 'placeFaceup', text: 'Place card faceup', menu: 'under' },
+            { command: 'placeFacedown', text: 'Place card facedown', menu: 'under' }
+        ];
+
+        this.endRound();
+        this.modifiedPower = undefined;
+    }
+
+    getTopCard() {
+        return this;
+    }
+
+    getBottomCard() {
+        return this;
+    }
+
+    get name() {
+        const copyEffect = this.mostRecentEffect('copyCard');
+        return copyEffect ? copyEffect.printedName : this.printedName;
+    }
+
+    get type() {
+        return this.mostRecentEffect('changeType') || this.clonedType || this.printedType;
+    }
+
+    getEffects(type, predicate = () => true) {
+        if (!Effects.unblankableEffects.includes(type) && this.isBlank()) {
+            return [];
+        }
+        return super.getEffects(type, predicate);
+    }
+
+    sumEffects(type) {
+        if (!Effects.unblankableEffects.includes(type) && this.isBlank()) {
+            return 0;
+        }
+        return super.sumEffects(type);
+    }
+
+    anyEffect(type) {
+        if (!Effects.unblankableEffects.includes(type) && this.isBlank()) {
+            return false;
+        }
+        let x = super.anyEffect(type);
+        return x;
+    }
+
+    isToken() {
+        return this.sumEffects('flipToken') % 2 === 1;
+    }
+
+    tokenCard() {
+        // Tokens are always created from their owner's own deck,
+        // and each player has at most one token card definition,
+        // so the owner's tokenCard is the canonical resolution.
+        // Avoid looking up by `this.name`, which can be overridden
+        //  by a copyCard effect.
+        return this.owner && this.owner.tokenCard;
+    }
+
+    isProphecy() {
+        return this.type === 'prophecy';
+    }
+
+    get actions() {
+        if (this.isBlank()) {
+            return [];
+        }
+
+        let actions = this.abilities.actions;
+        if (this.anyEffect('copyCard')) {
+            let mostRecentEffect = _.last(
+                this.effects.filter((effect) => effect.type === 'copyCard')
+            );
+            actions = mostRecentEffect.value.getActions(this);
+        }
+
+        let effectActions = this.getEffects('gainAbility').filter(
+            (ability) => ability.abilityType === 'action'
+        );
+        return actions.concat(effectActions);
+    }
+
+    get reactions() {
+        return this.getReactions();
+    }
+
+    getReactions(ignoreBlank = false) {
+        if (this.isBlank() && !ignoreBlank) {
+            return this.abilities.keywordReactions;
+        }
+
+        const TriggeredAbilityTypes = ['interrupt', 'reaction'];
+        let reactions = this.abilities.reactions;
+        if (this.anyEffect('copyCard')) {
+            let mostRecentEffect = _.last(
+                this.effects.filter((effect) => effect.type === 'copyCard')
+            );
+            reactions = mostRecentEffect.value.getReactions(this);
+        }
+
+        let effectReactions = this.getEffects('gainAbility').filter((ability) =>
+            TriggeredAbilityTypes.includes(ability.abilityType)
+        );
+        reactions = reactions.concat(this.abilities.keywordReactions, effectReactions);
+
+        if (this.isBlankFight() && !ignoreBlank) {
+            reactions = reactions.filter((reaction) => !reaction.properties.fight);
+        }
+
+        if (this.isBlankDestroyed() && !ignoreBlank) {
+            reactions = reactions.filter((reaction) => !reaction.properties.destroyed);
+        }
+
+        if (
+            this.type === 'action' &&
+            !this.controller.checkRestrictions('resolveActionPlayEffects')
+        ) {
+            reactions = reactions.filter((reaction) => !reaction.properties.play);
+        }
+
+        return reactions;
+    }
+
+    get persistentEffects() {
+        return this.getPersistentEffects();
+    }
+
+    getPersistentEffects(ignoreBlank = false) {
+        if (this.isBlank() && !ignoreBlank) {
+            return this.abilities.keywordPersistentEffects;
+        }
+
+        let persistentEffects = this.abilities.persistentEffects;
+        if (this.anyEffect('copyCard')) {
+            let mostRecentEffect = _.last(
+                this.effects.filter((effect) => effect.type === 'copyCard')
+            );
+            persistentEffects = mostRecentEffect.value.getPersistentEffects(this);
+        }
+
+        let gainedPersistentEffects = this.getEffects('gainAbility').filter(
+            (ability) => ability.abilityType === 'persistentEffect'
+        );
+
+        let result = persistentEffects.concat(
+            this.abilities.keywordPersistentEffects,
+            gainedPersistentEffects
+        );
+
+        return result;
+    }
+
+    get bonusIcons() {
+        if (this.anyEffect('copyCard')) {
+            return this.mostRecentEffect('copyCard').bonusIcons;
+        }
+
+        if (this.anyEffect('modifyBonusIcons')) {
+            return this.mostRecentEffect('modifyBonusIcons');
+        }
+
+        let printedAmber = this.getTopCard().cardPrintedAmber;
+        let enhancements = this.getTopCard().enhancements;
+
+        let result = printedAmber ? Array.from(Array(printedAmber), () => 'amber') : [];
+        return enhancements ? result.concat(enhancements) : result;
+    }
+
+    setupAbilities() {
+        this.setupKeywordAbilities(AbilityDsl);
+        this.setupCardAbilities(AbilityDsl);
+    }
+
+    /**
+     * Create card abilities by calling subsequent methods with appropriate properties
+     * @param ability - object containing limits, costs, effects, and game actions
+     */
+    // eslint-disable-next-line no-unused-vars
+    setupCardAbilities(ability) {}
+
+    setupKeywordAbilities(ability) {
+        // Assault
+        this.abilities.keywordReactions.push(
+            this.interrupt({
+                title: 'Assault',
+                printedAbility: false,
+                when: {
+                    onFight: (event, context) => event.attacker === context.source
+                },
+                gameAction: ability.actions.dealDamage((context) => ({
+                    amount: context.source.getKeywordValue('assault'),
+                    target: context.event.card,
+                    damageSource: context.source,
+                    damageType: 'assault'
+                }))
+            })
+        );
+
+        // Hazardous
+        this.abilities.keywordReactions.push(
+            this.interrupt({
+                title: 'Hazardous',
+                printedAbility: false,
+                when: {
+                    onFight: (event, context) =>
+                        event.card === context.source && !event.attacker.ignores('hazardous')
+                },
+                gameAction: ability.actions.dealDamage((context) => ({
+                    amount: context.source.getKeywordValue('hazardous'),
+                    target: context.event.attacker,
+                    damageSource: context.source,
+                    damageType: 'hazardous'
+                }))
+            })
+        );
+
+        // Taunt
+        this.abilities.keywordPersistentEffects.push(
+            this.persistentEffect({
+                condition: () => !!this.getKeywordValue('taunt') && this.type === 'creature',
+                printedAbility: false,
+                match: (card) => this.neighbors.includes(card) && !card.getKeywordValue('taunt'),
+                effect: ability.effects.cardCannot('attackDueToTaunt')
+            })
+        );
+
+        // enraged
+        this.abilities.keywordPersistentEffects.push(
+            this.persistentEffect({
+                printedAbility: false,
+                condition: () => {
+                    return this.hasToken('enrage') && this.type === 'creature';
+                },
+                match: this,
+                effect: AbilityDsl.effects.mustFightIfAble()
+            })
+        );
+
+        // warded
+        this.abilities.keywordReactions.push(
+            this.interrupt({
+                when: {
+                    onCardDestroyed: (event, context) =>
+                        event.card === context.source &&
+                        event.card.type === 'creature' &&
+                        context.source.warded &&
+                        !event.isRedirected,
+                    onCardPurged: (event, context) =>
+                        event.card === context.source &&
+                        event.card.type === 'creature' &&
+                        context.source.warded &&
+                        !event.isRedirected,
+                    onCardLeavesPlay: (event, context) =>
+                        event.card === context.source &&
+                        event.card.type === 'creature' &&
+                        context.source.warded &&
+                        !event.isRedirected
+                },
+                autoResolve: true,
+                effect: 'remove its ward token',
+                gameAction: [
+                    AbilityDsl.actions.changeEvent((context) => ({
+                        event: context.event,
+                        cancel: true,
+                        postHandler: (context) => (context.event.card.moribund = false)
+                    })),
+                    AbilityDsl.actions.removeWard()
+                ]
+            })
+        );
+
+        // Invulnerable
+        const invulnerabilityApplies = (_context, _effectContext, event) => {
+            const damageEvent = (event && event.damageEvent) || event;
+            const source = damageEvent && damageEvent.damageSource;
+            if (!source || !source.ignores || !source.ignores('invulnerable')) {
+                return true;
+            }
+            // In a fight, only the attacker's `ignores` bypasses invulnerable;
+            // the defender dealing fight damage back does not bypass it.
+            const fightEvent = damageEvent && damageEvent.fightEvent;
+            if (fightEvent && fightEvent.attacker !== source) {
+                return true;
+            }
+            return false;
+        };
+        this.abilities.keywordPersistentEffects.push(
+            this.persistentEffect({
+                condition: () => !!this.getKeywordValue('invulnerable'),
+                printedAbility: false,
+                match: this,
+                effect: [
+                    ability.effects.cardCannot('damage', invulnerabilityApplies),
+                    ability.effects.cardCannot('destroy', invulnerabilityApplies),
+                    ability.effects.cardCannot('sacrifice')
+                ]
+            })
+        );
+
+        // Treachery
+        this.abilities.keywordPersistentEffects.push(
+            this.persistentEffect({
+                printedAbility: false,
+                condition: () => this.hasKeyword('treachery'),
+                match: this,
+                location: 'any',
+                targetController: 'any',
+                effect: ability.effects.entersPlayUnderOpponentsControl()
+            })
+        );
+
+        // Versatile
+        this.abilities.keywordPersistentEffects.push(
+            this.persistentEffect({
+                condition: () => this.hasKeyword('versatile'),
+                printedAbility: false,
+                match: this,
+                effect: ability.effects.canUse(
+                    (card, _, effectContext) => card === effectContext.source
+                )
+            })
+        );
+    }
+
+    /**
+     * @typedef {('play area'|'discard'|'archives'|'being played'|'draw')} CardLocation
+     */
+
+    /**
+     * @typedef PlayProperties
+     * @property {CardLocation} location The location this effect can trigger from
+     * @property {function(any): boolean} condition An expression that returns whether this effect is allowed to trigger
+     * @property {string} effect The text added to the game log when this effect triggers
+     * @property {function(any): [any]} effectArgs A function that returns the arguments to the effect string
+     */
+
+    play(properties) {
+        if (this.type === 'action') {
+            properties.location = properties.location || 'being played';
+        }
+
+        return this.reaction(Object.assign({ play: true, name: 'Play' }, properties));
+    }
+
+    fight(properties) {
+        return this.reaction(Object.assign({ fight: true, name: 'Fight' }, properties));
+    }
+
+    reap(properties) {
+        return this.reaction(Object.assign({ reap: true, name: 'Reap' }, properties));
+    }
+
+    fate(properties) {
+        // Re-attribute the auto-generated "uses {fateCard} to ..." message to
+        // the active player (who triggered the prophecy fulfillment) rather
+        // than the fate card's controller, without altering context.player so
+        // that card targeting (e.g. controller: 'opponent') is unaffected.
+        const wrapped = Object.assign({}, properties);
+        if (wrapped.effect && !wrapped.message) {
+            const origEffect = wrapped.effect;
+            const origEffectArgs = wrapped.effectArgs;
+            wrapped.message = '{0} uses {1} to ' + origEffect;
+            wrapped.messageArgs = (context) => {
+                const extra =
+                    typeof origEffectArgs === 'function'
+                        ? origEffectArgs(context)
+                        : origEffectArgs || [];
+                return [context.game.activePlayer, context.source, ...[].concat(extra)];
+            };
+            delete wrapped.effect;
+            delete wrapped.effectArgs;
+        }
+        return this.interrupt(
+            Object.assign(
+                {
+                    when: {
+                        onFate: (event, context) => event.card === context.source
+                    },
+                    name: 'Fate',
+                    location: 'any',
+                    effectAlert: true
+                },
+                wrapped
+            )
+        );
+    }
+
+    scrap(properties) {
+        return this.reaction(
+            Object.assign(
+                {
+                    when: {
+                        onCardDiscarded: (event, context) => {
+                            return (
+                                event.location === 'hand' &&
+                                event.card.controller === context.game.activePlayer &&
+                                event.card === context.source
+                            );
+                        }
+                    },
+                    location: 'any',
+                    scrap: true,
+                    name: 'Scrap'
+                },
+                properties
+            )
+        );
+    }
+
+    destroyed(properties) {
+        return this.interrupt(
+            Object.assign(
+                {
+                    when: {
+                        onCardLeavesPlay: (event, context) =>
+                            event.triggeringEvent &&
+                            event.triggeringEvent.name === EVENTS.onCardDestroyed &&
+                            event.card === context.source
+                    },
+                    destroyed: true
+                },
+                properties
+            )
+        );
+    }
+
+    omni(properties) {
+        properties.omni = true;
+        return this.action(properties);
+    }
+
+    action(properties) {
+        const action = new CardAction(this.game, this, properties);
+        if (action.printedAbility) {
+            this.abilities.actions.push(action);
+        }
+
+        return action;
+    }
+
+    beforeFight(properties) {
+        return this.interrupt(
+            Object.assign(
+                { when: { onFight: (event, context) => event.attacker === context.source } },
+                properties
+            )
+        );
+    }
+
+    triggeredAbility(abilityType, properties) {
+        const ability = new TriggeredAbility(this.game, this, abilityType, properties);
+        if (ability.printedAbility) {
+            this.abilities.reactions.push(ability);
+        }
+
+        return ability;
+    }
+
+    removeAbility(ability) {
+        this.abilities.reactions = this.abilities.reactions.filter((it) => it !== ability);
+        this.abilities.actions = this.abilities.actions.filter((it) => it !== ability);
+        this.abilities.persistentEffects = this.abilities.persistentEffects.filter(
+            (it) => it !== ability
+        );
+    }
+
+    reaction(properties) {
+        if (properties.play || properties.fight || properties.reap) {
+            properties.when = {
+                onCardPlayed: (event, context) => event.card === context.source,
+                onFight: (event, context) => event.attacker === context.source,
+                onReap: (event, context) => event.card === context.source
+            };
+        }
+
+        return this.triggeredAbility('reaction', properties);
+    }
+
+    interrupt(properties) {
+        return this.triggeredAbility('interrupt', properties);
+    }
+
+    prophecyReaction(properties) {
+        let originalWhen = properties.when;
+        if (typeof originalWhen === 'object') {
+            properties.when = Object.entries(originalWhen).reduce((newWhen, [key, condition]) => {
+                newWhen[key] = (event, context) => {
+                    return (
+                        condition(event, context) &&
+                        context.game.activePlayer !== this.controller &&
+                        this.childCards.length > 0 &&
+                        this.activeProphecy
+                    );
+                };
+                return newWhen;
+            }, {});
+        }
+
+        properties.location = 'any';
+        return this.triggeredAbility('reaction', properties);
+    }
+
+    prophecyInterrupt(properties) {
+        let originalWhen = properties.when;
+        if (typeof originalWhen === 'object') {
+            properties.when = Object.entries(originalWhen).reduce((newWhen, [key, condition]) => {
+                newWhen[key] = (event, context) => {
+                    return (
+                        condition(event, context) &&
+                        context.game.activePlayer !== this.controller &&
+                        this.childCards.length > 0 &&
+                        this.activeProphecy
+                    );
+                };
+                return newWhen;
+            }, {});
+        }
+
+        properties.location = 'any';
+        return this.triggeredAbility('interrupt', properties);
+    }
+
+    /**
+     * Applies an effect that continues as long as the card providing the effect
+     * is both in play and not blank.
+     */
+    persistentEffect(properties) {
+        const allowedLocations = ['any', 'play area', 'discard'];
+        let location = properties.location || 'play area';
+        if (!allowedLocations.includes(location)) {
+            throw new Error(`'${location}' is not a supported effect location.`);
+        }
+
+        let ability = _.extend(
+            {
+                abilityType: 'persistentEffect',
+                duration: 'persistentEffect',
+                location: location,
+                printedAbility: true
+            },
+            properties
+        );
+        if (ability.printedAbility) {
+            this.abilities.persistentEffects.push(ability);
+        }
+
+        return ability;
+    }
+
+    hasTrait(trait) {
+        if (this.anyEffect('removeAllTraits')) {
+            return false;
+        }
+
+        if (!trait) {
+            return false;
+        }
+
+        trait = trait.toLowerCase();
+        return this.getTraits().includes(trait);
+    }
+
+    getTraits(printed = false) {
+        if (this.anyEffect('removeAllTraits')) {
+            return [];
+        }
+
+        if (printed) {
+            return this.getBottomCard().traits;
+        }
+        let copyEffect = this.mostRecentEffect('copyCard');
+        let traits = copyEffect ? copyEffect.traits : this.getBottomCard().traits;
+        return _.uniq(traits.concat(this.getEffects('addTrait')));
+    }
+
+    getHouseEnhancements() {
+        if (!this.enhancements) {
+            return [];
+        }
+        return this.enhancements
+            .map((e) => e.replace(' ', '')) // e.g. "star alliance" -> "staralliance"
+            .filter((e) => Constants.Houses.includes(e.toLowerCase()));
+    }
+
+    getResolvableBonusIcons() {
+        return this.bonusIcons.filter((icon) => {
+            const normalized = icon.replace(/\s/g, '').toLowerCase();
+            return !Constants.Houses.includes(normalized);
+        });
+    }
+
+    getHouses() {
+        let combinedHouses = [];
+
+        if (this.anyEffect('changeHouse')) {
+            combinedHouses = combinedHouses.concat(this.getEffects('changeHouse').flat());
+        } else {
+            let copyEffect = this.mostRecentEffect('copyCard');
+            combinedHouses.push(copyEffect ? copyEffect.printedHouse : this.printedHouse);
+            combinedHouses = combinedHouses.concat(
+                copyEffect ? copyEffect.getHouseEnhancements() : this.getHouseEnhancements()
+            );
+        }
+
+        if (this.anyEffect('addHouse')) {
+            combinedHouses = combinedHouses.concat(this.getEffects('addHouse'));
+        }
+
+        return combinedHouses;
+    }
+
+    hasHouse(house) {
+        if (!house) {
+            return false;
+        }
+
+        house = house.toLowerCase();
+        return this.getHouses().includes(house);
+    }
+
+    hasHouseThatIsNot(house) {
+        if (!house) {
+            return true;
+        }
+
+        house = house.toLowerCase();
+        return this.getHouses().some((h) => h !== house);
+    }
+
+    applyAnyLocationPersistentEffects() {
+        _.each(this.persistentEffects, (effect) => {
+            if (effect.location === 'any') {
+                effect.ref = this.addEffectToEngine(effect);
+            }
+        });
+    }
+
+    onLeavesPlay() {
+        if (this.type === 'creature' && this.hasToken('amber') && this.controller.opponent) {
+            this.game.actions
+                .gainAmber({ amount: this.amber })
+                .resolve(this.controller.opponent, this.game.getFrameworkContext());
+        }
+
+        this.exhausted = false;
+        this.moribund = false;
+        this.new = false;
+        this.tokens = {};
+        this.setDefaultController(this.owner);
+        this.updateEffectContexts();
+        this.endRound();
+    }
+
+    clearDependentCards() {
+        for (let upgrade of this.upgrades) {
+            upgrade.onLeavesPlay();
+            upgrade.owner.moveCard(upgrade, 'discard');
+        }
+
+        for (let child of this.childCards) {
+            child.onLeavesPlay();
+            child.owner.moveCard(child, 'discard');
+        }
+
+        for (let card of this.purgedCards) {
+            card.purgedBy = null;
+        }
+        this.purgedCards = [];
+    }
+
+    endRound() {
+        this.armorUsed = 0;
+        this.elusiveUsed = false;
+    }
+
+    /**
+     * Returns true if this card has any reaction whose target step resolves
+     * a `GainsTextBoxAction` (i.e. a Doppelganger-style “copy a neighbor’s
+     * text box” ability). Uses the runtime reactions list so abilities granted
+     * via CopyCard (e.g. tokens, Mimic Gel copies) or gainAbility effects are
+     * also detected. Used to spot infinite copy loops (e.g. two Doppelgangers
+     * next to each other) so the infinite-loop rule can be applied.
+     */
+    hasGainsTextBoxAbility() {
+        if (this.isBlank()) {
+            return false;
+        }
+        const GainsTextBoxAction = require('./GameActions/GainsTextBoxAction');
+        const isGainsTextBox = (action) => action instanceof GainsTextBoxAction;
+        return this.getReactions(true).some(
+            (reaction) =>
+                reaction.targets &&
+                reaction.targets.some(
+                    (target) =>
+                        target.properties &&
+                        Array.isArray(target.properties.gameAction) &&
+                        target.properties.gameAction.some(isGainsTextBox)
+                )
+        );
+    }
+
+    updateAbilityEvents(from, to) {
+        _.each(this.getReactions(true), (reaction) => {
+            if (reaction.location.includes(to) && !reaction.location.includes(from)) {
+                reaction.registerEvents();
+            } else if (!reaction.location.includes(to) && reaction.location.includes(from)) {
+                reaction.unregisterEvents();
+            }
+        });
+    }
+
+    updateEffects(from = '', to = '') {
+        if (from === 'play area' || from === 'being played') {
+            this.removeLastingEffects();
+        }
+
+        let effectLocations = ['play area', 'discard'];
+
+        _.each(this.getPersistentEffects(true), (effect) => {
+            if (effect.location !== 'any') {
+                if (
+                    effectLocations.includes(effect.location) &&
+                    to === effect.location &&
+                    from !== effect.location
+                ) {
+                    effect.ref = this.addEffectToEngine(effect);
+                } else if (
+                    effectLocations.includes(effect.location) &&
+                    to !== effect.location &&
+                    from === effect.location
+                ) {
+                    if (effect.ref) {
+                        this.removeEffectFromEngine(effect.ref);
+                    }
+                    effect.ref = [];
+                }
+            }
+        });
+    }
+
+    updateEffectContexts() {
+        for (const effect of this.getPersistentEffects(true)) {
+            if (effect.ref) {
+                for (let e of effect.ref) {
+                    e.refreshContext();
+                }
+            }
+        }
+    }
+
+    moveTo(targetLocation) {
+        let originalLocation = this.location;
+
+        this.location = targetLocation;
+
+        if (
+            ['play area', 'discard', 'hand', 'purged', 'grafted', 'archives'].includes(
+                targetLocation
+            )
+        ) {
+            this.facedown = false;
+        }
+
+        if (originalLocation !== targetLocation) {
+            // We want to update effects first, then unregister/re-register
+            // events. This ordering is important for _e.g._ token creatures,
+            // since we need to remove the tokenizing `CopyCard` effect first
+            // (which will happen when updateEffects clears out all lasting
+            // effects), then register any reactions for the card in its new
+            // location.
+            //
+            // If the order is reversed, updateAbilityEvents would try to
+            // register any of the _token’s_ reactions for the new location,
+            // even if the tokenness is about to go away.
+            this.updateEffects(originalLocation, targetLocation);
+            this.updateAbilityEvents(originalLocation, targetLocation);
+
+            this.game.emitEvent(EVENTS.onCardMoved, {
+                card: this,
+                originalLocation: originalLocation,
+                newLocation: targetLocation
+            });
+        }
+    }
+
+    getMenu(activePlayer) {
+        var menu = [];
+
+        // Special handling for prophecy cards in manual mode
+        if (this.isProphecy() && this.game.manualMode) {
+            menu.push({ command: 'click', text: 'Select Card', menu: 'main' });
+
+            if (!this.activeProphecy) {
+                // Inactive prophecy: show "Activate" option
+                if (this.controller.canActivateProphecy(this)) {
+                    menu.push({ command: 'activateProphecy', text: 'Activate', menu: 'main' });
+                }
+            } else {
+                // Active prophecy: show "Deactivate" option
+                menu.push({ command: 'deactivateProphecy', text: 'Deactivate', menu: 'main' });
+
+                // If active and opponent is active player, show "Trigger" option
+                if (this.game.activePlayer !== this.controller) {
+                    menu.push({ command: 'fulfillProphecy', text: 'Trigger', menu: 'main' });
+                }
+            }
+
+            return menu;
+        }
+
+        if (!this.menu.length || !this.game.manualMode || this.location !== 'play area') {
+            return undefined;
+        }
+
+        if (this.facedown) {
+            return [{ command: 'reveal', text: 'Reveal', menu: 'main' }];
+        }
+
+        // Upgrades should only be returned to hand - they cannot be otherwise interacted with while attached to a creature, and don't need their own menu options
+        if (this.parent) {
+            menu.push({ command: 'click', text: 'Select Card', menu: 'main' });
+            menu.push({ command: 'returnToHand', text: 'Return to hand', menu: 'main' });
+            return menu;
+        }
+
+        menu.push({ command: 'click', text: 'Select Card', menu: 'main' });
+        if (this.location === 'play area') {
+            // Render the static menu, but rewrite a few toggle entries to
+            // reflect the card's current state instead of the generic
+            // 'X/Remove X' wording.
+            const dynamicLabels = {
+                exhaust: this.exhausted ? 'Ready' : 'Exhaust',
+                stun: this.stunned ? 'Remove Stun' : 'Stun',
+                ward: this.warded ? 'Remove Ward' : 'Ward',
+                enrage: this.enraged ? 'Remove Enrage' : 'Enrage'
+            };
+            menu = menu.concat(
+                this.menu.map((item) =>
+                    dynamicLabels[item.command]
+                        ? { ...item, text: dynamicLabels[item.command] }
+                        : item
+                )
+            );
+            // Dynamic 'take' entries, one per card currently placed
+            // beneath this card. Players can see facedown cards they
+            // placed themselves, so always label by name in the menu;
+            // log lines hide the name for opponent visibility.
+            // Only the controller of the host card can take cards out
+            // from under it: opponents can place cards under enemy
+            // creatures but cannot take them, and shouldn't be able to
+            // see what cards are under a card.
+            if (!activePlayer || activePlayer === this.controller) {
+                for (const child of this.childCards) {
+                    menu.push({
+                        command: 'takeChild',
+                        arg: child.uuid,
+                        text: 'Take ' + child.name,
+                        menu: 'under'
+                    });
+                }
+            }
+        }
+
+        return menu;
+    }
+
+    checkRestrictions(actionType, context = null, event = null) {
+        return (
+            super.checkRestrictions(actionType, context, event) &&
+            (!context ||
+                !context.player ||
+                context.player.checkRestrictions(actionType, context, event))
+        );
+    }
+
+    addToken(type, number = 1) {
+        if (!number || !Number.isInteger(number)) {
+            return;
+        }
+
+        if (_.isUndefined(this.tokens[type])) {
+            this.tokens[type] = 0;
+        }
+
+        this.tokens[type] += number;
+    }
+
+    setToken(type, number) {
+        this.tokens[type] = number;
+        this.game?.checkGameState(true);
+    }
+
+    hasToken(type) {
+        return !!this.tokens[type];
+    }
+
+    sumTokens() {
+        if (!this.tokens) {
+            return 0;
+        }
+        return Object.values(this.tokens).reduce((a, b) => a + b, 0);
+    }
+
+    removeToken(type, number = this.tokens[type]) {
+        if (!this.tokens[type]) {
+            return;
+        }
+
+        this.tokens[type] -= number;
+
+        if (this.tokens[type] < 0) {
+            this.tokens[type] = 0;
+        }
+
+        if (this.tokens[type] === 0) {
+            delete this.tokens[type];
+        }
+    }
+
+    clearToken(type) {
+        if (this.tokens[type]) {
+            delete this.tokens[type];
+        }
+    }
+
+    readiesDuringReadyPhase() {
+        return !this.anyEffect('doesNotReady');
+    }
+
+    isBlank() {
+        return this.anyEffect('blank');
+    }
+
+    isBlankFight() {
+        return this.anyEffect('blankFight');
+    }
+
+    isBlankDestroyed() {
+        return this.anyEffect('blankDestroyed');
+    }
+
+    hasKeyword(keyword) {
+        return !!this.getKeywordValue(keyword);
+    }
+
+    getKeywordValue(keyword) {
+        keyword = keyword.toLowerCase();
+        if (this.getEffects('removeKeyword').includes(keyword)) {
+            return 0;
+        }
+
+        // For gigantic creatures with a composed part, get keywords from the bottom card
+        // This allows the top half to share keywords with the bottom half when in play
+        let baseValue = 0;
+        if (this.gigantic && this.composedPart) {
+            let copyEffect = this.mostRecentEffect('copyCard');
+            let baseKeywords = copyEffect
+                ? copyEffect.printedKeywords
+                : this.getBottomCard().printedKeywords;
+            baseValue = baseKeywords[keyword] || 0;
+        }
+
+        return this.getEffects('addKeyword').reduce(
+            (total, keywords) => total + (keywords[keyword] ? keywords[keyword] : 0),
+            baseValue
+        );
+    }
+
+    createSnapshot() {
+        let clone = new Card(
+            this.owner,
+            this.isToken() && this.tokenCard() ? this.tokenCard().cardData : this.cardData
+        );
+
+        clone.clonedType = clone.type;
+        clone.upgrades = this.upgrades.map((upgrade) => upgrade.createSnapshot());
+        clone.effects = _.clone(this.effects);
+        clone.tokens = _.clone(this.tokens);
+        clone.controller = this.controller;
+        clone.clonedPurgedCards = this.purgedCards;
+        clone.exhausted = this.exhausted;
+        clone.location = this.location;
+        clone.parent = this.parent;
+        clone.clonedNeighbors = this.neighbors;
+        clone.traits = this.getTraits();
+        clone.modifiedPower = this.power;
+        return clone;
+    }
+
+    get power() {
+        if (this.anyEffect('setPower')) {
+            return this.mostRecentEffect('setPower');
+        }
+
+        const copyEffect = this.mostRecentEffect('copyCard');
+
+        const basePower = copyEffect ? copyEffect.powerPrinted : this.getBottomCard().powerPrinted;
+        return (
+            basePower +
+            this.sumEffects('modifyPower') +
+            (this.hasToken('power') ? this.tokens.power : 0)
+        );
+    }
+
+    get powerForPlayRestriction() {
+        return this.power;
+    }
+
+    get armor() {
+        return this.hasToken('armor') ? this.tokens.armor : 0;
+    }
+
+    get armorTotal() {
+        if (this.anyEffect('setArmor')) {
+            return this.mostRecentEffect('setArmor');
+        }
+
+        const copyEffect = this.mostRecentEffect('copyCard');
+        const baseArmor = copyEffect ? copyEffect.armorPrinted : this.getBottomCard().armorPrinted;
+        return baseArmor + this.sumEffects('modifyArmor');
+    }
+
+    get amber() {
+        return this.hasToken('amber') ? this.tokens.amber : 0;
+    }
+
+    set amber(amber) {
+        this.setToken('amber', amber);
+    }
+
+    get damage() {
+        return this.hasToken('damage') ? this.tokens.damage : 0;
+    }
+
+    set damage(damage) {
+        this.setToken('damage', damage);
+    }
+
+    get powerCounters() {
+        return this.hasToken('power') ? this.tokens.power : 0;
+    }
+
+    set powerCounters(power) {
+        this.setToken('power', power);
+    }
+
+    get enraged() {
+        return this.hasToken('enrage');
+    }
+
+    enrage() {
+        if (!this.hasToken('enrage')) {
+            this.addToken('enrage');
+        }
+    }
+
+    unenrage() {
+        this.clearToken('enrage');
+    }
+
+    get stunned() {
+        // v18-2 only refers to creatures when describing how stun affects
+        // cards. _E.g._ “While a creature is stunned, it cannot
+        // fight, reap, or use Action: or Omni: abilities.”
+        //
+        // See: https://github.com/keyteki/keyteki/issues/4673
+        return this.getType() === 'creature' && this.hasToken('stun');
+    }
+
+    stun() {
+        if (!this.hasToken('stun')) {
+            this.addToken('stun');
+        }
+    }
+
+    unstun() {
+        this.clearToken('stun');
+    }
+
+    get warded() {
+        return this.hasToken('ward');
+    }
+
+    ward() {
+        if (!this.hasToken('ward')) {
+            this.addToken('ward');
+        }
+    }
+
+    unward() {
+        this.clearToken('ward');
+    }
+
+    exhaust() {
+        this.exhausted = true;
+    }
+
+    ready() {
+        this.exhausted = false;
+    }
+
+    removeAttachment(card) {
+        this.upgrades = this.upgrades.filter((c) => c !== card);
+    }
+
+    /**
+     * Applies an effect with the specified properties while the current card is
+     * attached to another card. By default the effect will target the parent
+     * card, but you can provide a match function to narrow down whether the
+     * effect is applied (for cases where the effect only applies to specific
+     * characters).
+     */
+    whileAttached(properties) {
+        this.persistentEffect({
+            condition: properties.condition || (() => true),
+            match: (card, context) =>
+                card === this.parent &&
+                (!properties.match || properties.match(card, context)) &&
+                (card.type === 'creature' ||
+                    (this.anyEffect('canAttachToArtifacts') && card.type === 'artifact')),
+            targetController: 'any',
+            effect: properties.effect
+        });
+    }
+
+    canPlayAsUpgrade() {
+        return this.anyEffect('canPlayAsUpgrade') || this.type === 'upgrade';
+    }
+
+    /**
+     * Checks whether the passed card meets the upgrade restrictions (e.g.
+     * Opponent cards only, specific factions, etc) for this card.
+     */
+    // eslint-disable-next-line no-unused-vars
+    canAttach(card, context) {
+        return card && card.getType() === 'creature' && this.canPlayAsUpgrade();
+    }
+
+    // eslint-disable-next-line no-unused-vars
+    canMoveAttachedUpgradeTo(card, context) {
+        return card && card.getType() === 'creature' && this.type === 'upgrade';
+    }
+
+    use(player, ignoreHouse = false) {
+        let legalActions = this.getLegalActions(player, ignoreHouse);
+
+        if (legalActions.length === 0) {
+            return false;
+        } else if (legalActions.length === 1) {
+            let action = legalActions[0];
+            if (!this.game.activePlayer.optionSettings.confirmOneClick || ignoreHouse) {
+                let context = action.createContext(player);
+                context.ignoreHouse = ignoreHouse;
+                this.game.resolveAbility(context);
+                return true;
+            }
+        }
+
+        let choices = legalActions.map((action) => {
+            // Include source in tooltip when there are multiple action abilities
+            if (legalActions.length > 1) {
+                const sourceCard = action.grantedBy || this;
+                return {
+                    text: action.title,
+                    tooltip: {
+                        text: '{{title}} (from {{card}})',
+                        values: { title: action.title, card: sourceCard.name },
+                        locale: sourceCard.locale
+                    }
+                };
+            }
+            return action.title;
+        });
+        let handlers = legalActions.map((action) => () => {
+            let context = action.createContext(player);
+            context.ignoreHouse = ignoreHouse;
+            this.game.resolveAbility(context);
+        });
+        if (!ignoreHouse) {
+            choices = choices.concat('Cancel');
+            handlers = handlers.concat(() => true);
+        }
+
+        this.game.promptWithHandlerMenu(player, {
+            activePromptTitle:
+                this.location === 'play area'
+                    ? 'Choose an ability:'
+                    : { text: 'Play {{card}}:', values: { card: this.name } },
+            source: this,
+            choices: choices,
+            handlers: handlers
+        });
+
+        return true;
+    }
+
+    getLegalActions(player, ignoreHouse = false) {
+        let actions = this.getActions();
+        actions = actions.filter((action) => {
+            let context = action.createContext(player);
+            context.ignoreHouse = ignoreHouse;
+            return !action.meetsRequirements(context, []);
+        });
+        let canFight = actions.findIndex((action) => action.fight) >= 0;
+        if (this.getEffects('mustFightIfAble').length > 0 && canFight) {
+            actions = actions.filter((action) => action.fight);
+        }
+        return actions;
+    }
+
+    getFightAction(cardCondition = null, postHandler = null, ignoreTaunt = false) {
+        return this.action({
+            title: 'Fight with this creature',
+            fight: true,
+            useCondition: (context) =>
+                this.checkRestrictions('fight', context) && this.type === 'creature',
+            printedAbility: false,
+            target: {
+                activePromptTitle: 'Choose a creature to attack',
+                cardType: 'creature',
+                controller: 'opponent',
+                cardCondition: cardCondition,
+                gameAction: new ResolveFightAction({
+                    attacker: this,
+                    postHandler: postHandler,
+                    ignoreTaunt: ignoreTaunt
+                })
+            }
+        });
+    }
+
+    getReapAction() {
+        return this.action({
+            title: 'Reap with this creature',
+            reap: true,
+            useCondition: (context) =>
+                this.checkRestrictions('reap', context) && this.type === 'creature',
+            printedAbility: false,
+            gameAction: new ResolveReapAction({})
+        });
+    }
+
+    getRemoveStunAction() {
+        let removeStun = new RemoveStun(this);
+        // if card has an omni ability, it should allow to stun, so stun becomes omni
+        removeStun.omni = this.actions.some((action) => !!action.omni);
+        return removeStun;
+    }
+
+    getActions(location = this.location) {
+        let actions = [];
+        if (location === 'hand') {
+            if (this.type === 'creature') {
+                actions.push(new PlayCreatureAction(this));
+            } else if (this.type === 'artifact') {
+                actions.push(new PlayArtifactAction(this));
+            } else if (this.type === 'action') {
+                actions.push(new PlayAction(this));
+            }
+
+            if (this.canPlayAsUpgrade()) {
+                actions.push(new PlayUpgradeAction(this));
+            }
+
+            actions.push(new DiscardAction(this));
+        } else if (location === 'play area' && this.type === 'creature') {
+            actions.push(this.getFightAction());
+            actions.push(this.getReapAction());
+            actions.push(this.getRemoveStunAction());
+        } else if (
+            location === 'discard' &&
+            this.mostRecentEffect('returnToHandFromDiscardAnytime')
+        ) {
+            actions.push(new ReturnToHandFromDiscardAction(this));
+        }
+
+        return actions.concat(this.actions.slice());
+    }
+
+    setDefaultController(player) {
+        this.defaultController = player;
+        this.controller = player;
+    }
+
+    getModifiedController() {
+        if (this.location === 'play area') {
+            return this.mostRecentEffect('takeControl') || this.defaultController;
+        }
+
+        return this.owner;
+    }
+
+    isOnFlank(flank) {
+        if (this.type !== 'creature') {
+            return false;
+        }
+
+        let position = this.controller.creaturesInPlay.indexOf(this);
+        if (flank === 'left') {
+            return (
+                (this.anyEffect('consideredAsFlank') || this.neighbors.length < 2) && position === 0
+            );
+        } else if (flank === 'right') {
+            return (
+                (this.anyEffect('consideredAsFlank') || this.neighbors.length < 2) &&
+                position === this.controller.creaturesInPlay.length - 1
+            );
+        }
+
+        return this.anyEffect('consideredAsFlank') || this.neighbors.length < 2;
+    }
+
+    isInCenter() {
+        let creatures = this.controller.creaturesInPlay;
+        if (creatures.length % 2 === 0) {
+            return false;
+        }
+
+        let mid = Math.floor(creatures.length / 2);
+        let centerCreature = creatures[mid];
+
+        return this === centerCreature;
+    }
+
+    get neighbors() {
+        if (this.type !== 'creature') {
+            return [];
+        } else if (this.clonedNeighbors) {
+            return this.clonedNeighbors;
+        }
+
+        let creatures = this.controller.creaturesInPlay;
+        let index = creatures.indexOf(this);
+        let neighbors = [];
+
+        if (index < 0) {
+            return neighbors;
+        } else if (index > 0) {
+            neighbors.push(creatures[index - 1]);
+        }
+
+        if (index < creatures.length - 1) {
+            neighbors.push(creatures[index + 1]);
+        }
+
+        return neighbors;
+    }
+
+    leftNeighbor() {
+        if (this.type !== 'creature') {
+            return undefined;
+        }
+
+        const creatures = this.controller.creaturesInPlay;
+        const index = creatures.indexOf(this);
+        if (index > 0) {
+            return creatures[index - 1];
+        } else if (index === -1) {
+            // Source is no longer in play. Per the rules, later instructions in
+            // the same ability refer to cards as they were immediately prior to
+            // leaving play, so fall back to the snapshot captured on leave.
+            return this.leftNeighborBeforeLeavingPlay || undefined;
+        }
+        return undefined;
+    }
+
+    rightNeighbor() {
+        if (this.type !== 'creature') {
+            return undefined;
+        }
+
+        const creatures = this.controller.creaturesInPlay;
+        const index = creatures.indexOf(this);
+        if (index >= 0 && index < creatures.length - 1) {
+            return creatures[index + 1];
+        } else if (index === -1) {
+            return this.rightNeighborBeforeLeavingPlay || undefined;
+        }
+        return undefined;
+    }
+
+    getNeighbors() {
+        return [this.leftNeighbor(), this.rightNeighbor()].filter(Boolean);
+    }
+
+    ignores(trait) {
+        return this.getEffects('ignores').includes(trait);
+    }
+
+    getShortSummary() {
+        if (this.isToken() && this.tokenCard()) {
+            return this.tokenCard().getShortSummary();
+        }
+        let result = super.getShortSummary();
+
+        // Include card specific information useful for UI rendering
+        result.maverick = this.maverick;
+        result.anomaly = this.anomaly;
+        result.enhancements = this.enhancements;
+        result.cardPrintedAmber = this.cardPrintedAmber;
+        result.locale = this.locale;
+        result.activeProphecy = this.activeProphecy;
+        return result;
+    }
+
+    getSummary(activePlayer, hideWhenFaceup) {
+        const isController = activePlayer === this.controller;
+        const selectionState = activePlayer.getCardSelectionState(this);
+
+        if (!this.game.isCardVisible(this, activePlayer)) {
+            return {
+                cardback: this.owner.deckData.cardback,
+                controller: this.controller.name,
+                location: this.location,
+                facedown: true,
+                uuid: this.uuid,
+                tokens: this.tokens,
+                ...selectionState
+            };
+        }
+
+        const childCards = this.childCards
+            .map((card) => card.getSummary(activePlayer, hideWhenFaceup))
+            .concat(this.purgedCards.map((card) => card.getSummary(activePlayer, hideWhenFaceup)));
+
+        const tokenCard = this.isToken() && this.tokenCard();
+        const tokenCardOrThis = tokenCard ? tokenCard : this;
+        const state = {
+            id: tokenCardOrThis.id,
+            anomaly: tokenCardOrThis.anomaly,
+            enhancements: tokenCardOrThis.enhancements,
+            image: tokenCardOrThis.image,
+            canPlay: !!(
+                activePlayer === this.game.activePlayer &&
+                this.game.activePlayer.activeHouse &&
+                isController &&
+                this.getLegalActions(activePlayer, false).length > 0
+            ),
+            cardback: this.owner.deckData.cardback,
+            childCards: childCards,
+            controlled: this.owner !== this.controller,
+            // Tokens always have a baseline `copyCard(tokenCard)` effect (see
+            // MakeTokenCreatureAction); ignore that self-copy and only flag
+            // `copying` when something else (e.g. Mirror Shell, Mimic Gel)
+            // overrides the card's identity. FlipAction uses `copyCard(card)`
+            // when un-tokenizing, which is also a baseline self-reference.
+            copying: (() => {
+                const copyEffect = this.mostRecentEffect('copyCard');
+                if (
+                    !copyEffect ||
+                    (this.isToken() && copyEffect === this.tokenCard()) ||
+                    copyEffect === this
+                ) {
+                    return false;
+                }
+
+                return true;
+            })(),
+            exhausted: this.exhausted,
+            facedown: this.facedown,
+            location: this.location,
+            locale: this.locale,
+            number: tokenCardOrThis.cardData.number,
+            menu: this.getMenu(activePlayer),
+            name: this.name,
+            new: this.new,
+            printedHouse: tokenCardOrThis.printedHouse,
+            maverick: tokenCardOrThis.maverick,
+            cardPrintedAmber: tokenCardOrThis.cardPrintedAmber,
+            powerPrinted: tokenCardOrThis.powerPrinted,
+            armorPrinted: tokenCardOrThis.armorPrinted,
+            modifiedPower: this.power,
+            stunned: this.stunned,
+            taunt: this.getType() === 'creature' && !!this.getKeywordValue('taunt'),
+            tokens: this.tokens,
+            type: this.getType(),
+            gigantic: this.gigantic,
+            upgrades: this.upgrades.map((upgrade) => {
+                return upgrade.getSummary(activePlayer, hideWhenFaceup);
+            }),
+            uuid: this.uuid, // TODO - fix vulnerability with token cards
+            isToken: !!tokenCard,
+            activeProphecy: this.activeProphecy,
+            canActivateProphecy:
+                this.type === 'prophecy' ? this.controller.canActivateProphecy(this) : false,
+            accolades: (this.owner.deckData.accolades || []).filter((a) => a.shown)
+        };
+
+        if (tokenCard && isController) {
+            state.versusCard = {
+                anomaly: this.anomaly,
+                enhancements: this.enhancements,
+                id: this.id,
+                image: this.image,
+                locale: this.locale,
+                name: this.name,
+                printedHouse: this.printedHouse,
+                maverick: this.maverick,
+                cardPrintedAmber: this.cardPrintedAmber,
+                powerPrinted: this.powerPrinted,
+                armorPrinted: this.armorPrinted,
+                type: this.printedType,
+                gigantic: this.gigantic,
+                uuid: this.uuid
+            };
+        }
+
+        return Object.assign(state, selectionState);
+    }
+}
+
+module.exports = Card;

@@ -1,0 +1,79 @@
+const GameAction = require('./GameAction');
+const AllocateDamagePrompt = require('../gamesteps/AllocateDamagePrompt');
+const CardSelector = require('../CardSelector.js');
+
+class AllocateDamageAction extends GameAction {
+    setDefaultProperties() {
+        this.cardCondition = () => true;
+        this.damageStep = 1;
+        this.numSteps = 0;
+        this.splash = 0;
+        this.controller = 'any';
+        this.defersMessage = true;
+        this.chatMessage = true;
+    }
+
+    preEventHandler(context) {
+        super.preEventHandler(context);
+        this.events = [];
+        const selector = this.getSelector();
+
+        if (
+            this.numSteps > 0 &&
+            this.damageStep > 0 &&
+            selector.getAllLegalTargets(context).length > 0
+        ) {
+            context.game.queueStep(
+                new AllocateDamagePrompt(context.game, {
+                    damageStep: this.damageStep,
+                    numSteps: this.numSteps,
+                    splash: this.splash,
+                    selector: selector,
+                    context: context,
+                    onSelect: (cardDamage) => {
+                        for (const uuid of Object.keys(cardDamage)) {
+                            const card = context.game.findAnyCardInPlayByUuid(uuid);
+                            const amount =
+                                (cardDamage[uuid].damage || 0) + (cardDamage[uuid].splash || 0);
+                            if (card) {
+                                this.events.push(
+                                    context.game.actions
+                                        .dealDamage({ amount: amount })
+                                        .getEvent(card, context)
+                                );
+                                if (this.chatMessage) {
+                                    context.game.addMessage(
+                                        '{0} uses {1} to deal {2} damage to {3}',
+                                        context.player,
+                                        context.source,
+                                        amount,
+                                        card
+                                    );
+                                }
+                            }
+                        }
+                    }
+                })
+            );
+        }
+    }
+
+    getSelector() {
+        return CardSelector.for({
+            cardType: 'creature',
+            cardCondition: this.cardCondition,
+            controller: this.controller
+        });
+    }
+
+    hasLegalTarget(context) {
+        this.update(context);
+        return this.getSelector().hasEnoughTargets(context);
+    }
+
+    getEventArray() {
+        return this.events;
+    }
+}
+
+module.exports = AllocateDamageAction;

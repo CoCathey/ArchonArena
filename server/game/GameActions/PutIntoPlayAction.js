@@ -1,0 +1,447 @@
+const { EVENTS } = require('../Events/types');
+const CardGameAction = require('./CardGameAction');
+
+class PutIntoPlayAction extends CardGameAction {
+    setDefaultProperties() {
+        this.left = false;
+        this.deployIndex = undefined;
+        this.myControl = false;
+        this.ready = false;
+        this.deploy = false;
+        this.playedOnLeftFlank = false;
+        this.playedOnRightFlank = false;
+        this.promptSource = false;
+        this.beingPlayed = false;
+        this.controller = null;
+        this.numPlayAllowances = 1;
+        this.cancelled = false;
+    }
+
+    setup() {
+        this.name = 'putIntoPlay';
+        this.targetType = ['creature', 'artifact'];
+        this.effectMsg = 'put {0} into play';
+    }
+
+    canAffect(card, context) {
+        if (!context || !super.canAffect(card, context)) {
+            return false;
+        } else if (!context.player) {
+            return false;
+        } else if (card.location === 'play area') {
+            return false;
+        }
+
+        return true;
+    }
+
+    // Gigantic creatures require 2 play allowances to play both halves.
+    // Playing from hand always provides enough allowance.
+    canPutIntoPlayGigantic(_, card) {
+        return card.location === 'hand' || this.numPlayAllowances >= 2;
+    }
+
+    // Returns whether the other half of a gigantic creature has the given
+    // printed keyword. Used during preEventHandler when composedPart isn't
+    // wired up yet, so card.hasKeyword() can't see the shared keyword.
+    giganticOtherHalfHasKeyword(card, keyword) {
+        if (!card.gigantic || !card.controller) {
+            return false;
+        }
+        const otherHalf = card.controller.allCards.find((c) => c.id === card.compositeId);
+        return !!(otherHalf && otherHalf.printedKeywords[keyword]);
+    }
+
+    preEventHandler(context) {
+        super.preEventHandler(context);
+        const card = this.target.length > 0 ? this.target[0] : context.source;
+
+        if (card.gigantic && !this.canPutIntoPlayGigantic(context, card)) {
+            return;
+        }
+
+        // Give abilities a chance to react to the card entering play *before*
+        // the redirect / controller checks and the positioning prompt
+        // (flank/deploy). This is the hook used by cards like Mimic Gel that
+        // need to choose a creature to copy before the card is placed — the
+        // copy effect can introduce a redirect (e.g. Alpha sending the card
+        // to deck), flip controller (e.g. treachery / `entersPlayUnderOpponentsControl`),
+        // or grant `deploy`, all of which must be reflected downstream.
+        context.game.raiseEvent(EVENTS.onCardEnteringPlay, {
+            card: card,
+            context: context
+        });
+
+        context.game.queueSimpleStep(() => this.resolveAfterEnteringPlay(card, context));
+    }
+
+    resolveAfterEnteringPlay(card, context) {
+        // Check if creature should go to a different location instead of play
+        // area - eg Mimic Gel and Alpha. If so, skip flank selection.
+        const redirectLocation = card.mostRecentEffect('cardLocationAfterPlay');
+        if (redirectLocation && redirectLocation !== 'play area') {
+            return;
+        }
+
+        // Abducted cards return to owner's hand when leaving archives - skip flank selection
+        if (card.abducted && card.location === 'archives') {
+            return;
+        }
+
+        let player;
+
+        if (this.deployIndex !== undefined) {
+            return;
+        }
+
+        if (card.anyEffect('entersPlayUnderOpponentsControl') && card.owner.opponent) {
+            if (this.myControl) {
+                // If we are putting this card into play as if we
+                // owned it, then our opponent gets the card, not the
+                // card's owner's opponent.
+                player = context.player.opponent;
+            } else {
+                player = card.owner.opponent;
+            }
+        } else if (this.controller) {
+            player = this.controller;
+        } else {
+            player = this.myControl ? context.player : card.controller;
+        }
+
+        if (
+            (this.target.length === 0 || this.target[0].type === 'creature') &&
+            player.cardsInPlay.some((card) => card.type === 'creature')
+        ) {
+            let choices = ['Left'];
+
+            let allowRightFlankDeploy = true;
+            if (!this.beingPlayed || !player.anyEffect('cannotPlayCreaturesOnRight')) {
+                choices.push('Right');
+            } else {
+                allowRightFlankDeploy = false;
+            }
+
+            if (
+                (card.anyEffect('enterPlayAnywhere', context) ||
+                    this.deploy ||
+                    card.hasKeyword('deploy') ||
+                    this.giganticOtherHalfHasKeyword(card, 'deploy')) &&
+                player.creaturesInPlay.length > 1
+            ) {
+                choices.push('Deploy Left');
+
+                // Can only deploy right when prevented from playing
+                // on the right flank if there is more than one
+                // creature in play.
+                if (
+                    !this.beingPlayed ||
+                    !player.anyEffect('cannotPlayCreaturesOnRight') ||
+                    player.creaturesInPlay.length > 1
+                ) {
+                    choices.push('Deploy Right');
+                }
+            }
+
+            context.game.promptWithHandlerMenu(context.player, {
+                activePromptTitle: 'Which flank do you want to place this creature on?',
+                context: context,
+                source:
+                    this.promptSource || (this.target.length > 0 ? this.target[0] : context.source),
+                choices:
+                    this.beingPlayed &&
+                    card.location === 'hand' &&
+                    card.controller === context.player &&
+                    !context.playedByCardEffect &&
+                    context.player.getAdditionalCosts(context).length === 0
+                        ? // If playing a card from own hand with no costs without using an ability, allow cancelling to stop the play
+                          choices.concat({ text: 'Cancel', type: 'cancel' })
+                        : //   Otherwise, choices with no cancel option
+                          choices,
+                choiceHandler: (choice) => {
+                    if (choice && choice.type === 'cancel') {
+                        this.cancelled = true;
+                        this.cancelInFlightPlay();
+                        return;
+                    }
+
+                    let deploy;
+                    let flank;
+
+                    switch (choice) {
+                        case 'Left':
+                            flank = 'left';
+                            deploy = false;
+                            this.playedOnLeftFlank = true;
+
+                            break;
+                        case 'Right':
+                            flank = 'right';
+                            deploy = false;
+                            this.playedOnRightFlank = true;
+
+                            break;
+                        case 'Deploy Left':
+                            flank = 'left';
+                            deploy = true;
+
+                            break;
+                        case 'Deploy Right':
+                            flank = 'right';
+                            deploy = true;
+
+                            break;
+                    }
+
+                    if (deploy) {
+                        context.game.promptForSelect(context.game.activePlayer, {
+                            source: card,
+                            activePromptTitle: `Select a card to deploy to the ${flank} of`,
+                            cardCondition: (card) =>
+                                card.location === 'play area' &&
+                                card.controller === player &&
+                                card.type === 'creature' &&
+                                (flank !== 'right' ||
+                                    allowRightFlankDeploy ||
+                                    player.creaturesInPlay.indexOf(card) <
+                                        player.creaturesInPlay.length - 1),
+                            onSelect: (p, card) => {
+                                this.deployIndex = card.controller.cardsInPlay.indexOf(card);
+                                if (flank === 'left' && this.deployIndex >= 0) {
+                                    this.deployIndex--;
+                                }
+
+                                this.left = flank === 'left';
+
+                                let creaturesInPlay = card.controller.creaturesInPlay;
+
+                                if (flank === 'left' && card === creaturesInPlay[0]) {
+                                    this.playedOnLeftFlank = true;
+                                }
+
+                                if (
+                                    flank === 'right' &&
+                                    card === creaturesInPlay[creaturesInPlay.length - 1]
+                                ) {
+                                    this.playedOnRightFlank = true;
+                                }
+
+                                return true;
+                            }
+                        });
+                    } else {
+                        this.left = flank === 'left';
+                    }
+                }
+            });
+        } else {
+            this.playedOnLeftFlank = true;
+            this.playedOnRightFlank = true;
+        }
+    }
+
+    // Cancel an in-flight play that has reached the flank/deploy prompt.
+    //
+    // This is only called from the flank prompt's Cancel choice, which
+    // can only appear when `beingPlayed && card.location === 'hand'`, the card
+    // belongs to the playing player, the play was not initiated by another
+    // card's effect (i.e. `ability.actions.playCard()`), and there are no
+    // additional costs — i.e. a direct user-initiated play of one's own card
+    // from hand with no irrevocable side-effects.
+    //
+    // The flank prompt is queued during `PlayCreatureAction.addSubEvent` via
+    // `preEventHandler`, which runs synchronously BEFORE `openEventWindow`
+    // opens the `onCardPlayed` event window. The pipeline drains the flank
+    // prompt first, so when Cancel is clicked here the play event, its bonus
+    // icon subevent, and the putIntoPlay child event are all queued but
+    // unresolved. Calling `cancel()` on the tree marks them cancelled, and
+    // the subsequent event window skips them — so the card never enters play,
+    // no bonus icons resolve, and no `onCardPlayed`-driven side-effects fire.
+    //
+    // Hide Cancel when additional costs (e.g. Truebaru's loseAmber(3))
+    // exist because those costs resolve in separate event windows and
+    // refunding them could trigger unintended side-effects.
+    //
+    // We assert below that the root event is not yet resolved to catch any
+    // future change that would re-order the pipeline and make this unsafe.
+    cancelInFlightPlay() {
+        if (!this.event) {
+            return;
+        }
+        let root = this.event;
+        while (root.parentEvent) {
+            root = root.parentEvent;
+        }
+        if (root.resolved) {
+            throw new Error(
+                'PutIntoPlayAction.cancelInFlightPlay called after the play event already resolved'
+            );
+        }
+        const cancelTree = (e) => {
+            e.cancel();
+            if (e.childEvent) {
+                cancelTree(e.childEvent);
+            }
+            if (e.subEvent) {
+                cancelTree(e.subEvent);
+            }
+        };
+        cancelTree(root);
+    }
+
+    getEvent(card, context) {
+        const event = super.createEvent(
+            EVENTS.onCardEntersPlay,
+            {
+                card: card,
+                context: context
+            },
+            (event) => {
+                if (this.cancelled) {
+                    event.cancel();
+                    return;
+                }
+
+                event.playedOnLeftFlank = this.playedOnLeftFlank;
+                event.playedOnRightFlank = this.playedOnRightFlank;
+
+                let player;
+                let control;
+                if (card.anyEffect('entersPlayUnderOpponentsControl') && card.owner.opponent) {
+                    if (this.myControl) {
+                        // If we are putting this card into play as if
+                        // we owned it, then our opponent gets the
+                        // card, not the card's owner's opponent.
+                        player = context.player.opponent;
+                    } else {
+                        player = card.owner.opponent;
+                    }
+                    control = true;
+                } else if (this.controller) {
+                    player = this.controller;
+                    control = player !== context.player;
+                } else {
+                    player = this.myControl ? context.player : card.controller;
+                    control = this.myControl;
+                }
+
+                if (card.gigantic) {
+                    let part = card.composedPart;
+
+                    // Play from hand
+                    if (!part && card.location === 'hand') {
+                        part = card.controller
+                            .getSourceList(card.location)
+                            .find((p) => card.compositeId === p.id);
+                    }
+
+                    // Play from under another card
+                    if (!part && card.parent) {
+                        part = card.parent.childCards.find((part) => card.compositeId === part.id);
+                    }
+
+                    // Play from discard or other pile - requires 2 play allowances
+                    if (!part && this.numPlayAllowances >= 2) {
+                        part = card.controller
+                            .getSourceList(card.location)
+                            .find((p) => card.compositeId === p.id);
+                    }
+
+                    // If the other part of the gigantic creature is not available then fizzle
+                    if (!part) {
+                        return;
+                    }
+
+                    // Compose the gigantic creature with both halves
+                    card.controller.removeCardFromPile(part);
+                    card.composedPart = part;
+                    card.image = card.compositeImageId || card.id;
+                }
+
+                // If we took control, we need to update the effect
+                // contexts AND update the game state to reflect the
+                // new controller, since it could affect the
+                // 'entersPlay' properties below.  But it must be done
+                // before the location of the card is moved to 'play
+                // area', since that could incorrectly affect the
+                // 'entersPlay' effect.
+                if (control && card.controller != player) {
+                    let prevController = card.controller;
+                    card.controller = player;
+                    card.updateEffectContexts();
+                    context.game.checkGameState(true);
+                    card.controller = prevController;
+                }
+
+                for (let e of card.getEffects('entersPlayWithEffect')) {
+                    context.game.actions
+                        .cardLastingEffect({
+                            target: card,
+                            // This was previously `targetLocation: "play
+                            // area"`, but the old version of
+                            // `cardLastingEffect` actually ignored the value of
+                            // `targetLocation` and merely used its presence to
+                            // disable the requirement that the target of the
+                            // effect was in the `"play area"` location.
+                            //
+                            // `allowedLocations: "any"` is equivalent behavior
+                            // to the old `targetLocation: "play area"`.
+                            allowedLocations: 'any',
+                            duration: e.duration,
+                            effect: e.builder()
+                        })
+                        .resolve(card, context);
+                }
+
+                // Show play message for tokens only - non-tokens are handled by BasePlayAction
+                if (card.isToken()) {
+                    context.game.addMessage('{0} puts {1} into play', player, card);
+                }
+
+                // Check if creature should go to a different location instead of play area
+                let location = card.mostRecentEffect('cardLocationAfterPlay') || 'play area';
+                if (location !== 'play area') {
+                    // Use context.player (the player attempting to play the
+                    // card) rather than the locally-computed `player` (which
+                    // is the new controller for treachery cards). The
+                    // attempting player is the one whose play is being
+                    // refused, and matches the player referenced by
+                    // BasePlayAction.displayMessage's "X plays Y" message.
+                    context.game.addMessage(
+                        '{0} is unable to play {1} and returns it to {2}',
+                        context.player,
+                        card,
+                        location
+                    );
+                    return card.owner.moveCard(card, location);
+                }
+
+                player.moveCard(card, 'play area', {
+                    left: this.left,
+                    deployIndex: this.deployIndex,
+                    myControl: control
+                });
+
+                if (control) {
+                    card.updateEffectContexts();
+                }
+
+                if (!this.ready && !card.checkConditions('entersPlayReady', context)) {
+                    card.exhaust();
+                }
+
+                if (card.checkConditions('entersPlayStunned', context)) {
+                    card.stun();
+                }
+
+                if (card.checkConditions('entersPlayEnraged', context)) {
+                    card.enrage();
+                }
+            }
+        );
+        this.event = event;
+        return event;
+    }
+}
+
+module.exports = PutIntoPlayAction;

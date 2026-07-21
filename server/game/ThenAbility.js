@@ -1,0 +1,163 @@
+const AbilityContext = require('./AbilityContext.js');
+const BaseAbility = require('./baseability.js');
+
+class ThenAbility extends BaseAbility {
+    constructor(game, card, properties) {
+        super(properties);
+
+        this.game = game;
+        this.card = card;
+        this.properties = properties;
+        this.condition = properties.condition || (() => true);
+        this.alwaysTriggers = properties.alwaysTriggers;
+        this.handler = properties.handler || this.executeGameActionPrehandlers;
+    }
+
+    createContext(player = this.card.controller) {
+        return new AbilityContext({
+            ability: this,
+            game: this.game,
+            player: player,
+            source: this.card
+        });
+    }
+
+    checkThenAbilities() {
+        const then = this.properties.then;
+        // For function-form `then`, we can't safely inspect `alwaysTriggers`
+        // without invoking the callback (which may register listeners or
+        // otherwise mutate state). Assume it may always-trigger; the final
+        // gating happens in resolveThenIfNeeded after the function is called
+        // for real.
+        return !!then && (typeof then === 'function' || then.alwaysTriggers);
+    }
+
+    displayMessage(context) {
+        if (this.properties.message) {
+            let messageArgs = [context.player, context.source, context.target];
+            if (this.properties.messageArgs) {
+                let args = this.properties.messageArgs;
+                if (typeof args === 'function') {
+                    args = args(context);
+                }
+
+                messageArgs = messageArgs.concat(args);
+            }
+
+            if (this.properties.effectAlert) {
+                this.game.addAlert('bell', this.properties.message, ...messageArgs);
+            } else {
+                this.game.addMessage(this.properties.message, ...messageArgs);
+            }
+        }
+    }
+
+    getGameActions(context) {
+        // if there are any targets, look for gameActions attached to them
+        let actions = this.targets.reduce(
+            (array, target) => array.concat(target.getGameAction(context)),
+            []
+        );
+        // look for a gameAction on the ability itself, on an upgrade execute that action on its parent, otherwise on the card itself
+        return actions.concat(this.gameAction);
+    }
+
+    executeHandler(context) {
+        if (this.properties.may) {
+            this.game.promptWithHandlerMenu(context.player, {
+                activePromptTitle: 'Do you wish to ' + this.properties.may + '?',
+                context: context,
+                choices: ['Yes', 'No'],
+                handlers: [() => this.handler(context), () => true]
+            });
+        } else {
+            this.handler(context);
+        }
+
+        this.game.queueSimpleStep(() => this.game.checkGameState());
+    }
+
+    executeGameActionPrehandlers(context) {
+        let actions = this.getGameActions(context);
+        for (const action of actions) {
+            action.preEventHandler(context);
+        }
+
+        this.game.queueSimpleStep(() => this.executeGameActions(actions, context));
+    }
+
+    executeGameActions(actions, context) {
+        // Get any gameActions for this ability
+        // Get their events, and execute simultaneously
+        let events = actions.reduce(
+            (array, action) => array.concat(action.getEventArray(context)),
+            []
+        );
+
+        if (events.length > 0) {
+            this.game.openEventWindow(events);
+        }
+
+        this.resolveThenIfNeeded(context, events);
+        this.runPostHandlers(actions, context);
+    }
+
+    resolveThenIfNeeded(context, events) {
+        let then = this.properties.then;
+        if (then && typeof then === 'function') {
+            then = then(context);
+        }
+
+        if (!then) {
+            return;
+        }
+
+        if (events.length > 0) {
+            this.game.queueSimpleStep(() => {
+                if (then.alwaysTriggers || events.every((event) => !event.cancelled)) {
+                    this.createAndResolveThenAbility(then, context, events);
+                }
+            });
+        } else if (then.alwaysTriggers) {
+            this.createAndResolveThenAbility(then, context, []);
+        }
+    }
+
+    createAndResolveThenAbility(then, context, events) {
+        const thenAbility = new ThenAbility(this.game, this.card, then);
+        const thenContext = thenAbility.createContext(context.player);
+        thenContext.preThenEvents = events;
+        thenContext.preThenEvent = events[0];
+        const requirementResult = thenAbility.meetsRequirements(thenContext, []);
+        if (
+            then.alwaysTriggers &&
+            requirementResult === 'condition' &&
+            typeof then.then === 'function' &&
+            process.env.NODE_ENV === 'test'
+        ) {
+            throw new Error(
+                `Then ability for "${this.card.name}" has alwaysTriggers: true but its gameAction has no legal target, ` +
+                    `so its function-form nested then-chain will be silently skipped. ` +
+                    `Refactor the function-form 'then' to return a no-gameAction object when the action would have no target. ` +
+                    `See docs/card-abilities.md "Pitfall: alwaysTriggers does not bypass legal-target checks".`
+            );
+        }
+        if (!requirementResult && thenAbility.condition(thenContext)) {
+            this.game.resolveAbility(thenContext);
+        }
+    }
+
+    runPostHandlers(actions, context) {
+        for (let action of actions) {
+            if (action.postHandler) {
+                action.postHandler(context, action);
+            }
+        }
+    }
+
+    isCardAbility() {
+        return true;
+    }
+}
+
+module.exports = ThenAbility;

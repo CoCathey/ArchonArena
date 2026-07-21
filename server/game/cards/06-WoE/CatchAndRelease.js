@@ -1,0 +1,29 @@
+const Card = require('../../Card.js');
+
+class CatchAndRelease extends Card {
+    // Play: Return each creature to its owner`s hand. Each player
+    // discards random cards from their hand until they have 6 or
+    // fewer cards in hand. Gain 2 chains.
+    setupCardAbilities(ability) {
+        this.play({
+            effect: "return all creatures to their owner's hand and have each player randomly discard down to 6 cards",
+            gameAction: [
+                ability.actions.returnToHand((context) => ({
+                    target: context.game.creaturesInPlay
+                })),
+                ability.actions.gainChains({ amount: 2 })
+            ],
+            then: {
+                alwaysTriggers: true,
+                gameAction: ability.actions.discardRandomCardsToAmount((context) => ({
+                    amount: 6,
+                    target: [context.player, context.player.opponent]
+                }))
+            }
+        });
+    }
+}
+
+CatchAndRelease.id = 'catch-and-release';
+
+module.exports = CatchAndRelease;

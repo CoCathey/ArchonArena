@@ -1,0 +1,173 @@
+describe('Scrivener Favian', function () {
+    describe("Scrivener Favian's abilities", function () {
+        beforeEach(function () {
+            this.setupTest({
+                player1: {
+                    house: 'untamed',
+                    inPlay: ['scrivener-favian', 'senator-shrix'],
+                    hand: ['fertility-chant', 'dust-pixie', 'wild-bounty']
+                },
+                player2: {
+                    inPlay: ['troll', 'flaxia'],
+                    amber: 2
+                }
+            });
+        });
+
+        it('should not trigger if no bonus', function () {
+            this.player1.play(this.wildBounty);
+            expect(this.player1).isReadyToTakeAction();
+            expect(this.player1.amber).toBe(0);
+        });
+
+        it('should not trigger if no capture', function () {
+            this.player1.play(this.fertilityChant);
+            expect(this.player1).isReadyToTakeAction();
+            expect(this.player1.amber).toBe(4);
+        });
+
+        it('should ask to replace capture with steal, and capture, if selected', function () {
+            this.dustPixie.enhancements = ['amber', 'capture', 'draw'];
+            this.player1.play(this.dustPixie);
+            expect(this.player1).toHavePrompt(
+                'How do you wish to resolve this capture bonus icon?'
+            );
+            expect(this.player1).toHavePromptButton('capture');
+            expect(this.player1).toHavePromptButton('steal');
+            this.player1.clickPrompt('capture');
+            this.player1.clickCard(this.senatorShrix);
+            expect(this.senatorShrix.amber).toBe(1);
+            expect(this.player1.amber).toBe(3);
+            expect(this.player2.amber).toBe(1);
+            expect(this.player1.player.hand.length).toBe(3);
+            expect(this.player1).isReadyToTakeAction();
+        });
+
+        it('should ask to replace capture with steal, and steal, if selected', function () {
+            this.dustPixie.enhancements = ['amber', 'capture', 'draw'];
+            this.player1.play(this.dustPixie);
+            expect(this.player1).toHavePrompt(
+                'How do you wish to resolve this capture bonus icon?'
+            );
+            expect(this.player1).toHavePromptButton('capture');
+            expect(this.player1).toHavePromptButton('steal');
+            this.player1.clickPrompt('steal');
+            expect(this.player1.amber).toBe(4);
+            expect(this.player2.amber).toBe(1);
+            expect(this.player1.player.hand.length).toBe(3);
+            expect(this.player1).isReadyToTakeAction();
+        });
+    });
+
+    describe("Scrivener Favian's abilities", function () {
+        beforeEach(function () {
+            this.setupTest({
+                player1: {
+                    house: 'untamed',
+                    inPlay: ['scrivener-favian', 'senator-shrix', 'amphora-captura'],
+                    hand: ['fertility-chant', 'dust-pixie', 'wild-bounty']
+                },
+                player2: {
+                    inPlay: ['troll', 'flaxia'],
+                    amber: 6
+                }
+            });
+        });
+
+        it('should interact with Amphora Captura and convert every bonus to steal, when selected, but still keep original options', function () {
+            this.dustPixie.enhancements = ['amber', 'capture', 'draw'];
+            this.player1.play(this.dustPixie);
+
+            // First amber icon - convert to steal via step-by-step prompts (amber to capture to steal)
+            expect(this.player1).toHavePrompt('How do you wish to resolve this amber bonus icon?');
+            expect(this.player1).toHavePromptButton('amber');
+            expect(this.player1).toHavePromptButton('capture');
+            this.player1.clickPrompt('capture');
+            expect(this.player1).toHavePrompt(
+                'How do you wish to resolve this capture bonus icon?'
+            );
+            expect(this.player1).toHavePromptButton('capture');
+            expect(this.player1).toHavePromptButton('steal');
+            this.player1.clickPrompt('steal');
+
+            // Second amber icon - convert to steal
+            expect(this.player1).toHavePrompt('How do you wish to resolve this amber bonus icon?');
+            this.player1.clickPrompt('capture');
+            expect(this.player1).toHavePrompt(
+                'How do you wish to resolve this capture bonus icon?'
+            );
+            this.player1.clickPrompt('steal');
+
+            // Third amber icon - convert to steal
+            expect(this.player1).toHavePrompt('How do you wish to resolve this amber bonus icon?');
+            this.player1.clickPrompt('capture');
+            expect(this.player1).toHavePrompt(
+                'How do you wish to resolve this capture bonus icon?'
+            );
+            this.player1.clickPrompt('steal');
+
+            // Capture icon - keep as capture
+            expect(this.player1).toHavePrompt(
+                'How do you wish to resolve this capture bonus icon?'
+            );
+            expect(this.player1).toHavePromptButton('capture');
+            expect(this.player1).toHavePromptButton('steal');
+            this.player1.clickPrompt('capture');
+            this.player1.clickCard(this.senatorShrix);
+
+            // Draw icon - keep as draw (can convert to capture via Amphora, no direct path)
+            expect(this.player1).toHavePrompt('How do you wish to resolve this draw bonus icon?');
+            expect(this.player1).toHavePromptButton('draw');
+            expect(this.player1).toHavePromptButton('capture');
+            this.player1.clickPrompt('draw');
+
+            expect(this.senatorShrix.amber).toBe(1);
+            expect(this.player1.amber).toBe(3);
+            expect(this.player2.amber).toBe(2);
+            expect(this.player1.player.hand.length).toBe(3);
+            expect(this.player1).isReadyToTakeAction();
+        });
+    });
+
+    describe('infinite loop regression with Odoac the Patrician', function () {
+        beforeEach(function () {
+            this.setupTest({
+                player1: {
+                    house: 'sanctum',
+                    inPlay: ['scrivener-favian'],
+                    hand: ['stalwart']
+                },
+                player2: {
+                    inPlay: ['odoac-the-patrician'],
+                    amber: 3
+                }
+            });
+            this.odoacThePatrician.tokens = { amber: 1 };
+            this.stalwart.enhancements = ['capture'];
+        });
+
+        it('serializes the gamestate after choosing steal but Odoac prevents it', function () {
+            this.player1.play(this.stalwart);
+            expect(this.player1).toHavePrompt(
+                'How do you wish to resolve this capture bonus icon?'
+            );
+            this.player1.clickPrompt('steal');
+            expect(this.player1).isReadyToTakeAction();
+            expect(this.player1.amber).toBe(0);
+            expect(this.player2.amber).toBe(3);
+        });
+
+        it('serializes the gamestate after choosing capture', function () {
+            this.player1.play(this.stalwart);
+            expect(this.player1).toHavePrompt(
+                'How do you wish to resolve this capture bonus icon?'
+            );
+            this.player1.clickPrompt('capture');
+            this.player1.clickCard(this.scrivenerFavian);
+            expect(this.player1).isReadyToTakeAction();
+            expect(this.scrivenerFavian.amber).toBe(1);
+            expect(this.player1.amber).toBe(0);
+            expect(this.player2.amber).toBe(2);
+        });
+    });
+});
