@@ -282,8 +282,14 @@ much stronger deck pays less.
 
 1. ~~Import keyteki source into this repo (Phase 0).~~ ✅
 2. ~~Initial rebrand pass — user-visible strings (Phase 1).~~ ✅
-3. Get build + tests green; record baseline (Phase 0).
-4. Docker compose stack + deployment docs for ArchonArena.com (Phase 2).
-5. Keybringer OIDC spike: confirm client registration needs (Phase 3).
-6. Deck service extraction + DoK SAS fetch (Phase 4).
-7. Rating service with configurable SAS-adjusted Elo (Phase 5).
+3. ~~Get build + tests green; record baseline (Phase 0).~~ ✅
+4. ~~Docker compose stack + deployment docs for ArchonArena.com (Phase 2).~~ ✅
+5. ~~Keybringer OIDC login flow (Phase 3).~~ ✅ (owner: register Keycloak client)
+6. ~~DoK SAS fetch + display (Phase 4).~~ ✅
+7. ~~SAS-adjusted Elo calculator (Phase 5, increment 1).~~ ✅
+8. **Owner actions:** provision a VPS + point Porkbun DNS (docs/DEPLOYMENT.md §2);
+   register the Keycloak client (docs/design/keybringer-sso.md); get a DoK API key.
+9. RatingService persistence + GAMEWIN wiring (Phase 5, increment 2).
+10. Rankings: profile location fields + leaderboards (Phase 6).
+11. Site Settings service + admin panel foundations (cross-cutting).
+12. Tournament engine data model + Swiss pairing core (Phase 7).
