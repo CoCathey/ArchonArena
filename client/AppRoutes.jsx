@@ -14,6 +14,7 @@ import Login from './pages/LoginContainer';
 import Logout from './pages/Logout';
 // ARCHON: new navigation targets
 import CommunityNews from './pages/CommunityNews';
+import Leaderboards from './pages/Leaderboards';
 import Matches from './pages/Matches';
 import Placeholder from './pages/Placeholder';
 import MotdAdmin from './pages/MotdAdmin';
@@ -187,15 +188,7 @@ const AppRoutes = ({ currentGame, user }) => {
                     />
                 }
             />
-            <Route
-                path='/leaderboards'
-                element={
-                    <Placeholder
-                        title='Leaderboards'
-                        description='Worldwide, regional, country, and state rankings are being built right now.'
-                    />
-                }
-            />
+            <Route path='/leaderboards' element={<Leaderboards />} />
             <Route
                 path='/community/articles'
                 element={

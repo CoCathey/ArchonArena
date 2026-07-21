@@ -268,6 +268,28 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.OIDC]
         }),
+        // ARCHON: rankings (Phase 6): player location + leaderboards
+        getLocation: builder.query({
+            query: () => '/account/location',
+            providesTags: [TAG_TYPES.LOCATION]
+        }),
+        setLocation: builder.mutation({
+            query: ({ country, state }) => ({
+                url: '/account/location',
+                method: 'PUT',
+                body: { country, state }
+            }),
+            invalidatesTags: [TAG_TYPES.LOCATION]
+        }),
+        getLeaderboard: builder.query({
+            query: (params) => ({
+                url: '/ratings/leaderboard',
+                params
+            })
+        }),
+        getRatings: builder.query({
+            query: (username) => `/ratings/${encodeURIComponent(username)}`
+        }),
         getCards: builder.query({
             query: () => '/cards',
             providesTags: [{ type: TAG_TYPES.CARDS, id: 'LIST' }]
@@ -517,6 +539,10 @@ export const {
     useGetOidcStatusQuery,
     useStartOidcLinkMutation,
     useUnlinkOidcMutation,
+    useGetLocationQuery,
+    useSetLocationMutation,
+    useGetLeaderboardQuery,
+    useGetRatingsQuery,
     useUnlinkPatreonMutation,
     useGetCardsQuery,
     useGetFactionsQuery,

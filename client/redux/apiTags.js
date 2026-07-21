@@ -11,5 +11,6 @@ export const TAG_TYPES = {
     CHALLONGE: 'Challonge',
     GAMES: 'Games',
     LOBBY: 'Lobby',
-    OIDC: 'Oidc'
+    OIDC: 'Oidc',
+    LOCATION: 'Location'
 };

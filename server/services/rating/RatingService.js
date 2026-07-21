@@ -1,5 +1,6 @@
 const logger = require('../../log');
 const { calculateGameResult, normalizeConfig } = require('./EloCalculator');
+const { isValidCountry, regionForCountry, countriesInRegion } = require('./regions');
 
 const DEFAULT_RATING_CONFIG = {
     enabled: true,
@@ -7,6 +8,10 @@ const DEFAULT_RATING_CONFIG = {
     ratedTypes: ['casual', 'competitive'],
     // Win reasons that never rate (a rematch overwrites the winner record).
     excludedWinReasons: ['rematch'],
+    // Rated games required to appear on leaderboards.
+    leaderboardMinGames: 5,
+    // Maximum rows a single leaderboard request may return.
+    leaderboardMaxLimit: 100,
     // Overrides for the Elo calculator (see eloDefaults.js).
     elo: {}
 };
@@ -285,6 +290,130 @@ class RatingService {
             gamesPlayed: row.GamesPlayed,
             provisional: row.GamesPlayed < eloConfig.provisionalGames
         }));
+    }
+
+    /**
+     * Player location (rankings scope). State is free-form except for
+     * countries where the client offers a fixed list; both are stored
+     * uppercase-code (country) and trimmed (state).
+     */
+    async getLocation(userId) {
+        const rows = await this.db.query('SELECT "Country", "State" FROM "Users" WHERE "Id" = $1', [
+            userId
+        ]);
+
+        const row = rows && rows[0];
+
+        return {
+            country: row?.Country || null,
+            state: row?.State || null,
+            region: row?.Country ? regionForCountry(row.Country) : null
+        };
+    }
+
+    async setLocation(userId, country, state) {
+        const normalizedCountry = country ? String(country).toUpperCase().trim() : null;
+        const normalizedState = state ? String(state).trim().slice(0, 60) : null;
+
+        if (normalizedCountry && !isValidCountry(normalizedCountry)) {
+            return { success: false, message: 'Unknown country code' };
+        }
+
+        await this.db.query('UPDATE "Users" SET "Country" = $1, "State" = $2 WHERE "Id" = $3', [
+            normalizedCountry,
+            normalizedCountry ? normalizedState : null,
+            userId
+        ]);
+
+        return {
+            success: true,
+            country: normalizedCountry,
+            state: normalizedCountry ? normalizedState : null,
+            region: normalizedCountry ? regionForCountry(normalizedCountry) : null
+        };
+    }
+
+    /**
+     * Ranked slice of a rating pool.
+     *
+     * @param {object} options
+     * @param {string} options.pool rating pool (game format), e.g. 'archon'
+     * @param {string} [options.scope] 'world' | 'region' | 'country' | 'state'
+     * @param {string} [options.country] required for country/state scope
+     * @param {string} [options.state] required for state scope
+     * @param {string} [options.region] required for region scope
+     * @param {number} [options.limit]
+     * @param {number} [options.offset]
+     */
+    async getLeaderboard(options) {
+        const config = this.getConfig();
+        const pool = options.pool || 'archon';
+        const scope = options.scope || 'world';
+        const limit = Math.min(
+            Math.max(1, parseInt(options.limit, 10) || 50),
+            config.leaderboardMaxLimit
+        );
+        const offset = Math.max(0, parseInt(options.offset, 10) || 0);
+
+        const params = [pool, config.leaderboardMinGames];
+        let where = 'r."Pool" = $1 AND r."GamesPlayed" >= $2';
+
+        if (scope === 'region') {
+            const countries = countriesInRegion(options.region);
+            if (countries.length === 0) {
+                return { entries: [], scope, pool };
+            }
+
+            params.push(countries);
+            where += ` AND u."Country" = ANY($${params.length})`;
+        } else if (scope === 'country' || scope === 'state') {
+            const country = options.country ? String(options.country).toUpperCase() : null;
+            if (!country || !isValidCountry(country)) {
+                return { entries: [], scope, pool };
+            }
+
+            params.push(country);
+            where += ` AND u."Country" = $${params.length}`;
+
+            if (scope === 'state') {
+                if (!options.state) {
+                    return { entries: [], scope, pool };
+                }
+
+                params.push(String(options.state).trim());
+                where += ` AND u."State" ILIKE $${params.length}`;
+            }
+        }
+
+        params.push(limit);
+        const limitIndex = params.length;
+        params.push(offset);
+        const offsetIndex = params.length;
+
+        const rows = await this.db.query(
+            'SELECT u."Username", u."Country", u."State", r."Rating", r."GamesPlayed" ' +
+                'FROM "Ratings" r JOIN "Users" u ON u."Id" = r."UserId" ' +
+                `WHERE ${where} AND (u."Disabled" IS NOT TRUE) ` +
+                'ORDER BY r."Rating" DESC, r."GamesPlayed" DESC, u."Username" ASC ' +
+                `LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
+            params
+        );
+
+        const eloConfig = normalizeConfig(config.elo);
+
+        return {
+            pool: pool,
+            scope: scope,
+            entries: (rows || []).map((row, index) => ({
+                rank: offset + index + 1,
+                username: row.Username,
+                country: row.Country,
+                state: row.State,
+                rating: row.Rating,
+                gamesPlayed: row.GamesPlayed,
+                provisional: row.GamesPlayed < eloConfig.provisionalGames
+            }))
+        };
     }
 }
 

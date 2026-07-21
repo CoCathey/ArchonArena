@@ -226,4 +226,129 @@ describe('RatingService', function () {
             ]);
         });
     });
+
+    describe('setLocation', function () {
+        it('stores a valid country uppercased with its state', async function () {
+            const result = await service.setLocation(5, 'us', 'Texas');
+
+            expect(result).toEqual({
+                success: true,
+                country: 'US',
+                state: 'Texas',
+                region: 'NA'
+            });
+            expect(db.query).toHaveBeenCalledWith(expect.stringContaining('UPDATE "Users"'), [
+                'US',
+                'Texas',
+                5
+            ]);
+        });
+
+        it('rejects unknown country codes without writing', async function () {
+            const result = await service.setLocation(5, 'ZZ', 'Somewhere');
+
+            expect(result.success).toBe(false);
+            expect(db.query).not.toHaveBeenCalled();
+        });
+
+        it('clears state when country is cleared', async function () {
+            const result = await service.setLocation(5, null, 'Texas');
+
+            expect(result.success).toBe(true);
+            expect(db.query).toHaveBeenCalledWith(expect.stringContaining('UPDATE "Users"'), [
+                null,
+                null,
+                5
+            ]);
+        });
+    });
+
+    describe('getLeaderboard', function () {
+        const leaderboardRow = (username, rating, extra = {}) => ({
+            Username: username,
+            Country: 'US',
+            State: 'TX',
+            Rating: rating,
+            GamesPlayed: 20,
+            ...extra
+        });
+
+        it('returns ranked world entries', async function () {
+            db.query.mockResolvedValue([
+                leaderboardRow('Alice', 1500),
+                leaderboardRow('Bob', 1400)
+            ]);
+
+            const board = await service.getLeaderboard({ pool: 'archon' });
+
+            expect(board.entries[0]).toMatchObject({
+                rank: 1,
+                username: 'Alice',
+                rating: 1500,
+                provisional: false
+            });
+            expect(board.entries[1].rank).toBe(2);
+
+            const [sql, params] = db.query.mock.calls[0];
+            expect(sql).toContain('"GamesPlayed" >= $2');
+            expect(params[0]).toBe('archon');
+        });
+
+        it('continues rank numbers across pages', async function () {
+            db.query.mockResolvedValue([leaderboardRow('Cara', 1300)]);
+
+            const board = await service.getLeaderboard({ pool: 'archon', offset: 50 });
+
+            expect(board.entries[0].rank).toBe(51);
+        });
+
+        it('filters region scope by that regions country list', async function () {
+            db.query.mockResolvedValue([]);
+
+            await service.getLeaderboard({ pool: 'archon', scope: 'region', region: 'NA' });
+
+            const [sql, params] = db.query.mock.calls[0];
+            expect(sql).toContain('= ANY($3)');
+            expect(params[2]).toEqual(expect.arrayContaining(['US', 'CA', 'MX']));
+        });
+
+        it('returns empty for an unknown region without querying', async function () {
+            const board = await service.getLeaderboard({
+                pool: 'archon',
+                scope: 'region',
+                region: 'NOPE'
+            });
+
+            expect(board.entries).toEqual([]);
+            expect(db.query).not.toHaveBeenCalled();
+        });
+
+        it('filters state scope by country and state', async function () {
+            db.query.mockResolvedValue([]);
+
+            await service.getLeaderboard({
+                pool: 'archon',
+                scope: 'state',
+                country: 'us',
+                state: 'Texas'
+            });
+
+            const [sql, params] = db.query.mock.calls[0];
+            expect(sql).toContain('u."Country" = $3');
+            expect(sql).toContain('u."State" ILIKE $4');
+            expect(params[2]).toBe('US');
+            expect(params[3]).toBe('Texas');
+        });
+
+        it('caps the limit at the configured maximum', async function () {
+            db.query.mockResolvedValue([]);
+
+            await service.getLeaderboard({ pool: 'archon', limit: 5000 });
+
+            const [sql, params] = db.query.mock.calls[0];
+            const limitParam = params[params.length - 2];
+            expect(limitParam).toBe(100);
+            expect(sql).toContain('LIMIT');
+        });
+    });
 });

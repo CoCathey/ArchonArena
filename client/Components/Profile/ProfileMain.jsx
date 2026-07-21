@@ -25,6 +25,7 @@ import {
 import { authActions } from '../../redux/slices/authSlice';
 import { PatreonStatus } from '../../types';
 import Avatar from '../Site/Avatar';
+import ProfileLocation from './ProfileLocation';
 import Panel from '../Site/Panel';
 
 /**
@@ -166,6 +167,8 @@ const ProfileMain = ({ user, formProps, section }) => {
                         </TextField>
                     </div>
                 </Panel>
+                {/* ARCHON: location for rankings (Phase 6) */}
+                <ProfileLocation />
                 <Panel type='default' compactHeader title={t('Avatar')}>
                     <div className='flex items-center gap-3'>
                         {!formProps.errors.avatar && localAvatar ? (

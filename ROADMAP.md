@@ -161,15 +161,22 @@ much stronger deck pays less.
 
 ## Phase 6 — Rankings & leaderboards _(PRIORITY)_
 
--   [ ] Player profile fields: country, state/province, region (self-declared; validated
-        against ISO-3166 / subdivisions list).
--   [ ] Leaderboards: worldwide, region (e.g. NA/EU/APAC/LATAM), country, state **(admin-config
-        region definitions)**.
--   [ ] Redis-backed leaderboard (sorted sets) with periodic PG snapshot for history.
--   [ ] Minimum games threshold + activity window to appear on boards **(admin-config)**.
+-   [x] Player profile fields: country (validated ISO-3166 alpha-2) + state/province
+        (US/CA dropdowns, free text elsewhere) — Profile > Account > Location; migration 25.
+-   [x] Region mapping: country → NA/LATAM/EU/MEA/APAC (server/services/rating/regions.js;
+        code-defined for now, admin-config later).
+-   [x] Leaderboards: worldwide, region, country, state over rating pools; disabled
+        accounts excluded; provisional flag shown.
+-   [x] Minimum games threshold to appear on boards (rating.leaderboardMinGames,
+        config-driven).
+-   [x] Leaderboard UI (Community > Leaderboards): scope tabs follow the viewer's saved
+        location, pool tabs (Archon/Sealed/Alliance), pagination, own-row highlight.
+-   [x] Public API: GET /api/ratings/leaderboard (paginated, capped limit).
+-   [ ] Redis-backed leaderboard cache (sorted sets) once traffic warrants; PG indexes
+        carry current scale fine.
+-   [ ] Activity window on boards **(admin-config)**.
 -   [ ] Seasons: start/end, soft reset rules **(admin-config)**.
--   [ ] Leaderboard UI with filters + player rank card on profile.
--   [ ] API endpoints for rankings (public, paginated, cached).
+-   [ ] Player rank card on profile page; ratings shown on lobby player names.
 
 ## Phase 7 — Tournament engine _(PRIORITY)_
 
