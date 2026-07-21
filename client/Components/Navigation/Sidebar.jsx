@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
 import { Button as HeroButton } from '@heroui/react';
@@ -23,6 +23,33 @@ const Sidebar = ({ appName, user }) => {
     const [openSection, setOpenSection] = useState(null);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
+
+    // Keep the flyout open through a small pointer slip: closing is
+    // delayed, and any re-entry (into the button, the bridge gap, or the
+    // flyout itself) cancels the pending close.
+    const closeTimeout = useRef(null);
+
+    const cancelScheduledClose = () => {
+        if (closeTimeout.current) {
+            clearTimeout(closeTimeout.current);
+            closeTimeout.current = null;
+        }
+    };
+
+    const openSectionNow = (title) => {
+        cancelScheduledClose();
+        setOpenSection(title);
+    };
+
+    const scheduleClose = () => {
+        cancelScheduledClose();
+        closeTimeout.current = setTimeout(() => {
+            setOpenSection(null);
+            closeTimeout.current = null;
+        }, 400);
+    };
+
+    useEffect(() => cancelScheduledClose, []);
 
     const canSee = (item) => {
         if (item.showOnlyWhenLoggedIn && !user) {
@@ -56,6 +83,7 @@ const Sidebar = ({ appName, user }) => {
     };
 
     const closeAll = () => {
+        cancelScheduledClose();
         setOpenSection(null);
         setMobileOpen(false);
         setProfileOpen(false);
@@ -90,26 +118,52 @@ const Sidebar = ({ appName, user }) => {
         }
 
         const isOpen = openSection === section.title;
+        const toggle = () => setOpenSection(isOpen ? null : section.title);
 
         return (
             <div
                 key={section.title}
                 className='relative'
-                onMouseEnter={() => setOpenSection(section.title)}
-                onMouseLeave={() => setOpenSection(null)}
+                onMouseEnter={() => openSectionNow(section.title)}
+                onMouseLeave={scheduleClose}
             >
-                <button
-                    type='button'
-                    className={sectionButtonClass(active || isOpen)}
-                    onClick={() => setOpenSection(isOpen ? null : section.title)}
-                >
-                    <span>{t(section.title)}</span>
-                    <span className='text-xs text-muted'>›</span>
-                </button>
+                {/* Header: the label navigates to the section's landing page
+                    (like Learn/Watch), while the caret opens the flyout. On
+                    desktop hover also opens it; the caret is the tap target
+                    for touch. Sections without a landing page toggle wholesale. */}
+                <div className={`${sectionButtonClass(active || isOpen)} gap-1`}>
+                    {section.landingPath ? (
+                        <Link
+                            href={section.landingPath}
+                            className='min-w-0 flex-1 truncate'
+                            onClick={closeAll}
+                        >
+                            {t(section.title)}
+                        </Link>
+                    ) : (
+                        <button
+                            type='button'
+                            className='min-w-0 flex-1 truncate text-left'
+                            onClick={toggle}
+                        >
+                            {t(section.title)}
+                        </button>
+                    )}
+                    <button
+                        type='button'
+                        aria-label={t('Toggle {{title}} menu', { title: t(section.title) })}
+                        aria-expanded={isOpen}
+                        className='-mr-1 shrink-0 px-1.5 py-0.5 text-xs text-muted'
+                        onClick={toggle}
+                    >
+                        ›
+                    </button>
+                </div>
                 {isOpen && (
-                    // Outer wrapper includes the gap so hover survives the
-                    // pointer crossing from the button into the flyout
-                    <div className='top-0 z-50 lg:absolute lg:left-full lg:w-60 lg:pl-2'>
+                    // Outer wrapper includes the gap and a little vertical
+                    // slack so hover survives the pointer crossing from the
+                    // button into the flyout, or a few pixels of slip.
+                    <div className='top-0 z-50 lg:absolute lg:left-full lg:w-60 lg:pl-3 lg:pb-2'>
                         <div className='rounded-md border border-border/70 bg-overlay p-1.5 shadow-xl'>
                             {section.childItems.map((item) => (
                                 <Link

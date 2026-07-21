@@ -70,6 +70,7 @@ export const ProfileMenu = [
 export const SidebarMenu = [
     {
         title: 'Play',
+        landingPath: '/play',
         childItems: [
             { path: '/play', title: 'Play Online' },
             { path: '/play-irl', title: 'Play IRL' },
@@ -83,6 +84,7 @@ export const SidebarMenu = [
     { title: 'Watch', path: '/watch' },
     {
         title: 'Community',
+        landingPath: '/community/members',
         childItems: [
             { path: '/community/friends', title: 'Friends' },
             { path: '/community/clubs', title: 'Clubs' },
@@ -98,6 +100,7 @@ export const SidebarMenu = [
     },
     {
         title: 'Other',
+        landingPath: '/about',
         childItems: [
             { path: '/how-to-play', title: 'How To Play' },
             { path: '/about', title: 'About' },
