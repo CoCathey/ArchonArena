@@ -2,7 +2,7 @@ import React from 'react';
 import { useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton } from '@heroui/react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 
 import AlertPanel from '../Components/Site/AlertPanel';
 import BrandMark from '../assets/img/aa_mark.svg';
@@ -22,6 +22,11 @@ const Lobby = () => {
     const user = useSelector((state) => state.account.user);
 
     const toAlertType = (type) => (type === 'error' ? 'danger' : type || 'info');
+
+    // ARCHON: new accounts finish (or skip) the setup wizard before landing
+    if (user && user.onboarded === false) {
+        return <Navigate to='/welcome' replace />;
+    }
 
     const features = [
         {

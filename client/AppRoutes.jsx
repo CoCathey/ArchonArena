@@ -23,6 +23,7 @@ import Friends from './pages/Friends';
 import Members from './pages/Members';
 import Clubs from './pages/Clubs';
 import ClubDetail from './pages/ClubDetail';
+import Onboarding from './pages/Onboarding';
 import MotdAdmin from './pages/MotdAdmin';
 import NewsAdmin from './pages/NewsAdmin';
 import NodesAdmin from './pages/NodesAdmin';
@@ -148,6 +149,7 @@ const AppRoutes = ({ currentGame, user }) => {
                     />
                 }
             />
+            <Route path='/welcome' element={<Onboarding />} />
             <Route path='/community/friends' element={<Friends />} />
             <Route path='/community/clubs' element={<Clubs />} />
             <Route path='/community/clubs/:id' element={<ClubDetail />} />

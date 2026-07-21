@@ -225,6 +225,13 @@ much stronger deck pays less.
 -   [x] **Clubs v1** (local scenes/stores): create/join/leave, club pages with member
         lists, owner remove/disband (server/services/community/ClubService). Follow-ups:
         club leaderboards, approval-based joins, ownership transfer.
+-   [x] **Club invite codes**: every club gets a shareable 8-char join code (owner-visible
+        with copy button); join-by-code endpoint used by the club page and onboarding.
+-   [x] **First-run onboarding wizard** (`/welcome`, docs/design/onboarding.md): new
+        accounts are walked through location, club join (code or search), deck import,
+        and profile picture - all skippable; completion stamped in Users.OnboardedAt
+        (existing users backfilled as onboarded). Follow-ups: highlight a "play your
+        first game" step once casual matchmaking lands.
 -   [x] **Member directory**: public searchable member list (username/country filters,
         rating-sorted, privacy-safe fields only) with joined-24h/total/online stats.
 -   [ ] **Teams** (competitive): rosters, team events, team rating.

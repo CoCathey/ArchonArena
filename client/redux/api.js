@@ -354,6 +354,28 @@ export const api = createApi({
                 { type: TAG_TYPES.CLUBS, id }
             ]
         }),
+        joinClubByCode: builder.mutation({
+            query: (code) => ({
+                url: '/clubs/join-by-code',
+                method: 'POST',
+                body: { code }
+            }),
+            invalidatesTags: [TAG_TYPES.CLUBS]
+        }),
+        // ARCHON: first-run onboarding wizard (Phase 9)
+        completeOnboarding: builder.mutation({
+            query: () => ({
+                url: '/account/onboarded',
+                method: 'POST'
+            })
+        }),
+        setAvatar: builder.mutation({
+            query: (avatar) => ({
+                url: '/account/avatar',
+                method: 'PUT',
+                body: { avatar }
+            })
+        }),
         // ARCHON: runtime admin settings
         getAdminSettings: builder.query({
             query: () => '/admin/settings'
@@ -638,6 +660,9 @@ export const {
     useGetClubQuery,
     useCreateClubMutation,
     useClubActionMutation,
+    useJoinClubByCodeMutation,
+    useCompleteOnboardingMutation,
+    useSetAvatarMutation,
     useUnlinkPatreonMutation,
     useGetCardsQuery,
     useGetFactionsQuery,

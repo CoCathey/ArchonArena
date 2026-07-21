@@ -9,6 +9,8 @@ const adminSettings = require('./admin-settings');
 const tournaments = require('./tournaments');
 // ARCHON: community (friends, members, clubs)
 const community = require('./community');
+// ARCHON: first-run onboarding wizard
+const onboarding = require('./onboarding');
 const decks = require('./decks');
 const games = require('./games');
 const cards = require('./cards');
@@ -30,6 +32,8 @@ module.exports.init = function (server, options) {
     tournaments.init(server);
     // ARCHON: community (friends, members, clubs)
     community.init(server);
+    // ARCHON: first-run onboarding wizard
+    onboarding.init(server, options);
     decks.init(server);
     games.init(server);
     cards.init(server);

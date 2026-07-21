@@ -107,6 +107,30 @@ const ClubDetail = () => {
                         {club.description}
                     </p>
                 )}
+                {club.isOwner && club.joinCode && (
+                    <div className='mt-3 flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-surface-secondary/50 px-3 py-2 text-sm'>
+                        <span className='text-muted'>{t('Invite code:')}</span>
+                        <code className='font-mono font-bold tracking-widest text-amber-300'>
+                            {club.joinCode}
+                        </code>
+                        <HeroButton
+                            size='sm'
+                            variant='tertiary'
+                            className='!h-6 !px-2 text-xs'
+                            onPress={() => {
+                                navigator.clipboard?.writeText(club.joinCode);
+                                toast.success(t('Copied'));
+                            }}
+                        >
+                            {t('Copy')}
+                        </HeroButton>
+                        <span className='w-full text-xs text-muted'>
+                            {t(
+                                'Share this code so players can join instantly - even during sign-up.'
+                            )}
+                        </span>
+                    </div>
+                )}
             </Panel>
 
             <Panel title={t('Members')}>

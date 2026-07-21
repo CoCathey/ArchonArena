@@ -1,14 +1,35 @@
+const crypto = require('crypto');
+
 const logger = require('../../log');
+
+// Join codes skip easily-confused characters (0/O, 1/I/L).
+const JOIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const JOIN_CODE_LENGTH = 8;
 
 /**
  * Clubs (Phase 9): open-membership groups for local scenes and stores.
  * The creator owns the club; owners cannot leave (disband or, later,
  * transfer instead), members join and leave freely. Site admins can
- * disband any club.
+ * disband any club. Every club gets a shareable invite code so players
+ * can join without searching (used by the onboarding wizard too).
  */
 class ClubService {
     constructor(db = require('../../db')) {
         this.db = db;
+    }
+
+    generateJoinCode() {
+        const bytes = crypto.randomBytes(JOIN_CODE_LENGTH);
+
+        return Array.from(bytes)
+            .map((byte) => JOIN_CODE_ALPHABET[byte % JOIN_CODE_ALPHABET.length])
+            .join('');
+    }
+
+    normalizeJoinCode(code) {
+        return String(code || '')
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, '');
     }
 
     async create(actorId, options) {
@@ -26,10 +47,23 @@ class ClubService {
             return { success: false, message: 'A club with that name already exists' };
         }
 
+        // Collisions are ~impossible in a 31^8 space, but re-roll a few
+        // times anyway rather than surface a unique-index error.
+        let joinCode = this.generateJoinCode();
+        for (let attempt = 0; attempt < 5; attempt++) {
+            const clash = await this.db.query('SELECT 1 FROM "Clubs" WHERE "JoinCode" = $1', [
+                joinCode
+            ]);
+            if (!clash || clash.length === 0) {
+                break;
+            }
+            joinCode = this.generateJoinCode();
+        }
+
         const rows = await this.db.query(
-            'INSERT INTO "Clubs" ("Name", "Description", "OwnerId", "CreatedAt") ' +
-                'VALUES ($1, $2, $3, now() AT TIME ZONE \'utc\') RETURNING "Id"',
-            [name, (options.description || '').slice(0, 2000) || null, actorId]
+            'INSERT INTO "Clubs" ("Name", "Description", "OwnerId", "JoinCode", "CreatedAt") ' +
+                'VALUES ($1, $2, $3, $4, now() AT TIME ZONE \'utc\') RETURNING "Id"',
+            [name, (options.description || '').slice(0, 2000) || null, actorId, joinCode]
         );
         const clubId = rows[0].Id;
 
@@ -41,7 +75,7 @@ class ClubService {
 
         logger.info(`Club ${clubId} '${name}' created by user ${actorId}`);
 
-        return { success: true, id: clubId };
+        return { success: true, id: clubId, joinCode };
     }
 
     async list(query) {
@@ -94,6 +128,8 @@ class ClubService {
             ? (members || []).find((member) => member.UserId === actorId)
             : null;
 
+        const isOwner = membership?.Role === 'owner';
+
         return {
             success: true,
             club: {
@@ -102,7 +138,9 @@ class ClubService {
                 description: club.Description,
                 ownerId: club.OwnerId,
                 isMember: !!membership,
-                isOwner: membership?.Role === 'owner'
+                isOwner,
+                // Only the owner sees the invite code - it is theirs to share
+                joinCode: isOwner ? club.JoinCode : undefined
             },
             members: (members || []).map((member) => ({
                 userId: member.UserId,
@@ -127,6 +165,30 @@ class ClubService {
         );
 
         return { success: true };
+    }
+
+    async joinByCode(actorId, code) {
+        const normalized = this.normalizeJoinCode(code);
+
+        if (normalized.length < 4) {
+            return { success: false, message: 'Invalid join code' };
+        }
+
+        const rows = await this.db.query('SELECT * FROM "Clubs" WHERE "JoinCode" = $1', [
+            normalized
+        ]);
+
+        if (!rows || rows.length === 0) {
+            return { success: false, message: 'No club matches that join code' };
+        }
+
+        const result = await this.join(rows[0].Id, actorId);
+
+        if (!result.success) {
+            return result;
+        }
+
+        return { success: true, id: rows[0].Id, name: rows[0].Name };
     }
 
     async leave(clubId, actorId) {

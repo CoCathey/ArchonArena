@@ -1220,3 +1220,8 @@ async function checkAuth(req, res) {
 
     return user;
 }
+
+// ARCHON: shared with the onboarding wizard's lightweight avatar endpoint
+// (server/api/onboarding.js) so it reuses the exact same image pipeline.
+module.exports.isValidImage = isValidImage;
+module.exports.processAvatar = processAvatar;

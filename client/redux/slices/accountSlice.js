@@ -63,6 +63,17 @@ const accountSlice = createSlice({
                 if (state.user) {
                     state.user.patreon = undefined;
                 }
+            })
+            // ARCHON: first-run onboarding wizard (Phase 9)
+            .addMatcher(api.endpoints.completeOnboarding.matchFulfilled, (state) => {
+                if (state.user) {
+                    state.user.onboarded = true;
+                }
+            })
+            .addMatcher(api.endpoints.setAvatar.matchFulfilled, (state, action) => {
+                if (state.user && action.payload.avatar) {
+                    state.user.avatar = action.payload.avatar;
+                }
             });
     }
 });

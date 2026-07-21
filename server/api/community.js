@@ -110,6 +110,14 @@ module.exports.init = function (server) {
     );
 
     server.post(
+        '/api/clubs/join-by-code',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(await clubService.joinByCode(req.user.id, req.body.code));
+        })
+    );
+
+    server.post(
         '/api/clubs/:id/join',
         jwt,
         wrapAsync(async (req, res) => {

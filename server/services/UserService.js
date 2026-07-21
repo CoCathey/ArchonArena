@@ -519,6 +519,15 @@ class UserService extends EventEmitter {
         await db.query('DELETE FROM "RefreshToken" WHERE "Expiry" < current_date');
     }
 
+    // ARCHON: first-run wizard (Phase 9 onboarding). Idempotent: only the
+    // first completion stamps the timestamp.
+    async setOnboarded(userId) {
+        await db.query(
+            'UPDATE "Users" SET "OnboardedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1 AND "OnboardedAt" IS NULL',
+            [userId]
+        );
+    }
+
     async anonymizeUser(user, options = {}) {
         const client = await db.startTransaction();
         const anonymizedUsername = options.username || `deleted-user-${user.id}`;
@@ -639,7 +648,9 @@ class UserService extends EventEmitter {
             tokenExpires: dbUser.TokenExpires,
             activationToken: dbUser.ActivationToken,
             activationTokenExpiry: dbUser.ActivationTokenExpiry,
-            registerIp: dbUser.RegisterIp
+            registerIp: dbUser.RegisterIp,
+            // ARCHON: first-run wizard flag (Phase 9 onboarding)
+            onboarded: !!dbUser.OnboardedAt
         };
 
         return user;

@@ -29,12 +29,14 @@ const LoginContainer = () => {
     useEffect(() => {
         if (isSuccess) {
             toast.success(t('Login successful'));
+            // ARCHON: brand-new accounts go through the setup wizard first
+            const needsOnboarding = loginState.data?.user?.onboarded === false;
             reset();
             dispatch(lobbyConnectRequested());
             dispatch(lobbyAuthenticateRequested());
-            navigate('/');
+            navigate(needsOnboarding ? '/welcome' : '/');
         }
-    }, [dispatch, isSuccess, navigate, reset, t]);
+    }, [dispatch, isSuccess, loginState.data, navigate, reset, t]);
 
     // ARCHON: complete an SSO redirect: tokens arrive in the URL fragment
     // (never sent to the server) as /login#sso=<base64url payload>
@@ -72,7 +74,7 @@ const LoginContainer = () => {
             dispatch(lobbyConnectRequested());
             dispatch(lobbyAuthenticateRequested());
             toast.success(t('Login successful'));
-            navigate('/', { replace: true });
+            navigate(decoded.user?.onboarded === false ? '/welcome' : '/', { replace: true });
         } catch (err) {
             toast.error(t('Login failed, please try again'));
             navigate('/login', { replace: true });

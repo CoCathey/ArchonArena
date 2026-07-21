@@ -148,7 +148,9 @@ class User {
             settings: this.userData.settings,
             permissions: this.userData.permissions,
             verified: this.userData.verified,
-            challonge: this.userData.challonge
+            challonge: this.userData.challonge,
+            // ARCHON: drives the first-run wizard redirect (Phase 9)
+            onboarded: !!this.userData.onboarded
         };
 
         user = Settings.getUserWithDefaultsSet(user);
