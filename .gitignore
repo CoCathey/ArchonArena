@@ -2,6 +2,12 @@ bower_components
 node_modules
 public/*
 !public/banner
+# ARCHON: track the small root-level site assets (favicons, manifest) so a
+# fresh clone / Docker build has them. Large image dirs (public/img/*) stay ignored.
+!public/*.png
+!public/*.ico
+!public/*.svg
+!public/site.webmanifest
 dist*
 typings
 coverage
@@ -10,6 +16,10 @@ coverage
 !client/locales/*.json
 !master-vault-data/**/*.json
 !server/game/chatCommands.json
+# ARCHON: package manifests are needed for the Docker build (npm ci); the broad
+# *.json rule above would otherwise exclude them.
+!package.json
+!package-lock.json
 server/events.txt
 .DS_Store
 config/local*
