@@ -1,6 +1,8 @@
 const account = require('./account');
 // ARCHON: OIDC SSO login (Keybringer)
 const oidc = require('./oidc');
+// ARCHON: public rating lookups
+const ratings = require('./ratings');
 const decks = require('./decks');
 const games = require('./games');
 const cards = require('./cards');
@@ -14,6 +16,8 @@ module.exports.init = function (server, options) {
     account.init(server, options);
     // ARCHON: OIDC SSO login (Keybringer)
     oidc.init(server);
+    // ARCHON: public rating lookups
+    ratings.init(server);
     decks.init(server);
     games.init(server);
     cards.init(server);

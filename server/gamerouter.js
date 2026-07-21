@@ -2,6 +2,8 @@ const EventEmitter = require('events');
 
 const logger = require('./log');
 const GameService = require('./services/GameService');
+// ARCHON: ratings react to finished games (docs/design/rating-engine.md)
+const RatingService = require('./services/rating/RatingService');
 const RedisClientFactory = require('./services/RedisClientFactory');
 const { detectBinary } = require('./util');
 
@@ -14,6 +16,8 @@ class GameRouter extends EventEmitter {
 
         this.workers = {};
         this.gameService = new GameService();
+        // ARCHON: ratings react to finished games (docs/design/rating-engine.md)
+        this.ratingService = new RatingService(configService);
 
         const factory = new RedisClientFactory(configService);
         this.subscriber = factory.createClient();
@@ -258,7 +262,11 @@ class GameRouter extends EventEmitter {
 
                 break;
             case 'GAMEWIN':
-                this.gameService.update(message.arg.game);
+                // ARCHON: rate the game once its result is persisted. Best
+                // effort and idempotent; never blocks the game flow.
+                Promise.resolve(this.gameService.update(message.arg.game))
+                    .then(() => this.ratingService.processGame(message.arg.game.gameId))
+                    .catch((err) => logger.error('Failed to save/rate finished game', err));
                 break;
             case 'REMATCH':
                 this.gameService.update(message.arg.game);

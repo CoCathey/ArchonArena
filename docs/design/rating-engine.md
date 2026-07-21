@@ -1,7 +1,31 @@
 # Design: Rating Engine (SAS-adjusted Elo)
 
-Status: **Increment 1 shipped** — pure calculator + unit tests. Persistence, game-end
-integration, and admin settings wiring are follow-up increments (see ROADMAP.md Phase 5).
+Status: **Increments 1–2 shipped** — pure calculator (increment 1) plus persistence and
+live game-end integration (increment 2). Rated play is ON by default for casual +
+competitive 2-player games. Admin settings service wiring and the recalculation tool are
+follow-ups (see ROADMAP.md Phase 5).
+
+Increment 2 (`RatingService`, `server/services/rating/RatingService.js`):
+
+-   **Hook**: `gamerouter.js` GAMEWIN handler chains `ratingService.processGame(gameId)`
+    after `GameService.update()` persists the result (ARCHON-marked; fire-and-forget with
+    error logging — rating can never affect game flow).
+-   **Idempotent by construction**: pre-check on `RatingHistory` plus a
+    `UNIQUE (GameId, UserId)` constraint means duplicate GAMEWINs, rematch re-saves, or
+    crashes can never double-rate a game.
+-   **What rates**: exactly-2-player games with a recorded winner whose `GameType` is in
+    `rating.ratedTypes` (default casual + competitive) and whose `WinReason` is not
+    excluded (default excludes `rematch`). Win reasons map to calculator result types:
+    `keys`→keys, `concede`→concede, `clock`/`* after time`→timeout.
+-   **SAS at game time**: joins `GamePlayers → Decks → DeckSas` by deck uuid, so the
+    Phase 4 cache feeds the handicap with no extra fetches; missing SAS degrades to an
+    even-deck matchup.
+-   **Pools**: one rating per player per `GameFormat` (archon/sealed/alliance…),
+    defaulting to `archon`.
+-   **Auditability**: every history row snapshots the effective Elo config (jsonb), so
+    past ratings remain explainable and recalculable after tuning.
+-   **API**: `GET /api/ratings/:username` → `[{ pool, rating, gamesPlayed, provisional }]`
+    (public).
 
 ## Current TCO architecture (analysis)
 

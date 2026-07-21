@@ -55,6 +55,19 @@
         }
     },
 
+    // Rating engine (SAS-adjusted Elo). Defaults live in code
+    // (server/services/rating/); set values here to override. All of this
+    // becomes runtime admin settings once the settings service exists.
+    rating: {
+        enabled: true,
+        ratedTypes: ['casual', 'competitive'], // game types that move ratings
+        elo: {
+            // See server/services/rating/eloDefaults.js for all knobs:
+            // defaultRating, kFactor, provisionalKFactor, provisionalGames,
+            // sasWeight, ratingFloor, keyDiffMultipliers, resultTypeMultipliers
+        }
+    },
+
     // Decks of KeyForge (decksofkeyforge.com) SAS/AERC integration.
     // Get an API key from your DoK profile page. All values are intended to
     // become runtime admin settings once the settings service exists.

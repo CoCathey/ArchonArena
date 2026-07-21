@@ -146,10 +146,13 @@ much stronger deck pays less.
         K-factor, provisional K + game count, sasWeight, MoV tables, floor, default rating.
 -   [x] Unit tests: algorithm properties (zero-sum, monotonicity in key diff, SAS handicap
         direction), golden-value tests, config edge cases (27 tests).
--   [ ] RatingService orchestration layer: persistence + subscribe to game completion at
-        the lobby layer (GAMEWIN), no gameplay-engine coupling.
--   [ ] DB: Ratings + RatingHistory tables (pre/post rating, opponent, decks, SAS,
-        key diff, config snapshot per game).
+-   [x] RatingService orchestration layer: hooks GAMEWIN at the lobby/router layer
+        (ARCHON-marked, fire-and-forget, idempotent), zero gameplay-engine coupling.
+-   [x] DB: Ratings + RatingHistory tables (migration 24) with per-game Elo config
+        snapshot; SAS joined from DeckSas at rating time.
+-   [x] Public API: GET /api/ratings/:username (pool, rating, gamesPlayed, provisional).
+-   [ ] Show ratings in the UI (profile page, lobby player names) — with Phase 6
+        leaderboards.
 -   [ ] Wire admin settings service overrides into RatingService (needs settings service).
 -   [ ] Rating decay policy **(admin-config)**.
 -   [ ] Provisional/placement UX (badge until N games).
