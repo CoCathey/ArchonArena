@@ -118,3 +118,18 @@ network — decision deferred until load requires it.
 -   Point an external uptime monitor (e.g. UptimeRobot) at `https://archonarena.com/`.
 -   `docker compose ... logs -f lobby node-0` for live logs; Winston writes structured
     logs to stdout.
+
+## 8. Health check
+
+`deploy/healthcheck.sh` verifies everything the site needs in one pass — containers,
+HTTPS + certificate, the game-node socket path through Caddy, the game node's advertised
+address (must be empty or game starts strand players), every schema migration, card and
+standalone-deck data, required env vars, and disk/memory. It is read-only and each FAIL
+prints the exact command that fixes it.
+
+```bash
+cd /opt/archonarena && bash deploy/healthcheck.sh
+```
+
+Run it after every deploy, and any time something feels off. Exit code is the number of
+failures, so it can be dropped into cron/uptime tooling as-is.
