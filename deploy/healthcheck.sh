@@ -117,7 +117,11 @@ check_column() { # table, column, migration file
     fi
 }
 
+check_table "DeckSas" "22 - DeckSas.sql"
+check_table "UserOidcIdentities" "23 - UserOidcIdentities.sql"
 check_table "Ratings" "24 - Ratings.sql"
+check_table "RatingHistory" "24 - Ratings.sql"
+check_column "Users" "Country" "25 - UserLocation.sql"
 check_table "SiteSettings" "26 - SiteSettings.sql"
 check_table "Tournaments" "27 - Tournaments.sql"
 check_table "Friendships" "28 - Community.sql"
