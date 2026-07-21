@@ -1,28 +1,45 @@
-# Keyteki
+# Archon Arena
 
-This is the repository for the code internally known as keyteki which is running on [thecrucible.online](https://thecrucible.online/) allowing people to play [KeyForge](https://keyforging.com/) online using only their browser.
+**Archon Arena** ([archonarena.com](https://archonarena.com)) is a next-generation competitive
+platform for playing [KeyForge](https://keyforging.com/) in your browser — ratings, rankings,
+tournaments, and analytics built on a proven gameplay engine.
+
+It is a fork of [keyteki](https://github.com/keyteki/keyteki), the engine behind
+The Crucible Online. The gameplay engine is kept upstream-compatible so card fixes and new
+sets can be pulled in — see [docs/UPSTREAM.md](docs/UPSTREAM.md).
+
+## What Archon Arena adds
+
+- **SAS-adjusted Elo ratings** — chess-style Elo modified by key differential and deck SAS
+  (power) difference, fully admin-configurable
+- **Rankings** — worldwide, region, country, and state leaderboards
+- **Tournaments** — online, in-person, and hybrid events with TO tools
+- **Keybringer SSO** — sign in with your Keybringer account
+- **Deck SAS integration** — SAS/AERC scores from Decks of KeyForge
+
+See [ROADMAP.md](ROADMAP.md) for the full plan and current status.
 
 ## Reporting Bugs or Issues
 
-To report bugs or issues, please use the [GitHub Issues](https://github.com/keyteki/keyteki/issues) page. Before submitting a new issue, check if it has already been reported to avoid duplicates. Please include screenshots, the full chat log, and steps to reproduce the issue.
+Use the [GitHub Issues](https://github.com/CoCathey/ArchonArena/issues) page. Before
+submitting a new issue, check if it has already been reported. Please include screenshots,
+the full chat log, and steps to reproduce.
 
-## Discord Server
+## Development
 
-The [Keyteki Discord Server](https://discord.gg/NncEXAs) is a great place to discuss development, ask questions, and coordinate with other contributors.
+The [docs folder](docs/README.md) contains documentation on how the engine works:
 
-## Contributing
-
-Contributions are welcome from anyone - whether that is bug reports, bug fixes, or implementing new cards. See the [contributing doc](CONTRIBUTING.md) for detailed guidelines. Before writing code, please coordinate changes in the [Discord channel #development](https://discord.com/channels/600996321763262464/600996321763262466) to avoid duplicate work.
-
-The [docs folder](docs/README.md) contains documentation on how keyteki works. The following covers the basics to get started:
-
--   [Local Development](docs/local-development.md) - How to set up keyteki for local development
+-   [Local Development](docs/local-development.md) - Setting up for local development
+-   [Upstream Sync](docs/UPSTREAM.md) - Pulling gameplay/card fixes from keyteki
 -   [Implementing Cards](docs/implementing-cards.md) - How to implement new cards
 -   [Testing Cards](docs/testing-cards.md) - How to write and run tests for cards
 -   [Card Messages](docs/card-messages.md) - How to update card log messages
 
-## Doesn't this look a lot like Jinteki/Throneteki? The Android netrunner/AGOT online experience?
+## Lineage & acknowledgements
 
-Glad you noticed! Yes, jinteki was a huge inspiration for this project, as the interface is clean and user friendly, so I've tried to make this similar in a lot of ways
+Archon Arena is built on the shoulders of open source: keyteki (The Crucible Online), which
+was itself a fork of [ringteki](https://github.com/ringteki/ringteki), inspired by
+jinteki/throneteki. Our thanks to all their contributors.
 
-Keyteki is a fork of the [ringteki sourcecode](https://github.com/ringteki/ringteki).
+KeyForge and all related artwork and trademarks are the property of Fantasy Flight Games /
+Ghost Galaxy. This site is a fan project and is not endorsed by or affiliated with them.

@@ -1,7 +1,7 @@
 {
     "name": "master-vault-data",
     "version": "1.0.0",
-    "description": "Card data for The Crucible Online",
+    "description": "Card data for Archon Arena (upstream: The Crucible Online)",
     "repository": {
         "type": "git",
         "url": "https://github.com/keyteki/keyteki"

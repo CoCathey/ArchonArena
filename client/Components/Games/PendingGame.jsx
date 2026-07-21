@@ -25,7 +25,7 @@ function showNotification(notification) {
     }
 
     try {
-        const windowNotification = new Notification('The Crucible Online', notification);
+        const windowNotification = new Notification('Archon Arena', notification);
 
         setTimeout(() => windowNotification.close(), 5000);
     } catch {
@@ -34,7 +34,7 @@ function showNotification(notification) {
         // Fall back to ServiceWorkerRegistration.showNotification when available.
         if (navigator.serviceWorker?.ready) {
             navigator.serviceWorker.ready
-                .then((reg) => reg.showNotification('The Crucible Online', notification))
+                .then((reg) => reg.showNotification('Archon Arena', notification))
                 .catch(() => {});
         }
     }

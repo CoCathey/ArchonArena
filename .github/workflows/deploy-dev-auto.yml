@@ -21,7 +21,7 @@ jobs:
               run: |
                   NAMESPACE="keyteki-development"
                   ENV_SUBDOMAIN="dev"
-                  APP_NAME="The Crucible Online"
+                  APP_NAME="Archon Arena"
                   DEPLOY_TIME=$(date +%s)
 
                   cat > /tmp/lobby-secrets.yaml <<EOF

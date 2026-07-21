@@ -11,13 +11,13 @@ const HowToPlay = () => {
 
     return (
         <div className='min-h-full w-full'>
-            <Panel title={t('How To Play on The Crucible Online')}>
+            <Panel title={t('How To Play on Archon Arena')}>
                 <Button
                     className='mb-3 ml-auto inline-flex'
                     variant='primary'
                     onPress={() =>
                         window.open(
-                            'https://github.com/keyteki/keyteki/issues',
+                            'https://github.com/CoCathey/ArchonArena/issues',
                             '_blank',
                             'noopener,noreferrer'
                         )
@@ -31,7 +31,7 @@ const HowToPlay = () => {
                 <p>
                     <Trans i18nKey='howtoplay.thisguide'>
                         This guide is aimed at players familiar with Keyforge: the Unique Deck Game
-                        who want to start playing online using the The Crucible Online platform. If
+                        who want to start playing online using the Archon Arena platform. If
                         you are new to this cardgame in general, there is a{' '}
                         <a
                             href='https://www.youtube.com/watch?v=D7qt2H9Im2Q'
@@ -126,7 +126,7 @@ const HowToPlay = () => {
                         would help immensely if you would submit an issue on{' '}
                         <a
                             target='_blank'
-                            href='https://github.com/keyteki/keyteki/issues'
+                            href='https://github.com/CoCathey/ArchonArena/issues'
                             rel='noopener noreferrer'
                         >
                             GitHub
@@ -179,17 +179,13 @@ const HowToPlay = () => {
                 </h3>
                 <p>
                     <Trans i18nKey='howtoplay.about'>
-                        The Crucible Online does not rank and/or match players by skill level in any
-                        way. There are three categories (beginner, casual and competitive) to be
-                        chosen when creating a game which gives an indication of what to expect, but
-                        it doesn&apos;t enforce anything. Even though personal stats are not being
-                        tracked, most players still very much appreciate a formal concede by
-                        clicking the ‘Concede’ button and typing ‘gg’ before leaving a game. The
-                        reality of quick and anonymous online games dictates this won’t always
-                        happen though, as evidenced by regular complaining in the main lobby about
-                        people leaving without conceding. Our advice is to just move on to the next
-                        game since in the end, conceding or not doesn’t really impact anything.
-                        Happy gaming!
+                        Archon Arena is building rated play, rankings, and tournaments on top of
+                        the classic casual experience. There are three categories (beginner, casual
+                        and competitive) to be chosen when creating a game which gives an
+                        indication of what to expect. Most players very much appreciate a formal
+                        concede by clicking the ‘Concede’ button and typing ‘gg’ before leaving a
+                        game — and once rated play launches, finishing or formally conceding rated
+                        games will matter for your rating. Happy gaming!
                     </Trans>
                 </p>
             </Panel>

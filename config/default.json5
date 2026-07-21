@@ -17,8 +17,8 @@
 
     lobby: {
         port: 4000,
-        appName: 'The Crucible Online',
-        emailFromAddress: 'noreply@thecrucible.online',
+        appName: 'Archon Arena',
+        emailFromAddress: 'noreply@archonarena.com',
         blockDisposableEmail: false,
         requireActivation: false,
         hmacSecret: 'somethingevenmoresecret',

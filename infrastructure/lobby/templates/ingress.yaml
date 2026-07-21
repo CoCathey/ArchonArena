@@ -10,7 +10,7 @@ spec:
         - websecure
     routes:
 {{- if eq .Values.environment "production" }}
-        - match: Host(`thecrucible.online`) && PathPrefix(`/img/`)
+        - match: Host(`archonarena.com`) && PathPrefix(`/img/`)
           kind: Rule
           priority: 20
           services:
@@ -18,14 +18,14 @@ spec:
                 port: 80
           middlewares:
               - name: static-cache-headers
-        - match: Host(`thecrucible.online`)
+        - match: Host(`archonarena.com`)
           kind: Rule
           priority: 10
           services:
               - name: keyteki-lobby
                 port: 80
 {{- else }}
-        - match: Host(`{{ .Values.environment }}.thecrucible.online`) && PathPrefix(`/img/`)
+        - match: Host(`{{ .Values.environment }}.archonarena.com`) && PathPrefix(`/img/`)
           kind: Rule
           priority: 20
           services:
@@ -33,7 +33,7 @@ spec:
                 port: 80
           middlewares:
               - name: static-cache-headers
-        - match: Host(`{{ .Values.environment }}.thecrucible.online`)
+        - match: Host(`{{ .Values.environment }}.archonarena.com`)
           kind: Rule
           priority: 10
           services:
@@ -75,7 +75,7 @@ spec:
         kind: ClusterIssuer
     dnsNames:
 {{- if eq .Values.environment "production" }}
-        - thecrucible.online
+        - archonarena.com
 {{- else }}
-        - {{ .Values.environment }}.thecrucible.online
+        - {{ .Values.environment }}.archonarena.com
 {{- end }}

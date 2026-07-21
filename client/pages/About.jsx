@@ -10,13 +10,13 @@ const About = () => {
 
     return (
         <div className='min-h-full w-full'>
-            <Panel title={t('About The Crucible Online - Help and information')}>
+            <Panel title={t('About Archon Arena - Help and information')}>
                 <Button
                     className='mb-2 ml-auto block w-fit'
                     variant='primary'
                     onPress={() =>
                         window.open(
-                            'https://github.com/keyteki/keyteki/issues',
+                            'https://github.com/CoCathey/ArchonArena/issues',
                             '_blank',
                             'noopener,noreferrer'
                         )
@@ -28,8 +28,10 @@ const About = () => {
                     <h3>What is this?</h3>
 
                     <p>
-                        This site was setup to allow you to play Keyforge, a Unique Deck Game from
-                        Ghost Galaxy in your browser.
+                        Archon Arena is a competitive platform for playing KeyForge, a Unique Deck
+                        Game from Ghost Galaxy, in your browser — with ratings, rankings, and
+                        tournaments. The gameplay engine is based on The Crucible Online (keyteki)
+                        open source project.
                     </p>
                 </Trans>
                 <Trans i18nKey='about.cool'>
@@ -77,8 +79,9 @@ const About = () => {
                 <Trans i18nKey='about.thanks'>
                     <h3>Special Thanks</h3>
                     <p>
-                        I&apos;d like to thank Jadiel for starting this site and taking good care of
-                        it before I got involved!
+                        Archon Arena is built on the shoulders of The Crucible Online and the
+                        keyteki open source project — our thanks to its maintainers and
+                        contributors for years of work on the gameplay engine.
                     </p>
                 </Trans>
                 <Trans i18nKey='about.colors'>

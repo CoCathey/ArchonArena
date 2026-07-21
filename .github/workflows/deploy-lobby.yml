@@ -17,7 +17,7 @@ jobs:
             - name: Deploy Lobby
               run: |
                   ENV=$(echo "${{ github.event.inputs.environment }}" | tr '[:upper:]' '[:lower:]')
-                  APP_NAME="The Crucible Online"
+                  APP_NAME="Archon Arena"
 
                   if [ "${{ github.event.inputs.environment }}" = "Production" ]; then
                     NAMESPACE="keyteki"

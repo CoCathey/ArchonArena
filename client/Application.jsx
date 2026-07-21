@@ -196,7 +196,7 @@ const Application = () => {
 
     return (
         <div className='bg' ref={bgRef}>
-            <Navigation appName='The Crucible Online' user={user} />
+            <Navigation appName='Archon Arena' user={user} />
             <div className='wrapper'>
                 <div className='mx-auto w-full pt-14 px-3 sm:px-4 lg:max-w-[92vw] lg:px-6 2xl:max-w-screen-2xl'>
                     <ErrorBoundary
