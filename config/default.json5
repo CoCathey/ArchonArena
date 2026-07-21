@@ -37,6 +37,24 @@
          */
     },
 
+    // OpenID Connect SSO login. Disabled until a client is registered in the
+    // provider realm (Keybringer/Keycloak): the client id/secret and the
+    // redirect URI https://<domain>/api/account/oidc/callback must be
+    // configured there first.
+    auth: {
+        oidc: {
+            enabled: false,
+            providerName: 'keybringer', // stable key used in the identities table
+            providerDisplayName: 'Keybringer',
+            issuer: 'https://account.keybringer.com/realms/keybringer',
+            clientId: '', // set via OIDC_CLIENT_ID
+            clientSecret: '', // set via OIDC_CLIENT_SECRET
+            redirectUri: 'http://localhost:4000/api/account/oidc/callback',
+            scopes: 'openid profile email',
+            requestTimeoutMs: 10000
+        }
+    },
+
     // Decks of KeyForge (decksofkeyforge.com) SAS/AERC integration.
     // Get an API key from your DoK profile page. All values are intended to
     // become runtime admin settings once the settings service exists.

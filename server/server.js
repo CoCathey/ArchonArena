@@ -1,6 +1,8 @@
 const express = require('express');
 const app = express();
 const bodyParser = require('body-parser');
+// ARCHON: cookies carry transient OIDC login state (see server/api/oidc.js)
+const cookieParser = require('cookie-parser');
 const ConfigService = require('./services/ConfigService');
 const passport = require('passport');
 const logger = require('./log.js');
@@ -60,6 +62,8 @@ class Server {
 
         app.use(bodyParser.json({ limit: '5mb' }));
         app.use(bodyParser.urlencoded({ extended: false }));
+        // ARCHON: cookies carry transient OIDC login state (see server/api/oidc.js)
+        app.use(cookieParser());
 
         api.init(app, options);
 

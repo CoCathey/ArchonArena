@@ -23,6 +23,16 @@
         apiKey: 'DOK_API_KEY'
     },
 
+    auth: {
+        oidc: {
+            enabled: 'OIDC_ENABLED',
+            issuer: 'OIDC_ISSUER',
+            clientId: 'OIDC_CLIENT_ID',
+            clientSecret: 'OIDC_CLIENT_SECRET',
+            redirectUri: 'OIDC_REDIRECT_URI'
+        }
+    },
+
     gameNode: {
         name: 'SERVER',
         host: 'HOST',

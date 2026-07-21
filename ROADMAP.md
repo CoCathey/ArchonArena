@@ -89,19 +89,24 @@ correct identity.
 Keybringer runs Keycloak (`account.keybringer.com/realms/keybringer`) — standard
 OpenID Connect.
 
--   [ ] Current-state analysis of TCO auth (local username/password + JWT) — doc.
--   [ ] Add OIDC login via Keycloak (`openid-connect` authorization code + PKCE flow).
--   [ ] Account linking: existing local accounts can link a Keybringer identity;
-        new users can register purely via Keybringer.
--   [ ] Admin setting: enable/disable local registration vs SSO-only **(admin-config)**.
--   [ ] Token refresh, logout (RP-initiated), session revocation.
+-   [x] Current-state analysis of TCO auth (local username/password + JWT) —
+        docs/design/keybringer-sso.md.
+-   [x] OIDC login via Keycloak (authorization code + PKCE, JWKS signature validation,
+        no new dependencies) — server/services/auth/OidcService.js + /api/account/oidc/\*.
+-   [x] Account resolution: existing link → login; verified-email match → auto-link;
+        otherwise create a pre-verified account. New users can register purely via
+        Keybringer.
+-   [x] Provider-agnostic config **(admin-config-ready)**: OIDC\_\* env vars; login page
+        button appears only when the server reports SSO enabled.
+-   [x] Tests: request construction, RS256 verification, nonce/issuer/key rejection,
+        identity resolution paths (13 tests).
+-   [ ] **Owner action:** register the Keycloak client in the keybringer realm (client
+        id/secret, redirect URIs for archonarena.com + localhost) and set OIDC\_\* env vars.
+-   [ ] Link/unlink UI in account settings.
+-   [ ] Admin setting: SSO-only mode (disable local registration) **(admin-config)**.
+-   [ ] RP-initiated logout against Keycloak; session revocation on unlink.
 -   [ ] Role mapping: Keycloak roles/groups → Archon Arena roles (admin, TO, moderator).
--   [ ] Auth service extracted behind an interface so future providers (Discord OAuth etc.)
-        are pluggable.
--   [ ] Tests: OIDC callback, link/unlink, role sync, token expiry.
-
-**Open question for owner:** we need a Keycloak client registered in the keybringer realm
-(client id, redirect URIs for archonarena.com + localhost dev). Requires realm admin access.
+-   [ ] Password-set flow for SSO-created accounts.
 
 ## Phase 4 — Deck service: Decks of KeyForge SAS integration _(PRIORITY)_
 

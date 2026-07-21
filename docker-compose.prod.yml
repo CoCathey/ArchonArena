@@ -53,6 +53,11 @@ services:
             - SENTRY_DSN=${SENTRY_DSN:-}
             - CAPTCHA_KEY=${CAPTCHA_KEY:-}
             - DOK_API_KEY=${DOK_API_KEY:-}
+            - OIDC_ENABLED=${OIDC_ENABLED:-}
+            - OIDC_ISSUER=${OIDC_ISSUER:-}
+            - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
+            - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-}
+            - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI:-}
         command: ['node', '.']
 
     node-0:

@@ -1,4 +1,6 @@
 const account = require('./account');
+// ARCHON: OIDC SSO login (Keybringer)
+const oidc = require('./oidc');
 const decks = require('./decks');
 const games = require('./games');
 const cards = require('./cards');
@@ -10,6 +12,8 @@ const challonge = require('./challonge');
 
 module.exports.init = function (server, options) {
     account.init(server, options);
+    // ARCHON: OIDC SSO login (Keybringer)
+    oidc.init(server);
     decks.init(server);
     games.init(server);
     cards.init(server);
