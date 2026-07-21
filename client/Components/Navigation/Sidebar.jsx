@@ -107,17 +107,21 @@ const Sidebar = ({ appName, user }) => {
                     <span className='text-xs text-muted'>›</span>
                 </button>
                 {isOpen && (
-                    <div className='top-0 z-50 rounded-md border border-border/70 bg-overlay/98 p-1.5 shadow-xl lg:absolute lg:left-full lg:ml-1 lg:w-56'>
-                        {section.childItems.map((item) => (
-                            <Link
-                                key={item.path}
-                                href={item.path}
-                                className={childLinkClass(location.pathname === item.path)}
-                                onClick={closeAll}
-                            >
-                                {t(item.title)}
-                            </Link>
-                        ))}
+                    // Outer wrapper includes the gap so hover survives the
+                    // pointer crossing from the button into the flyout
+                    <div className='top-0 z-50 lg:absolute lg:left-full lg:w-60 lg:pl-2'>
+                        <div className='rounded-md border border-border/70 bg-overlay p-1.5 shadow-xl'>
+                            {section.childItems.map((item) => (
+                                <Link
+                                    key={item.path}
+                                    href={item.path}
+                                    className={childLinkClass(location.pathname === item.path)}
+                                    onClick={closeAll}
+                                >
+                                    {t(item.title)}
+                                </Link>
+                            ))}
+                        </div>
                     </div>
                 )}
             </div>
@@ -166,7 +170,10 @@ const Sidebar = ({ appName, user }) => {
 
     const menuBody = (
         <>
-            <nav className='flex-1 space-y-1 overflow-y-auto px-2 py-3'>
+            {/* overflow must stay visible on desktop or the flyouts get
+                clipped inside the column (and force horizontal scrolling);
+                mobile renders submenus inline so it can scroll freely */}
+            <nav className='flex-1 space-y-1 overflow-y-auto px-2 py-3 lg:overflow-visible'>
                 {visibleSections.map(renderSection)}
             </nav>
             <div className='space-y-2 border-t border-border/70 px-3 py-3'>
