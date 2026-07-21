@@ -121,19 +121,22 @@ Chess Elo, modified by (a) key differential of the result and (b) SAS (power) di
 between the two decks. Playing up in SAS and winning big should pay more; stomping with a
 much stronger deck pays less.
 
--   [ ] Standalone **Rating Service** (pure functions + persistence adapter; no gameplay
-        engine coupling).
--   [ ] Core algorithm: - Expected score `E = 1 / (1 + 10^((Ro - Rp + sasWeight·ΔSAS)/400))` — ΔSAS shifts
-        expectation toward the stronger deck. - Margin-of-victory multiplier from key differential (3–0, 3–1, 3–2 keys, forge-out
-        vs. timeout, concession) similar to FIDE/Glicko margin variants. - `R' = R + K · movMultiplier(keyDiff) · (S − E)`.
--   [ ] All parameters **(admin-config)**: K-factor (with new-player/provisional K),
-        sasWeight, MoV multiplier table, rating floor, placement game count, decay policy.
--   [ ] Rating history table (every game: pre/post rating, opponent, decks, SAS, key diff).
--   [ ] Provisional ratings + placement matches.
+-   [x] Core algorithm as a pure calculator (`server/services/rating/EloCalculator.js`;
+        design: docs/design/rating-engine.md): SAS handicap folded into expected score,
+        key-differential margin-of-victory multipliers, provisional K, rating floor.
+-   [x] All calculator parameters override-driven **(admin-config)** with validation:
+        K-factor, provisional K + game count, sasWeight, MoV tables, floor, default rating.
+-   [x] Unit tests: algorithm properties (zero-sum, monotonicity in key diff, SAS handicap
+        direction), golden-value tests, config edge cases (27 tests).
+-   [ ] RatingService orchestration layer: persistence + subscribe to game completion at
+        the lobby layer (GAMEWIN), no gameplay-engine coupling.
+-   [ ] DB: Ratings + RatingHistory tables (pre/post rating, opponent, decks, SAS,
+        key diff, config snapshot per game).
+-   [ ] Wire admin settings service overrides into RatingService (needs settings service).
+-   [ ] Rating decay policy **(admin-config)**.
+-   [ ] Provisional/placement UX (badge until N games).
 -   [ ] Separate rating pools **(admin-config)**: e.g. Archon, Alliance, Sealed; per-format.
 -   [ ] Recalculation tool (replay rating history after config change; admin-triggered).
--   [ ] Unit tests: algorithm properties (zero-sum, monotonicity in key diff, SAS handicap
-        direction), golden-value tests, config edge cases.
 
 ## Phase 6 — Rankings & leaderboards _(PRIORITY)_
 
