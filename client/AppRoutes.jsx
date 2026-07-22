@@ -116,6 +116,24 @@ const AppRoutes = ({ currentGame, user }) => {
             {/* ARCHON: placeholders for roadmap features (see ROADMAP.md) */}
             <Route path='/play-irl' element={<PlayIrl />} />
             <Route
+                path='/mobile/ios'
+                element={
+                    <Placeholder
+                        title='iPhone App'
+                        description='The Archon Arena iPhone app is on its way to the App Store. Until then, the site works great in Safari on your phone.'
+                    />
+                }
+            />
+            <Route
+                path='/mobile/android'
+                element={
+                    <Placeholder
+                        title='Android App'
+                        description='The Archon Arena Android app is on its way to Google Play. Until then, the site works great in Chrome on your phone.'
+                    />
+                }
+            />
+            <Route
                 path='/stats'
                 element={
                     <Placeholder

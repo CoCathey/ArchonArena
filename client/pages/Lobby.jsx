@@ -112,10 +112,44 @@ const Lobby = () => {
                             games: games?.length || 0
                         })}
                     </div>
+                    {/* ARCHON: mobile apps (routes show Coming Soon until the
+                        store listings are live) */}
+                    <div className='flex flex-wrap items-center justify-center gap-2'>
+                        <button
+                            type='button'
+                            onClick={() => navigate('/mobile/ios')}
+                            className='inline-flex items-center gap-2 rounded-md border border-border/70 bg-surface-secondary/60 px-3 py-1.5 text-sm text-foreground transition hover:border-amber-300/60'
+                        >
+                            <svg
+                                viewBox='0 0 24 24'
+                                className='h-4 w-4'
+                                fill='currentColor'
+                                aria-hidden='true'
+                            >
+                                <path d='M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z' />
+                            </svg>
+                            {t('iPhone App')}
+                        </button>
+                        <button
+                            type='button'
+                            onClick={() => navigate('/mobile/android')}
+                            className='inline-flex items-center gap-2 rounded-md border border-border/70 bg-surface-secondary/60 px-3 py-1.5 text-sm text-foreground transition hover:border-amber-300/60'
+                        >
+                            <svg
+                                viewBox='0 0 24 24'
+                                className='h-4 w-4'
+                                fill='currentColor'
+                                aria-hidden='true'
+                            >
+                                <path d='M17.6 9.48l1.84-3.18c.16-.31.04-.7-.26-.85-.29-.15-.65-.06-.83.22l-1.88 3.24a11.46 11.46 0 0 0-8.94 0L5.65 5.67c-.19-.29-.55-.37-.83-.22-.3.16-.42.54-.26.85L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z' />
+                            </svg>
+                            {t('Android App')}
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <div className='grid gap-4 pb-12 md:grid-cols-3'>
+            <div className='grid gap-4 pb-8 md:grid-cols-3'>
                 {features.map((feature) => (
                     <div
                         key={feature.title}
@@ -125,6 +159,39 @@ const Lobby = () => {
                         <div className='text-sm text-muted'>{feature.body}</div>
                     </div>
                 ))}
+            </div>
+
+            {/* ARCHON: standing on the shoulders of two community projects -
+                say so where every player lands, not just on the About page. */}
+            <div className='mb-12 rounded-lg border border-border/50 bg-surface-secondary/40 px-5 py-4 text-center'>
+                <div className='mb-1 text-xs font-semibold uppercase tracking-wide text-amber-300/80'>
+                    {t('Special thanks')}
+                </div>
+                <p className='mx-auto max-w-2xl text-sm text-muted'>
+                    {t(
+                        'Archon Arena exists because of two projects that have carried the KeyForge community for years: '
+                    )}
+                    <a
+                        href='https://thecrucible.online'
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        className='font-semibold text-foreground underline decoration-amber-400/60 underline-offset-2 hover:text-amber-300'
+                    >
+                        {t('The Crucible Online')}
+                    </a>
+                    {t(', whose open-source gameplay engine powers every game played here, and ')}
+                    <a
+                        href='https://decksofkeyforge.com'
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        className='font-semibold text-foreground underline decoration-amber-400/60 underline-offset-2 hover:text-amber-300'
+                    >
+                        {t('Decks of KeyForge')}
+                    </a>
+                    {t(
+                        ', whose SAS ratings taught us all how to talk about deck power. Thank you for keeping the Crucible burning.'
+                    )}
+                </p>
             </div>
         </div>
     );
