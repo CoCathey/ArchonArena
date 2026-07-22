@@ -1,0 +1,147 @@
+import { io, Socket } from 'socket.io-client';
+import { refreshAuthToken } from '../api/client';
+import type { HandoffMessage } from '../api/types';
+import type { GameState } from '../game/types';
+import { useAuthStore } from '../stores/authStore';
+import { useGameStore } from '../stores/gameStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { patch } from './jsonpatch';
+
+let socket: Socket | undefined;
+let currentGameId: string | undefined;
+
+export function getGameSocket(): Socket | undefined {
+    return socket;
+}
+
+/** Build the game node origin from a lobby handoff message. */
+export function gameNodeUrl(handoff: HandoffMessage): string {
+    const lobbyUrl = useSettingsStore.getState().serverUrl;
+    const lobbyHost = lobbyUrl.replace(/^https?:\/\//, '').replace(/[:/].*$/, '');
+    const lobbyProtocol = lobbyUrl.startsWith('http://') ? 'http' : 'https';
+
+    const host = handoff.address && handoff.address !== 'undefined' ? handoff.address : lobbyHost;
+    const protocol = handoff.protocol ?? lobbyProtocol;
+
+    let url = `${protocol}://${host}`;
+    const standardPorts = [80, 443];
+    if (handoff.port && !standardPorts.includes(handoff.port)) {
+        url += `:${handoff.port}`;
+    }
+
+    return url;
+}
+
+/**
+ * Connect to the game node named in the handoff. Replaces any previous game
+ * connection.
+ */
+export function connectToGame(handoff: HandoffMessage): void {
+    const store = useGameStore.getState();
+
+    if (socket && currentGameId === handoff.gameId && socket.connected) {
+        return;
+    }
+
+    if (socket) {
+        closeGameSocket({ resetStore: false });
+    }
+
+    currentGameId = handoff.gameId;
+    store.setStatus('connecting');
+    store.setRootState(undefined);
+
+    socket = io(gameNodeUrl(handoff), {
+        path: `/${handoff.name}/socket.io`,
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: 5,
+        transports: ['websocket'],
+        auth: (cb) => {
+            // Prefer the freshest JWT we hold; the handoff token was newest at
+            // handoff time, but reconnects may happen much later.
+            cb({ token: useAuthStore.getState().token || handoff.authToken });
+        }
+    });
+
+    socket.on('connect', () => {
+        const gameStore = useGameStore.getState();
+        gameStore.setStatus('connected');
+        // The server resets its diff baseline for us on every connection and
+        // will send a complete state next — drop whatever we had.
+        gameStore.setRootState(undefined);
+    });
+
+    socket.on('connect_error', async () => {
+        // Most likely an expired JWT; refresh so the next retry can succeed.
+        await refreshAuthToken();
+    });
+
+    socket.on('disconnect', () => {
+        const gameStore = useGameStore.getState();
+        if (gameStore.status !== 'closed') {
+            gameStore.setStatus('reconnecting');
+        }
+    });
+
+    socket.io.on('reconnect_attempt', () => {
+        useGameStore.getState().setStatus('reconnecting');
+    });
+
+    socket.io.on('reconnect_failed', () => {
+        useGameStore.getState().setStatus('failed');
+    });
+
+    socket.on('gamestate', (state: unknown) => {
+        const gameStore = useGameStore.getState();
+        if (state === undefined || state === null) {
+            return;
+        }
+        if (gameStore.rootState) {
+            try {
+                gameStore.setRootState(patch(gameStore.rootState, state));
+            } catch (err) {
+                // A malformed/mismatched delta would corrupt the board; drop
+                // state and force a clean resync instead.
+                console.warn('gamestate patch failed; resyncing', err);
+                gameStore.setRootState(undefined);
+                socket?.disconnect();
+                socket?.connect();
+            }
+        } else {
+            gameStore.setRootState(state as GameState);
+        }
+    });
+
+    socket.on('cleargamestate', () => {
+        useGameStore.getState().setRootState(undefined);
+    });
+}
+
+/** Send an in-game command (a Game method) to the game node. */
+export function sendGameMessage(command: string, ...args: unknown[]): void {
+    if (socket) {
+        socket.emit('game', command, ...args);
+    }
+}
+
+/**
+ * Close the game connection. Deferred a tick so a just-queued 'concede' /
+ * 'leavegame' emit can flush over the transport first.
+ */
+export function closeGameSocket(options: { resetStore?: boolean } = {}): void {
+    const { resetStore = true } = options;
+    if (socket) {
+        const closing = socket;
+        closing.removeAllListeners();
+        setTimeout(() => closing.close(), 0);
+        socket = undefined;
+    }
+    currentGameId = undefined;
+    if (resetStore) {
+        useGameStore.getState().reset();
+    } else {
+        useGameStore.getState().setStatus('closed');
+    }
+}
