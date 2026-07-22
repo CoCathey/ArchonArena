@@ -83,6 +83,12 @@ const ProfileSection = Object.freeze({
     Gameplay: 'gameplay'
 });
 
+// ARCHON: the Integrations tab (Patreon linking, Challonge API keys, and -
+// once SSO is enabled - Keybringer account linking) is hidden for now. All
+// of its code (ProfileMain's integrations section, the server endpoints)
+// stays live; flip this to true to bring the tab back.
+const SHOW_INTEGRATIONS = false;
+
 /**
  * @param {ProfileProps} props
  */
@@ -229,7 +235,9 @@ const Profile = ({ onSubmit, isLoading }) => {
                                 <nav className='grid gap-1'>
                                     {[
                                         [ProfileSection.Account, t('Account')],
-                                        [ProfileSection.Integrations, t('Integrations')],
+                                        ...(SHOW_INTEGRATIONS
+                                            ? [[ProfileSection.Integrations, t('Integrations')]]
+                                            : []),
                                         [ProfileSection.Appearance, t('Appearance')],
                                         [ProfileSection.Gameplay, t('Gameplay')]
                                     ].map(([sectionKey, label]) => (
