@@ -202,7 +202,12 @@ export const socketMiddleware = (store) => (next) => (action) => {
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            reconnectionAttempts: 5,
+            // ARCHON: 5 attempts (~15s) was too few — a brief network blip mid
+            // game would exhaust them and strand the player at a board whose
+            // clicks no longer resolve. Give reconnection a couple of minutes to
+            // recover. Safe now that a post-connect `connect_error` no longer
+            // reports a failed handoff to the lobby (see the handler below).
+            reconnectionAttempts: 20,
             auth: {
                 token: currentState.auth.token || undefined
             }
@@ -220,11 +225,20 @@ export const socketMiddleware = (store) => (next) => (action) => {
         });
 
         gameSocket.on('connect', () => {
+            // ARCHON: remember that we reached the node at least once so a later
+            // reconnection blip isn't misreported as a failed handoff.
+            gameSocket.tHasConnected = true;
             store.dispatch(gamesActions.socketConnected({ socket: gameSocket }));
         });
 
         gameSocket.on('connect_error', () => {
-            if (lobbySocket) {
+            // ARCHON: only tell the lobby the handoff failed if we NEVER managed
+            // to connect to the game node. A `connect_error` fired after a
+            // successful connect is a transient reconnection blip (socket.io
+            // keeps retrying) — reporting it made the node run `failedConnect`
+            // on a live game, marking it finished and leaving the player staring
+            // at a board whose buttons (e.g. the mulligan prompt) did nothing.
+            if (lobbySocket && !gameSocket.tHasConnected) {
                 lobbySocket.emit('connectfailed');
             }
             store.dispatch(gamesActions.socketConnectError());

@@ -685,6 +685,28 @@ class Lobby {
         socket.send('cleargamestate');
         socket.leaveChannel(game.id);
 
+        // ARCHON: leaving a *started* game over the lobby socket is the fallback
+        // escape hatch when a player's game-node socket is dead (they were
+        // stranded at a rendered-but-unresponsive board). The node still
+        // believes the player is present, so once every player has left from the
+        // lobby's authoritative view, force the node to tear the game down —
+        // otherwise the finished game lingers as a ghost in the lobby list until
+        // the node's stale-game sweep, or forever if the dead socket never
+        // times out. When the opponent is still playing we only broadcast the
+        // update and let the node keep running the live game.
+        if (game.started && !game.tournament) {
+            if (game.isEmpty()) {
+                if (game.node && game.node.identity) {
+                    this.router.closeGame(game);
+                }
+                delete this.games[game.id];
+                this.broadcastGameMessage('removegame', game);
+            } else {
+                this.broadcastGameMessage('updategame', game);
+            }
+            return;
+        }
+
         if (game.isEmpty() && !game.tournament) {
             delete this.games[game.id];
             this.broadcastGameMessage('removegame', game);

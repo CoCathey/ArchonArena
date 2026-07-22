@@ -2,7 +2,11 @@ import React, { useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@heroui/react';
-import { gameCloseRequested, gameSendMessage } from '../../redux/socketActions';
+import {
+    gameCloseRequested,
+    gameSendMessage,
+    lobbyLeaveGameRequested
+} from '../../redux/socketActions';
 
 const GameContextMenu = ({ mobile = false }) => {
     const currentGame = useSelector((state) => state.lobby.currentGame);
@@ -46,6 +50,23 @@ const GameContextMenu = ({ mobile = false }) => {
         return true;
     };
 
+    // ARCHON: leave over BOTH sockets. The game-socket emits are the normal
+    // path, but if that socket is dead (the player was stranded at an
+    // unresponsive board) they go nowhere — so also send `leavegame` over the
+    // independent, still-alive lobby socket. That guarantees the player can
+    // always escape and lets the server tear the game down instead of leaving a
+    // ghost in the lobby list.
+    const leaveViaBothSockets = (conceding) => {
+        if (conceding) {
+            dispatch(gameSendMessage('concede'));
+        }
+        dispatch(gameSendMessage('leavegame'));
+        if (currentGame?.id) {
+            dispatch(lobbyLeaveGameRequested(currentGame.id));
+        }
+        dispatch(gameCloseRequested());
+    };
+
     const onLeaveClick = () => {
         if (!isSpectating && isGameActive()) {
             const confirmed = window.confirm(
@@ -58,14 +79,11 @@ const GameContextMenu = ({ mobile = false }) => {
                 return;
             }
 
-            dispatch(gameSendMessage('concede'));
-            dispatch(gameSendMessage('leavegame'));
-            dispatch(gameCloseRequested());
+            leaveViaBothSockets(true);
             return;
         }
 
-        dispatch(gameSendMessage('leavegame'));
-        dispatch(gameCloseRequested());
+        leaveViaBothSockets(false);
     };
 
     if (!currentGame || !currentGame.started) {
