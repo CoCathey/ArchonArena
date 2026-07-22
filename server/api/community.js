@@ -5,6 +5,27 @@ const ClubService = require('../services/community/ClubService');
 const MemberDirectoryService = require('../services/community/MemberDirectoryService');
 const StoreService = require('../services/community/StoreService');
 const { wrapAsync } = require('../util.js');
+const { rateLimit } = require('./rateLimit');
+
+// Abuse limits on mutations with no legitimate high-frequency use.
+const friendRequestLimit = rateLimit({
+    name: 'friend-request',
+    windowMs: 10 * 60 * 1000,
+    max: 30,
+    message: 'Too many friend requests. Please wait a little before sending more.'
+});
+const clubCreateLimit = rateLimit({
+    name: 'club-create',
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    message: 'You have created several clubs recently. Please wait a while before creating another.'
+});
+const storeCreateLimit = rateLimit({
+    name: 'store-create',
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    message: 'You have added several stores recently. Please wait a while before adding another.'
+});
 
 const friendService = new FriendService();
 const clubService = new ClubService();
@@ -31,6 +52,7 @@ module.exports.init = function (server) {
     server.post(
         '/api/friends/request',
         jwt,
+        friendRequestLimit,
         wrapAsync(async (req, res) => {
             if (!req.body.username) {
                 return res.send({ success: false, message: 'username must be specified' });
@@ -91,6 +113,7 @@ module.exports.init = function (server) {
     server.post(
         '/api/clubs',
         jwt,
+        clubCreateLimit,
         wrapAsync(async (req, res) => {
             res.send(await clubService.create(req.user.id, req.body));
         })
@@ -181,6 +204,7 @@ module.exports.init = function (server) {
     server.post(
         '/api/stores',
         jwt,
+        storeCreateLimit,
         wrapAsync(async (req, res) => {
             res.send(await storeService.create(req.user.id, req.body));
         })

@@ -1333,6 +1333,40 @@ class Game extends EventEmitter {
             if (!this.finishedAt) {
                 this.finishedAt = new Date();
             }
+
+            this.recordAbandonmentResultOnLeave(player);
+        }
+    }
+
+    /**
+     * ARCHON: award a started, unfinished game to the leaving player when
+     * their opponent has ALREADY abandoned it (left or disconnected). Without
+     * this, a player could dodge a rated loss by quitting first (disconnect or
+     * leave) and forcing the opponent to leave an unfinished game that then
+     * evaporates with no winner and is never rated.
+     *
+     * The ordinary "leave = concede to a still-present opponent" case is
+     * intentionally NOT handled here: the client sends an explicit concede
+     * whenever the opponent is still active, and we must not forfeit a player
+     * who leaves an opponent that is merely idle/inactive (not abandoned).
+     */
+    recordAbandonmentResultOnLeave(leaver) {
+        if (this.winner) {
+            return;
+        }
+
+        const opponents = Object.values(this.playersAndSpectators).filter(
+            (player) => player !== leaver && !this.isSpectator(player) && player.id !== 'TBA'
+        );
+
+        if (opponents.length !== 1) {
+            return;
+        }
+
+        const opponent = opponents[0];
+
+        if (opponent.left || opponent.disconnectedAt) {
+            this.recordWinner(leaver, 'concede');
         }
     }
 

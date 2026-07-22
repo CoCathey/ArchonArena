@@ -442,7 +442,7 @@ module.exports.init = function (server, options) {
                 .digest('hex');
 
             if (resetToken !== req.body.token) {
-                logger.error('Invalid activation token for %s: %s', user.username, req.body.token);
+                logger.error('Invalid activation token for %s', user.username);
 
                 return res.send({
                     success: false,
@@ -725,7 +725,7 @@ module.exports.init = function (server, options) {
             );
 
             if (resetToken !== req.body.token) {
-                logger.error(`Invalid reset token for ${user.username}: ${req.body.token}`);
+                logger.error(`Invalid reset token for ${user.username}`);
 
                 return res.send({
                     success: false,
@@ -789,7 +789,9 @@ module.exports.init = function (server, options) {
 
             resetToken = hmac.update(`RESET ${user.username} ${formattedExpiration}`).digest('hex');
 
-            logger.info(`${resetToken} ${user.username} ${formattedExpiration}`);
+            // SECURITY: never log the reset token - it grants a password reset
+            // for this account to anyone who can read the logs.
+            logger.info(`Password reset requested for ${user.username}`);
 
             try {
                 await userService.setResetToken(user, resetToken, expiration);
