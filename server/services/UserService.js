@@ -788,6 +788,22 @@ class UserService extends EventEmitter {
             }
         }
 
+        // ARCHON: the Admin role is a superuser - it implies every management
+        // permission, so a single "Admin" grant gives full access without
+        // also needing UserManager, NewsManager, etc. individually.
+        if (ret.isAdmin) {
+            ret.canEditNews = true;
+            ret.canManageUsers = true;
+            ret.canManagePermissions = true;
+            ret.canManageGames = true;
+            ret.canManageNodes = true;
+            ret.canModerateChat = true;
+            ret.canVerifyDecks = true;
+            ret.canManageBanlist = true;
+            ret.canManageMotd = true;
+            ret.canManageTournaments = true;
+        }
+
         return ret;
     }
 }

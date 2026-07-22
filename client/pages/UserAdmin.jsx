@@ -333,7 +333,7 @@ const UserAdmin = () => {
                                     <AdminRatings username={currentUser.username} />
                                 ) : null}
 
-                                {user?.permissions.canManageUsers ? (
+                                {user?.permissions.isAdmin || user?.permissions.canManageUsers ? (
                                     <AdminUserDanger
                                         username={currentUser.username}
                                         onDeleted={() => setSearchUsername('')}
