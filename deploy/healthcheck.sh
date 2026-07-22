@@ -182,6 +182,21 @@ for var in SECRET HMAC_SECRET DB_USER DB_PASSWORD; do
 done
 if grep -qE "^DOK_API_KEY=.+" .env.production 2>/dev/null; then
     ok "DOK_API_KEY set (SAS + bulk deck import enabled)"
+    # Probe DoK from inside the lobby container: proves outbound network
+    # AND whether DoK accepts the key. 200/404 = reachable + key accepted;
+    # 401/403 = key rejected; 429 = rate limited; ERR = cannot reach.
+    dok_probe="$($DC exec -T lobby node -e "
+        fetch('https://decksofkeyforge.com/public-api/v3/decks/00000000-0000-0000-0000-000000000000', {
+            headers: { 'Api-Key': process.env.DOK_API_KEY || '' },
+            signal: AbortSignal.timeout(10000)
+        }).then((r) => console.log(r.status)).catch((e) => console.log('ERR:' + e.message));
+    " 2>/dev/null | tail -1)"
+    case "$dok_probe" in
+        200 | 404) ok "Decks of KeyForge reachable from the lobby, API key accepted (probe: $dok_probe)" ;;
+        401 | 403) bad "DoK rejected the API key (HTTP $dok_probe)" "regenerate the key on your DoK profile and update DOK_API_KEY in .env.production, then: $DC up -d lobby" ;;
+        429) warn "DoK rate limit hit during probe (HTTP 429)" "harmless if a bulk import just ran; re-check in a minute" ;;
+        *) bad "cannot reach decksofkeyforge.com from the lobby ($dok_probe)" "check VPS outbound connectivity/DNS: $DC exec lobby ping -c1 decksofkeyforge.com" ;;
+    esac
 else
     warn "DOK_API_KEY not set" "SAS scores and Decks of KeyForge bulk import stay disabled until set (get a key from your DoK profile)"
 fi

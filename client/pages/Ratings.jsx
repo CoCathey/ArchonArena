@@ -127,7 +127,7 @@ const Ratings = () => {
                     </ul>
                     <p>
                         {t(
-                            'Unlike Clash Royale trophies, Amber can go down as well as up - it always reflects your current standing against the field.'
+                            'Amber can go down as well as up - it always reflects your current standing against the field.'
                         )}
                     </p>
                 </div>

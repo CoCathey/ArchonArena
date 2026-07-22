@@ -29,6 +29,50 @@ const setPath = (object, path, value) => {
     return next;
 };
 
+/** Add-a-row control for stringMap fields (e.g. country -> region). */
+const StringMapAdder = ({ descriptor, onAdd }) => {
+    const { t } = useTranslation();
+    const [key, setKey] = useState('');
+    const [value, setValue] = useState(descriptor.allowedValues?.[0] || '');
+
+    const keyValid = !descriptor.keyPattern || new RegExp(descriptor.keyPattern).test(key);
+
+    return (
+        <div className='flex items-center gap-2 pt-1'>
+            <input
+                type='text'
+                className={inputClass + ' !w-24 uppercase'}
+                placeholder={descriptor.keyLabel || t('Key')}
+                value={key}
+                onChange={(event) => setKey(event.target.value.toUpperCase())}
+            />
+            <select
+                className={inputClass + ' !w-40'}
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+            >
+                {(descriptor.allowedValues || []).map((option) => (
+                    <option key={option} value={option}>
+                        {option}
+                    </option>
+                ))}
+            </select>
+            <HeroButton
+                size='sm'
+                variant='tertiary'
+                className='!h-7 !px-2 text-xs'
+                isDisabled={!key || !keyValid}
+                onPress={() => {
+                    onAdd(key, value);
+                    setKey('');
+                }}
+            >
+                {t('Add')}
+            </HeroButton>
+        </div>
+    );
+};
+
 /**
  * One editable field driven by its registry descriptor. Values edit into
  * the section's draft override object; empty means "use default".
@@ -94,6 +138,73 @@ const SettingField = ({ descriptor, path, draft, setDraft }) => {
                             {option}
                         </label>
                     ))}
+                </div>
+            </div>
+        );
+    }
+
+    if (descriptor.type === 'text') {
+        return (
+            <div>
+                <Label>{t(descriptor.label)}</Label>
+                <textarea
+                    className={`${inputClass} min-h-40 font-mono text-xs`}
+                    value={effective ?? ''}
+                    maxLength={descriptor.maxLength}
+                    onChange={(event) => setDraft(setPath(draft, path, event.target.value))}
+                />
+            </div>
+        );
+    }
+
+    if (descriptor.type === 'stringMap') {
+        const entries = Object.entries(effective || {});
+
+        return (
+            <div>
+                <Label>{t(descriptor.label)}</Label>
+                <div className='space-y-1 pt-1'>
+                    {entries.map(([key, value]) => (
+                        <div key={key} className='flex items-center gap-2'>
+                            <code className='w-16 font-mono text-sm text-foreground'>{key}</code>
+                            <select
+                                className={inputClass + ' !w-40'}
+                                value={value}
+                                onChange={(event) =>
+                                    setDraft(setPath(draft, [...path, key], event.target.value))
+                                }
+                            >
+                                {(descriptor.allowedValues || []).map((option) => (
+                                    <option key={option} value={option}>
+                                        {option}
+                                    </option>
+                                ))}
+                            </select>
+                            <HeroButton
+                                size='sm'
+                                variant='tertiary'
+                                className='!h-7 !px-2 text-xs'
+                                onPress={() => {
+                                    const next = { ...(effective || {}) };
+                                    delete next[key];
+                                    setDraft(setPath(draft, path, next));
+                                }}
+                            >
+                                {t('Remove')}
+                            </HeroButton>
+                        </div>
+                    ))}
+                    {entries.length === 0 && (
+                        <div className='text-xs text-muted'>
+                            {t('No overrides - defaults apply.')}
+                        </div>
+                    )}
+                    <StringMapAdder
+                        descriptor={descriptor}
+                        onAdd={(key, value) =>
+                            setDraft(setPath(draft, path, { ...(effective || {}), [key]: value }))
+                        }
+                    />
                 </div>
             </div>
         );

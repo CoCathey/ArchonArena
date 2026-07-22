@@ -1,4 +1,5 @@
 const { DEFAULT_ELO_CONFIG } = require('../rating/eloDefaults');
+const { REGION_NAMES } = require('../rating/regions');
 
 /**
  * Registry of runtime admin-editable settings.
@@ -10,7 +11,9 @@ const { DEFAULT_ELO_CONFIG } = require('../rating/eloDefaults');
  * on purpose).
  *
  * Field types: 'boolean' | 'number' | 'stringArray' | 'numberMap'
- * (object of numeric values, e.g. the key differential multiplier table).
+ * (object of numeric values, e.g. the key differential multiplier table) |
+ * 'stringMap' (object of string values with optional key pattern and
+ * allowed-values list) | 'text' (long free text, e.g. Markdown content).
  */
 const REGISTRY = {
     rating: {
@@ -126,6 +129,40 @@ const REGISTRY = {
                 default: 25
             }
         }
+    },
+    regions: {
+        title: 'Regions',
+        description:
+            'Country-to-region assignments for regional leaderboards. Every country already has a default region (NA, LATAM, EU, MEA, APAC); add an override to move a country. State/province is whatever each player enters and scopes state leaderboards within their country.',
+        fields: {
+            overrides: {
+                type: 'stringMap',
+                label: 'Country overrides (ISO country code → region)',
+                keyPattern: '^[A-Z]{2}$',
+                keyLabel: 'Country code (e.g. US)',
+                allowedValues: REGION_NAMES,
+                default: {}
+            }
+        }
+    },
+    content: {
+        title: 'Site Content',
+        description:
+            'Replace the built-in About and Privacy pages with your own content (Markdown: # headings, **bold**, [links](url), - lists). Leave a field empty to keep the built-in page.',
+        fields: {
+            aboutMarkdown: {
+                type: 'text',
+                label: 'About page (Markdown; empty = built-in page)',
+                maxLength: 50000,
+                default: ''
+            },
+            privacyMarkdown: {
+                type: 'text',
+                label: 'Privacy page (Markdown; empty = built-in page)',
+                maxLength: 50000,
+                default: ''
+            }
+        }
     }
 };
 
@@ -149,6 +186,26 @@ function validateField(descriptor, value, path, errors) {
             for (const entry of value) {
                 if (!descriptor.allowed.includes(entry)) {
                     errors.push(`${path} contains unknown value '${entry}'`);
+                }
+            }
+        }
+    } else if (descriptor.type === 'text') {
+        if (typeof value !== 'string') {
+            errors.push(`${path} must be text`);
+        } else if (descriptor.maxLength !== undefined && value.length > descriptor.maxLength) {
+            errors.push(`${path} must be at most ${descriptor.maxLength} characters`);
+        }
+    } else if (descriptor.type === 'stringMap') {
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+            errors.push(`${path} must be an object`);
+        } else {
+            for (const [key, entry] of Object.entries(value)) {
+                if (descriptor.keyPattern && !new RegExp(descriptor.keyPattern).test(key)) {
+                    errors.push(`${path} has invalid key '${key}'`);
+                } else if (typeof entry !== 'string') {
+                    errors.push(`${path}.${key} must be a string`);
+                } else if (descriptor.allowedValues && !descriptor.allowedValues.includes(entry)) {
+                    errors.push(`${path}.${key} has unknown value '${entry}'`);
                 }
             }
         }

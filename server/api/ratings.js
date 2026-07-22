@@ -39,6 +39,48 @@ module.exports.init = function (server) {
         })
     );
 
+    // ----- Admin rating tools (set / reset a player's Amber)
+    const ensureUserAdmin = (req, res) => {
+        if (req.user?.permissions?.isAdmin || req.user?.permissions?.canManageUsers) {
+            return true;
+        }
+
+        res.status(403).send({ success: false, message: 'Forbidden' });
+
+        return false;
+    };
+
+    server.put(
+        '/api/admin/ratings/:username',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!ensureUserAdmin(req, res)) {
+                return;
+            }
+
+            res.send(
+                await ratingService.adminSetRating(
+                    req.params.username,
+                    req.body.pool,
+                    req.body.rating,
+                    req.body.gamesPlayed
+                )
+            );
+        })
+    );
+
+    server.post(
+        '/api/admin/ratings/:username/reset',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!ensureUserAdmin(req, res)) {
+                return;
+            }
+
+            res.send(await ratingService.adminResetRatings(req.params.username, req.body.pool));
+        })
+    );
+
     server.get(
         '/api/account/location',
         passport.authenticate('jwt', { session: false }),

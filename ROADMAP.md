@@ -63,6 +63,8 @@
 -   [x] Legal pages: privacy policy rewritten for Archon Arena (what/why/who/retention,
         no ads or trackers); About page rewritten (platform intro, ratings explainer,
         lineage credits, FFG/Ghost Galaxy IP acknowledgement). ToS still open.
+-   [x] **About/Privacy admin-editable**: Site Settings > Site Content accepts Markdown
+        that replaces either built-in page (react-markdown, HTML-escaped; empty = built-in).
 -   [ ] Keep internal code identifiers stable where renaming risks gameplay breakage
         (rename UI-facing only; engine internals renamed opportunistically later).
 
@@ -175,8 +177,12 @@ much stronger deck pays less.
 
 -   [x] Player profile fields: country (validated ISO-3166 alpha-2) + state/province
         (US/CA dropdowns, free text elsewhere) — Profile > Account > Location; migration 25.
--   [x] Region mapping: country → NA/LATAM/EU/MEA/APAC (server/services/rating/regions.js;
-        code-defined for now, admin-config later).
+-   [x] Region mapping: country → NA/LATAM/EU/MEA/APAC (server/services/rating/regions.js).
+-   [x] **Region mapping admin-configurable**: Site Settings > Regions lets admins move
+        any country to a different region (stringMap overrides; defaults untouched).
+-   [x] **Admin rating tools**: view / set / reset any player's Amber per pool from User
+        Admin (RatingHistory kept as audit trail; reset re-enters at default as
+        provisional).
 -   [x] Leaderboards: worldwide, region, country, state over rating pools; disabled
         accounts excluded; provisional flag shown.
 -   [x] Minimum games threshold to appear on boards (rating.leaderboardMinGames,

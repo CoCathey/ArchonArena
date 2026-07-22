@@ -9,6 +9,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import Panel from '../Components/Site/Panel';
 import ApiStatus from '../Components/Site/ApiStatus';
 import ReactTable from '../Components/Table/ReactTable';
+import AdminRatings from '../Components/Admin/AdminRatings';
 import { useFindUserQuery, useSaveUserMutation } from '../redux/api';
 import { clearUserSessions } from '../redux/slices/adminSlice';
 
@@ -325,6 +326,10 @@ const UserAdmin = () => {
                                             disableSelection
                                         />
                                     </Panel>
+                                ) : null}
+
+                                {user?.permissions.isAdmin || user?.permissions.canManageUsers ? (
+                                    <AdminRatings username={currentUser.username} />
                                 ) : null}
 
                                 {user?.permissions.canManagePermissions ? (

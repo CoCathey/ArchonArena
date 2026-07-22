@@ -258,13 +258,55 @@ for (const [region, countries] of Object.entries(REGIONS)) {
     }
 }
 
+const REGION_NAMES = Object.keys(REGIONS);
+
+/**
+ * ARCHON: admin-configurable country->region overrides (settings section
+ * 'regions', field 'overrides': { 'US': 'EU', ... }). Lazily required
+ * inside the function - the settings registry itself imports REGION_NAMES
+ * from this module, so a top-level require would be circular. Returns {}
+ * whenever the settings service is absent (tests, scripts).
+ */
+function getRegionOverrides() {
+    try {
+        // eslint-disable-next-line global-require
+        const overrides = require('../settings').getSection('regions').overrides;
+
+        return overrides && typeof overrides === 'object' ? overrides : {};
+    } catch {
+        return {};
+    }
+}
+
+// Countries can only be MOVED between regions, never invented, so
+// validity always follows the built-in master list.
 const isValidCountry = (code) => typeof code === 'string' && !!COUNTRY_TO_REGION[code];
 
-const regionForCountry = (code) => COUNTRY_TO_REGION[code] || null;
+const regionForCountry = (code) => {
+    if (!isValidCountry(code)) {
+        return null;
+    }
 
-const countriesInRegion = (region) => REGIONS[region] || [];
+    const override = getRegionOverrides()[code];
 
-const REGION_NAMES = Object.keys(REGIONS);
+    return override && REGIONS[override] ? override : COUNTRY_TO_REGION[code];
+};
+
+const countriesInRegion = (region) => {
+    const overrides = getRegionOverrides();
+    const base = (REGIONS[region] || []).filter(
+        (country) =>
+            !(overrides[country] && REGIONS[overrides[country]] && overrides[country] !== region)
+    );
+    const movedIn = Object.keys(overrides).filter(
+        (country) =>
+            overrides[country] === region &&
+            isValidCountry(country) &&
+            COUNTRY_TO_REGION[country] !== region
+    );
+
+    return base.concat(movedIn);
+};
 
 module.exports = {
     REGIONS,

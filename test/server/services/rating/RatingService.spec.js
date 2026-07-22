@@ -241,6 +241,62 @@ describe('RatingService', function () {
         });
     });
 
+    describe('admin rating tools', function () {
+        const primeUserLookup = (id) => {
+            db.query.mockImplementation(async (sql) => {
+                if (sql.includes('FROM "Users"')) {
+                    return id ? [{ Id: id }] : [];
+                }
+                return [];
+            });
+        };
+
+        it('adminSetRating upserts the rating for a known player', async function () {
+            primeUserLookup(7);
+
+            const result = await service.adminSetRating('Player1', 'archon', 1500, 20);
+
+            expect(result.success).toBe(true);
+            expect(db.query).toHaveBeenCalledWith(
+                expect.stringContaining('INSERT INTO "Ratings"'),
+                [7, 'archon', 1500, 20]
+            );
+        });
+
+        it('adminSetRating keeps existing games when none given', async function () {
+            primeUserLookup(7);
+
+            await service.adminSetRating('Player1', 'archon', 1500);
+
+            expect(db.query).toHaveBeenCalledWith(
+                expect.stringContaining('COALESCE($4, "Ratings"."GamesPlayed")'),
+                [7, 'archon', 1500, null]
+            );
+        });
+
+        it('adminSetRating validates player and value', async function () {
+            primeUserLookup(null);
+            expect((await service.adminSetRating('Ghost', 'archon', 1500)).success).toBe(false);
+
+            primeUserLookup(7);
+            expect((await service.adminSetRating('Player1', 'archon', -5)).success).toBe(false);
+            expect((await service.adminSetRating('Player1', 'archon', 'lots')).success).toBe(false);
+        });
+
+        it('adminResetRatings deletes one pool or all pools', async function () {
+            primeUserLookup(7);
+
+            await service.adminResetRatings('Player1', 'archon');
+            expect(db.query).toHaveBeenCalledWith(expect.stringContaining('AND "Pool" = $2'), [
+                7,
+                'archon'
+            ]);
+
+            await service.adminResetRatings('Player1');
+            expect(db.query).toHaveBeenCalledWith('DELETE FROM "Ratings" WHERE "UserId" = $1', [7]);
+        });
+    });
+
     describe('setLocation', function () {
         it('stores a valid country uppercased with its state', async function () {
             const result = await service.setLocation(5, 'us', 'Texas');

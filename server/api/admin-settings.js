@@ -15,6 +15,22 @@ const requireAdmin = (req, res, next) => {
 };
 
 module.exports.init = function (server) {
+    // Public: admin-authored page content overrides (About / Privacy).
+    // Only ever exposes the 'content' section - nothing sensitive lives
+    // there, and the pages that consume it are public themselves.
+    server.get(
+        '/api/content',
+        wrapAsync(async (req, res) => {
+            const content = settingsService.getSection('content') || {};
+
+            res.send({
+                success: true,
+                about: content.aboutMarkdown || '',
+                privacy: content.privacyMarkdown || ''
+            });
+        })
+    );
+
     server.get(
         '/api/admin/settings',
         passport.authenticate('jwt', { session: false }),

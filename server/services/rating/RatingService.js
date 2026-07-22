@@ -280,6 +280,74 @@ class RatingService {
         );
     }
 
+    async findUserIdByUsername(username) {
+        const rows = await this.db.query(
+            'SELECT "Id" FROM "Users" WHERE lower("Username") = lower($1)',
+            [username]
+        );
+
+        return rows && rows[0] ? rows[0].Id : null;
+    }
+
+    /**
+     * ARCHON admin tool: set a player's rating (and optionally games played)
+     * in one pool directly. RatingHistory is left untouched as an audit
+     * trail of how the rating actually evolved through games.
+     */
+    async adminSetRating(username, pool, rating, gamesPlayed) {
+        const userId = await this.findUserIdByUsername(username);
+
+        if (!userId) {
+            return { success: false, message: 'No such player' };
+        }
+
+        const numericRating = parseInt(rating, 10);
+        if (!Number.isFinite(numericRating) || numericRating < 0 || numericRating > 5000) {
+            return { success: false, message: 'Rating must be between 0 and 5000' };
+        }
+
+        const games =
+            gamesPlayed === undefined || gamesPlayed === null ? null : parseInt(gamesPlayed, 10);
+        if (games !== null && (!Number.isFinite(games) || games < 0 || games > 100000)) {
+            return { success: false, message: 'Games played must be 0 or more' };
+        }
+
+        await this.db.query(
+            'INSERT INTO "Ratings" ("UserId", "Pool", "Rating", "GamesPlayed", "UpdatedAt") ' +
+                "VALUES ($1, $2, $3, COALESCE($4, 0), now() AT TIME ZONE 'utc') " +
+                'ON CONFLICT ("UserId", "Pool") DO UPDATE SET "Rating" = $3, ' +
+                '"GamesPlayed" = COALESCE($4, "Ratings"."GamesPlayed"), ' +
+                '"UpdatedAt" = now() AT TIME ZONE \'utc\'',
+            [userId, pool || 'archon', numericRating, games]
+        );
+
+        return { success: true };
+    }
+
+    /**
+     * ARCHON admin tool: reset a player's rating in one pool (or all pools)
+     * so they re-enter at the default as a fresh provisional player.
+     * RatingHistory stays for auditability.
+     */
+    async adminResetRatings(username, pool) {
+        const userId = await this.findUserIdByUsername(username);
+
+        if (!userId) {
+            return { success: false, message: 'No such player' };
+        }
+
+        if (pool) {
+            await this.db.query('DELETE FROM "Ratings" WHERE "UserId" = $1 AND "Pool" = $2', [
+                userId,
+                pool
+            ]);
+        } else {
+            await this.db.query('DELETE FROM "Ratings" WHERE "UserId" = $1', [userId]);
+        }
+
+        return { success: true };
+    }
+
     /**
      * Public ratings for a user by username: [{ pool, rating, gamesPlayed }].
      */

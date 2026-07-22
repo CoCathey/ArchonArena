@@ -80,9 +80,18 @@ const DokImport = ({ onDone, compact }) => {
         let prepared;
         try {
             prepared = await prepareDokImport(trimmed).unwrap();
-        } catch {
+        } catch (err) {
             setPhase('idle');
-            setMessage(t('Could not reach the server. Please try again.'));
+            // Surface what actually failed instead of a generic shrug - the
+            // status/message pinpoints whether it's auth, a server error, or
+            // a network drop (err.status is RTK's FETCH_ERROR/HTTP status).
+            const detail =
+                err?.data?.message || err?.error || (err?.status && `HTTP ${err.status}`);
+            setMessage(
+                detail
+                    ? t('Import failed: {{detail}}', { detail })
+                    : t('Could not reach the server. Please try again.')
+            );
 
             return;
         }

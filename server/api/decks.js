@@ -173,7 +173,30 @@ module.exports.init = function (server) {
                 });
             }
 
-            const result = await dokService.listOwnerDecks(dokUsername);
+            logger.info(
+                `DoK bulk import: user ${req.user.username} preparing import for DoK account '${dokUsername}'`
+            );
+
+            let result;
+            try {
+                result = await dokService.listOwnerDecks(dokUsername);
+            } catch (err) {
+                // listOwnerDecks is designed never to throw; if it somehow
+                // does, log loudly and answer cleanly instead of a bare 500.
+                logger.error(`DoK bulk import prepare failed for '${dokUsername}'`, err);
+
+                return res.send({
+                    success: false,
+                    message: 'Something went wrong talking to Decks of KeyForge. Please try again.'
+                });
+            }
+
+            logger.info(
+                `DoK bulk import: '${dokUsername}' -> configured=${result.configured !== false} ` +
+                    `error=${!!result.error} decks=${
+                        result.decks.length
+                    } truncated=${!!result.truncated}`
+            );
 
             if (result.error) {
                 return res.send({

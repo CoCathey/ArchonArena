@@ -389,6 +389,25 @@ export const api = createApi({
                 body: { avatar }
             })
         }),
+        // ARCHON: admin-authored About/Privacy overrides (public)
+        getSiteContent: builder.query({
+            query: () => '/content'
+        }),
+        // ARCHON: admin rating tools
+        adminSetRating: builder.mutation({
+            query: ({ username, pool, rating, gamesPlayed }) => ({
+                url: `/admin/ratings/${encodeURIComponent(username)}`,
+                method: 'PUT',
+                body: { pool, rating, gamesPlayed }
+            })
+        }),
+        adminResetRatings: builder.mutation({
+            query: ({ username, pool }) => ({
+                url: `/admin/ratings/${encodeURIComponent(username)}/reset`,
+                method: 'POST',
+                body: { pool }
+            })
+        }),
         // ARCHON: runtime admin settings
         getAdminSettings: builder.query({
             query: () => '/admin/settings'
@@ -666,6 +685,9 @@ export const {
     useUnlinkOidcMutation,
     useGetLocationQuery,
     useSetLocationMutation,
+    useGetSiteContentQuery,
+    useAdminSetRatingMutation,
+    useAdminResetRatingsMutation,
     useGetLeaderboardQuery,
     useGetRatingsQuery,
     useGetAdminSettingsQuery,

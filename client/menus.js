@@ -98,6 +98,9 @@ export const SidebarMenu = [
             { path: '/community/forums', title: 'Forums' }
         ]
     },
+    // ARCHON: quick links for signed-in players, chess.com-style
+    { title: 'My Decks', path: '/decks', showOnlyWhenLoggedIn: true },
+    { title: 'My Stats', path: '/community/ratings', showOnlyWhenLoggedIn: true },
     {
         title: 'Other',
         landingPath: '/about',
