@@ -49,8 +49,23 @@ for svc in caddy lobby node-0 postgres redis; do
     fi
 done
 
+# Retry a URL for up to ~30s: the script is often run right after a
+# restart, while the app inside an already-"running" container is still
+# booting (settings snapshot, card cache) and Caddy answers 502.
+probe() { # url -> echoes final http code
+    local code attempt
+    for attempt in 1 2 3 4 5 6; do
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$1" || echo 000)"
+        case "$code" in
+            502 | 503 | 000) [ "$attempt" -lt 6 ] && sleep 5 ;;
+            *) break ;;
+        esac
+    done
+    echo "$code"
+}
+
 echo "== Site reachability =="
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$DOMAIN/" || echo 000)"
+code="$(probe "https://$DOMAIN/")"
 if [ "$code" = "200" ]; then
     ok "https://$DOMAIN returns 200"
 else
@@ -73,7 +88,7 @@ fi
 # The game-board websocket path must reach the game node through Caddy.
 # socket.io answers HTTP 200/400 to a bare polling probe; Caddy errors
 # (404 = matcher wrong, 502 = node down/unreachable) mean broken games.
-ws_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$DOMAIN/node-0/socket.io/?EIO=4&transport=polling" || echo 000)"
+ws_code="$(probe "https://$DOMAIN/node-0/socket.io/?EIO=4&transport=polling")"
 case "$ws_code" in
     200 | 400) ok "game-node socket path (/node-0/socket.io) reachable through Caddy" ;;
     *) bad "game-node socket path returned $ws_code - players cannot start games" "$DC restart node-0 caddy && $DC logs --tail 50 node-0" ;;
