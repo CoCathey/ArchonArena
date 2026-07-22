@@ -126,6 +126,23 @@ export function reconnectGameSocket(): void {
     socket.connect();
 }
 
+/**
+ * Force a fresh full game state from the server. Cycling the connection makes
+ * the game node reset its per-player diff baseline and resend the complete
+ * state, which recovers a client whose board has drifted out of sync (the
+ * "both players stuck on Waiting for opponent" case). Listeners are kept.
+ */
+export function resyncGame(): void {
+    if (!socket) {
+        return;
+    }
+    const store = useGameStore.getState();
+    store.setStatus('reconnecting');
+    store.setRootState(undefined); // the next gamestate will be a full snapshot
+    socket.disconnect();
+    socket.connect();
+}
+
 /** Send an in-game command (a Game method) to the game node. */
 export function sendGameMessage(command: string, ...args: unknown[]): void {
     if (socket) {

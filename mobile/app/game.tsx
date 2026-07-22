@@ -11,7 +11,12 @@ import {
     useWindowDimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { closeGameSocket, reconnectGameSocket, sendGameMessage } from '../src/net/gameSocket';
+import {
+    closeGameSocket,
+    reconnectGameSocket,
+    resyncGame,
+    sendGameMessage
+} from '../src/net/gameSocket';
 import { successFeedback, tapFeedback, warnFeedback } from '../src/haptics';
 import { useAuthStore } from '../src/stores/authStore';
 import { useGameStore } from '../src/stores/gameStore';
@@ -164,12 +169,13 @@ export default function GameScreen() {
 
     const showGameMenu = () => {
         Alert.alert(rootState?.name ?? 'Game', undefined, [
-            { text: 'Concede', style: 'destructive', onPress: concede },
-            { text: 'Leave game', style: 'destructive', onPress: leave },
+            { text: 'Resync game', onPress: resyncGame },
             {
                 text: rootState?.manualMode ? 'Disable manual mode' : 'Enable manual mode',
                 onPress: () => sendGameMessage('toggleManualMode')
             },
+            { text: 'Concede', style: 'destructive', onPress: concede },
+            { text: 'Leave game', style: 'destructive', onPress: leave },
             { text: 'Close', style: 'cancel' }
         ]);
     };

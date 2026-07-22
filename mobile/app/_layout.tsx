@@ -3,7 +3,7 @@ import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, AppState, Pressable, Text, View } from 'react-native';
 import { checkAuth, refreshAuthToken } from '../src/api/client';
-import { reconnectGameSocket } from '../src/net/gameSocket';
+import { resyncGame } from '../src/net/gameSocket';
 import { connectLobby } from '../src/net/lobbySocket';
 import { useAuthStore } from '../src/stores/authStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
@@ -46,7 +46,9 @@ export default function RootLayout() {
         const sub = AppState.addEventListener('change', (state) => {
             if (state === 'active' && useAuthStore.getState().token) {
                 connectLobby();
-                reconnectGameSocket();
+                // Pull a fresh game state — a socket suspended in the background
+                // can look "connected" but be dead, leaving a stale board.
+                resyncGame();
             }
         });
         return () => sub.remove();
