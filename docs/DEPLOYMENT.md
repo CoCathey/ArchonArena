@@ -54,12 +54,18 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 ```
 
 PostgreSQL initializes itself from `server/db/schema/*.sql` on the first start (empty
-data volume only). Then load card data:
+data volume only). Then load card data **and card art** (one command does both — art
+downloads take a while, are resumable, and skip existing files):
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production \
   exec lobby npm run fetchdata
 ```
+
+Card art, user avatars, and custom backgrounds live in named volumes
+(`card_images`, `user_avatars`, `user_backgrounds`) mounted into the lobby, so they
+survive redeploys. Without those mounts they are written to the container layer and
+silently wiped by every `up -d`.
 
 Visit `https://archonarena.com` — you should see the Archon Arena lobby.
 

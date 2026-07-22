@@ -160,6 +160,15 @@ else
     bad "standalone decks missing" "$DC exec lobby node server/scripts/importstandalonedecks.js"
 fi
 
+# Card ART is separate from card data: images are downloaded into the
+# card_images volume and served from public/img/cards.
+imgs="$($DC exec -T lobby sh -c 'ls /usr/src/app/public/img/cards 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]')"
+if [ "${imgs:-0}" -gt 1000 ] 2>/dev/null; then
+    ok "card art present ($imgs images)"
+else
+    bad "card art missing (${imgs:-0} images) - boards show blank cards" "$DC exec lobby npm run fetchdata   (downloads ~6k images; resumable, skips existing)"
+fi
+
 users="$(psql_q 'SELECT COUNT(*) FROM "Users"')"
 ok "user accounts: ${users:-?}"
 
