@@ -55,7 +55,19 @@ const Matches = () => {
     }
 
     if (isError) {
-        return <AlertPanel type='error' message={error?.data?.message} />;
+        return (
+            <div className='profile mx-auto min-h-full w-full max-w-6xl'>
+                <Panel title={t('Matches')}>
+                    <AlertPanel
+                        type='error'
+                        message={
+                            error?.data?.message ||
+                            t('Could not load your game history. Please try again in a moment.')
+                        }
+                    />
+                </Panel>
+            </div>
+        );
     }
 
     const matches = games

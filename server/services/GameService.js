@@ -4,20 +4,26 @@ const logger = require('../log.js');
 const db = require('../db');
 
 class GameService {
+    // ARCHON: db is injectable (defaults to the shared PG pool) so the
+    // service is unit-testable, matching RatingService/TournamentService.
+    constructor(database = db) {
+        this.db = database;
+    }
+
     async create(game) {
         let gameId;
 
-        await db.query('BEGIN');
+        await this.db.query('BEGIN');
 
         try {
-            let newGame = await db.query(
+            let newGame = await this.db.query(
                 'INSERT INTO "Games" ("GameId", "GameType", "GameFormat", "StartedAt") VALUES ($1, $2, $3, $4) RETURNING "Id"',
                 [game.gameId, game.gameType, game.gameFormat, game.startedAt]
             );
 
             if (!newGame || newGame.length === 0) {
                 logger.error('Failed to create game');
-                await db.query('ROLLBACK');
+                await this.db.query('ROLLBACK');
 
                 throw new Error('Failed to create game');
             }
@@ -26,14 +32,14 @@ class GameService {
         } catch (err) {
             logger.error('Failed to create game', err);
 
-            await db.query('ROLLBACK');
+            await this.db.query('ROLLBACK');
 
             throw new Error('Failed to create game');
         }
 
         for (let player of game.players) {
             try {
-                await db.query(
+                await this.db.query(
                     'INSERT INTO "GamePlayers" ("GameId", "PlayerId", "DeckId") VALUES ' +
                         '($1, (SELECT "Id" FROM "Users" WHERE "Username" = $2), (SELECT "Id" FROM "Decks" WHERE "Identity" = $3))',
                     [gameId, player.name, player.deck]
@@ -41,25 +47,25 @@ class GameService {
             } catch (err) {
                 logger.error('Failed to create game player', err);
 
-                await db.query('ROLLBACK');
+                await this.db.query('ROLLBACK');
 
                 throw new Error('Failed to create game player');
             }
         }
 
-        await db.query('COMMIT');
+        await this.db.query('COMMIT');
     }
 
     async update(game) {
-        await db.query('BEGIN');
+        await this.db.query('BEGIN');
 
         try {
-            await db.query(
+            await this.db.query(
                 'UPDATE "Games" SET "StartedAt" = $2, "WinnerId" = (SELECT "Id" FROM "Users" WHERE "Username" = $3), "WinReason" = $4, "FinishedAt" = $5 WHERE "GameId" = $1',
                 [game.gameId, game.startedAt, game.winner, game.winReason, game.finishedAt]
             );
         } catch (err) {
-            await db.query('ROLLBACK');
+            await this.db.query('ROLLBACK');
 
             throw new Error('Failed to update game');
         }
@@ -82,7 +88,7 @@ class GameService {
             }
 
             try {
-                await db.query(
+                await this.db.query(
                     'UPDATE "GamePlayers" SET "Keys" = $1, ' +
                         '"DeckId" = (SELECT "Id" FROM "Decks" WHERE "Identity" = $5 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $4)), ' +
                         '"Turn" = $2 WHERE "GameId" = (SELECT "Id" FROM "Games" WHERE "GameId" = $3) AND "PlayerId" = (SELECT "Id" FROM "Users" WHERE "Username" = $4)',
@@ -94,13 +100,13 @@ class GameService {
                     err
                 );
 
-                await db.query('ROLLBACK');
+                await this.db.query('ROLLBACK');
 
                 throw new Error('Failed to update game player');
             }
         }
 
-        await db.query('COMMIT');
+        await this.db.query('COMMIT');
     }
 
     getAllGames(from, to) {
@@ -117,62 +123,76 @@ class GameService {
             });
     }
 
+    /**
+     * ARCHON: a player's recent finished games for the Game History page.
+     * Rewritten from the legacy MongoDB aggregation onto PostgreSQL
+     * (Games / GamePlayers / Decks) - `this.games` never existed on the
+     * PG-backed service, so this used to throw and blank the page.
+     *
+     * Returns games newest-first with position zero always the requested
+     * player (and their deck), matching what the client expects:
+     * { gameId, gameType, gameFormat, startedAt, finishedAt, winReason,
+     *   winner, players: [{ name, deck, keys }], decks: [{ name, identity }] }.
+     */
     async findByUserName(username) {
-        let games = await this.games.aggregate([
-            {
-                $lookup: {
-                    from: 'decks',
-                    localField: 'players.deck',
-                    foreignField: 'identity',
-                    as: 'decks'
-                }
-            },
-            {
-                $match: {
-                    $and: [
-                        {
-                            'players.name': username
-                        },
-                        {
-                            'players.deck': {
-                                $ne: null
-                            }
-                        }
-                    ]
-                }
-            },
-            {
-                $sort: {
-                    finishedAt: -1
-                }
-            },
-            {
-                $limit: 30
-            }
-        ]);
+        const rows = await this.db.query(
+            'WITH user_games AS (' +
+                'SELECT g."Id", g."GameId", g."GameType", g."GameFormat", g."StartedAt", ' +
+                'g."FinishedAt", g."WinReason", g."WinnerId" ' +
+                'FROM "Games" g ' +
+                'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                'JOIN "Users" u ON u."Id" = gp."PlayerId" ' +
+                'WHERE u."Username" = $1 AND g."FinishedAt" IS NOT NULL ' +
+                'ORDER BY g."FinishedAt" DESC LIMIT 30' +
+                ') ' +
+                'SELECT ug."GameId", ug."GameType", ug."GameFormat", ug."StartedAt", ' +
+                'ug."FinishedAt", ug."WinReason", wu."Username" AS "Winner", gp."Keys", ' +
+                'pu."Username" AS "PlayerName", d."Name" AS "DeckName", ' +
+                'd."Identity" AS "DeckIdentity" ' +
+                'FROM user_games ug ' +
+                'JOIN "GamePlayers" gp ON gp."GameId" = ug."Id" ' +
+                'JOIN "Users" pu ON pu."Id" = gp."PlayerId" ' +
+                'LEFT JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                'LEFT JOIN "Users" wu ON wu."Id" = ug."WinnerId" ' +
+                'ORDER BY ug."FinishedAt" DESC, gp."Id"',
+            [username]
+        );
 
-        // Make sure position zero is always the given username
-        games.forEach((game) => {
-            if (
-                game.players &&
-                game.players[0] &&
-                game.players[1] &&
-                game.decks[0] &&
-                game.decks[1]
-            ) {
-                if (game.players[1].name === username) {
-                    let opponent = game.players[0];
-                    game.players[0] = game.players[1];
-                    game.players[1] = opponent;
-                }
+        // Group the flat rows (one per player) into game objects, keeping
+        // the FinishedAt-DESC order the query emits.
+        const byGame = new Map();
 
-                if (game.players[0].deck === game.decks[1].identity) {
-                    let oppDeck = game.decks[0];
-                    game.decks[0] = game.decks[1];
-                    game.decks[1] = oppDeck;
-                }
+        for (const row of rows || []) {
+            if (!byGame.has(row.GameId)) {
+                byGame.set(row.GameId, {
+                    gameId: row.GameId,
+                    gameType: row.GameType,
+                    gameFormat: row.GameFormat,
+                    startedAt: row.StartedAt,
+                    finishedAt: row.FinishedAt,
+                    winReason: row.WinReason,
+                    winner: row.Winner,
+                    players: [],
+                    decks: []
+                });
             }
-        });
+
+            const game = byGame.get(row.GameId);
+            // players[i] and decks[i] are pushed together so they stay
+            // aligned; reversing later keeps that alignment.
+            game.players.push({ name: row.PlayerName, deck: row.DeckIdentity, keys: row.Keys });
+            game.decks.push({ name: row.DeckName, identity: row.DeckIdentity });
+        }
+
+        const games = [...byGame.values()];
+
+        // Position zero is always the requesting player and their deck.
+        for (const game of games) {
+            if (game.players.length === 2 && game.players[1].name === username) {
+                game.players.reverse();
+                game.decks.reverse();
+            }
+        }
 
         return games;
     }
