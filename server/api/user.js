@@ -14,13 +14,67 @@ let userService = new UserService(configService);
 let cardService = new CardService(configService);
 let deckService = new DeckService(configService, cardService);
 
+// Management permissions that make an account "staff". A destructive action
+// (reset password / delete) may not target an account that holds a permission
+// the actor lacks - otherwise a lower-tier staff member (e.g. a UserManager)
+// could reset an admin's/owner's password and take over the account, or delete
+// an admin. isAdmin implies every management permission, so an admin actor is
+// never blocked.
+const MANAGEMENT_PERMISSIONS = [
+    'isAdmin',
+    'canManageUsers',
+    'canManagePermissions',
+    'canManageGames',
+    'canManageNodes',
+    'canModerateChat',
+    'canVerifyDecks',
+    'canManageBanlist',
+    'canManageMotd',
+    'canEditNews',
+    'canManageTournaments'
+];
+
+const targetOutranksActor = (targetPermissions, actorPermissions) => {
+    const target = targetPermissions || {};
+    const actor = actorPermissions || {};
+
+    if (actor.isAdmin) {
+        return false;
+    }
+
+    return MANAGEMENT_PERMISSIONS.some((permission) => target[permission] && !actor[permission]);
+};
+
+// Fields that must never be exposed to a user-management lookup: another
+// user's refresh tokens (hash/ip), Challonge API key, Patreon token, and
+// reset/activation tokens. getFullDetails() only strips the password.
+const stripSensitiveUserFields = (user) => {
+    if (!user) {
+        return user;
+    }
+
+    delete user.tokens;
+    delete user.resetToken;
+    delete user.tokenExpires;
+    delete user.activationToken;
+    delete user.activationTokenExpiry;
+    delete user.patreon;
+
+    if (user.challonge) {
+        user.challonge = { ...user.challonge };
+        delete user.challonge.key;
+    }
+
+    return user;
+};
+
 module.exports.init = function (server) {
     server.get(
         '/api/user/:username',
         passport.authenticate('jwt', { session: false }),
         wrapAsync(async (req, res) => {
             if (!req.user.permissions || !req.user.permissions.canManageUsers) {
-                return res.status(403);
+                return res.status(403).send({ success: false, message: 'Forbidden' });
             }
 
             let user;
@@ -33,7 +87,7 @@ module.exports.init = function (server) {
                     return res.status(404).send({ message: 'Not found' });
                 }
 
-                retUser = user.getFullDetails();
+                retUser = stripSensitiveUserFields(user.getFullDetails());
 
                 if (req.user.permissions.canVerifyDecks) {
                     retUser.invalidDecks = (
@@ -70,7 +124,7 @@ module.exports.init = function (server) {
         passport.authenticate('jwt', { session: false }),
         wrapAsync(async (req, res) => {
             if (!req.user.permissions || !req.user.permissions.canManageUsers) {
-                return res.status(403);
+                return res.status(403).send({ success: false, message: 'Forbidden' });
             }
 
             if (!req.body.userToChange) {
@@ -124,7 +178,7 @@ module.exports.init = function (server) {
         passport.authenticate('jwt', { session: false }),
         wrapAsync(async (req, res) => {
             if (!req.user.permissions || !req.user.permissions.canVerifyDecks) {
-                return res.status(403);
+                return res.status(403).send({ success: false, message: 'Forbidden' });
             }
 
             let user;
@@ -167,9 +221,16 @@ module.exports.init = function (server) {
                 });
             }
 
-            const user = await userService.getUserByUsername(req.params.username);
+            const user = await userService.getFullUserByUsername(req.params.username);
             if (!user) {
                 return res.status(404).send({ success: false, message: 'Not found' });
+            }
+
+            if (targetOutranksActor(user.permissions, req.user.permissions)) {
+                logger.warn(
+                    `Blocked ${req.user.username} from resetting the password of higher-privileged account ${req.params.username}`
+                );
+                return res.status(403).send({ success: false, message: 'Forbidden' });
             }
 
             const hash = await bcrypt.hash(newPassword, 10);
@@ -202,9 +263,16 @@ module.exports.init = function (server) {
                 });
             }
 
-            const user = await userService.getUserByUsername(req.params.username);
+            const user = await userService.getFullUserByUsername(req.params.username);
             if (!user) {
                 return res.status(404).send({ success: false, message: 'Not found' });
+            }
+
+            if (targetOutranksActor(user.permissions, req.user.permissions)) {
+                logger.warn(
+                    `Blocked ${req.user.username} from deleting higher-privileged account ${req.params.username}`
+                );
+                return res.status(403).send({ success: false, message: 'Forbidden' });
             }
 
             await userService.anonymizeUser(user);

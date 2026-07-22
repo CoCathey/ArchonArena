@@ -38,9 +38,16 @@ module.exports.init = function (server) {
                     return next(err);
                 }
 
-                res.send(
-                    await tournamentService.getDetail(parseInt(req.params.id, 10), user || null)
-                );
+                // This callback runs outside wrapAsync's promise chain, so a
+                // rejection here would be an unhandled rejection and the
+                // request would hang. Catch and forward to the error handler.
+                try {
+                    res.send(
+                        await tournamentService.getDetail(parseInt(req.params.id, 10), user || null)
+                    );
+                } catch (detailErr) {
+                    next(detailErr);
+                }
             })(req, res, next);
         })
     );

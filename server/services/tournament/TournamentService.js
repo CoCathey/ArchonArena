@@ -84,7 +84,8 @@ class TournamentService {
         const rows = await this.db.query(
             'SELECT t."Id", t."Name", t."Format", t."GameFormat", t."Mode", t."Status", ' +
                 't."CurrentRound", t."RoundCount", t."CreatedAt", u."Username" AS "Organizer", ' +
-                '(SELECT COUNT(*) FROM "TournamentPlayers" tp WHERE tp."TournamentId" = t."Id") AS "PlayerCount" ' +
+                '(SELECT COUNT(*) FROM "TournamentPlayers" tp WHERE tp."TournamentId" = t."Id" ' +
+                'AND tp."Dropped" IS NOT TRUE) AS "PlayerCount" ' +
                 'FROM "Tournaments" t JOIN "Users" u ON u."Id" = t."OrganizerId" ' +
                 `${where} ORDER BY t."Id" DESC LIMIT 100`,
             params
@@ -267,9 +268,13 @@ class TournamentService {
             this.getMatches(tournamentId)
         ]);
 
-        const active = players.filter((player) => !player.Dropped);
+        // Compute standings over ALL players (including dropped ones) so that
+        // results against a player who later dropped still count. Passing only
+        // active players made computeStandings discard every match a dropped
+        // player was in, silently erasing the point (and opponent-history)
+        // earned by whoever beat them - corrupting Swiss pairings and byes.
         const standings = computeStandings(
-            active.map((player) => ({ id: player.UserId })),
+            players.map((player) => ({ id: player.UserId })),
             matches.map((match) => ({
                 player1: match.Player1Id,
                 player2: match.Player2Id,
@@ -278,14 +283,21 @@ class TournamentService {
             }))
         );
 
+        // Only ACTIVE (non-dropped) players are paired into the next round.
+        const activeIds = new Set(
+            players.filter((player) => !player.Dropped).map((player) => player.UserId)
+        );
+
         // computeStandings returns entries sorted by standing; keep that
         // order so Swiss pairs within score groups and elim reseeds
-        return standings.map((entry) => ({
-            id: entry.id,
-            points: entry.points,
-            opponents: entry.opponents,
-            receivedBye: entry.byes > 0
-        }));
+        return standings
+            .filter((entry) => activeIds.has(entry.id))
+            .map((entry) => ({
+                id: entry.id,
+                points: entry.points,
+                opponents: entry.opponents,
+                receivedBye: entry.byes > 0
+            }));
     }
 
     async insertRoundMatches(tournamentId, round, pairings, byes) {

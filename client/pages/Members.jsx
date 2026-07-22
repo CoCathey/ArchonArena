@@ -28,11 +28,15 @@ const Members = () => {
     const { data, isFetching } = useGetMembersQuery({
         query: query || undefined,
         country: country || undefined,
-        limit: PAGE_SIZE,
+        // Over-fetch one row to detect a next page even on an exactly-full
+        // page (otherwise "Next" advances to an empty page).
+        limit: PAGE_SIZE + 1,
         offset: page * PAGE_SIZE
     });
 
-    const members = data?.members || [];
+    const rawMembers = data?.members || [];
+    const hasMore = rawMembers.length > PAGE_SIZE;
+    const members = rawMembers.slice(0, PAGE_SIZE);
     const stats = data?.stats;
 
     const tiles = [
@@ -152,7 +156,7 @@ const Members = () => {
                     <HeroButton
                         size='sm'
                         variant='tertiary'
-                        isDisabled={members.length < PAGE_SIZE}
+                        isDisabled={!hasMore}
                         onPress={() => setPage((current) => current + 1)}
                     >
                         {t('Next')}

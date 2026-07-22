@@ -285,10 +285,12 @@ export const api = createApi({
             query: (params) => ({
                 url: '/ratings/leaderboard',
                 params
-            })
+            }),
+            providesTags: [TAG_TYPES.RATINGS]
         }),
         getRatings: builder.query({
-            query: (username) => `/ratings/${encodeURIComponent(username)}`
+            query: (username) => `/ratings/${encodeURIComponent(username)}`,
+            providesTags: [TAG_TYPES.RATINGS]
         }),
         // ARCHON: native tournament engine ("event" naming avoids clashing
         // with the legacy Challonge getTournaments endpoint below)
@@ -399,14 +401,16 @@ export const api = createApi({
                 url: `/admin/ratings/${encodeURIComponent(username)}`,
                 method: 'PUT',
                 body: { pool, rating, gamesPlayed }
-            })
+            }),
+            invalidatesTags: [TAG_TYPES.RATINGS]
         }),
         adminResetRatings: builder.mutation({
             query: ({ username, pool }) => ({
                 url: `/admin/ratings/${encodeURIComponent(username)}/reset`,
                 method: 'POST',
                 body: { pool }
-            })
+            }),
+            invalidatesTags: [TAG_TYPES.RATINGS]
         }),
         // ARCHON: runtime admin settings
         getAdminSettings: builder.query({

@@ -81,7 +81,9 @@ const PendingGame = () => {
 
             showNotification({
                 body: `${otherPlayer.name} has joined your game`,
-                icon: `/img/avatar/${otherPlayer.username}.png`
+                // The pending-game player summary exposes `avatar`/`name`, not
+                // `username`; using username produced /img/avatar/undefined.png.
+                icon: `/img/avatar/${otherPlayer.avatar}.png`
             });
         }
 

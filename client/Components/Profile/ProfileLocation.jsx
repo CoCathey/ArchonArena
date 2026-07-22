@@ -38,8 +38,10 @@ const ProfileLocation = () => {
             } else {
                 toast.danger(result.message || t('Could not save location'));
             }
-        } catch {
-            toast.danger(t('Could not save location'));
+        } catch (err) {
+            // The API layer rejects 200 + {success:false}, so the specific
+            // server reason arrives here rather than in the else branch above.
+            toast.danger(err?.data?.message || t('Could not save location'));
         }
     };
 
