@@ -378,6 +378,12 @@ much stronger deck pays less.
 
 ## Cross-cutting: Quality & operations
 
+-   [x] **Game-connection resilience** (`docs/design/game-leave-resilience.md`): a
+        post-connect reconnection blip no longer reports a failed handoff (which
+        marked a live setup-phase game finished and froze the board); reconnection
+        given ~2 min to recover; "Leave Game" now also leaves over the lobby
+        socket so a stranded player can always escape and the lobby tears the game
+        down on the node instead of leaving a ghost.
 -   [ ] Gameplay regression suite kept green on every PR (card tests from upstream).
 -   [ ] Load testing for game nodes + matchmaking before public launch.
 -   [ ] Upstream sync process: periodically merge keyteki card fixes (`docs/UPSTREAM.md`).

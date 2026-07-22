@@ -643,7 +643,7 @@ module.exports.init = function (server, options) {
                 return res.send({ success: false, message: 'Invalid refresh token' });
             }
 
-            if (!userService.verifyRefreshToken(user.username, refreshToken)) {
+            if (!userService.verifyRefreshToken(user.username, refreshToken, token.token)) {
                 return res.send({ success: false, message: 'Invalid refresh token' });
             }
 

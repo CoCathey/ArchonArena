@@ -45,3 +45,4 @@ tmp/
 # Production secrets - never commit
 .env.production
 config/local*.json5
+dump.rdb

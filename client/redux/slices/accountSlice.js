@@ -8,6 +8,16 @@ const accountSlice = createSlice({
     reducers: {
         clearLinkStatus: (state) => {
             state.accountLinked = undefined;
+        },
+        // ARCHON: populate the account user directly. Used by the SSO redirect,
+        // which mints its tokens client-side (from the URL fragment) rather
+        // than through the loginAccount mutation, so no RTK matcher fires to
+        // set state.account.user. Without this the whole app reads an
+        // undefined user after SSO (stuck on "Loading...", logged-out nav).
+        setUser: (state, action) => {
+            state.loggedIn = true;
+            state.loggedOut = false;
+            state.user = action.payload;
         }
     },
     extraReducers: (builder) => {
@@ -73,6 +83,12 @@ const accountSlice = createSlice({
             .addMatcher(api.endpoints.setAvatar.matchFulfilled, (state, action) => {
                 if (state.user && action.payload.avatar) {
                     state.user.avatar = action.payload.avatar;
+                    // Keep settings.avatar in sync too - components read from
+                    // both, so updating only the top-level field left the
+                    // avatar stale in places until the next auth refresh.
+                    if (state.user.settings) {
+                        state.user.settings.avatar = action.payload.avatar;
+                    }
                 }
             });
     }

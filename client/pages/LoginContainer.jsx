@@ -10,6 +10,7 @@ import ApiStatus from '../Components/Site/ApiStatus';
 import SsoButton from '../Components/Site/SsoButton';
 import { useLoginAccountMutation } from '../redux/api';
 import { setAuthTokens } from '../redux/slices/authSlice';
+import { accountActions } from '../redux/slices/accountSlice';
 import { lobbyAuthenticateRequested, lobbyConnectRequested } from '../redux/socketActions';
 
 const LoginContainer = () => {
@@ -71,6 +72,10 @@ const LoginContainer = () => {
                     user: decoded.user
                 })
             );
+            // Populate the account slice too - setAuthTokens only writes the
+            // auth slice, but the app reads the logged-in user from
+            // state.account.user (which the login mutation would normally set).
+            dispatch(accountActions.setUser(decoded.user));
             dispatch(lobbyConnectRequested());
             dispatch(lobbyAuthenticateRequested());
             toast.success(t('Login successful'));

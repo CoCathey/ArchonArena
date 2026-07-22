@@ -279,8 +279,11 @@ function getRegionOverrides() {
 }
 
 // Countries can only be MOVED between regions, never invented, so
-// validity always follows the built-in master list.
-const isValidCountry = (code) => typeof code === 'string' && !!COUNTRY_TO_REGION[code];
+// validity always follows the built-in master list. Use hasOwnProperty so
+// inherited keys ('constructor', '__proto__', 'toString', ...) are never
+// treated as valid countries/regions.
+const isValidCountry = (code) =>
+    typeof code === 'string' && Object.prototype.hasOwnProperty.call(COUNTRY_TO_REGION, code);
 
 const regionForCountry = (code) => {
     if (!isValidCountry(code)) {
@@ -293,6 +296,13 @@ const regionForCountry = (code) => {
 };
 
 const countriesInRegion = (region) => {
+    // Guard against inherited object keys (region='constructor' etc.), which
+    // would otherwise yield a non-array and throw on .filter (a public,
+    // unauthenticated 500 on GET /api/ratings/leaderboard?scope=region).
+    if (typeof region !== 'string' || !Object.prototype.hasOwnProperty.call(REGIONS, region)) {
+        return [];
+    }
+
     const overrides = getRegionOverrides();
     const base = (REGIONS[region] || []).filter(
         (country) =>

@@ -16,6 +16,21 @@ const DEFAULT_RATING_CONFIG = {
     elo: {}
 };
 
+// Map a game format (Games.GameFormat) onto a rating pool. The client only
+// surfaces three pools on the leaderboards/ratings pages - 'archon', 'sealed'
+// and 'alliance' - so every constructed variant folds into the main 'archon'
+// ladder. Without this, standard games (format 'normal') would rate into a
+// 'normal' pool that no UI reads, leaving the leaderboards permanently empty.
+const POOL_BY_FORMAT = {
+    normal: 'archon',
+    reversal: 'archon',
+    'adaptive-bo1': 'archon',
+    unchained: 'archon',
+    archon: 'archon',
+    sealed: 'sealed',
+    alliance: 'alliance'
+};
+
 /**
  * Orchestrates rating updates from finished games.
  *
@@ -31,6 +46,18 @@ class RatingService {
         this.configService = configService;
         this.db = db;
         this.settingsService = settingsService;
+    }
+
+    /**
+     * Normalize a game format into the rating pool the UI reads. Unknown or
+     * missing formats fall back to the main 'archon' pool.
+     */
+    normalizePool(gameFormat) {
+        if (!gameFormat) {
+            return 'archon';
+        }
+
+        return POOL_BY_FORMAT[gameFormat] || 'archon';
     }
 
     getConfig() {
@@ -151,7 +178,7 @@ class RatingService {
 
         const isTournament = !!tournamentRow;
 
-        const pool = game.GameFormat || 'archon';
+        const pool = this.normalizePool(game.GameFormat);
         const eloConfig = normalizeConfig(config.elo);
 
         const [winnerRating, loserRating] = await Promise.all([
@@ -186,22 +213,14 @@ class RatingService {
 
         const client = await this.db.startTransaction();
         try {
-            await this.upsertRating(
-                client,
-                winnerRow.PlayerId,
-                pool,
-                result.winner.newRating,
-                winnerRating.gamesPlayed + 1
-            );
-            await this.upsertRating(
-                client,
-                loserRow.PlayerId,
-                pool,
-                result.loser.newRating,
-                loserRating.gamesPlayed + 1
-            );
-
-            await this.insertHistory(client, {
+            // Insert the winner's history row FIRST and use it as the gate. The
+            // unique (GameId, UserId) constraint means a duplicate/concurrent
+            // processing of the same game inserts nothing here (empty result),
+            // so we roll back before touching Ratings. This is what actually
+            // makes rating idempotent under concurrent GAMEWIN delivery (Redis
+            // pub/sub fans a GAMEWIN out to every lobby instance); the earlier
+            // pre-check alone was check-then-act and could double-apply.
+            const gate = await this.insertHistory(client, {
                 gameDbId: game.GameDbId,
                 userId: winnerRow.PlayerId,
                 opponentId: loserRow.PlayerId,
@@ -216,6 +235,13 @@ class RatingService {
                 resultType: resultType,
                 configSnapshot: configSnapshot
             });
+
+            if (!gate || gate.length === 0) {
+                // Already rated by another run - do not touch Ratings.
+                await this.db.queryTran(client, 'ROLLBACK');
+                return;
+            }
+
             await this.insertHistory(client, {
                 gameDbId: game.GameDbId,
                 userId: loserRow.PlayerId,
@@ -231,6 +257,21 @@ class RatingService {
                 resultType: resultType,
                 configSnapshot: configSnapshot
             });
+
+            await this.upsertRating(
+                client,
+                winnerRow.PlayerId,
+                pool,
+                result.winner.newRating,
+                winnerRating.gamesPlayed + 1
+            );
+            await this.upsertRating(
+                client,
+                loserRow.PlayerId,
+                pool,
+                result.loser.newRating,
+                loserRating.gamesPlayed + 1
+            );
 
             await this.db.queryTran(client, 'COMMIT');
             logger.info(
@@ -272,14 +313,20 @@ class RatingService {
         );
     }
 
+    /**
+     * Insert one RatingHistory row. Returns the inserted rows (RETURNING) so
+     * the caller can use the unique (GameId, UserId) constraint as an
+     * idempotency gate: an empty result means this game/user was already
+     * rated and nothing was written.
+     */
     async insertHistory(client, entry) {
-        await this.db.queryTran(
+        return await this.db.queryTran(
             client,
             'INSERT INTO "RatingHistory" ("GameId", "UserId", "OpponentId", "Pool", "Won", ' +
                 '"RatingBefore", "RatingAfter", "Expected", "OwnSas", "OpponentSas", "KeyDiff", ' +
                 '"ResultType", "ConfigSnapshot", "CreatedAt") ' +
                 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now() AT TIME ZONE 'utc') " +
-                'ON CONFLICT ("GameId", "UserId") DO NOTHING',
+                'ON CONFLICT ("GameId", "UserId") DO NOTHING RETURNING "Id"',
             [
                 entry.gameDbId,
                 entry.userId,
@@ -370,24 +417,32 @@ class RatingService {
      * Public ratings for a user by username: [{ pool, rating, gamesPlayed }].
      */
     async getRatingsForUsername(username) {
+        const config = this.getConfig();
         const rows = await this.db.query(
             'SELECT r."Pool", r."Rating", r."GamesPlayed", ' +
                 // Worldwide rank in the pool (players with a strictly higher
-                // rating, plus one) and the size of the rated field.
-                '(SELECT COUNT(*) + 1 FROM "Ratings" r2 WHERE r2."Pool" = r."Pool" ' +
-                'AND r2."Rating" > r."Rating") AS "Rank", ' +
-                '(SELECT COUNT(*) FROM "Ratings" r3 WHERE r3."Pool" = r."Pool") AS "TotalRated", ' +
+                // rating, plus one) and the size of the rated field. Both count
+                // only the same population the leaderboard shows - rated
+                // (GamesPlayed >= minimum) and non-disabled accounts - so the
+                // profile's "rank #N of M" agrees with the leaderboard.
+                '(SELECT COUNT(*) + 1 FROM "Ratings" r2 ' +
+                'JOIN "Users" u2 ON u2."Id" = r2."UserId" WHERE r2."Pool" = r."Pool" ' +
+                'AND r2."Rating" > r."Rating" AND r2."GamesPlayed" >= $2 ' +
+                'AND u2."Disabled" IS NOT TRUE) AS "Rank", ' +
+                '(SELECT COUNT(*) FROM "Ratings" r3 ' +
+                'JOIN "Users" u3 ON u3."Id" = r3."UserId" WHERE r3."Pool" = r."Pool" ' +
+                'AND r3."GamesPlayed" >= $2 AND u3."Disabled" IS NOT TRUE) AS "TotalRated", ' +
                 // Win/loss record from the audit history.
                 '(SELECT COUNT(*) FROM "RatingHistory" h WHERE h."UserId" = r."UserId" ' +
                 'AND h."Pool" = r."Pool" AND h."Won") AS "Wins", ' +
                 '(SELECT COUNT(*) FROM "RatingHistory" h WHERE h."UserId" = r."UserId" ' +
                 'AND h."Pool" = r."Pool" AND NOT h."Won") AS "Losses" ' +
                 'FROM "Ratings" r JOIN "Users" u ON u."Id" = r."UserId" ' +
-                'WHERE u."Username" = $1 ORDER BY r."Pool"',
-            [username]
+                'WHERE lower(u."Username") = lower($1) AND u."Disabled" IS NOT TRUE ORDER BY r."Pool"',
+            [username, config.leaderboardMinGames]
         );
 
-        const eloConfig = normalizeConfig(this.getConfig().elo);
+        const eloConfig = normalizeConfig(config.elo);
 
         return (rows || []).map((row) => ({
             pool: row.Pool,
@@ -456,7 +511,7 @@ class RatingService {
      */
     async getLeaderboard(options) {
         const config = this.getConfig();
-        const pool = options.pool || 'archon';
+        const pool = this.normalizePool(options.pool);
         const scope = options.scope || 'world';
         const limit = Math.min(
             Math.max(1, parseInt(options.limit, 10) || 50),
@@ -489,8 +544,11 @@ class RatingService {
                     return { entries: [], scope, pool };
                 }
 
+                // Case-insensitive exact match. ILIKE with the raw value let a
+                // '%' or '_' in the query act as a wildcard (e.g. state=%
+                // returned the whole country); locations are stored trimmed.
                 params.push(String(options.state).trim());
-                where += ` AND u."State" ILIKE $${params.length}`;
+                where += ` AND lower(u."State") = lower($${params.length})`;
             }
         }
 

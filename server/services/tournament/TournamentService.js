@@ -431,7 +431,8 @@ class TournamentService {
                 't."CurrentRound", t."RoundCount", t."StartTime", t."PlayerCap", t."BestOf", ' +
                 't."CutTo", t."Stage", t."Visibility", t."RatedGames", t."CreatedAt", ' +
                 'u."Username" AS "Organizer", ' +
-                '(SELECT COUNT(*) FROM "TournamentPlayers" tp WHERE tp."TournamentId" = t."Id" AND NOT tp."Waitlisted") AS "PlayerCount" ' +
+                '(SELECT COUNT(*) FROM "TournamentPlayers" tp WHERE tp."TournamentId" = t."Id" ' +
+                'AND NOT tp."Waitlisted" AND tp."Dropped" IS NOT TRUE) AS "PlayerCount" ' +
                 'FROM "Tournaments" t JOIN "Users" u ON u."Id" = t."OrganizerId" ' +
                 `${
                     where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
@@ -1261,20 +1262,33 @@ class TournamentService {
             this.getMatches(tournamentId)
         ]);
 
-        const active = players.filter((player) => !player.Dropped && !player.Waitlisted);
+        // Compute standings over ALL competitors (including dropped ones)
+        // so that results against a player who later dropped still count.
+        // Passing only active players made computeStandings discard every
+        // match a dropped player was in, silently erasing the point (and
+        // opponent history) earned by whoever beat them - corrupting Swiss
+        // pairings and byes.
+        const competitors = players.filter((player) => !player.Waitlisted);
         const standings = computeStandings(
-            active.map((player) => ({ id: player.UserId })),
+            competitors.map((player) => ({ id: player.UserId })),
             this.matchesForStandings(matches)
+        );
+
+        // Only ACTIVE (non-dropped) players are paired into the next round.
+        const activeIds = new Set(
+            competitors.filter((player) => !player.Dropped).map((player) => player.UserId)
         );
 
         // computeStandings returns entries sorted by standing; keep that
         // order so Swiss pairs within score groups and elim reseeds
-        return standings.map((entry) => ({
-            id: entry.id,
-            points: entry.points,
-            opponents: entry.opponents,
-            receivedBye: entry.byes > 0
-        }));
+        return standings
+            .filter((entry) => activeIds.has(entry.id))
+            .map((entry) => ({
+                id: entry.id,
+                points: entry.points,
+                opponents: entry.opponents,
+                receivedBye: entry.byes > 0
+            }));
     }
 
     async start(tournamentId, actor, options = {}) {
