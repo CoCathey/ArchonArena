@@ -90,15 +90,24 @@ R'             = R + K × mov × (S − E)         S ∈ {1, 0}
     so new players converge fast. Provisional-vs-established games are intentionally not
     zero-sum (standard practice).
 -   **Rating floor** (default 100) prevents runaway deflation of inactive/losing accounts.
+-   **FIDE-style K tiers** (adopted from the owner's original ranked-KeyForge system):
+    established players at ≥ `highRatingThreshold` (2100) use `highRatingKFactor` (24),
+    at ≥ `topRatingThreshold` (2400) use `topRatingKFactor` (16). The top of the ladder
+    moves in smaller steps, staying stable and farm-resistant. Provisional status takes
+    precedence over tiers.
+-   **Tournament weighting**: `game.isTournament` multiplies both K-factors by
+    `tournamentKMultiplier` (default 1.1) — the successor to the old system's flat +3 K.
+    The lobby always passes false today; tournament auto-reporting will set it when
+    tournament results feed the engine (roadmap).
 
 ## Admin-configurable parameters (all of them)
 
 `defaultRating`, `ratingFloor`, `kFactor`, `provisionalKFactor`, `provisionalGames`,
-`sasWeight`, `keyDiffMultipliers`, `resultTypeMultipliers` — defaults live in
-`eloDefaults.js`; the settings service (roadmap, cross-cutting) will layer admin overrides
-on top and pass the merged object in. `normalizeConfig()` validates any override set and
-rejects nonsense (non-positive K, negative weights) so a bad admin edit cannot corrupt
-ratings.
+`highRatingThreshold`, `highRatingKFactor`, `topRatingThreshold`, `topRatingKFactor`,
+`tournamentKMultiplier`, `sasWeight`, `keyDiffMultipliers`, `resultTypeMultipliers` —
+defaults live in `eloDefaults.js`; the settings service layers admin overrides on top and
+passes the merged object in. `normalizeConfig()` validates any override set and rejects
+nonsense (non-positive K, negative weights) so a bad admin edit cannot corrupt ratings.
 
 ## Files changed (this increment)
 

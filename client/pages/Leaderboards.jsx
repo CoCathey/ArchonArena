@@ -136,6 +136,7 @@ const Leaderboards = () => {
                                         <th className='px-2 py-2'>{t('Player')}</th>
                                         <th className='px-2 py-2'>{t('Location')}</th>
                                         <th className='px-2 py-2 text-right'>{t('Amber')}</th>
+                                        <th className='px-2 py-2 text-right'>{t('Record')}</th>
                                         <th className='px-2 py-2 text-right'>{t('Games')}</th>
                                     </tr>
                                 </thead>
@@ -173,6 +174,15 @@ const Leaderboards = () => {
                                             </td>
                                             <td className='px-2 py-2 text-right'>
                                                 <AmberValue value={entry.rating} />
+                                            </td>
+                                            <td className='px-2 py-2 text-right text-muted'>
+                                                <span className='text-green-400'>
+                                                    {entry.wins ?? 0}
+                                                </span>
+                                                {'–'}
+                                                <span className='text-red-400'>
+                                                    {entry.losses ?? 0}
+                                                </span>
                                             </td>
                                             <td className='px-2 py-2 text-right text-muted'>
                                                 {entry.gamesPlayed}

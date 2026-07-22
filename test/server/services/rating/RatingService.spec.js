@@ -212,10 +212,26 @@ describe('RatingService', function () {
     });
 
     describe('getRatingsForUsername', function () {
-        it('returns pools with provisional flags, rank and field size', async function () {
+        it('returns pools with provisional flags, rank, field size and W-L', async function () {
             db.query.mockResolvedValue([
-                { Pool: 'archon', Rating: 1250, GamesPlayed: 3, Rank: '12', TotalRated: '340' },
-                { Pool: 'sealed', Rating: 1400, GamesPlayed: 40, Rank: '3', TotalRated: '88' }
+                {
+                    Pool: 'archon',
+                    Rating: 1250,
+                    GamesPlayed: 3,
+                    Rank: '12',
+                    TotalRated: '340',
+                    Wins: '2',
+                    Losses: '1'
+                },
+                {
+                    Pool: 'sealed',
+                    Rating: 1400,
+                    GamesPlayed: 40,
+                    Rank: '3',
+                    TotalRated: '88',
+                    Wins: '25',
+                    Losses: '15'
+                }
             ]);
 
             const ratings = await service.getRatingsForUsername('Player1');
@@ -227,7 +243,9 @@ describe('RatingService', function () {
                     gamesPlayed: 3,
                     provisional: true,
                     rank: 12,
-                    totalRated: 340
+                    totalRated: 340,
+                    wins: 2,
+                    losses: 1
                 },
                 {
                     pool: 'sealed',
@@ -235,7 +253,9 @@ describe('RatingService', function () {
                     gamesPlayed: 40,
                     provisional: false,
                     rank: 3,
-                    totalRated: 88
+                    totalRated: 88,
+                    wins: 25,
+                    losses: 15
                 }
             ]);
         });

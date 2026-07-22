@@ -22,6 +22,21 @@ const DEFAULT_ELO_CONFIG = {
     // A player is provisional until they have completed this many rated games.
     provisionalGames: 10,
 
+    // FIDE-style K reduction for high-rated players (adopted from the
+    // owner's original ranked-KeyForge system): established players above
+    // these thresholds move more slowly, keeping the top of the ladder
+    // stable and resistant to farming. Provisional status takes precedence.
+    highRatingThreshold: 2100,
+    highRatingKFactor: 24,
+    topRatingThreshold: 2400,
+    topRatingKFactor: 16,
+
+    // K multiplier for rated games played as part of a tournament -
+    // tournament results should move ratings more than ladder games
+    // (successor to the old system's flat +3 K). 1 disables the bonus.
+    // Takes effect when tournament results feed the rating engine.
+    tournamentKMultiplier: 1.1,
+
     // How many rating points of expectation shift one point of SAS (deck
     // power) difference is worth. With sasWeight 4, a 25-SAS stronger deck
     // gives the same expected-score shift as a 100-point rating advantage.

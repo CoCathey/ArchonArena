@@ -74,6 +74,41 @@ const REGISTRY = {
                         max: 100,
                         default: DEFAULT_ELO_CONFIG.provisionalGames
                     },
+                    highRatingThreshold: {
+                        type: 'number',
+                        label: 'High-rating tier starts at',
+                        min: 0,
+                        max: 4000,
+                        default: DEFAULT_ELO_CONFIG.highRatingThreshold
+                    },
+                    highRatingKFactor: {
+                        type: 'number',
+                        label: 'K-factor (high tier)',
+                        min: 1,
+                        max: 200,
+                        default: DEFAULT_ELO_CONFIG.highRatingKFactor
+                    },
+                    topRatingThreshold: {
+                        type: 'number',
+                        label: 'Top-rating tier starts at',
+                        min: 0,
+                        max: 4000,
+                        default: DEFAULT_ELO_CONFIG.topRatingThreshold
+                    },
+                    topRatingKFactor: {
+                        type: 'number',
+                        label: 'K-factor (top tier)',
+                        min: 1,
+                        max: 200,
+                        default: DEFAULT_ELO_CONFIG.topRatingKFactor
+                    },
+                    tournamentKMultiplier: {
+                        type: 'number',
+                        label: 'Tournament game K multiplier (1 = no bonus)',
+                        min: 0.1,
+                        max: 5,
+                        default: DEFAULT_ELO_CONFIG.tournamentKMultiplier
+                    },
                     sasWeight: {
                         type: 'number',
                         label: 'SAS weight (rating points per SAS point)',

@@ -37,14 +37,27 @@ function normalizeConfig(overrides = {}) {
 }
 
 function validateConfig(config) {
-    const positive = ['kFactor', 'provisionalKFactor', 'defaultRating'];
+    const positive = [
+        'kFactor',
+        'provisionalKFactor',
+        'defaultRating',
+        'highRatingKFactor',
+        'topRatingKFactor',
+        'tournamentKMultiplier'
+    ];
     for (const key of positive) {
         if (typeof config[key] !== 'number' || config[key] <= 0) {
             throw new Error(`Elo config '${key}' must be a positive number`);
         }
     }
 
-    const nonNegative = ['sasWeight', 'ratingFloor', 'provisionalGames'];
+    const nonNegative = [
+        'sasWeight',
+        'ratingFloor',
+        'provisionalGames',
+        'highRatingThreshold',
+        'topRatingThreshold'
+    ];
     for (const key of nonNegative) {
         if (typeof config[key] !== 'number' || config[key] < 0) {
             throw new Error(`Elo config '${key}' must be a non-negative number`);
@@ -100,8 +113,29 @@ function movMultiplier(winnerKeys, loserKeys, resultType, config) {
     return keyMultiplier * resultMultiplier;
 }
 
-function kFactorFor(gamesPlayed, config) {
-    return gamesPlayed < config.provisionalGames ? config.provisionalKFactor : config.kFactor;
+/**
+ * K-factor for one player. Provisional players converge fast regardless of
+ * rating; established players use FIDE-style tiers - the higher the rating,
+ * the smaller the K, so the top of the ladder is stable.
+ *
+ * @param {number} gamesPlayed
+ * @param {number} rating the player's current rating
+ * @param {object} config normalized elo config
+ */
+function kFactorFor(gamesPlayed, rating, config) {
+    if (gamesPlayed < config.provisionalGames) {
+        return config.provisionalKFactor;
+    }
+
+    if (rating >= config.topRatingThreshold) {
+        return config.topRatingKFactor;
+    }
+
+    if (rating >= config.highRatingThreshold) {
+        return config.highRatingKFactor;
+    }
+
+    return config.kFactor;
 }
 
 /**
@@ -114,6 +148,8 @@ function kFactorFor(gamesPlayed, config) {
  * @param {number} game.loserKeys  keys forged by the loser at game end
  * @param {string} [game.resultType] 'keys' | 'concede' | 'timeout' (or any
  *                 configured type); defaults to 'keys'
+ * @param {boolean} [game.isTournament] tournament games move ratings more
+ *                 (config.tournamentKMultiplier applied to both K-factors)
  * @param {object} [configOverrides] admin overrides merged onto defaults
  * @returns {{winner: object, loser: object, movMultiplier: number}}
  *          per player: { newRating, change, expected, kFactor }
@@ -128,9 +164,11 @@ function calculateGameResult(game, configOverrides = {}) {
     const loserExpected = 1 - winnerExpected;
 
     const mov = movMultiplier(winnerKeys, loserKeys, resultType, config);
+    const tournamentMultiplier = game.isTournament ? config.tournamentKMultiplier : 1;
 
-    const winnerK = kFactorFor(winner.gamesPlayed ?? 0, config);
-    const loserK = kFactorFor(loser.gamesPlayed ?? 0, config);
+    const winnerK =
+        kFactorFor(winner.gamesPlayed ?? 0, winner.rating, config) * tournamentMultiplier;
+    const loserK = kFactorFor(loser.gamesPlayed ?? 0, loser.rating, config) * tournamentMultiplier;
 
     const winnerChange = winnerK * mov * (1 - winnerExpected);
     const loserChange = loserK * mov * (0 - loserExpected);

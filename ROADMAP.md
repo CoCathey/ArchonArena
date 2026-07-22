@@ -183,6 +183,12 @@ much stronger deck pays less.
 -   [x] **Admin rating tools**: view / set / reset any player's Amber per pool from User
         Admin (RatingHistory kept as audit trail; reset re-enters at default as
         provisional).
+-   [x] **FIDE-style K tiers** (from the owner's original ranked system): ≥2100 → K24,
+        ≥2400 → K16 (admin-config thresholds/values); top of ladder moves in smaller steps.
+-   [x] **Tournament K multiplier** (config tournamentKMultiplier, default 1.1): calculator
+        support landed; activates when tournament results feed the rating engine.
+-   [x] **W–L records** on the Ratings page and Leaderboards (aggregated from
+        RatingHistory; games played still shown).
 -   [x] Leaderboards: worldwide, region, country, state over rating pools; disabled
         accounts excluded; provisional flag shown.
 -   [x] Minimum games threshold to appear on boards (rating.leaderboardMinGames,

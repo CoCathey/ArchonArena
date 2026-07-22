@@ -158,7 +158,11 @@ class RatingService {
                 },
                 winnerKeys: winnerRow.Keys || 0,
                 loserKeys: loserRow.Keys || 0,
-                resultType: resultType
+                resultType: resultType,
+                // Tournament games get a K bonus (tournamentKMultiplier);
+                // set when tournament auto-reporting feeds the rating engine
+                // (roadmap) - lobby-created games are never tournament games.
+                isTournament: false
             },
             config.elo
         );
@@ -358,7 +362,12 @@ class RatingService {
                 // rating, plus one) and the size of the rated field.
                 '(SELECT COUNT(*) + 1 FROM "Ratings" r2 WHERE r2."Pool" = r."Pool" ' +
                 'AND r2."Rating" > r."Rating") AS "Rank", ' +
-                '(SELECT COUNT(*) FROM "Ratings" r3 WHERE r3."Pool" = r."Pool") AS "TotalRated" ' +
+                '(SELECT COUNT(*) FROM "Ratings" r3 WHERE r3."Pool" = r."Pool") AS "TotalRated", ' +
+                // Win/loss record from the audit history.
+                '(SELECT COUNT(*) FROM "RatingHistory" h WHERE h."UserId" = r."UserId" ' +
+                'AND h."Pool" = r."Pool" AND h."Won") AS "Wins", ' +
+                '(SELECT COUNT(*) FROM "RatingHistory" h WHERE h."UserId" = r."UserId" ' +
+                'AND h."Pool" = r."Pool" AND NOT h."Won") AS "Losses" ' +
                 'FROM "Ratings" r JOIN "Users" u ON u."Id" = r."UserId" ' +
                 'WHERE u."Username" = $1 ORDER BY r."Pool"',
             [username]
@@ -372,7 +381,9 @@ class RatingService {
             gamesPlayed: row.GamesPlayed,
             provisional: row.GamesPlayed < eloConfig.provisionalGames,
             rank: parseInt(row.Rank, 10),
-            totalRated: parseInt(row.TotalRated, 10)
+            totalRated: parseInt(row.TotalRated, 10),
+            wins: parseInt(row.Wins, 10) || 0,
+            losses: parseInt(row.Losses, 10) || 0
         }));
     }
 
@@ -476,8 +487,12 @@ class RatingService {
 
         const rows = await this.db.query(
             'SELECT u."Username", u."Country", u."State", u."Settings_Avatar", ' +
-                'r."Rating", r."GamesPlayed" ' +
+                'r."Rating", r."GamesPlayed", record."Wins", record."Losses" ' +
                 'FROM "Ratings" r JOIN "Users" u ON u."Id" = r."UserId" ' +
+                // W/L from the audit history, one lateral scan per row.
+                'LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE h."Won") AS "Wins", ' +
+                'COUNT(*) FILTER (WHERE NOT h."Won") AS "Losses" ' +
+                'FROM "RatingHistory" h WHERE h."UserId" = r."UserId" AND h."Pool" = r."Pool") record ON true ' +
                 `WHERE ${where} AND (u."Disabled" IS NOT TRUE) ` +
                 'ORDER BY r."Rating" DESC, r."GamesPlayed" DESC, u."Username" ASC ' +
                 `LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
@@ -497,7 +512,9 @@ class RatingService {
                 avatar: row.Settings_Avatar,
                 rating: row.Rating,
                 gamesPlayed: row.GamesPlayed,
-                provisional: row.GamesPlayed < eloConfig.provisionalGames
+                provisional: row.GamesPlayed < eloConfig.provisionalGames,
+                wins: parseInt(row.Wins, 10) || 0,
+                losses: parseInt(row.Losses, 10) || 0
             }))
         };
     }

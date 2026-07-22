@@ -106,13 +106,27 @@ describe('EloCalculator', function () {
 
     describe('kFactorFor', function () {
         it('uses the provisional K below the provisional game count', function () {
-            expect(kFactorFor(0, config)).toBe(config.provisionalKFactor);
-            expect(kFactorFor(config.provisionalGames - 1, config)).toBe(config.provisionalKFactor);
+            expect(kFactorFor(0, 1200, config)).toBe(config.provisionalKFactor);
+            expect(kFactorFor(config.provisionalGames - 1, 1200, config)).toBe(
+                config.provisionalKFactor
+            );
         });
 
         it('uses the standard K at and beyond the provisional game count', function () {
-            expect(kFactorFor(config.provisionalGames, config)).toBe(config.kFactor);
-            expect(kFactorFor(500, config)).toBe(config.kFactor);
+            expect(kFactorFor(config.provisionalGames, 1200, config)).toBe(config.kFactor);
+            expect(kFactorFor(500, 1200, config)).toBe(config.kFactor);
+        });
+
+        it('reduces K for high-rated established players (FIDE-style tiers)', function () {
+            expect(kFactorFor(100, 2099, config)).toBe(config.kFactor);
+            expect(kFactorFor(100, 2100, config)).toBe(config.highRatingKFactor);
+            expect(kFactorFor(100, 2399, config)).toBe(config.highRatingKFactor);
+            expect(kFactorFor(100, 2400, config)).toBe(config.topRatingKFactor);
+            expect(kFactorFor(100, 3000, config)).toBe(config.topRatingKFactor);
+        });
+
+        it('provisional status beats the rating tiers', function () {
+            expect(kFactorFor(0, 2500, config)).toBe(config.provisionalKFactor);
         });
     });
 
@@ -130,6 +144,46 @@ describe('EloCalculator', function () {
 
             expect(result.winner.newRating).toBe(1220);
             expect(result.loser.newRating).toBe(1180);
+        });
+
+        it('applies the tournament K multiplier to both players', function () {
+            const game = {
+                winner: { rating: 1200, deckSas: 60, ...established },
+                loser: { rating: 1200, deckSas: 60, ...established },
+                winnerKeys: 3,
+                loserKeys: 0
+            };
+
+            const ladder = calculateGameResult(game);
+            const tournament = calculateGameResult(
+                { ...game, isTournament: true },
+                { tournamentKMultiplier: 1.5 }
+            );
+
+            expect(tournament.winner.change).toBe(Math.round(ladder.winner.change * 1.5));
+            expect(tournament.loser.change).toBe(Math.round(ladder.loser.change * 1.5));
+        });
+
+        it('high-rated players move more slowly than mid-ladder players', function () {
+            // Same 200-point favorite-wins scenario at two ladder heights:
+            // the 2500-rated winner (K16) gains half of what a 1500-rated
+            // winner (K32) would.
+            const mid = calculateGameResult({
+                winner: { rating: 1500, deckSas: 60, ...established },
+                loser: { rating: 1300, deckSas: 60, ...established },
+                winnerKeys: 3,
+                loserKeys: 2
+            });
+            const top = calculateGameResult({
+                winner: { rating: 2500, deckSas: 60, ...established },
+                loser: { rating: 2300, deckSas: 60, ...established },
+                winnerKeys: 3,
+                loserKeys: 2
+            });
+
+            expect(top.winner.kFactor).toBe(16);
+            expect(mid.winner.kFactor).toBe(32);
+            expect(top.winner.change).toBeLessThan(mid.winner.change);
         });
 
         it('is zero-sum for two established players', function () {

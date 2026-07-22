@@ -80,7 +80,15 @@ const Ratings = () => {
                                         : null}
                                 </div>
                                 <div className='text-xs text-muted'>
-                                    {t('{{count}} rated games', { count: rating.gamesPlayed })}
+                                    <span className='font-semibold text-green-400'>
+                                        {rating.wins ?? 0}
+                                    </span>
+                                    {'W – '}
+                                    <span className='font-semibold text-red-400'>
+                                        {rating.losses ?? 0}
+                                    </span>
+                                    {'L '}
+                                    {t('({{count}} rated games)', { count: rating.gamesPlayed })}
                                 </div>
                             </div>
                         ))}
@@ -122,6 +130,11 @@ const Ratings = () => {
                         <li>
                             {t(
                                 'Provisional: your first several games swing more Amber while the system finds your level. After that your rating settles.'
+                            )}
+                        </li>
+                        <li>
+                            {t(
+                                'At the top: very high-rated players move in smaller steps, so the top of the ladder stays stable and hard-earned.'
                             )}
                         </li>
                     </ul>
