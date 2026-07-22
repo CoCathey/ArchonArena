@@ -11,7 +11,8 @@ import {
     useWindowDimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { closeGameSocket, sendGameMessage } from '../src/net/gameSocket';
+import { closeGameSocket, reconnectGameSocket, sendGameMessage } from '../src/net/gameSocket';
+import { successFeedback, tapFeedback, warnFeedback } from '../src/haptics';
 import { useAuthStore } from '../src/stores/authStore';
 import { useGameStore } from '../src/stores/gameStore';
 import { useLobbyStore } from '../src/stores/lobbyStore';
@@ -21,6 +22,7 @@ import PlayerHud from '../src/game/PlayerHud';
 import PromptPanel from '../src/game/PromptPanel';
 import LogSheet from '../src/game/LogSheet';
 import { CardMenuModal, CardZoomModal, PileModal } from '../src/game/GameModals';
+import { Button } from '../src/ui/primitives';
 import type { CardMenuItem, CardSummary, PlayerState, PromptButton } from '../src/game/types';
 
 type PileName = 'discard' | 'archives' | 'purged' | 'hand' | 'deck';
@@ -112,6 +114,20 @@ export default function GameScreen() {
         }
     }, [cleared]);
 
+    // Fire a single haptic when the game ends.
+    const winnerRef = useRef<string | undefined>(undefined);
+    useEffect(() => {
+        const winner = rootState?.winner;
+        if (winner && winner !== winnerRef.current) {
+            winnerRef.current = winner;
+            if (!isSpectator && winner === perspective?.name) {
+                successFeedback();
+            } else {
+                warnFeedback();
+            }
+        }
+    }, [rootState?.winner, isSpectator, perspective?.name]);
+
     const smallCard = Math.max(56, Math.floor(screenWidth / 6.4));
     const handCard = Math.max(78, Math.floor(screenWidth / 4.6));
 
@@ -167,6 +183,7 @@ export default function GameScreen() {
             setMenuCard(card);
             return;
         }
+        tapFeedback();
         sendGameMessage('cardClicked', card.uuid);
     };
 
@@ -175,15 +192,18 @@ export default function GameScreen() {
             setZoomCard(card);
             return;
         }
+        tapFeedback();
         sendGameMessage('cardClicked', card.uuid);
     };
 
     const onMenuItem = (card: CardSummary, item: CardMenuItem) => {
         setMenuCard(undefined);
+        tapFeedback();
         sendGameMessage('menuItemClick', card.uuid, item);
     };
 
     const onPromptButton = (button: PromptButton) => {
+        tapFeedback();
         sendGameMessage(button.command ?? 'menuButton', button.arg, button.uuid, button.method);
     };
 
@@ -193,14 +213,22 @@ export default function GameScreen() {
     };
 
     if (!rootState || !perspective) {
+        const failed = status === 'failed';
         return (
             <SafeAreaView style={styles.loading}>
-                <ActivityIndicator size='large' color={colors.brand} />
+                {failed ? (
+                    <Text style={styles.loadingIcon}>⚠</Text>
+                ) : (
+                    <ActivityIndicator size='large' color={colors.brand} />
+                )}
                 <Text style={styles.loadingText}>
-                    {status === 'failed'
+                    {failed
                         ? 'Could not reach the game server.'
                         : 'Connecting to the game…'}
                 </Text>
+                {failed ? (
+                    <Button title='Retry connection' onPress={reconnectGameSocket} />
+                ) : null}
                 <Pressable
                     onPress={() => {
                         leftGame.current = true;
@@ -211,6 +239,7 @@ export default function GameScreen() {
                             router.replace('/(tabs)');
                         }
                     }}
+                    hitSlop={8}
                 >
                     <Text style={styles.loadingLeave}>Back to lobby</Text>
                 </Pressable>
@@ -261,7 +290,15 @@ export default function GameScreen() {
                         {isSpectator ? ' · spectating' : ''}
                     </Text>
                 </View>
-                {status !== 'connected' ? (
+                {status === 'failed' ? (
+                    <Pressable
+                        onPress={reconnectGameSocket}
+                        style={styles.reconnectButton}
+                        hitSlop={8}
+                    >
+                        <Text style={styles.reconnectButtonText}>Reconnect</Text>
+                    </Pressable>
+                ) : status !== 'connected' ? (
                     <Text style={styles.reconnecting}>reconnecting…</Text>
                 ) : null}
                 <Pressable onPress={() => setLogOpen(true)} style={styles.headerButton} hitSlop={8}>
@@ -301,11 +338,7 @@ export default function GameScreen() {
                     emptyLabel='No enemy creatures'
                 />
 
-                {!isSpectator ? (
-                    <PromptPanel me={me} onButton={onPromptButton} />
-                ) : (
-                    <View style={{ height: 8 }} />
-                )}
+                <View style={{ height: 8 }} />
 
                 <CardRow
                     cards={myArea.creatures}
@@ -323,6 +356,10 @@ export default function GameScreen() {
                     onLongPress={setZoomCard}
                 />
             </ScrollView>
+
+            {/* Prompt — pinned just above the player so the required action is
+                always visible, never scrolled off with the board. */}
+            {!isSpectator ? <PromptPanel me={me} onButton={onPromptButton} /> : null}
 
             {/* Me */}
             <PlayerHud
@@ -416,6 +453,21 @@ const styles = StyleSheet.create({
     loadingText: {
         color: colors.textDim,
         fontSize: 14
+    },
+    loadingIcon: {
+        color: colors.warning,
+        fontSize: 40
+    },
+    reconnectButton: {
+        backgroundColor: colors.warning,
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 6
+    },
+    reconnectButtonText: {
+        color: '#161006',
+        fontSize: 13,
+        fontWeight: '800'
     },
     loadingLeave: {
         color: colors.accent,

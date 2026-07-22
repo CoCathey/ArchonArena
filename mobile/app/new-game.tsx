@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    View
+} from 'react-native';
 import { lobby } from '../src/net/lobbySocket';
 import { useAuthStore } from '../src/stores/authStore';
 import { useLobbyStore } from '../src/stores/lobbyStore';
@@ -138,12 +147,27 @@ export default function NewGameScreen() {
     };
 
     return (
-        <ScrollView style={styles.container} contentContainerStyle={{ padding: spacing.lg }}>
-            <ErrorBanner message={gameError} />
+        <KeyboardAvoidingView
+            style={styles.container}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+            <ScrollView
+                style={styles.container}
+                contentContainerStyle={{ padding: spacing.lg }}
+                keyboardShouldPersistTaps='handled'
+                keyboardDismissMode='on-drag'
+            >
+                <ErrorBanner message={gameError} />
 
-            {!quickJoin ? (
-                <TextField label='Game name' value={name} onChangeText={setName} maxLength={64} />
-            ) : (
+                {!quickJoin ? (
+                    <TextField
+                        label='Game name'
+                        value={name}
+                        onChangeText={setName}
+                        maxLength={64}
+                        autoCapitalize='sentences'
+                    />
+                ) : (
                 <Text style={styles.quickJoinText}>
                     Quick join finds the first open game matching your settings — or creates one
                     if none exists.
@@ -211,7 +235,8 @@ export default function NewGameScreen() {
                 onPress={create}
                 loading={submitted && !gameError}
             />
-        </ScrollView>
+            </ScrollView>
+        </KeyboardAvoidingView>
     );
 }
 

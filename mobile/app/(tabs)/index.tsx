@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { router, usePathname } from 'expo-router';
 import {
     FlatList,
+    KeyboardAvoidingView,
     Modal,
+    Platform,
     RefreshControl,
     StyleSheet,
     Text,
@@ -95,8 +97,17 @@ export default function PlayScreen() {
         { game: GameSummary; mode: 'join' | 'watch' } | undefined
     >();
     const [password, setPassword] = useState('');
+    const [refreshing, setRefreshing] = useState(false);
     const prevGameId = useRef<string | undefined>(undefined);
     const pathname = usePathname();
+
+    // The game list is live over the socket, but honour a pull-to-refresh:
+    // reconnect if we've dropped, and show a brief spinner as acknowledgement.
+    const onRefresh = () => {
+        setRefreshing(true);
+        connectLobby();
+        setTimeout(() => setRefreshing(false), 800);
+    };
 
     // When we join a pending game from the lobby, open the pending screen once.
     // Skip when we're on the New game modal (it navigates to pending itself) or
@@ -237,8 +248,8 @@ export default function PlayScreen() {
                 contentContainerStyle={{ padding: spacing.md, paddingBottom: 48 }}
                 refreshControl={
                     <RefreshControl
-                        refreshing={status === 'connecting'}
-                        onRefresh={() => connectLobby()}
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
                         tintColor={colors.textDim}
                     />
                 }
@@ -256,7 +267,10 @@ export default function PlayScreen() {
                 animationType='fade'
                 onRequestClose={() => setPasswordGame(undefined)}
             >
-                <View style={styles.modalBackdrop}>
+                <KeyboardAvoidingView
+                    style={styles.modalBackdrop}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                >
                     <View style={styles.modalCard}>
                         <Text style={styles.modalTitle}>
                             {passwordGame?.mode === 'watch' ? 'Watch game' : 'Join game'}
@@ -282,7 +296,7 @@ export default function PlayScreen() {
                             <Button title='Enter' onPress={submitPassword} />
                         </View>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
         </View>
     );

@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, AppState, Pressable, Text, View } from 'react-native';
 import { checkAuth, refreshAuthToken } from '../src/api/client';
+import { reconnectGameSocket } from '../src/net/gameSocket';
+import { connectLobby } from '../src/net/lobbySocket';
 import { useAuthStore } from '../src/stores/authStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
 import { colors } from '../src/theme';
@@ -21,6 +23,10 @@ export default function RootLayout() {
         if (!authHydrated || !settingsHydrated || booted) {
             return;
         }
+        // Never let a stalled restore keep the splash up indefinitely — the
+        // login screen (with its server-settings escape hatch) must be able to
+        // appear even offline. (REST calls also self-timeout in the client.)
+        const safety = setTimeout(() => setBooted(true), 8000);
         (async () => {
             // Try to restore the session silently before showing any screen.
             if (useAuthStore.getState().refreshToken) {
@@ -29,9 +35,22 @@ export default function RootLayout() {
                     await checkAuth();
                 }
             }
+            clearTimeout(safety);
             setBooted(true);
         })();
+        return () => clearTimeout(safety);
     }, [authHydrated, settingsHydrated, booted]);
+
+    // iOS suspends sockets in the background; reconnect on return to foreground.
+    useEffect(() => {
+        const sub = AppState.addEventListener('change', (state) => {
+            if (state === 'active' && useAuthStore.getState().token) {
+                connectLobby();
+                reconnectGameSocket();
+            }
+        });
+        return () => sub.remove();
+    }, []);
 
     if (!booted) {
         return (
@@ -62,9 +81,28 @@ export default function RootLayout() {
             >
                 <Stack.Screen name='(tabs)' options={{ headerShown: false }} />
                 <Stack.Screen name='login' options={{ headerShown: false }} />
-                <Stack.Screen name='register' options={{ title: 'Create account' }} />
-                <Stack.Screen name='new-game' options={{ title: 'New game', presentation: 'modal' }} />
-                <Stack.Screen name='pending' options={{ title: 'Game lobby' }} />
+                <Stack.Screen
+                    name='register'
+                    options={{ title: 'Create account', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='new-game'
+                    options={{
+                        title: 'New game',
+                        presentation: 'modal',
+                        headerLeft: () => (
+                            <Pressable onPress={() => router.back()} hitSlop={8}>
+                                <Text style={{ color: colors.accent, fontSize: 16, fontWeight: '600' }}>
+                                    Cancel
+                                </Text>
+                            </Pressable>
+                        )
+                    }}
+                />
+                <Stack.Screen
+                    name='pending'
+                    options={{ title: 'Game lobby', headerBackTitle: 'Back' }}
+                />
                 <Stack.Screen
                     name='game'
                     options={{ headerShown: false, gestureEnabled: false }}

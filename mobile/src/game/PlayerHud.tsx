@@ -21,11 +21,17 @@ const KEY_IMAGES: Record<string, { forged: number; unforged: number }> = {
 };
 
 function PileChip(props: { label: string; count: number; onPress?: () => void }) {
+    const interactive = !!props.onPress;
     return (
         <Pressable
             onPress={props.onPress}
-            disabled={!props.onPress}
-            style={({ pressed }) => [styles.pileChip, pressed && { opacity: 0.6 }]}
+            disabled={!interactive}
+            hitSlop={8}
+            style={({ pressed }) => [
+                styles.pileChip,
+                interactive && styles.pileChipInteractive,
+                pressed && { opacity: 0.6 }
+            ]}
         >
             <Text style={styles.pileChipLabel}>{props.label}</Text>
             <Text style={styles.pileChipCount}>{props.count}</Text>
@@ -89,11 +95,7 @@ export default function PlayerHud(props: {
             </View>
 
             <View style={styles.pileRow}>
-                <PileChip
-                    label='Hand'
-                    count={player.cardPiles?.hand?.length ?? 0}
-                    onPress={props.isMe ? undefined : undefined}
-                />
+                <PileChip label='Hand' count={player.cardPiles?.hand?.length ?? 0} />
                 <PileChip label='Deck' count={player.numDeckCards ?? 0} />
                 <PileChip
                     label='Discard'
@@ -201,8 +203,14 @@ const styles = StyleSheet.create({
         borderColor: colors.border,
         borderWidth: 1,
         borderRadius: 999,
-        paddingHorizontal: 8,
-        paddingVertical: 2
+        paddingHorizontal: 10,
+        paddingVertical: 5
+    },
+    // Tappable piles (discard/archives/purged) read as buttons; Hand/Deck are
+    // just counts.
+    pileChipInteractive: {
+        backgroundColor: colors.surfaceHover,
+        borderColor: colors.borderLight
     },
     pileChipLabel: {
         color: colors.textFaint,

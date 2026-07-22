@@ -124,8 +124,8 @@ export function PileModal(props: {
             animationType='slide'
             onRequestClose={props.onClose}
         >
-            <View style={styles.sheetBackdrop}>
-                <View style={[styles.sheet, { maxHeight: '75%' }]}>
+            <Pressable style={styles.sheetBackdrop} onPress={props.onClose}>
+                <Pressable style={[styles.sheet, { maxHeight: '75%' }]} onPress={() => {}}>
                     <View style={styles.pileHeader}>
                         <Text style={styles.sheetTitle}>{props.title ?? 'Cards'}</Text>
                         <Pressable onPress={props.onClose} hitSlop={12}>
@@ -154,8 +154,8 @@ export function PileModal(props: {
                             <Text style={styles.emptyPile}>Nothing here yet</Text>
                         }
                     />
-                </View>
-            </View>
+                </Pressable>
+            </Pressable>
         </Modal>
     );
 }

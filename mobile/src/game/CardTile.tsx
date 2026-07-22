@@ -48,7 +48,7 @@ export default function CardTile(props: {
         <Pressable
             onPress={() => props.onPress?.(card)}
             onLongPress={() => props.onLongPress?.(card)}
-            delayLongPress={220}
+            delayLongPress={450}
             disabled={props.disabled}
             style={({ pressed }) => [
                 styles.container,
@@ -116,7 +116,10 @@ const styles = StyleSheet.create({
         height: '100%'
     },
     exhausted: {
-        transform: [{ rotate: '90deg' }, { scale: 0.86 }]
+        // Scale down enough that the 90°-rotated card fits within its own
+        // (un-rotated) slot — otherwise it overflows into neighbouring cards
+        // and its extended edges fall outside the tappable area.
+        transform: [{ rotate: '90deg' }, { scale: 0.7 }]
     },
     newCard: {
         shadowColor: colors.brand,

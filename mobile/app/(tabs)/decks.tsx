@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import type { Deck } from '../../src/api/types';
 import { fetchDecks, importDeck, parseDeckUuid } from '../../src/api/client';
 import { colors, spacing } from '../../src/theme';
@@ -119,7 +119,9 @@ export default function DecksScreen() {
                     <RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.textDim} />
                 }
                 ListEmptyComponent={
-                    loading ? null : (
+                    loading ? (
+                        <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
+                    ) : (
                         <EmptyState
                             title='No decks yet'
                             subtitle='Import a deck from the Master Vault with the field above.'
