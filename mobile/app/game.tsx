@@ -351,7 +351,7 @@ export default function GameScreen() {
                     ))}
                 </ScrollView>
             ) : (
-                <View style={styles.handStrip}>
+                <View style={[styles.handStrip, styles.handStripEmpty]}>
                     <Text style={styles.emptyRowText}>
                         {isSpectator ? 'Spectator view' : 'No cards in hand'}
                     </Text>
@@ -495,13 +495,20 @@ const styles = StyleSheet.create({
         borderTopColor: colors.border,
         borderTopWidth: 1,
         maxHeight: 190,
-        minHeight: 44,
-        justifyContent: 'center'
+        minHeight: 44
+        // NOTE: never put justifyContent/alignItems that centers the MAIN
+        // (horizontal) axis here — on a horizontal ScrollView that centers the
+        // overflowing row and makes the leftmost cards impossible to scroll to.
     },
     handContent: {
         gap: 6,
         paddingHorizontal: spacing.sm,
         paddingVertical: 8,
-        alignItems: 'flex-start'
+        // Cross-axis (vertical) centering only — safe for horizontal scrolling.
+        alignItems: 'center'
+    },
+    handStripEmpty: {
+        alignItems: 'center',
+        justifyContent: 'center'
     }
 });
