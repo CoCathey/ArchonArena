@@ -11,6 +11,7 @@ import {
     useWindowDimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useKeepAwake } from 'expo-keep-awake';
 import {
     closeGameSocket,
     reconnectGameSocket,
@@ -70,6 +71,11 @@ function CardRow(props: {
 }
 
 export default function GameScreen() {
+    // Keep the screen awake for the duration of a game — turns involve reading
+    // and thinking, and the board auto-locking mid-turn is disruptive. Released
+    // automatically when this screen unmounts (leaving the game).
+    useKeepAwake();
+
     const rootState = useGameStore((state) => state.rootState);
     const status = useGameStore((state) => state.status);
     const currentGame = useLobbyStore((state) => state.currentGame);
