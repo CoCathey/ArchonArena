@@ -149,21 +149,9 @@ const Lobby = () => {
                 </div>
             </div>
 
-            <div className='grid gap-4 pb-8 md:grid-cols-3'>
-                {features.map((feature) => (
-                    <div
-                        key={feature.title}
-                        className='rounded-lg border border-border/70 bg-surface-secondary/60 p-5'
-                    >
-                        <div className='mb-2 font-semibold text-amber-300'>{feature.title}</div>
-                        <div className='text-sm text-muted'>{feature.body}</div>
-                    </div>
-                ))}
-            </div>
-
             {/* ARCHON: standing on the shoulders of two community projects -
                 say so where every player lands, not just on the About page. */}
-            <div className='mb-12 rounded-lg border border-border/50 bg-surface-secondary/40 px-5 py-4 text-center'>
+            <div className='mb-6 rounded-lg border border-border/50 bg-surface-secondary/40 px-5 py-4 text-center'>
                 <div className='mb-1 text-xs font-semibold uppercase tracking-wide text-amber-300/80'>
                     {t('Special thanks')}
                 </div>
@@ -192,6 +180,18 @@ const Lobby = () => {
                         ', whose SAS ratings taught us all how to talk about deck power. Thank you for keeping the Crucible burning.'
                     )}
                 </p>
+            </div>
+
+            <div className='grid gap-4 pb-12 md:grid-cols-3'>
+                {features.map((feature) => (
+                    <div
+                        key={feature.title}
+                        className='rounded-lg border border-border/70 bg-surface-secondary/60 p-5'
+                    >
+                        <div className='mb-2 font-semibold text-amber-300'>{feature.title}</div>
+                        <div className='text-sm text-muted'>{feature.body}</div>
+                    </div>
+                ))}
             </div>
         </div>
     );

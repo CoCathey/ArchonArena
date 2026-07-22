@@ -11,6 +11,8 @@ const tournaments = require('./tournaments');
 const community = require('./community');
 // ARCHON: first-run onboarding wizard
 const onboarding = require('./onboarding');
+// ARCHON: beta bug reports
+const bugReports = require('./bug-reports');
 const decks = require('./decks');
 const games = require('./games');
 const cards = require('./cards');
@@ -39,6 +41,8 @@ module.exports.init = function (server, options) {
     tournaments.init(server);
     // ARCHON: community (friends, members, clubs)
     community.init(server);
+    // ARCHON: beta bug reports
+    bugReports.init(server);
     decks.init(server);
     games.init(server);
     cards.init(server);

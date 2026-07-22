@@ -17,6 +17,7 @@ import CommunityNews from './pages/CommunityNews';
 import Leaderboards from './pages/Leaderboards';
 import Matches from './pages/Matches';
 import Placeholder from './pages/Placeholder';
+import BugReportsAdmin from './pages/BugReportsAdmin';
 import Tournaments from './pages/Tournaments';
 import TournamentDetail from './pages/TournamentDetail';
 import Friends from './pages/Friends';
@@ -104,6 +105,10 @@ const AppRoutes = ({ currentGame, user }) => {
                 )}
             />
             <Route path='/admin/motd' element={requirePermission('canManageMotd', <MotdAdmin />)} />
+            <Route
+                path='/admin/bug-reports'
+                element={requirePermission('isAdmin', <BugReportsAdmin />)}
+            />
             {/* ARCHON: runtime site settings (admin only) */}
             <Route
                 path='/admin/settings'

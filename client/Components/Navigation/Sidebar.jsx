@@ -5,6 +5,7 @@ import { Button as HeroButton } from '@heroui/react';
 
 import { SidebarMenu, ProfileMenu } from '../../menus';
 import Avatar from '../Site/Avatar';
+import BugReportModal from '../Site/BugReportModal';
 import LanguageSelector from './LanguageSelector';
 import Link from './Link';
 
@@ -23,6 +24,7 @@ const Sidebar = ({ appName, user }) => {
     const [openSection, setOpenSection] = useState(null);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
+    const [bugReportOpen, setBugReportOpen] = useState(false);
 
     // Keep the flyout open through a small pointer slip: closing is
     // delayed, and any re-entry (into the button, the bridge gap, or the
@@ -231,6 +233,20 @@ const Sidebar = ({ appName, user }) => {
                 {visibleSections.map(renderSection)}
             </nav>
             <div className='space-y-2 border-t border-border/70 px-3 py-3'>
+                {/* ARCHON: beta feedback entry point - always visible */}
+                <button
+                    type='button'
+                    onClick={() => {
+                        closeAll();
+                        setBugReportOpen(true);
+                    }}
+                    className='flex w-full items-center gap-2 rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-left text-xs text-amber-200 transition hover:bg-amber-400/20'
+                >
+                    <span className='rounded bg-amber-400/25 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-300'>
+                        {t('Beta')}
+                    </span>
+                    {t('Report a bug')}
+                </button>
                 {authControls}
                 <div className='flex items-center justify-between'>
                     <Link
@@ -248,6 +264,9 @@ const Sidebar = ({ appName, user }) => {
 
     return (
         <>
+            {bugReportOpen && (
+                <BugReportModal user={user} onClose={() => setBugReportOpen(false)} />
+            )}
             {/* Desktop sidebar */}
             <aside className='fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-border/80 bg-overlay/95 lg:flex'>
                 <Link href='/' className='flex items-center gap-2 px-4 py-4' onClick={closeAll}>

@@ -321,6 +321,23 @@ export const api = createApi({
             query: (username) => `/tournaments/history/${encodeURIComponent(username)}`,
             providesTags: [TAG_TYPES.TOURNAMENTS]
         }),
+        // ARCHON: beta bug reports
+        submitBugReport: builder.mutation({
+            query: (body) => ({ url: '/bug-reports', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.BUG_REPORTS]
+        }),
+        getBugReports: builder.query({
+            query: (params) => ({ url: '/bug-reports', params }),
+            providesTags: [TAG_TYPES.BUG_REPORTS]
+        }),
+        setBugReportStatus: builder.mutation({
+            query: ({ id, status }) => ({
+                url: `/bug-reports/${id}/status`,
+                method: 'POST',
+                body: { status }
+            }),
+            invalidatesTags: [TAG_TYPES.BUG_REPORTS]
+        }),
         // ARCHON: community (friends, members, clubs)
         getFriends: builder.query({
             query: () => '/friends',
@@ -721,6 +738,9 @@ export const {
     useCreateTournamentMutation,
     useTournamentActionMutation,
     useGetTournamentHistoryQuery,
+    useSubmitBugReportMutation,
+    useGetBugReportsQuery,
+    useSetBugReportStatusMutation,
     useGetFriendsQuery,
     useFriendActionMutation,
     useGetMembersQuery,
