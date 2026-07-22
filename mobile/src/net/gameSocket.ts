@@ -5,6 +5,7 @@ import type { GameState } from '../game/types';
 import { useAuthStore } from '../stores/authStore';
 import { useGameStore } from '../stores/gameStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { buildGameNodeUrl } from './gameNodeUrl';
 import { patch } from './jsonpatch';
 
 let socket: Socket | undefined;
@@ -16,20 +17,7 @@ export function getGameSocket(): Socket | undefined {
 
 /** Build the game node origin from a lobby handoff message. */
 export function gameNodeUrl(handoff: HandoffMessage): string {
-    const lobbyUrl = useSettingsStore.getState().serverUrl;
-    const lobbyHost = lobbyUrl.replace(/^https?:\/\//, '').replace(/[:/].*$/, '');
-    const lobbyProtocol = lobbyUrl.startsWith('http://') ? 'http' : 'https';
-
-    const host = handoff.address && handoff.address !== 'undefined' ? handoff.address : lobbyHost;
-    const protocol = handoff.protocol ?? lobbyProtocol;
-
-    let url = `${protocol}://${host}`;
-    const standardPorts = [80, 443];
-    if (handoff.port && !standardPorts.includes(handoff.port)) {
-        url += `:${handoff.port}`;
-    }
-
-    return url;
+    return buildGameNodeUrl(handoff, useSettingsStore.getState().serverUrl);
 }
 
 /**
