@@ -58,6 +58,30 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
         (game) => game.tournament && game.tournament.matchId === myMatch.id
     );
 
+    // Triad ban/pick state for this match (official KeyForge format:
+    // ban one of your opponent's three decks, then pilot one of your
+    // own two survivors).
+    const isP1 = myMatch.player1Id === user.id;
+    const myBannedDeckId = isP1 ? myMatch.p1BannedDeckId : myMatch.p2BannedDeckId;
+    const oppBannedDeckId = isP1 ? myMatch.p2BannedDeckId : myMatch.p1BannedDeckId;
+    const myPickedDeckId = isP1 ? myMatch.p1DeckId : myMatch.p2DeckId;
+    const oppPickedDeckId = isP1 ? myMatch.p2DeckId : myMatch.p1DeckId;
+    const myPool = players.find((player) => player.userId === user.id)?.triadDecks || [];
+    const oppPool = opponent?.triadDecks || [];
+
+    const triadStep =
+        tournament.triad && !decided
+            ? !oppBannedDeckId
+                ? 'ban'
+                : !myBannedDeckId
+                ? 'wait-ban'
+                : !myPickedDeckId
+                ? 'pick'
+                : !oppPickedDeckId
+                ? 'wait-pick'
+                : null
+            : null;
+
     return (
         <Panel title={t('Your Match - Round {{round}}', { round: tournament.currentRound })}>
             <div className='flex flex-wrap items-center gap-x-4 gap-y-2 text-sm'>
@@ -96,7 +120,17 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                     </span>
                 )}
                 <span className='ml-auto flex flex-wrap gap-2'>
-                    {decided ? (
+                    {triadStep ? (
+                        <span className='text-muted'>
+                            {triadStep === 'ban'
+                                ? t('Triad: ban one of their decks below')
+                                : triadStep === 'wait-ban'
+                                ? t('Triad: waiting for their ban')
+                                : triadStep === 'pick'
+                                ? t('Triad: choose your deck below')
+                                : t('Triad: waiting for their deck choice')}
+                        </span>
+                    ) : decided ? (
                         <span className={`font-bold ${won ? 'text-emerald-400' : 'text-red-400'}`}>
                             {won ? t('You won this match') : t('You lost this match')}
                         </span>
@@ -138,6 +172,64 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                     )}
                 </span>
             </div>
+            {triadStep === 'ban' && (
+                <div className='mt-2 border-t border-border/40 pt-2'>
+                    <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
+                        {t("Ban one of {{name}}'s decks", { name: opponent?.username })}
+                    </div>
+                    <div className='flex flex-wrap gap-2'>
+                        {oppPool.map((deck) => (
+                            <HeroButton
+                                key={deck.deckId}
+                                size='sm'
+                                variant='tertiary'
+                                onPress={() =>
+                                    act(
+                                        `matches/${myMatch.id}/triad-ban`,
+                                        { deckId: deck.deckId },
+                                        t('Deck banned')
+                                    )
+                                }
+                            >
+                                {deck.deckName}
+                                {deck.deckSas != null && ` (${deck.deckSas})`}
+                            </HeroButton>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {triadStep === 'pick' && (
+                <div className='mt-2 border-t border-border/40 pt-2'>
+                    <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
+                        {t('Your deck for this match (they banned {{name}})', {
+                            name:
+                                myPool.find((deck) => deck.deckId === myBannedDeckId)?.deckName ||
+                                t('one')
+                        })}
+                    </div>
+                    <div className='flex flex-wrap gap-2'>
+                        {myPool
+                            .filter((deck) => deck.deckId !== myBannedDeckId)
+                            .map((deck) => (
+                                <HeroButton
+                                    key={deck.deckId}
+                                    size='sm'
+                                    variant='primary'
+                                    onPress={() =>
+                                        act(
+                                            `matches/${myMatch.id}/triad-pick`,
+                                            { deckId: deck.deckId },
+                                            t('Deck locked in')
+                                        )
+                                    }
+                                >
+                                    {deck.deckName}
+                                    {deck.deckSas != null && ` (${deck.deckSas})`}
+                                </HeroButton>
+                            ))}
+                    </div>
+                </div>
+            )}
         </Panel>
     );
 };

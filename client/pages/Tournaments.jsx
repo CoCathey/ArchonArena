@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
+import { Constants } from '../constants';
 import {
     useCreateTournamentMutation,
     useGetTournamentHistoryQuery,
@@ -21,6 +22,24 @@ const formatNames = {
     'double-elim': 'Double Elim',
     'round-robin': 'Round Robin'
 };
+
+const houseOptions = [
+    ['brobnar', 'Brobnar'],
+    ['dis', 'Dis'],
+    ['ekwidon', 'Ekwidon'],
+    ['geistoid', 'Geistoid'],
+    ['logos', 'Logos'],
+    ['mars', 'Mars'],
+    ['ouboros', 'Ouboros'],
+    ['redemption', 'Redemption'],
+    ['sanctum', 'Sanctum'],
+    ['saurian', 'Saurian'],
+    ['shadows', 'Shadows'],
+    ['skyborn', 'Skyborn'],
+    ['staralliance', 'Star Alliance'],
+    ['unfathomable', 'Unfathomable'],
+    ['untamed', 'Untamed']
+];
 
 const defaultForm = {
     name: '',
@@ -42,7 +61,14 @@ const defaultForm = {
     requireDeckRegistration: false,
     hideDecklists: false,
     sasMin: '',
-    sasMax: ''
+    sasMax: '',
+    deckSwapPolicy: 'locked',
+    triad: false,
+    sasChainHandicap: false,
+    chainsPerMatchWin: '',
+    allowedSets: [],
+    bannedHouses: [],
+    requiredHouses: []
 };
 
 /**
@@ -94,7 +120,11 @@ const Tournaments = () => {
                 roundTimerMinutes: form.roundTimerMinutes || undefined,
                 gameTimeLimit: form.gameTimeLimit || undefined,
                 sasMin: form.sasMin || undefined,
-                sasMax: form.sasMax || undefined
+                sasMax: form.sasMax || undefined,
+                chainsPerMatchWin: form.chainsPerMatchWin || undefined,
+                allowedSets: form.allowedSets.length > 0 ? form.allowedSets : undefined,
+                bannedHouses: form.bannedHouses.length > 0 ? form.bannedHouses : undefined,
+                requiredHouses: form.requiredHouses.length > 0 ? form.requiredHouses : undefined
             }).unwrap();
 
             if (result.success) {
@@ -175,6 +205,12 @@ const Tournaments = () => {
                                     <option value='archon'>{t('Archon')}</option>
                                     <option value='sealed'>{t('Sealed')}</option>
                                     <option value='alliance'>{t('Alliance')}</option>
+                                    <option value='reversal'>
+                                        {t("Reversal (pilot your opponent's deck)")}
+                                    </option>
+                                    <option value='adaptive-bo1'>
+                                        {t('Adaptive Bo1 (play, swap, chain bid)')}
+                                    </option>
                                 </select>
                             </div>
                             <div>
@@ -374,6 +410,158 @@ const Tournaments = () => {
                                         onChange={set('sasMax')}
                                     />
                                 </div>
+                                <div>
+                                    <Label htmlFor='tournamentSwapPolicy'>{t('Deck rules')}</Label>
+                                    <select
+                                        id='tournamentSwapPolicy'
+                                        className={selectClass}
+                                        value={form.triad ? 'triad' : form.deckSwapPolicy}
+                                        onChange={(event) => {
+                                            const value = event.target.value;
+                                            setForm({
+                                                ...form,
+                                                triad: value === 'triad',
+                                                deckSwapPolicy:
+                                                    value === 'triad' ? 'locked' : value,
+                                                requireDeckRegistration:
+                                                    value === 'triad'
+                                                        ? true
+                                                        : form.requireDeckRegistration
+                                            });
+                                        }}
+                                    >
+                                        <option value='locked'>
+                                            {t('One deck, locked for the event (Archon standard)')}
+                                        </option>
+                                        <option value='between-rounds'>
+                                            {t('Deck may change between rounds')}
+                                        </option>
+                                        <option value='triad'>
+                                            {t('Triad: 3 decks, opponent bans one each match')}
+                                        </option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <Label htmlFor='tournamentChainsPerWin'>
+                                        {t('Chains gained per match win (Chainbound style)')}
+                                    </Label>
+                                    <Input
+                                        id='tournamentChainsPerWin'
+                                        type='number'
+                                        min='0'
+                                        max='6'
+                                        value={form.chainsPerMatchWin}
+                                        onChange={set('chainsPerMatchWin')}
+                                    />
+                                </div>
+                                <div className='md:col-span-2'>
+                                    <Label>{t('Allowed sets (none checked = all sets)')}</Label>
+                                    <div className='flex flex-wrap gap-x-3 gap-y-1'>
+                                        {Constants.Expansions.map((expansion) => (
+                                            <label
+                                                key={expansion.value}
+                                                className='flex items-center gap-1 text-sm text-foreground'
+                                            >
+                                                <input
+                                                    type='checkbox'
+                                                    checked={form.allowedSets.includes(
+                                                        parseInt(expansion.value, 10)
+                                                    )}
+                                                    onChange={(event) => {
+                                                        const id = parseInt(expansion.value, 10);
+                                                        setForm({
+                                                            ...form,
+                                                            allowedSets: event.target.checked
+                                                                ? [...form.allowedSets, id]
+                                                                : form.allowedSets.filter(
+                                                                      (entry) => entry !== id
+                                                                  )
+                                                        });
+                                                    }}
+                                                />
+                                                {expansion.label}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className='md:col-span-2'>
+                                    <Label>{t('Banned houses')}</Label>
+                                    <div className='flex flex-wrap gap-x-3 gap-y-1'>
+                                        {houseOptions.map(([code, label]) => (
+                                            <label
+                                                key={code}
+                                                className='flex items-center gap-1 text-sm text-foreground'
+                                            >
+                                                <input
+                                                    type='checkbox'
+                                                    checked={form.bannedHouses.includes(code)}
+                                                    onChange={(event) =>
+                                                        setForm({
+                                                            ...form,
+                                                            bannedHouses: event.target.checked
+                                                                ? [...form.bannedHouses, code]
+                                                                : form.bannedHouses.filter(
+                                                                      (entry) => entry !== code
+                                                                  ),
+                                                            requiredHouses:
+                                                                form.requiredHouses.filter(
+                                                                    (entry) => entry !== code
+                                                                )
+                                                        })
+                                                    }
+                                                />
+                                                {t(label)}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className='md:col-span-2'>
+                                    <Label>{t('Required houses (max 3)')}</Label>
+                                    <div className='flex flex-wrap gap-x-3 gap-y-1'>
+                                        {houseOptions.map(([code, label]) => (
+                                            <label
+                                                key={code}
+                                                className='flex items-center gap-1 text-sm text-foreground'
+                                            >
+                                                <input
+                                                    type='checkbox'
+                                                    checked={form.requiredHouses.includes(code)}
+                                                    disabled={
+                                                        !form.requiredHouses.includes(code) &&
+                                                        form.requiredHouses.length >= 3
+                                                    }
+                                                    onChange={(event) =>
+                                                        setForm({
+                                                            ...form,
+                                                            requiredHouses: event.target.checked
+                                                                ? [...form.requiredHouses, code]
+                                                                : form.requiredHouses.filter(
+                                                                      (entry) => entry !== code
+                                                                  ),
+                                                            bannedHouses: form.bannedHouses.filter(
+                                                                (entry) => entry !== code
+                                                            )
+                                                        })
+                                                    }
+                                                />
+                                                {t(label)}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                                <label className='flex items-center gap-2 text-sm text-foreground'>
+                                    <input
+                                        type='checkbox'
+                                        checked={form.sasChainHandicap}
+                                        onChange={(event) =>
+                                            setForm({
+                                                ...form,
+                                                sasChainHandicap: event.target.checked
+                                            })
+                                        }
+                                    />
+                                    {t('SAS chain handicap (stronger deck starts chained)')}
+                                </label>
                                 <label className='flex items-center gap-2 text-sm text-foreground'>
                                     <input
                                         type='checkbox'

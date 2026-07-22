@@ -432,6 +432,7 @@ class PendingGame {
             showHand: this.showHand,
             spectators,
             started: this.started,
+            startingChains: this.startingChains,
             swap: this.swap,
             tournament: this.tournament,
             useGameTimeLimit: this.useGameTimeLimit

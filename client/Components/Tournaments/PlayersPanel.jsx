@@ -51,7 +51,24 @@ const PlayersPanel = ({ tournament, players, act }) => {
                         {t('not checked in')}
                     </span>
                 ))}
-            {(tournament.requireDeckRegistration || player.hasDeck) &&
+            {tournament.triad ? (
+                player.hasDeck ? (
+                    (player.triadDecks || []).map((deck) => (
+                        <span
+                            key={deck.deckId}
+                            className='rounded bg-amber-400/15 px-1.5 text-xs text-amber-300'
+                        >
+                            {deck.deckName}
+                            {deck.deckSas != null && ` (${deck.deckSas})`}
+                        </span>
+                    ))
+                ) : (
+                    <span className='rounded bg-red-500/15 px-1.5 text-xs text-red-400'>
+                        {t('no pool')}
+                    </span>
+                )
+            ) : (
+                (tournament.requireDeckRegistration || player.hasDeck) &&
                 (player.hasDeck ? (
                     <span
                         className='rounded bg-amber-400/15 px-1.5 text-xs text-amber-300'
@@ -64,7 +81,8 @@ const PlayersPanel = ({ tournament, players, act }) => {
                     <span className='rounded bg-red-500/15 px-1.5 text-xs text-red-400'>
                         {t('no deck')}
                     </span>
-                ))}
+                ))
+            )}
             {tournament.canManage && (
                 <HeroButton
                     size='sm'

@@ -1161,6 +1161,12 @@ class Lobby {
             }
         });
 
+        // ARCHON: pre-assigned chains (SAS handicap / Chainbound accrual)
+        // ride the pending game into the engine's setup phase.
+        if (matchInfo.startingChains) {
+            game.startingChains = matchInfo.startingChains;
+        }
+
         this.games[game.id] = game;
 
         await this.tournamentService.attachGame(

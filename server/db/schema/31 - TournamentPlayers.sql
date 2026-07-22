@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS public."TournamentPlayers"
     "CheckedIn" boolean NOT NULL DEFAULT false,
     "Waitlisted" boolean NOT NULL DEFAULT false,
     "FinalRank" integer,
+    "EventChains" integer NOT NULL DEFAULT 0,
     "CreatedAt" timestamp without time zone NOT NULL,
     CONSTRAINT "PK_TournamentPlayers" PRIMARY KEY ("Id"),
     CONSTRAINT "UQ_TournamentPlayers_Tournament_User" UNIQUE ("TournamentId", "UserId"),

@@ -50,6 +50,9 @@ class Game extends EventEmitter {
         this.challonge = details.challonge;
         // ARCHON: tournament linkage rides along so GAMEWIN can auto-report
         this.tournament = details.tournament;
+        // ARCHON: pre-assigned chains (SAS handicap / Chainbound events);
+        // applied once at initialise, before the setup phase draws hands.
+        this.startingChains = details.startingChains;
         this.chatCommands = new ChatCommands(this);
         this.createdAt = new Date();
         this.currentAbilityWindow = null;
@@ -940,6 +943,14 @@ class Game extends EventEmitter {
 
         for (let player of this.getPlayers()) {
             player.initialise();
+
+            // ARCHON: tournament chain handicaps behave exactly like
+            // adaptive bid chains - set before setup so the starting
+            // hand is drawn short and the chains shed as usual.
+            const chains = this.startingChains && this.startingChains[player.name];
+            if (Number.isInteger(chains) && chains > 0) {
+                player.chains = chains;
+            }
         }
 
         this.allCards = _.reduce(

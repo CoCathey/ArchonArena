@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS public."TournamentMatches"
     "Player2Wins" integer NOT NULL DEFAULT 0,
     "BestOf" integer NOT NULL DEFAULT 1,
     "ResultType" text COLLATE pg_catalog."default",
+    -- Triad ban/pick state (migration 33): PxBannedDeckId is the deck
+    -- of player X banned by their opponent; PxDeckId the chosen deck.
+    "P1BannedDeckId" integer,
+    "P2BannedDeckId" integer,
+    "P1DeckId" integer,
+    "P2DeckId" integer,
     CONSTRAINT "PK_TournamentMatches" PRIMARY KEY ("Id"),
     CONSTRAINT "FK_TournamentMatches_Tournaments" FOREIGN KEY ("TournamentId")
         REFERENCES public."Tournaments" ("Id") MATCH SIMPLE

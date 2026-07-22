@@ -249,8 +249,21 @@ much stronger deck pays less.
         tournament record (trophy history) via /api/tournaments/history.
 -   [x] Tests: pairing algorithms + bracket templates + lifecycle/authorization/
         automation (68 tournament tests + rating gating tests).
+-   [x] **KeyForge-only conditions** (increment 5, docs/design/tournament-engine.md;
+        migration 33): deck swap policy (locked vs between-rounds), set legality
+        (allowed expansions), house restrictions (required/banned houses),
+        one-Archon-per-event uniqueness (same Master Vault uuid cannot enter twice),
+        SAS chain handicap (stronger deck starts chained, auto-applied to online
+        games via the engine's adaptive-chains path; per-chain SAS + cap
+        **admin-config**), Chainbound-style event chains (match wins accrue chains
+        carried through the event), the official **Triad** format (3-deck pools,
+        per-match opponent ban + pick, online tables wait for both picks), and
+        Reversal / Adaptive Bo1 event formats (with event→lobby format mapping,
+        also fixing tournament games being hidden from lobby filters).
 -   [ ] Hybrid events (online + paper results feeding one standing).
 -   [ ] QR join codes / check-in kiosk flows for IRL events.
+-   [ ] Alliance-specific conditions (pod legality checks per event).
+-   [ ] Archon Adaptive Bo3 (full swap/bid series) as a match type.
 
 ## Phase 8 — Modern UI
 

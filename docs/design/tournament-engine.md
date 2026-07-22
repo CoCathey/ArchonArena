@@ -1,12 +1,16 @@
 # Design: Tournament Engine (Phase 7)
 
-Status: **Increments 1-4 shipped** — full event lifecycle for Swiss (with optional
+Status: **Increments 1-5 shipped** — full event lifecycle for Swiss (with optional
 top-N cut), single elimination, double elimination and round robin, online and in
 person: create → register (caps, waitlists, join codes, check-in, deck registration
 with SAS bands) → pair rounds → play (auto-created games online) → results
 (auto-reported or manual, best-of series) → standings → final placements and player
 history. Inspired by the operational depth of Challonge/TopDeck and the
-play-in-platform integration of chess.com events.
+play-in-platform integration of chess.com events — plus KeyForge-only conditions
+(increment 5) that no other game could offer: deck swap policies, set legality,
+house restrictions, one-Archon-per-event uniqueness, SAS chain handicaps,
+Chainbound-style event chains, the official Triad format, and Reversal /
+Adaptive Bo1 events.
 
 ## Current architecture (analysis)
 
@@ -79,9 +83,39 @@ RatingService.processGame
     Tables that lose their pending game (restart) are recreated with "Open my
     table" (`ensureMatchGame`). Pending tournament games survive the stale-game
     sweep until their match is decided or the round moves on.
+-   **KeyForge-only conditions (increment 5)** — possible because every deck is
+    a unique, externally-rated physical object:
+    -   _Deck swap policy_: 'locked' (one deck all event, the Archon standard)
+        or 'between-rounds' (re-register a different legal deck; it applies
+        from the next pairing). Triad events are always locked to their pool.
+    -   _Set legality_ (`AllowedSets` jsonb of expansion ids) and _house
+        conditions_ (`RequiredHouses`/`BannedHouses` jsonb of house codes),
+        validated on every deck registration via Decks.ExpansionId and the
+        DeckHouses join.
+    -   _One Archon per event_: the same Master Vault uuid cannot be
+        registered by two players, across single decks and Triad pools.
+    -   _SAS chain handicap_ (`SasChainHandicap`): online games start the
+        stronger deck with chains — floor(SAS advantage / sasPerChain),
+        capped at maxHandicapChains (both admin-config). Applied via the
+        engine's `startingChains` hook, which behaves exactly like adaptive
+        bid chains (short first hand, chain shed on the reduced refill).
+    -   _Chainbound event chains_ (`ChainsPerMatchWin`): played match wins
+        accrue `TournamentPlayers.EventChains`, carried into the winner's
+        later games this event (stacking with the SAS handicap).
+    -   _Triad_ (official 3-deck format): players register exactly three
+        distinct decks (TournamentPlayerDecks, pools are open information);
+        each match, both players ban one opposing deck, then pick from their
+        own two survivors (`P1/P2BannedDeckId`, `P1/P2DeckId` on the match;
+        ban before pick is enforced, choices are immutable). Online tables
+        are only created once both picks are in.
+    -   _Reversal / Adaptive Bo1 events_: event game formats now map onto
+        the lobby's real formats (`archon`→`normal` — also fixing tournament
+        games being invisible to lobby format filters); the game node
+        already swaps decks for reversal and runs the adaptive bid.
 -   **No gameplay-engine coupling**: the engine never reaches into
     `server/game/**`; the game object only carries an opaque `tournament` tag
-    through its save state.
+    through its save state (plus the additive `startingChains` detail, applied
+    at `Game.initialise` exactly like adaptive bid chains).
 
 ## Database
 
@@ -100,6 +134,15 @@ Migration `32 - TournamentsV2.sql` (over `27 - Tournaments.sql`):
 -   New `TournamentStaff` (unique per event/user) and `TournamentMatchGames`
     (unique (MatchId, GameNumber), indexed by GameUuid).
 
+Migration `33 - KeyForgeConditions.sql`:
+
+-   `Tournaments` + DeckSwapPolicy, AllowedSets, RequiredHouses, BannedHouses
+    (jsonb), SasChainHandicap, ChainsPerMatchWin, Triad.
+-   `TournamentPlayers` + EventChains.
+-   `TournamentMatches` + P1/P2BannedDeckId, P1/P2DeckId (Triad state).
+-   New `TournamentPlayerDecks` (Triad pools; unique (TournamentId, UserId,
+    Slot)).
+
 ## API
 
 -   `GET /api/tournaments` (`?status=`, optional auth — private events visible
@@ -109,13 +152,15 @@ Migration `32 - TournamentsV2.sql` (over `27 - Tournaments.sql`):
 -   `POST /api/tournaments/:id/{register,register-deck,drop,update,
 open-check-in,check-in,seeds,staff/add,staff/remove,start,next-round,cut,
 finish,cancel}`
+-   `POST /api/tournaments/:id/register-triad-decks`
 -   `POST /api/tournaments/:id/matches/:matchId/{result,award,double-loss,
-open-game}`
+open-game,triad-ban,triad-pick}`
 
 ## Settings
 
-Registry section `tournament`: maxPlayerCap, autoCreateGames, allowRated —
-site-wide guardrails; everything else is per-event.
+Registry section `tournament`: maxPlayerCap, autoCreateGames, allowRated,
+sasPerChain, maxHandicapChains — site-wide guardrails; everything else is
+per-event.
 
 ## Tests
 

@@ -84,6 +84,14 @@ module.exports.init = function (server) {
         )
     );
 
+    action('/api/tournaments/:id/register-triad-decks', (req) =>
+        tournamentService.registerTriadDecks(
+            parseInt(req.params.id, 10),
+            req.user,
+            req.body.deckIds
+        )
+    );
+
     action('/api/tournaments/:id/drop', (req) =>
         tournamentService.drop(
             parseInt(req.params.id, 10),
@@ -166,6 +174,24 @@ module.exports.init = function (server) {
             parseInt(req.params.id, 10),
             parseInt(req.params.matchId, 10),
             req.user
+        )
+    );
+
+    action('/api/tournaments/:id/matches/:matchId/triad-ban', (req) =>
+        tournamentService.triadBan(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user,
+            req.body.deckId
+        )
+    );
+
+    action('/api/tournaments/:id/matches/:matchId/triad-pick', (req) =>
+        tournamentService.triadPick(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user,
+            req.body.deckId
         )
     );
 

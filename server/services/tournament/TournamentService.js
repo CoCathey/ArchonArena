@@ -19,6 +19,38 @@ const MODES = ['online', 'irl'];
 const SEED_METHODS = ['registration', 'rating', 'random', 'manual'];
 const VISIBILITIES = ['public', 'private'];
 const BEST_OF_OPTIONS = [1, 3, 5];
+// Event game formats. 'archon' is the classic constructed format and
+// maps onto the lobby's 'normal' games; reversal (pilot your
+// opponent's deck) and adaptive-bo1 (play, swap, chain-bid) are
+// uniquely possible in KeyForge and fully supported by the engine.
+const GAME_FORMATS = ['archon', 'sealed', 'alliance', 'reversal', 'adaptive-bo1'];
+const LOBBY_FORMAT_BY_EVENT = {
+    archon: 'normal',
+    sealed: 'sealed',
+    alliance: 'alliance',
+    reversal: 'reversal',
+    'adaptive-bo1': 'adaptive-bo1'
+};
+const DECK_SWAP_POLICIES = ['locked', 'between-rounds'];
+// House codes as stored in the Houses table.
+const HOUSE_CODES = [
+    'brobnar',
+    'dis',
+    'ekwidon',
+    'geistoid',
+    'logos',
+    'mars',
+    'ouboros',
+    'redemption',
+    'sanctum',
+    'saurian',
+    'shadows',
+    'skyborn',
+    'staralliance',
+    'unfathomable',
+    'untamed'
+];
+const TRIAD_DECKS = 3;
 
 // Join codes skip easily-confused characters (0/O, 1/I/L).
 const JOIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -30,7 +62,13 @@ const DEFAULT_TOURNAMENT_CONFIG = {
     // Lobby games are created automatically for online events.
     autoCreateGames: true,
     // Organizers may mark events as rated (feeding the Amber engine).
-    allowRated: true
+    allowRated: true,
+    // SAS chain handicap: 1 starting chain per this many SAS of deck
+    // advantage (KeyForge's official self-balancing mechanism).
+    sasPerChain: 5,
+    // Never assign more handicap chains than this (24 is the deepest
+    // official chain tier).
+    maxHandicapChains: 24
 };
 
 /**
@@ -73,6 +111,26 @@ class TournamentService {
         return String(code || '')
             .toUpperCase()
             .replace(/[^A-Z0-9]/g, '');
+    }
+
+    /**
+     * jsonb columns come back parsed from Postgres but may be raw
+     * strings from lighter test doubles; normalize to a value or null.
+     */
+    parseJsonColumn(value) {
+        if (value === null || value === undefined) {
+            return null;
+        }
+
+        if (typeof value === 'string') {
+            try {
+                return JSON.parse(value);
+            } catch {
+                return null;
+            }
+        }
+
+        return value;
     }
 
     async isStaff(tournamentId, userId) {
@@ -225,6 +283,93 @@ class TournamentService {
         out.sasMin = sasMin;
         out.sasMax = sasMax;
 
+        if (options.gameFormat && !GAME_FORMATS.includes(options.gameFormat)) {
+            errors.push('Unknown game format');
+        }
+
+        if (options.deckSwapPolicy && !DECK_SWAP_POLICIES.includes(options.deckSwapPolicy)) {
+            errors.push('Unknown deck swap policy');
+        }
+        out.deckSwapPolicy = options.deckSwapPolicy || 'locked';
+
+        const parseCodeList = (value, label, validate) => {
+            if (value === undefined || value === null || value === '') {
+                return null;
+            }
+
+            if (!Array.isArray(value)) {
+                errors.push(`${label} must be a list`);
+                return null;
+            }
+
+            const cleaned = [...new Set(value.map(validate).filter((entry) => entry !== null))];
+
+            if (cleaned.length !== new Set(value.filter((entry) => entry !== '')).size) {
+                errors.push(`${label} contains invalid entries`);
+            }
+
+            return cleaned.length > 0 ? cleaned : null;
+        };
+
+        out.allowedSets = parseCodeList(options.allowedSets, 'Allowed sets', (entry) => {
+            const id = parseInt(entry, 10);
+            return Number.isNaN(id) || id < 1 ? null : id;
+        });
+
+        const houseValidator = (entry) => {
+            const code = String(entry || '').toLowerCase();
+            return HOUSE_CODES.includes(code) ? code : null;
+        };
+        out.requiredHouses = parseCodeList(
+            options.requiredHouses,
+            'Required houses',
+            houseValidator
+        );
+        out.bannedHouses = parseCodeList(options.bannedHouses, 'Banned houses', houseValidator);
+
+        if (
+            out.requiredHouses &&
+            out.bannedHouses &&
+            out.requiredHouses.some((code) => out.bannedHouses.includes(code))
+        ) {
+            errors.push('A house cannot be both required and banned');
+        }
+
+        if (out.requiredHouses && out.requiredHouses.length > 3) {
+            errors.push('Decks only have three houses - at most three can be required');
+        }
+
+        out.sasChainHandicap = !!options.sasChainHandicap;
+
+        const chainsPerWin = options.chainsPerMatchWin
+            ? parseInt(options.chainsPerMatchWin, 10)
+            : 0;
+        if (Number.isNaN(chainsPerWin) || chainsPerWin < 0 || chainsPerWin > 6) {
+            errors.push('Chains per match win must be between 0 and 6');
+        }
+        out.chainsPerMatchWin = chainsPerWin || 0;
+
+        out.triad = !!options.triad;
+
+        if (out.triad) {
+            // Triad pools are fixed for the event and every player needs one.
+            out.requireDeckRegistration = true;
+
+            if (out.deckSwapPolicy !== 'locked') {
+                errors.push(
+                    'Triad events use their three-deck pool - deck swapping does not apply'
+                );
+            }
+
+            if (options.gameFormat === 'sealed') {
+                errors.push('Triad requires registered decks and cannot be sealed');
+            }
+        }
+
+        if (options.gameFormat === 'sealed' && out.requireDeckRegistration && !out.triad) {
+            errors.push('Sealed events cannot require deck registration');
+        }
+
         return { errors, values: out };
     }
 
@@ -243,9 +388,12 @@ class TournamentService {
                 '"GameFormat", "Mode", "RoundCount", "StartTime", "PlayerCap", "BestOf", ' +
                 '"PlayoffBestOf", "CutTo", "SeedMethod", "Visibility", "JoinCode", ' +
                 '"RoundTimerMinutes", "RatedGames", "RequireDeckRegistration", "SasMin", ' +
-                '"SasMax", "HideDecklists", "GameTimeLimit", "CreatedAt") ' +
+                '"SasMax", "HideDecklists", "GameTimeLimit", "DeckSwapPolicy", "AllowedSets", ' +
+                '"RequiredHouses", "BannedHouses", "SasChainHandicap", "ChainsPerMatchWin", ' +
+                '"Triad", "CreatedAt") ' +
                 'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ' +
-                '$16, $17, $18, $19, $20, $21, $22, now() AT TIME ZONE \'utc\') RETURNING "Id"',
+                '$16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, ' +
+                'now() AT TIME ZONE \'utc\') RETURNING "Id"',
             [
                 values.name,
                 values.description,
@@ -268,7 +416,14 @@ class TournamentService {
                 values.sasMin,
                 values.sasMax,
                 values.hideDecklists,
-                values.gameTimeLimit
+                values.gameTimeLimit,
+                values.deckSwapPolicy,
+                values.allowedSets ? JSON.stringify(values.allowedSets) : null,
+                values.requiredHouses ? JSON.stringify(values.requiredHouses) : null,
+                values.bannedHouses ? JSON.stringify(values.bannedHouses) : null,
+                values.sasChainHandicap,
+                values.chainsPerMatchWin,
+                values.triad
             ]
         );
 
@@ -331,6 +486,13 @@ class TournamentService {
                 sasMax: tournament.SasMax,
                 hideDecklists: tournament.HideDecklists,
                 gameTimeLimit: tournament.GameTimeLimit,
+                deckSwapPolicy: tournament.DeckSwapPolicy,
+                allowedSets: this.parseJsonColumn(tournament.AllowedSets),
+                requiredHouses: this.parseJsonColumn(tournament.RequiredHouses),
+                bannedHouses: this.parseJsonColumn(tournament.BannedHouses),
+                sasChainHandicap: tournament.SasChainHandicap,
+                chainsPerMatchWin: tournament.ChainsPerMatchWin,
+                triad: tournament.Triad,
                 ...options
             };
 
@@ -354,7 +516,10 @@ class TournamentService {
                     '"SeedMethod" = $13, "Visibility" = $14, "JoinCode" = $15, ' +
                     '"RoundTimerMinutes" = $16, "RatedGames" = $17, ' +
                     '"RequireDeckRegistration" = $18, "SasMin" = $19, "SasMax" = $20, ' +
-                    '"HideDecklists" = $21, "GameTimeLimit" = $22 WHERE "Id" = $1',
+                    '"HideDecklists" = $21, "GameTimeLimit" = $22, "DeckSwapPolicy" = $23, ' +
+                    '"AllowedSets" = $24, "RequiredHouses" = $25, "BannedHouses" = $26, ' +
+                    '"SasChainHandicap" = $27, "ChainsPerMatchWin" = $28, "Triad" = $29 ' +
+                    'WHERE "Id" = $1',
                 [
                     tournamentId,
                     values.name,
@@ -377,7 +542,14 @@ class TournamentService {
                     values.sasMin,
                     values.sasMax,
                     values.hideDecklists,
-                    values.gameTimeLimit
+                    values.gameTimeLimit,
+                    values.deckSwapPolicy,
+                    values.allowedSets ? JSON.stringify(values.allowedSets) : null,
+                    values.requiredHouses ? JSON.stringify(values.requiredHouses) : null,
+                    values.bannedHouses ? JSON.stringify(values.bannedHouses) : null,
+                    values.sasChainHandicap,
+                    values.chainsPerMatchWin,
+                    values.triad
                 ]
             );
 
@@ -472,7 +644,7 @@ class TournamentService {
     async getPlayers(tournamentId) {
         return await this.db.query(
             'SELECT tp."UserId", tp."Dropped", tp."Seed", tp."DeckId", tp."CheckedIn", ' +
-                'tp."Waitlisted", tp."FinalRank", u."Username", ' +
+                'tp."Waitlisted", tp."FinalRank", tp."EventChains", u."Username", ' +
                 'd."Name" AS "DeckName", d."Uuid" AS "DeckUuid", ds."SasRating" ' +
                 'FROM "TournamentPlayers" tp JOIN "Users" u ON u."Id" = tp."UserId" ' +
                 'LEFT JOIN "Decks" d ON d."Id" = tp."DeckId" ' +
@@ -488,7 +660,8 @@ class TournamentService {
                 'm."WinnerId", m."Bracket", m."BracketRound", m."BracketPos", ' +
                 'm."P1SourceMatchId", m."P1SourceIsLoser", m."P2SourceMatchId", ' +
                 'm."P2SourceIsLoser", m."Player1Wins", m."Player2Wins", m."BestOf", ' +
-                'm."ResultType", u1."Username" AS "Player1", u2."Username" AS "Player2" ' +
+                'm."ResultType", m."P1BannedDeckId", m."P2BannedDeckId", m."P1DeckId", ' +
+                'm."P2DeckId", u1."Username" AS "Player1", u2."Username" AS "Player2" ' +
                 'FROM "TournamentMatches" m ' +
                 'LEFT JOIN "Users" u1 ON u1."Id" = m."Player1Id" ' +
                 'LEFT JOIN "Users" u2 ON u2."Id" = m."Player2Id" ' +
@@ -523,23 +696,25 @@ class TournamentService {
             return { success: false, message: 'No such tournament' };
         }
 
-        const [players, matches, organizerRows, staffRows, gameRows] = await Promise.all([
-            this.getPlayers(tournamentId),
-            this.getMatches(tournamentId),
-            this.db.query('SELECT "Username" FROM "Users" WHERE "Id" = $1', [
-                tournament.OrganizerId
-            ]),
-            this.db.query(
-                'SELECT ts."UserId", ts."Role", u."Username" FROM "TournamentStaff" ts ' +
-                    'JOIN "Users" u ON u."Id" = ts."UserId" WHERE ts."TournamentId" = $1 ORDER BY ts."Id"',
-                [tournamentId]
-            ),
-            this.db.query(
-                'SELECT "MatchId", "GameNumber", "GameUuid", "WinnerId" FROM "TournamentMatchGames" ' +
-                    'WHERE "TournamentId" = $1 ORDER BY "MatchId", "GameNumber"',
-                [tournamentId]
-            )
-        ]);
+        const [players, matches, organizerRows, staffRows, gameRows, triadPools] =
+            await Promise.all([
+                this.getPlayers(tournamentId),
+                this.getMatches(tournamentId),
+                this.db.query('SELECT "Username" FROM "Users" WHERE "Id" = $1', [
+                    tournament.OrganizerId
+                ]),
+                this.db.query(
+                    'SELECT ts."UserId", ts."Role", u."Username" FROM "TournamentStaff" ts ' +
+                        'JOIN "Users" u ON u."Id" = ts."UserId" WHERE ts."TournamentId" = $1 ORDER BY ts."Id"',
+                    [tournamentId]
+                ),
+                this.db.query(
+                    'SELECT "MatchId", "GameNumber", "GameUuid", "WinnerId" FROM "TournamentMatchGames" ' +
+                        'WHERE "TournamentId" = $1 ORDER BY "MatchId", "GameNumber"',
+                    [tournamentId]
+                ),
+                tournament.Triad ? this.getTriadPools(tournamentId) : Promise.resolve({})
+            ]);
 
         const canManage = actor ? await this.canManage(actor, tournament) : false;
 
@@ -631,6 +806,13 @@ class TournamentService {
                 sasMax: tournament.SasMax,
                 hideDecklists: !!tournament.HideDecklists,
                 gameTimeLimit: tournament.GameTimeLimit,
+                deckSwapPolicy: tournament.DeckSwapPolicy || 'locked',
+                allowedSets: this.parseJsonColumn(tournament.AllowedSets),
+                requiredHouses: this.parseJsonColumn(tournament.RequiredHouses),
+                bannedHouses: this.parseJsonColumn(tournament.BannedHouses),
+                sasChainHandicap: !!tournament.SasChainHandicap,
+                chainsPerMatchWin: tournament.ChainsPerMatchWin || 0,
+                triad: !!tournament.Triad,
                 organizer: organizerRows[0]?.Username,
                 canManage,
                 isOrganizer: actor ? actor.id === tournament.OrganizerId : false,
@@ -653,10 +835,15 @@ class TournamentService {
                 waitlisted: player.Waitlisted,
                 finalRank: player.FinalRank,
                 amber: ratingById[player.UserId] ?? null,
+                eventChains: player.EventChains || 0,
                 deckId: showDeck(player) ? player.DeckId : undefined,
                 deckName: showDeck(player) ? player.DeckName : undefined,
-                hasDeck: !!player.DeckId,
-                deckSas: showDeck(player) ? player.SasRating : undefined
+                hasDeck: tournament.Triad
+                    ? (triadPools[player.UserId] || []).length === TRIAD_DECKS
+                    : !!player.DeckId,
+                deckSas: showDeck(player) ? player.SasRating : undefined,
+                // Triad pools are open information - opponents ban from them.
+                triadDecks: tournament.Triad ? triadPools[player.UserId] || [] : undefined
             })),
             matches: matches.map((match) => ({
                 id: match.Id,
@@ -678,6 +865,10 @@ class TournamentService {
                 p1SourceIsLoser: match.P1SourceIsLoser,
                 p2SourceMatchId: match.P2SourceMatchId,
                 p2SourceIsLoser: match.P2SourceIsLoser,
+                p1BannedDeckId: match.P1BannedDeckId,
+                p2BannedDeckId: match.P2BannedDeckId,
+                p1DeckId: match.P1DeckId,
+                p2DeckId: match.P2DeckId,
                 games: gamesByMatch[match.Id] || []
             })),
             standings
@@ -737,7 +928,10 @@ class TournamentService {
 
     async validateDeck(tournament, userId, deckId) {
         const rows = await this.db.query(
-            'SELECT d."Id", d."UserId", d."Name", d."Uuid", ds."SasRating" FROM "Decks" d ' +
+            'SELECT d."Id", d."UserId", d."Name", d."Uuid", d."ExpansionId", ds."SasRating", ' +
+                '(SELECT json_agg(h."Code") FROM "DeckHouses" dh ' +
+                'JOIN "Houses" h ON h."Id" = dh."HouseId" WHERE dh."DeckId" = d."Id") AS "Houses" ' +
+                'FROM "Decks" d ' +
                 'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" WHERE d."Id" = $1',
             [deckId]
         );
@@ -745,6 +939,62 @@ class TournamentService {
 
         if (!deck || deck.UserId !== userId) {
             return { success: false, message: 'That deck is not in your collection' };
+        }
+
+        // Set legality: the deck's expansion must be on the allow list.
+        const allowedSets = this.parseJsonColumn(tournament.AllowedSets);
+
+        if (allowedSets && allowedSets.length > 0 && !allowedSets.includes(deck.ExpansionId)) {
+            return {
+                success: false,
+                message: 'That deck is from a set this event does not allow'
+            };
+        }
+
+        // House conditions - only KeyForge has fixed three-house decks.
+        const deckHouses = (this.parseJsonColumn(deck.Houses) || []).map((code) =>
+            String(code).toLowerCase()
+        );
+        const requiredHouses = this.parseJsonColumn(tournament.RequiredHouses);
+        const bannedHouses = this.parseJsonColumn(tournament.BannedHouses);
+
+        if (requiredHouses && requiredHouses.some((code) => !deckHouses.includes(code))) {
+            return {
+                success: false,
+                message: `This event requires decks with ${requiredHouses.join(', ')}`
+            };
+        }
+
+        if (bannedHouses) {
+            const hit = bannedHouses.find((code) => deckHouses.includes(code));
+
+            if (hit) {
+                return {
+                    success: false,
+                    message: `This event bans house ${hit}`
+                };
+            }
+        }
+
+        // Every KeyForge deck is a unique physical object: the same
+        // Archon cannot be registered twice in one event, even from
+        // two different collections.
+        const singleClash = await this.db.query(
+            'SELECT 1 FROM "TournamentPlayers" tp JOIN "Decks" du ON du."Id" = tp."DeckId" ' +
+                'WHERE tp."TournamentId" = $1 AND tp."UserId" <> $2 AND du."Uuid" = $3 LIMIT 1',
+            [tournament.Id, userId, deck.Uuid]
+        );
+        const poolClash = await this.db.query(
+            'SELECT 1 FROM "TournamentPlayerDecks" tpd JOIN "Decks" du2 ON du2."Id" = tpd."DeckId" ' +
+                'WHERE tpd."TournamentId" = $1 AND tpd."UserId" <> $2 AND du2."Uuid" = $3 LIMIT 1',
+            [tournament.Id, userId, deck.Uuid]
+        );
+
+        if ((singleClash && singleClash.length > 0) || (poolClash && poolClash.length > 0)) {
+            return {
+                success: false,
+                message: 'Another player already registered that exact Archon deck'
+            };
         }
 
         if (tournament.SasMin !== null && tournament.SasMin !== undefined) {
@@ -794,7 +1044,17 @@ class TournamentService {
             return { success: false, message: 'No such tournament' };
         }
 
-        if (tournament.Status !== 'registration') {
+        if (tournament.Triad) {
+            return { success: false, message: 'This event uses three-deck Triad pools' };
+        }
+
+        // Deck swap policy: 'locked' events freeze decks at start (the
+        // Archon standard); 'between-rounds' events let players bring a
+        // different deck to their next pairing.
+        const swapAllowed =
+            tournament.Status === 'active' && tournament.DeckSwapPolicy === 'between-rounds';
+
+        if (tournament.Status !== 'registration' && !swapAllowed) {
             return { success: false, message: 'Decks are locked once the event starts' };
         }
 
@@ -828,6 +1088,106 @@ class TournamentService {
         );
 
         return { success: true };
+    }
+
+    /**
+     * Register the three-deck pool for a Triad event (official
+     * KeyForge format: opponents ban one of your three each match and
+     * you pilot one of the remaining two). Pools lock at start.
+     */
+    async registerTriadDecks(tournamentId, actor, deckIds) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament) {
+            return { success: false, message: 'No such tournament' };
+        }
+
+        if (!tournament.Triad) {
+            return { success: false, message: 'This event does not use Triad pools' };
+        }
+
+        if (tournament.Status !== 'registration') {
+            return { success: false, message: 'Triad pools are locked once the event starts' };
+        }
+
+        const playerRows = await this.db.query(
+            'SELECT * FROM "TournamentPlayers" WHERE "TournamentId" = $1 AND "UserId" = $2',
+            [tournamentId, actor.id]
+        );
+
+        if (!playerRows || playerRows.length === 0 || playerRows[0].Dropped) {
+            return { success: false, message: 'Register for the event first' };
+        }
+
+        if (!Array.isArray(deckIds) || deckIds.length !== TRIAD_DECKS) {
+            return { success: false, message: 'Triad needs exactly three decks' };
+        }
+
+        const parsed = deckIds.map((id) => parseInt(id, 10));
+
+        if (parsed.some((id) => Number.isNaN(id)) || new Set(parsed).size !== TRIAD_DECKS) {
+            return { success: false, message: 'Pick three different decks' };
+        }
+
+        const validated = [];
+
+        for (const deckId of parsed) {
+            const check = await this.validateDeck(tournament, actor.id, deckId);
+
+            if (!check.success) {
+                return check;
+            }
+
+            validated.push(check.deck);
+        }
+
+        // The three decks must also be three distinct physical Archons.
+        if (new Set(validated.map((deck) => deck.Uuid)).size !== TRIAD_DECKS) {
+            return { success: false, message: 'Pick three different decks' };
+        }
+
+        await this.db.query(
+            'DELETE FROM "TournamentPlayerDecks" WHERE "TournamentId" = $1 AND "UserId" = $2',
+            [tournamentId, actor.id]
+        );
+
+        for (let slot = 0; slot < TRIAD_DECKS; slot++) {
+            await this.db.query(
+                'INSERT INTO "TournamentPlayerDecks" ("TournamentId", "UserId", "DeckId", "Slot", "CreatedAt") ' +
+                    "VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc')",
+                [tournamentId, actor.id, parsed[slot], slot + 1]
+            );
+        }
+
+        return { success: true };
+    }
+
+    /**
+     * Triad pools with deck display data, keyed by user id.
+     */
+    async getTriadPools(tournamentId) {
+        const rows = await this.db.query(
+            'SELECT tpd."UserId", tpd."DeckId", tpd."Slot", d."Name" AS "DeckName", ' +
+                'd."Uuid" AS "DeckUuid", ds."SasRating" ' +
+                'FROM "TournamentPlayerDecks" tpd ' +
+                'JOIN "Decks" d ON d."Id" = tpd."DeckId" ' +
+                'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                'WHERE tpd."TournamentId" = $1 ORDER BY tpd."UserId", tpd."Slot"',
+            [tournamentId]
+        );
+
+        const pools = {};
+
+        for (const row of rows || []) {
+            (pools[row.UserId] = pools[row.UserId] || []).push({
+                deckId: row.DeckId,
+                slot: row.Slot,
+                deckName: row.DeckName,
+                deckSas: row.SasRating
+            });
+        }
+
+        return pools;
     }
 
     async openCheckIn(tournamentId, actor) {
@@ -1329,7 +1689,21 @@ class TournamentService {
 
         const active = players.filter((player) => !player.Dropped && !player.Waitlisted);
 
-        if (tournament.RequireDeckRegistration) {
+        if (tournament.Triad) {
+            const pools = await this.getTriadPools(tournamentId);
+            const missing = active.filter(
+                (player) => (pools[player.UserId] || []).length !== TRIAD_DECKS
+            );
+
+            if (missing.length > 0) {
+                return {
+                    success: false,
+                    message: `Players without a full Triad pool (3 decks): ${missing
+                        .map((player) => player.Username)
+                        .join(', ')}. They must register their pool or be removed.`
+                };
+            }
+        } else if (tournament.RequireDeckRegistration) {
             const missing = active.filter((player) => !player.DeckId);
 
             if (missing.length > 0) {
@@ -1645,6 +2019,21 @@ class TournamentService {
                 '"Player1Wins" = $5, "Player2Wins" = $6, "ReportedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
             [match.Id, winnerId || null, resultType, reporterId, player1Wins, player2Wins]
         );
+
+        // Chainbound-style accrual: played match wins add chains that
+        // the winner carries into their later games this event.
+        if (
+            winnerId &&
+            resultType === 'played' &&
+            tournament.ChainsPerMatchWin &&
+            tournament.ChainsPerMatchWin > 0
+        ) {
+            await this.db.query(
+                'UPDATE "TournamentPlayers" SET "EventChains" = "EventChains" + $3 ' +
+                    'WHERE "TournamentId" = $1 AND "UserId" = $2',
+                [tournament.Id, winnerId, tournament.ChainsPerMatchWin]
+            );
+        }
 
         if (match.Bracket) {
             await this.propagateBracket(tournament);
@@ -2067,6 +2456,128 @@ class TournamentService {
     }
 
     /**
+     * Triad: shared guards for ban/pick actions.
+     */
+    async triadMatchContext(tournamentId, matchId, actor) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament) {
+            return { error: 'No such tournament' };
+        }
+
+        if (!tournament.Triad || tournament.Status !== 'active') {
+            return { error: 'This match has no Triad deck step' };
+        }
+
+        const match = await this.getMatchRow(tournamentId, matchId);
+
+        if (!match || !match.Player1Id || !match.Player2Id) {
+            return { error: 'No such match' };
+        }
+
+        if (match.WinnerId || match.ResultType) {
+            return { error: 'This match already has a result' };
+        }
+
+        const isP1 = actor.id === match.Player1Id;
+        const isP2 = actor.id === match.Player2Id;
+
+        if (!isP1 && !isP2) {
+            return { error: 'Only the paired players choose Triad decks' };
+        }
+
+        const pools = await this.getTriadPools(tournamentId);
+
+        return { tournament, match, isP1, pools };
+    }
+
+    /**
+     * Triad step 1: ban one of your opponent's three decks. Both bans
+     * are independent and immutable once made.
+     */
+    async triadBan(tournamentId, matchId, actor, deckId) {
+        const context = await this.triadMatchContext(tournamentId, matchId, actor);
+
+        if (context.error) {
+            return { success: false, message: context.error };
+        }
+
+        const { match, isP1, pools } = context;
+        const opponentId = isP1 ? match.Player2Id : match.Player1Id;
+        const banColumn = isP1 ? 'P2BannedDeckId' : 'P1BannedDeckId';
+
+        if (match[banColumn]) {
+            return { success: false, message: 'You already banned a deck for this match' };
+        }
+
+        const target = parseInt(deckId, 10);
+        const opponentPool = pools[opponentId] || [];
+
+        if (!opponentPool.some((entry) => entry.deckId === target)) {
+            return { success: false, message: "Pick one of your opponent's three decks" };
+        }
+
+        await this.db.query(`UPDATE "TournamentMatches" SET "${banColumn}" = $2 WHERE "Id" = $1`, [
+            match.Id,
+            target
+        ]);
+
+        return { success: true };
+    }
+
+    /**
+     * Triad step 2: once your opponent has banned, pilot one of your
+     * two remaining decks. When both players have chosen, the online
+     * table game is created with those decks.
+     */
+    async triadPick(tournamentId, matchId, actor, deckId) {
+        const context = await this.triadMatchContext(tournamentId, matchId, actor);
+
+        if (context.error) {
+            return { success: false, message: context.error };
+        }
+
+        const { tournament, match, isP1, pools } = context;
+        const ownBanColumn = isP1 ? 'P1BannedDeckId' : 'P2BannedDeckId';
+        const pickColumn = isP1 ? 'P1DeckId' : 'P2DeckId';
+        const otherPick = isP1 ? match.P2DeckId : match.P1DeckId;
+
+        if (!match[ownBanColumn]) {
+            return {
+                success: false,
+                message: 'Wait for your opponent to ban one of your decks first'
+            };
+        }
+
+        if (match[pickColumn]) {
+            return { success: false, message: 'You already chose your deck for this match' };
+        }
+
+        const target = parseInt(deckId, 10);
+        const ownPool = pools[actor.id] || [];
+
+        if (!ownPool.some((entry) => entry.deckId === target)) {
+            return { success: false, message: 'Pick one of your own three decks' };
+        }
+
+        if (target === match[ownBanColumn]) {
+            return { success: false, message: 'That deck was banned for this match' };
+        }
+
+        await this.db.query(`UPDATE "TournamentMatches" SET "${pickColumn}" = $2 WHERE "Id" = $1`, [
+            match.Id,
+            target
+        ]);
+
+        if (otherPick) {
+            // Both decks chosen - the lobby can now build the table.
+            this.emitRoundPaired(tournament.Id);
+        }
+
+        return { success: true };
+    }
+
+    /**
      * Final placements when an event finishes.
      *
      * Elimination stages rank by how deep a player survived (latest
@@ -2348,43 +2859,119 @@ class TournamentService {
             (gamesByMatch[row.MatchId] = gamesByMatch[row.MatchId] || []).push(row);
         }
 
-        return matches
-            .filter(
-                (match) =>
-                    match.Round === tournament.CurrentRound &&
-                    !match.WinnerId &&
-                    !match.ResultType &&
-                    match.Player1Id &&
-                    match.Player2Id
-            )
-            .map((match) => {
-                const games = gamesByMatch[match.Id] || [];
-                const lastDecided = [...games].reverse().find((game) => game.WinnerId);
-                const previousWinnerId = lastDecided ? lastDecided.WinnerId : null;
+        const config = this.getConfig();
+        const playable = matches.filter(
+            (match) =>
+                match.Round === tournament.CurrentRound &&
+                !match.WinnerId &&
+                !match.ResultType &&
+                match.Player1Id &&
+                match.Player2Id &&
+                // Triad matches wait for both ban/pick steps.
+                (!tournament.Triad || (match.P1DeckId && match.P2DeckId))
+        );
 
-                return {
-                    tournamentId,
-                    tournamentName: tournament.Name,
-                    matchId: match.Id,
-                    round: match.Round,
-                    table: match.TableNumber,
-                    bracket: match.Bracket,
-                    bestOf: match.BestOf || 1,
-                    gameFormat: tournament.GameFormat,
-                    hideDecklists: !!tournament.HideDecklists,
-                    gameTimeLimit: tournament.GameTimeLimit,
-                    gameNumber: (match.Player1Wins || 0) + (match.Player2Wins || 0) + 1,
-                    knownGameUuids: games.map((game) => game.GameUuid),
-                    previousWinner: previousWinnerId
-                        ? playerById[previousWinnerId]?.Username
-                        : null,
-                    players: [match.Player1Id, match.Player2Id].map((playerId) => ({
-                        userId: playerId,
-                        username: playerById[playerId]?.Username,
-                        deckId: playerById[playerId]?.DeckId || null
-                    }))
-                };
-            });
+        // SAS lookup for the decks actually being piloted (triad picks
+        // can differ from the registered deck on the player row).
+        const deckIdFor = (match, side) => {
+            if (tournament.Triad) {
+                return side === 1 ? match.P1DeckId : match.P2DeckId;
+            }
+
+            const playerId = side === 1 ? match.Player1Id : match.Player2Id;
+            return playerById[playerId]?.DeckId || null;
+        };
+
+        const sasByDeckId = {};
+
+        if (tournament.SasChainHandicap) {
+            const deckIds = [
+                ...new Set(
+                    playable
+                        .flatMap((match) => [deckIdFor(match, 1), deckIdFor(match, 2)])
+                        .filter((id) => !!id)
+                )
+            ];
+
+            if (deckIds.length > 0) {
+                const sasRows = await this.db.query(
+                    'SELECT d."Id", ds."SasRating" FROM "Decks" d ' +
+                        'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" WHERE d."Id" = ANY($1)',
+                    [deckIds]
+                );
+
+                for (const row of sasRows || []) {
+                    sasByDeckId[row.Id] = row.SasRating;
+                }
+            }
+        }
+
+        return playable.map((match) => {
+            const games = gamesByMatch[match.Id] || [];
+            const lastDecided = [...games].reverse().find((game) => game.WinnerId);
+            const previousWinnerId = lastDecided ? lastDecided.WinnerId : null;
+
+            const deckIds = [deckIdFor(match, 1), deckIdFor(match, 2)];
+            const playerIds = [match.Player1Id, match.Player2Id];
+
+            // Starting chains: SAS handicap (the stronger deck starts
+            // chained, KeyForge's official balancing lever) plus any
+            // Chainbound accrual from earlier wins this event.
+            const startingChains = {};
+
+            for (let side = 0; side < 2; side++) {
+                const username = playerById[playerIds[side]]?.Username;
+
+                if (!username) {
+                    continue;
+                }
+
+                let chains = 0;
+
+                if (tournament.SasChainHandicap) {
+                    const ownSas = sasByDeckId[deckIds[side]];
+                    const oppSas = sasByDeckId[deckIds[1 - side]];
+
+                    if (ownSas != null && oppSas != null && ownSas > oppSas) {
+                        const perChain = Math.max(1, config.sasPerChain || 5);
+                        chains += Math.floor((ownSas - oppSas) / perChain);
+                    }
+                }
+
+                if (tournament.ChainsPerMatchWin > 0) {
+                    chains += playerById[playerIds[side]]?.EventChains || 0;
+                }
+
+                chains = Math.min(chains, config.maxHandicapChains || 24);
+
+                if (chains > 0) {
+                    startingChains[username] = chains;
+                }
+            }
+
+            return {
+                tournamentId,
+                tournamentName: tournament.Name,
+                matchId: match.Id,
+                round: match.Round,
+                table: match.TableNumber,
+                bracket: match.Bracket,
+                bestOf: match.BestOf || 1,
+                // The lobby speaks in lobby formats ('normal', not 'archon').
+                gameFormat: LOBBY_FORMAT_BY_EVENT[tournament.GameFormat] || 'normal',
+                hideDecklists: !!tournament.HideDecklists,
+                gameTimeLimit: tournament.GameTimeLimit,
+                gameNumber: (match.Player1Wins || 0) + (match.Player2Wins || 0) + 1,
+                knownGameUuids: games.map((game) => game.GameUuid),
+                previousWinner: previousWinnerId ? playerById[previousWinnerId]?.Username : null,
+                startingChains: Object.keys(startingChains).length > 0 ? startingChains : null,
+                players: playerIds.map((playerId, side) => ({
+                    userId: playerId,
+                    username: playerById[playerId]?.Username,
+                    deckId: deckIds[side]
+                }))
+            };
+        });
     }
 
     /**

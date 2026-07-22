@@ -186,6 +186,20 @@ const REGISTRY = {
                 type: 'boolean',
                 label: 'Organizers may mark events as rated (Amber)',
                 default: true
+            },
+            sasPerChain: {
+                type: 'number',
+                label: 'SAS handicap: 1 starting chain per this many SAS of deck advantage',
+                min: 1,
+                max: 30,
+                default: 5
+            },
+            maxHandicapChains: {
+                type: 'number',
+                label: 'Most starting chains an event may assign',
+                min: 1,
+                max: 24,
+                default: 24
             }
         }
     },

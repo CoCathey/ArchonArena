@@ -54,6 +54,7 @@ const TournamentDetail = () => {
     const [joinCode, setJoinCode] = useState('');
     const [showJoinCode, setShowJoinCode] = useState(false);
     const [showDeckPicker, setShowDeckPicker] = useState(false);
+    const [triadPicks, setTriadPicks] = useState(null); // in-progress 3-deck pool
     const [editingAnnouncement, setEditingAnnouncement] = useState(null);
     const [staffName, setStaffName] = useState('');
 
@@ -116,6 +117,35 @@ const TournamentDetail = () => {
     };
 
     const onDeckSelected = async (deck) => {
+        if (tournament.triad) {
+            const picks = [...(triadPicks || []), deck];
+
+            if (picks.some((entry, index) => picks.findIndex((d) => d.id === entry.id) !== index)) {
+                toast.danger(t('Pick three different decks'));
+
+                return;
+            }
+
+            if (picks.length < 3) {
+                setTriadPicks(picks);
+                toast.success(
+                    t('Deck {{count}} of 3 chosen - pick the next one', { count: picks.length })
+                );
+
+                return;
+            }
+
+            setShowDeckPicker(false);
+            setTriadPicks(null);
+            await act(
+                'register-triad-decks',
+                { deckIds: picks.map((entry) => entry.id) },
+                t('Triad pool registered')
+            );
+
+            return;
+        }
+
         setShowDeckPicker(false);
         await act('register-deck', { deckId: deck.id }, t('Deck registered'));
     };
@@ -192,6 +222,52 @@ const TournamentDetail = () => {
                             tournament.sasMin ?? 0
                         }-${tournament.sasMax ?? '∞'}`}</Badge>
                     )}
+                    {tournament.triad && (
+                        <Badge
+                            tone='amber'
+                            title={t('Three-deck pools; opponents ban one each match')}
+                        >
+                            {t('Triad')}
+                        </Badge>
+                    )}
+                    {tournament.deckSwapPolicy === 'between-rounds' && !tournament.triad && (
+                        <Badge title={t('Players may bring a different deck to each round')}>
+                            {t('Deck Swaps')}
+                        </Badge>
+                    )}
+                    {tournament.sasChainHandicap && (
+                        <Badge title={t('The stronger deck starts each game with chains')}>
+                            {t('SAS Handicap')}
+                        </Badge>
+                    )}
+                    {tournament.chainsPerMatchWin > 0 && (
+                        <Badge
+                            title={t('Each match win adds {{n}} chains for the rest of the event', {
+                                n: tournament.chainsPerMatchWin
+                            })}
+                        >
+                            {t('Chainbound +{{n}}', { n: tournament.chainsPerMatchWin })}
+                        </Badge>
+                    )}
+                    {tournament.allowedSets && tournament.allowedSets.length > 0 && (
+                        <Badge title={t('Only decks from these sets may register')}>
+                            {t('{{n}} sets legal', { n: tournament.allowedSets.length })}
+                        </Badge>
+                    )}
+                    {tournament.bannedHouses && tournament.bannedHouses.length > 0 && (
+                        <Badge title={tournament.bannedHouses.join(', ')}>
+                            {t('No {{houses}}', {
+                                houses: tournament.bannedHouses.join('/')
+                            })}
+                        </Badge>
+                    )}
+                    {tournament.requiredHouses && tournament.requiredHouses.length > 0 && (
+                        <Badge title={t('Decks must contain these houses')}>
+                            {t('Must have {{houses}}', {
+                                houses: tournament.requiredHouses.join('/')
+                            })}
+                        </Badge>
+                    )}
                     <span className='text-muted'>{statusLabel}</span>
                     {tournament.status === 'active' && (
                         <RoundTimer
@@ -239,9 +315,16 @@ const TournamentDetail = () => {
                                 <HeroButton
                                     size='sm'
                                     variant='tertiary'
-                                    onPress={() => setShowDeckPicker(true)}
+                                    onPress={() => {
+                                        setTriadPicks(tournament.triad ? [] : null);
+                                        setShowDeckPicker(true);
+                                    }}
                                 >
-                                    {myPlayer?.hasDeck
+                                    {tournament.triad
+                                        ? myPlayer?.hasDeck
+                                            ? t('Change Triad Pool')
+                                            : t('Register Triad Pool (3 decks)')
+                                        : myPlayer?.hasDeck
                                         ? t('Change Deck ({{deck}})', {
                                               deck: myPlayer.deckName || t('registered')
                                           })

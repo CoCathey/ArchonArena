@@ -24,7 +24,8 @@ const createFakeDb = () => {
         DeckId: null,
         CheckedIn: false,
         Waitlisted: false,
-        FinalRank: null
+        FinalRank: null,
+        EventChains: 0
     });
 
     const db = {
@@ -56,6 +57,13 @@ const createFakeDb = () => {
                     SasMax: params[19],
                     HideDecklists: params[20],
                     GameTimeLimit: params[21],
+                    DeckSwapPolicy: params[22],
+                    AllowedSets: params[23],
+                    RequiredHouses: params[24],
+                    BannedHouses: params[25],
+                    SasChainHandicap: params[26],
+                    ChainsPerMatchWin: params[27],
+                    Triad: params[28],
                     Status: 'registration',
                     Stage: 'main',
                     CurrentRound: 0,
@@ -103,7 +111,14 @@ const createFakeDb = () => {
                         SasMin: params[18],
                         SasMax: params[19],
                         HideDecklists: params[20],
-                        GameTimeLimit: params[21]
+                        GameTimeLimit: params[21],
+                        DeckSwapPolicy: params[22],
+                        AllowedSets: params[23],
+                        RequiredHouses: params[24],
+                        BannedHouses: params[25],
+                        SasChainHandicap: params[26],
+                        ChainsPerMatchWin: params[27],
+                        Triad: params[28]
                     });
                 }
                 return [];
@@ -330,6 +345,79 @@ const createFakeDb = () => {
                 return [];
             }
 
+            if (sql.includes('SET "EventChains" = "EventChains" + $3')) {
+                const player = state.players.find(
+                    (entry) => entry.TournamentId === params[0] && entry.UserId === params[1]
+                );
+                if (player) {
+                    player.EventChains = (player.EventChains || 0) + params[2];
+                }
+                return [];
+            }
+
+            if (sql.includes('DELETE FROM "TournamentPlayerDecks"')) {
+                state.playerDecks = (state.playerDecks || []).filter(
+                    (entry) => !(entry.TournamentId === params[0] && entry.UserId === params[1])
+                );
+                return [];
+            }
+
+            if (sql.includes('INSERT INTO "TournamentPlayerDecks"')) {
+                state.playerDecks = state.playerDecks || [];
+                state.playerDecks.push({
+                    Id: state.nextId++,
+                    TournamentId: params[0],
+                    UserId: params[1],
+                    DeckId: params[2],
+                    Slot: params[3]
+                });
+                return [];
+            }
+
+            if (sql.includes('FROM "TournamentPlayerDecks" tpd JOIN "Decks" du2')) {
+                // uniqueness probe across pools
+                return (state.playerDecks || [])
+                    .filter(
+                        (entry) => entry.TournamentId === params[0] && entry.UserId !== params[1]
+                    )
+                    .map((entry) => state.decks.find((deck) => deck.Id === entry.DeckId))
+                    .filter((deck) => deck && deck.Uuid === params[2])
+                    .slice(0, 1)
+                    .map(() => ({ '?column?': 1 }));
+            }
+
+            if (sql.includes('FROM "TournamentPlayerDecks" tpd')) {
+                return (state.playerDecks || [])
+                    .filter((entry) => entry.TournamentId === params[0])
+                    .sort((a, b) => a.UserId - b.UserId || a.Slot - b.Slot)
+                    .map((entry) => {
+                        const deck = state.decks.find((row) => row.Id === entry.DeckId);
+                        return {
+                            UserId: entry.UserId,
+                            DeckId: entry.DeckId,
+                            Slot: entry.Slot,
+                            DeckName: deck ? deck.Name : null,
+                            DeckUuid: deck ? deck.Uuid : null,
+                            SasRating: deck ? deck.SasRating : null
+                        };
+                    });
+            }
+
+            if (sql.includes('FROM "TournamentPlayers" tp JOIN "Decks" du')) {
+                // uniqueness probe against single-deck registrations
+                return state.players
+                    .filter(
+                        (player) =>
+                            player.TournamentId === params[0] &&
+                            player.UserId !== params[1] &&
+                            player.DeckId
+                    )
+                    .map((player) => state.decks.find((deck) => deck.Id === player.DeckId))
+                    .filter((deck) => deck && deck.Uuid === params[2])
+                    .slice(0, 1)
+                    .map(() => ({ '?column?': 1 }));
+            }
+
             if (sql.includes('DELETE FROM "TournamentPlayers"')) {
                 state.players = state.players.filter(
                     (player) => !(player.TournamentId === params[0] && player.UserId === params[1])
@@ -381,6 +469,7 @@ const createFakeDb = () => {
                             CheckedIn: player.CheckedIn,
                             Waitlisted: player.Waitlisted,
                             FinalRank: player.FinalRank,
+                            EventChains: player.EventChains || 0,
                             Username: player.Username,
                             DeckName: deck ? deck.Name : null,
                             DeckUuid: deck ? deck.Uuid : null,
@@ -558,6 +647,20 @@ const createFakeDb = () => {
                 return [];
             }
 
+            if (
+                sql.includes('SET "P1BannedDeckId"') ||
+                sql.includes('SET "P2BannedDeckId"') ||
+                sql.includes('SET "P1DeckId"') ||
+                sql.includes('SET "P2DeckId"')
+            ) {
+                const match = state.matches.find((entry) => entry.Id === params[0]);
+                if (match) {
+                    const column = /SET "(P[12](?:Banned)?DeckId)"/.exec(sql)[1];
+                    match[column] = params[1];
+                }
+                return [];
+            }
+
             if (sql.includes('SET "Player1Wins" = $2, "Player2Wins" = $3')) {
                 const match = state.matches.find((entry) => entry.Id === params[0]);
                 if (match) {
@@ -697,6 +800,15 @@ const createFakeDb = () => {
                 );
             }
 
+            if (sql.includes('FROM "Decks" d') && sql.includes('ANY($1)')) {
+                return state.decks
+                    .filter((deck) => params[0].includes(deck.Id))
+                    .map((deck) => ({
+                        Id: deck.Id,
+                        SasRating: deck.SasRating === undefined ? null : deck.SasRating
+                    }));
+            }
+
             if (sql.includes('FROM "Decks" d')) {
                 return state.decks
                     .filter((deck) => deck.Id === params[0])
@@ -705,7 +817,9 @@ const createFakeDb = () => {
                         UserId: deck.UserId,
                         Name: deck.Name,
                         Uuid: deck.Uuid,
-                        SasRating: deck.SasRating === undefined ? null : deck.SasRating
+                        ExpansionId: deck.ExpansionId || null,
+                        SasRating: deck.SasRating === undefined ? null : deck.SasRating,
+                        Houses: deck.Houses ? JSON.stringify(deck.Houses) : null
                     }));
             }
 
@@ -1597,6 +1711,314 @@ describe('TournamentService', function () {
             expect(history.length).toBe(1);
             expect(history[0].finalRank).toBe(1);
             expect(history[0].playerCount).toBe(4);
+        });
+    });
+
+    describe('KeyForge deck rules', function () {
+        it('validates create options for the KeyForge conditions', async function () {
+            const bad = async (options) =>
+                (
+                    await service.create(organizer, {
+                        name: 'Valid Name',
+                        format: 'swiss',
+                        ...options
+                    })
+                ).success;
+
+            expect(await bad({ gameFormat: 'ladder' })).toBe(false);
+            expect(await bad({ deckSwapPolicy: 'anytime' })).toBe(false);
+            expect(await bad({ requiredHouses: ['atlantis'] })).toBe(false);
+            expect(await bad({ requiredHouses: ['dis'], bannedHouses: ['dis'] })).toBe(false);
+            expect(await bad({ chainsPerMatchWin: 9 })).toBe(false);
+            expect(await bad({ triad: true, deckSwapPolicy: 'between-rounds' })).toBe(false);
+            expect(await bad({ gameFormat: 'sealed', triad: true })).toBe(false);
+
+            const ok = await service.create(organizer, {
+                name: 'Reversal Chains',
+                format: 'swiss',
+                gameFormat: 'reversal',
+                deckSwapPolicy: 'between-rounds',
+                allowedSets: [341, 435],
+                bannedHouses: ['dis'],
+                sasChainHandicap: true,
+                chainsPerMatchWin: 1
+            });
+            expect(ok.success).toBe(true);
+
+            const row = db.state.tournaments.find((entry) => entry.Id === ok.id);
+            expect(JSON.parse(row.AllowedSets)).toEqual([341, 435]);
+            expect(JSON.parse(row.BannedHouses)).toEqual(['dis']);
+        });
+
+        it('enforces set legality and house conditions on decks', async function () {
+            db.state.decks.push(
+                {
+                    Id: 61,
+                    UserId: 2,
+                    Name: 'CotA Dis',
+                    Uuid: 'u-61',
+                    ExpansionId: 341,
+                    SasRating: 65,
+                    Houses: ['dis', 'logos', 'shadows']
+                },
+                {
+                    Id: 62,
+                    UserId: 2,
+                    Name: 'WC Brobnar',
+                    Uuid: 'u-62',
+                    ExpansionId: 452,
+                    SasRating: 66,
+                    Houses: ['brobnar', 'logos', 'untamed']
+                },
+                {
+                    Id: 63,
+                    UserId: 2,
+                    Name: 'CotA Brobnar',
+                    Uuid: 'u-63',
+                    ExpansionId: 341,
+                    SasRating: 67,
+                    Houses: ['brobnar', 'sanctum', 'untamed']
+                }
+            );
+
+            const id = await createSwiss(2, {
+                allowedSets: [341],
+                bannedHouses: ['dis'],
+                requiredHouses: ['brobnar']
+            });
+
+            // Wrong set
+            expect((await service.registerDeck(id, { id: 2 }, 62)).success).toBe(false);
+            // Banned house
+            expect((await service.registerDeck(id, { id: 2 }, 61)).success).toBe(false);
+            // Legal: CotA, has brobnar, no dis
+            expect((await service.registerDeck(id, { id: 2 }, 63)).success).toBe(true);
+        });
+
+        it('rejects the same physical Archon registered by two players', async function () {
+            db.state.decks.push(
+                { Id: 71, UserId: 1, Name: 'Same Deck', Uuid: 'shared-uuid', SasRating: 60 },
+                { Id: 72, UserId: 2, Name: 'Same Deck', Uuid: 'shared-uuid', SasRating: 60 }
+            );
+
+            const id = await createSwiss(2);
+
+            expect((await service.registerDeck(id, { id: 1 }, 71)).success).toBe(true);
+
+            const clash = await service.registerDeck(id, { id: 2 }, 72);
+            expect(clash.success).toBe(false);
+            expect(clash.message).toMatch(/already registered/i);
+        });
+
+        it('locks decks mid-event unless the swap policy allows changes', async function () {
+            db.state.decks.push(
+                { Id: 81, UserId: 1, Name: 'First', Uuid: 'u-81', SasRating: 60 },
+                { Id: 82, UserId: 1, Name: 'Second', Uuid: 'u-82', SasRating: 61 }
+            );
+
+            const locked = await createSwiss(2);
+            await service.registerDeck(locked, { id: 1 }, 81);
+            await service.start(locked, organizer);
+            expect((await service.registerDeck(locked, { id: 1 }, 82)).success).toBe(false);
+
+            db.state.decks.push(
+                { Id: 83, UserId: 3, Name: 'Third', Uuid: 'u-83', SasRating: 62 },
+                { Id: 84, UserId: 3, Name: 'Fourth', Uuid: 'u-84', SasRating: 63 }
+            );
+
+            const open = await service.create(organizer, {
+                name: 'Swappable',
+                format: 'swiss',
+                deckSwapPolicy: 'between-rounds'
+            });
+            await service.register(open.id, { id: 3 });
+            await service.register(open.id, { id: 4 });
+            await service.registerDeck(open.id, { id: 3 }, 83);
+            await service.start(open.id, organizer);
+
+            expect((await service.registerDeck(open.id, { id: 3 }, 84)).success).toBe(true);
+
+            const player = db.state.players.find(
+                (entry) => entry.TournamentId === open.id && entry.UserId === 3
+            );
+            expect(player.DeckId).toBe(84);
+        });
+    });
+
+    describe('chains', function () {
+        it('computes SAS handicap starting chains for the stronger deck', async function () {
+            db.state.decks.push(
+                { Id: 91, UserId: 1, Name: 'Strong', Uuid: 'u-91', SasRating: 78 },
+                { Id: 92, UserId: 2, Name: 'Fair', Uuid: 'u-92', SasRating: 61 }
+            );
+
+            const created = await service.create(organizer, {
+                name: 'Handicapped',
+                format: 'swiss',
+                sasChainHandicap: true
+            });
+            await service.register(created.id, { id: 1 });
+            await service.register(created.id, { id: 2 });
+            await service.registerDeck(created.id, { id: 1 }, 91);
+            await service.registerDeck(created.id, { id: 2 }, 92);
+            await service.start(created.id, organizer);
+
+            const needing = await service.getMatchesNeedingGames(created.id);
+            expect(needing.length).toBe(1);
+            // 17 SAS apart at 5 SAS per chain = 3 chains for the strong deck.
+            expect(needing[0].startingChains).toEqual({ user1: 3 });
+            expect(needing[0].gameFormat).toBe('normal'); // archon -> lobby format
+        });
+
+        it('accrues Chainbound event chains on played wins only', async function () {
+            const created = await service.create(organizer, {
+                name: 'Chainbound Night',
+                format: 'swiss',
+                chainsPerMatchWin: 2
+            });
+            for (let index = 0; index < 4; index++) {
+                await service.register(created.id, { id: index + 1 });
+            }
+            await service.start(created.id, organizer);
+
+            const [matchA, matchB] = db.state.matches.filter((m) => m.Player2Id);
+
+            await service.reportResult(created.id, matchA.Id, matchA.Player1Id, organizer);
+            await service.awardWin(created.id, matchB.Id, matchB.Player1Id, organizer, 'no-show');
+
+            const playedWinner = db.state.players.find(
+                (entry) => entry.UserId === matchA.Player1Id
+            );
+            const awardWinner = db.state.players.find((entry) => entry.UserId === matchB.Player1Id);
+
+            expect(playedWinner.EventChains).toBe(2);
+            expect(awardWinner.EventChains).toBe(0); // no-shows earn nothing
+
+            const next = await service.nextRound(created.id, organizer);
+            expect(next.success).toBe(true);
+
+            const needing = await service.getMatchesNeedingGames(created.id);
+            const withChains = needing.find(
+                (entry) => entry.startingChains && entry.startingChains.user1
+            );
+            expect(withChains.startingChains.user1).toBe(2);
+        });
+    });
+
+    describe('triad', function () {
+        const triadDecks = (userId, base) => [
+            {
+                Id: base,
+                UserId: userId,
+                Name: `Deck A${userId}`,
+                Uuid: `u-${base}`,
+                SasRating: 60
+            },
+            {
+                Id: base + 1,
+                UserId: userId,
+                Name: `Deck B${userId}`,
+                Uuid: `u-${base + 1}`,
+                SasRating: 65
+            },
+            {
+                Id: base + 2,
+                UserId: userId,
+                Name: `Deck C${userId}`,
+                Uuid: `u-${base + 2}`,
+                SasRating: 70
+            }
+        ];
+
+        const setupTriad = async () => {
+            db.state.decks.push(...triadDecks(1, 101), ...triadDecks(2, 201));
+
+            const created = await service.create(organizer, {
+                name: 'Triad Trial',
+                format: 'swiss',
+                triad: true
+            });
+            await service.register(created.id, { id: 1 });
+            await service.register(created.id, { id: 2 });
+            await service.registerTriadDecks(created.id, { id: 1 }, [101, 102, 103]);
+            await service.registerTriadDecks(created.id, { id: 2 }, [201, 202, 203]);
+            return created.id;
+        };
+
+        it('requires exactly three distinct decks per pool', async function () {
+            db.state.decks.push(...triadDecks(1, 101));
+
+            const created = await service.create(organizer, {
+                name: 'Triad Trial',
+                format: 'swiss',
+                triad: true
+            });
+            await service.register(created.id, { id: 1 });
+
+            expect(
+                (await service.registerTriadDecks(created.id, { id: 1 }, [101, 102])).success
+            ).toBe(false);
+            expect(
+                (await service.registerTriadDecks(created.id, { id: 1 }, [101, 101, 102])).success
+            ).toBe(false);
+            expect(
+                (await service.registerTriadDecks(created.id, { id: 1 }, [101, 102, 103])).success
+            ).toBe(true);
+
+            const start = await service.start(created.id, organizer);
+            expect(start.success).toBe(false); // player 1 fine but only 1 player
+        });
+
+        it('blocks the start until every player has a full pool', async function () {
+            db.state.decks.push(...triadDecks(1, 101));
+
+            const created = await service.create(organizer, {
+                name: 'Triad Trial',
+                format: 'swiss',
+                triad: true
+            });
+            await service.register(created.id, { id: 1 });
+            await service.register(created.id, { id: 2 });
+            await service.registerTriadDecks(created.id, { id: 1 }, [101, 102, 103]);
+
+            const blocked = await service.start(created.id, organizer);
+            expect(blocked.success).toBe(false);
+            expect(blocked.message).toMatch(/user2/);
+        });
+
+        it('runs the ban/pick flow and only then creates the game', async function () {
+            const id = await setupTriad();
+            await service.start(id, organizer);
+
+            const match = db.state.matches[0];
+            const p1 = { id: match.Player1Id };
+            const p2 = { id: match.Player2Id };
+
+            // No game until decks are chosen.
+            expect((await service.getMatchesNeedingGames(id)).length).toBe(0);
+
+            // Picking before your opponent has banned is rejected.
+            expect((await service.triadPick(id, match.Id, p1, 101)).success).toBe(false);
+
+            // Bans target the opponent's pool.
+            expect((await service.triadBan(id, match.Id, p1, 102)).success).toBe(false); // own deck
+            expect((await service.triadBan(id, match.Id, p1, 203)).success).toBe(true);
+            expect((await service.triadBan(id, match.Id, p1, 202)).success).toBe(false); // already banned
+            expect((await service.triadBan(id, match.Id, p2, 101)).success).toBe(true);
+
+            // Picks come from your own unbanned decks.
+            expect((await service.triadPick(id, match.Id, p1, 101)).success).toBe(false); // banned
+            expect((await service.triadPick(id, match.Id, p1, 201)).success).toBe(false); // not yours
+            expect((await service.triadPick(id, match.Id, p1, 102)).success).toBe(true);
+            expect((await service.triadPick(id, match.Id, p2, 202)).success).toBe(true);
+
+            const needing = await service.getMatchesNeedingGames(id);
+            expect(needing.length).toBe(1);
+            expect(needing[0].players.map((player) => player.deckId).sort()).toEqual([102, 202]);
+
+            const detail = await service.getDetail(id, { id: 1, permissions: {} });
+            expect(detail.tournament.triad).toBe(true);
+            expect(detail.players.find((player) => player.userId === 1).triadDecks.length).toBe(3);
         });
     });
 
