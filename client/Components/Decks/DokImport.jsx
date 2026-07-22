@@ -1,51 +1,77 @@
-import React, { useState } from 'react';
-import { useSelector } from 'react-redux';
+import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button as HeroButton, Input } from '@heroui/react';
+import { Button as HeroButton } from '@heroui/react';
 
-import { usePrepareDokImportMutation, useSaveDeckMutation } from '../../redux/api';
+import { useSaveDeckMutation } from '../../redux/api';
 
 const IMPORT_CONCURRENCY = 3;
 
+// Master Vault deck ids are UUIDs. This finds them in anything the player
+// pastes or uploads: a Decks of KeyForge CSV export (its first column is
+// keyforge_id), DoK deck links, Master Vault deck links, or raw ids.
+const UUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
+
+const extractUuids = (text) => {
+    const matches = text.match(UUID_RE) || [];
+    const seen = new Set();
+    const uuids = [];
+    for (const raw of matches) {
+        const uuid = raw.toLowerCase();
+        if (!seen.has(uuid)) {
+            seen.add(uuid);
+            uuids.push(uuid);
+        }
+    }
+
+    return uuids;
+};
+
 /**
- * ARCHON: bulk import a player's whole Decks of KeyForge collection.
+ * ARCHON: bulk-import a whole KeyForge collection.
  *
- * The server "prepare" step lists the DoK account's decks and drops the
- * ones already imported; we then import each remaining deck through the
+ * Decks of KeyForge has no public "list a user's decks" API (their public
+ * API is single-deck lookup only), so instead of a username we take the
+ * player's DoK collection **CSV export** (or pasted deck links / ids),
+ * pull every Master Vault id out of it, and import each through the
  * ordinary single-deck endpoint (Master Vault fetch + SAS enrichment),
- * running a few in parallel and reporting live progress. Re-running only
- * imports decks added since last time, so it doubles as a "sync" button.
+ * a few in parallel with live progress. Decks already owned are skipped
+ * server-side, so re-running only adds new ones.
  *
  * @param {{ onDone?: () => void, compact?: boolean }} props
  */
 const DokImport = ({ onDone, compact }) => {
     const { t } = useTranslation();
-    const linkedUsername = useSelector((state) => state.account.user?.dokUsername);
+    const fileInput = useRef(null);
 
-    const [username, setUsername] = useState(linkedUsername || '');
-    const [phase, setPhase] = useState('idle'); // idle | preparing | importing | done
+    const [pasted, setPasted] = useState('');
+    const [phase, setPhase] = useState('idle'); // idle | importing | done
     const [message, setMessage] = useState(null);
-    const [progress, setProgress] = useState({ done: 0, total: 0, failed: 0 });
+    const [progress, setProgress] = useState({ done: 0, total: 0 });
     const [summary, setSummary] = useState(null);
 
-    const [prepareDokImport, prepareState] = usePrepareDokImportMutation();
     const [saveDeck] = useSaveDeckMutation();
 
-    const runImport = async (decks) => {
+    const runImport = async (uuids) => {
         setPhase('importing');
-        setProgress({ done: 0, total: decks.length, failed: 0 });
+        setProgress({ done: 0, total: uuids.length });
 
         let cursor = 0;
         let done = 0;
+        let imported = 0;
+        let already = 0;
         let failed = 0;
 
         const worker = async () => {
-            while (cursor < decks.length) {
-                const deck = decks[cursor++];
+            while (cursor < uuids.length) {
+                const uuid = uuids[cursor++];
 
                 try {
-                    const result = await saveDeck({ uuid: deck.uuid }).unwrap();
-                    if (!result.success) {
+                    const result = await saveDeck({ uuid }).unwrap();
+                    if (result.success) {
+                        imported++;
+                    } else if (/already exists/i.test(result.message || '')) {
+                        already++;
+                    } else {
                         failed++;
                     }
                 } catch {
@@ -53,83 +79,52 @@ const DokImport = ({ onDone, compact }) => {
                 }
 
                 done++;
-                setProgress({ done, total: decks.length, failed });
+                setProgress({ done, total: uuids.length });
             }
         };
 
         await Promise.all(
-            Array.from({ length: Math.min(IMPORT_CONCURRENCY, decks.length) }, () => worker())
+            Array.from({ length: Math.min(IMPORT_CONCURRENCY, uuids.length) }, () => worker())
         );
 
-        return { imported: done - failed, failed };
+        setPhase('done');
+        setSummary({ imported, already, failed, total: uuids.length });
+        onDone?.();
     };
 
-    const start = async () => {
-        const trimmed = username.trim();
-
-        if (!trimmed) {
-            setMessage(t('Enter your Decks of KeyForge username.'));
-
-            return;
-        }
-
+    const importFrom = (text) => {
         setMessage(null);
         setSummary(null);
-        setPhase('preparing');
 
-        let prepared;
-        try {
-            prepared = await prepareDokImport(trimmed).unwrap();
-        } catch (err) {
-            setPhase('idle');
-            // Surface what actually failed instead of a generic shrug - the
-            // status/message pinpoints whether it's auth, a server error, or
-            // a network drop (err.status is RTK's FETCH_ERROR/HTTP status).
-            const detail =
-                err?.data?.message || err?.error || (err?.status && `HTTP ${err.status}`);
+        const uuids = extractUuids(text || '');
+        if (uuids.length === 0) {
             setMessage(
-                detail
-                    ? t('Import failed: {{detail}}', { detail })
-                    : t('Could not reach the server. Please try again.')
+                t(
+                    'No decks found. Upload your Decks of KeyForge CSV export, or paste deck links (one per line).'
+                )
             );
 
             return;
         }
 
-        if (!prepared.success) {
-            setPhase('idle');
-            setMessage(prepared.message || t('Could not import from Decks of KeyForge.'));
-
-            return;
-        }
-
-        if (prepared.toImport.length === 0) {
-            setPhase('done');
-            setSummary({
-                imported: 0,
-                failed: 0,
-                already: prepared.ownedCount,
-                total: prepared.total
-            });
-            onDone?.();
-
-            return;
-        }
-
-        const { imported, failed } = await runImport(prepared.toImport);
-
-        setPhase('done');
-        setSummary({
-            imported,
-            failed,
-            already: prepared.ownedCount,
-            total: prepared.total,
-            truncated: prepared.truncated
-        });
-        onDone?.();
+        runImport(uuids);
     };
 
-    const busy = phase === 'preparing' || phase === 'importing';
+    const onFile = async (event) => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = '';
+        if (!file) {
+            return;
+        }
+
+        try {
+            importFrom(await file.text());
+        } catch {
+            setMessage(t('Could not read that file.'));
+        }
+    };
+
+    const busy = phase === 'importing';
     const percent = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
 
     return (
@@ -137,33 +132,45 @@ const DokImport = ({ onDone, compact }) => {
             {!compact && (
                 <p className='text-sm text-muted'>
                     {t(
-                        'Import your entire collection from Decks of KeyForge. Enter your DoK username and we will pull in every deck you own.'
+                        'Import your whole collection: on Decks of KeyForge, open your decks and use "Download Decks Spreadsheet", then upload that CSV here. You can also paste deck links (DoK or Master Vault), one per line.'
                     )}
                 </p>
             )}
-            <div className='flex gap-2'>
-                <Input
-                    className='flex-1'
-                    placeholder={t('Decks of KeyForge username')}
-                    value={username}
-                    isDisabled={busy}
-                    onChange={(event) => setUsername(event.target.value)}
-                    onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !busy) {
-                            start();
-                        }
-                    }}
-                />
-                <HeroButton variant='primary' isPending={busy} onPress={start}>
-                    {linkedUsername ? t('Sync') : t('Import')}
+
+            <div className='flex flex-wrap gap-2'>
+                <HeroButton
+                    variant='primary'
+                    isPending={busy}
+                    onPress={() => fileInput.current?.click()}
+                >
+                    {t('Upload DoK CSV')}
                 </HeroButton>
+                <input
+                    ref={fileInput}
+                    type='file'
+                    accept='.csv,text/csv,text/plain'
+                    hidden
+                    onChange={onFile}
+                />
             </div>
 
-            {phase === 'preparing' && (
-                <p className='text-sm text-muted'>
-                    {t('Finding your decks on Decks of KeyForge…')}
-                </p>
-            )}
+            <textarea
+                className='min-h-20 w-full rounded-md border border-border/65 bg-surface-secondary/55 px-3 py-2 text-sm text-foreground focus:border-border/90 focus:outline-none'
+                placeholder={t('…or paste deck links / ids here, one per line')}
+                value={pasted}
+                disabled={busy}
+                onChange={(event) => setPasted(event.target.value)}
+            />
+            <div className='flex justify-end'>
+                <HeroButton
+                    size='sm'
+                    variant='tertiary'
+                    isDisabled={busy || !pasted.trim()}
+                    onPress={() => importFrom(pasted)}
+                >
+                    {t('Import pasted')}
+                </HeroButton>
+            </div>
 
             {phase === 'importing' && (
                 <div className='space-y-1'>
@@ -186,43 +193,26 @@ const DokImport = ({ onDone, compact }) => {
                 <div className='rounded-md border border-border/60 bg-surface-secondary/50 px-3 py-2 text-sm'>
                     {summary.imported > 0 ? (
                         <p className='font-semibold text-green-400'>
-                            {t('Imported {{count}} new deck(s) from Decks of KeyForge.', {
-                                count: summary.imported
-                            })}
+                            {t('Imported {{count}} new deck(s).', { count: summary.imported })}
                         </p>
                     ) : (
                         <p className='font-semibold text-foreground'>
-                            {t('Your collection is already up to date.')}
+                            {t('No new decks to import.')}
                         </p>
                     )}
                     <p className='text-xs text-muted'>
-                        {t('{{total}} decks found, {{already}} already imported.', {
+                        {t('{{total}} found, {{already}} already imported.', {
                             total: summary.total,
                             already: summary.already
                         })}
                         {summary.failed > 0 &&
                             ' ' +
-                                t('{{failed}} could not be imported.', {
-                                    failed: summary.failed
-                                })}
+                                t('{{failed}} could not be imported.', { failed: summary.failed })}
                     </p>
-                    {summary.truncated && (
-                        <p className='mt-1 text-xs text-muted'>
-                            {t(
-                                'Only the most recent decks were imported. Run it again to fetch more.'
-                            )}
-                        </p>
-                    )}
                 </div>
             )}
 
             {message && <p className='text-sm text-red-400'>{message}</p>}
-
-            {prepareState.isError && !message && (
-                <p className='text-sm text-red-400'>
-                    {t('Something went wrong. Please try again.')}
-                </p>
-            )}
         </div>
     );
 };

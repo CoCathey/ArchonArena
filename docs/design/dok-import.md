@@ -1,4 +1,28 @@
-# Bulk & live import from Decks of KeyForge
+# Bulk import from a Decks of KeyForge CSV / pasted links
+
+> **Update.** The original design imported a collection by DoK username via a
+> DoK "filter" API. That endpoint does not exist in DoK's **public** API —
+> their public API (confirmed from their open source, `PublicApiEndpoints.kt`)
+> is single-deck lookup only (`GET /public-api/v3/decks/{id}`), which is what
+> SAS enrichment uses. There is no public "list a user's decks by username".
+> Bulk import now works entirely client-side from a **DoK CSV export** (or
+> pasted deck links / ids) and needs no DoK API at all. The server
+> owner-listing code below is retained but unused.
+
+## How it works now
+
+`client/Components/Decks/DokImport.jsx` takes a file (the DoK "Download Decks
+Spreadsheet" CSV, whose first column is `keyforge_id`) or pasted text (DoK or
+Master Vault deck links, or raw ids), extracts every Master Vault UUID with a
+regex, dedupes, and imports each through the ordinary `POST /api/decks` path
+(Master Vault fetch + SAS enrichment), a few in parallel with a progress bar.
+Decks already owned are skipped server-side ("Deck already exists"), so
+re-running only adds new decks. No DoK API key, rate limit, or network
+dependency on DoK is involved in the import itself.
+
+---
+
+## (Historical) username-based bulk import
 
 ## Goal
 
