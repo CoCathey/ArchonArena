@@ -86,14 +86,31 @@ export default function GameScreen() {
     const perspective: PlayerState | undefined = me ?? players[0];
     const opponent = players.find((player) => player.name !== perspective?.name);
 
-    // Rematch flow: the game node clears state and the lobby publishes a new
-    // pending game. Follow it back to the pending screen.
+    // Leave the board only when the game node actually tears the game down
+    // (game over / rematch / a player left), signalled by a bump in `cleared`.
+    // We must NOT leave just because `rootState` is momentarily empty — that
+    // also happens while the socket is (re)connecting and the full state is in
+    // flight, which is exactly the moment right after "Start game". Capture the
+    // counter on mount and react only to later increases.
+    const cleared = useGameStore((state) => state.cleared);
+    const clearedBaseline = useRef(cleared);
     useEffect(() => {
-        if (!rootState && currentGame && !currentGame.started && !leftGame.current) {
-            closeGameSocket();
-            router.replace('/pending');
+        if (cleared === clearedBaseline.current || leftGame.current) {
+            return;
         }
-    }, [rootState, currentGame]);
+        clearedBaseline.current = cleared;
+        leftGame.current = true;
+        closeGameSocket();
+        // A rematch leaves us in a fresh pending game; otherwise go to the lobby.
+        const pending = useLobbyStore.getState().currentGame;
+        if (pending && !pending.started) {
+            router.replace('/pending');
+        } else if (router.canGoBack()) {
+            router.back();
+        } else {
+            router.replace('/(tabs)');
+        }
+    }, [cleared]);
 
     const smallCard = Math.max(56, Math.floor(screenWidth / 6.4));
     const handCard = Math.max(78, Math.floor(screenWidth / 4.6));

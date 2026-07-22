@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
 import {
     FlatList,
     Modal,
@@ -96,10 +96,20 @@ export default function PlayScreen() {
     >();
     const [password, setPassword] = useState('');
     const prevGameId = useRef<string | undefined>(undefined);
+    const pathname = usePathname();
 
-    // When we land in a pending game, open the pending screen once.
+    // When we join a pending game from the lobby, open the pending screen once.
+    // Skip when we're on the New game modal (it navigates to pending itself) or
+    // already on pending/game, so we never push it twice.
     useEffect(() => {
-        if (currentGame && !currentGame.started && prevGameId.current !== currentGame.id) {
+        if (
+            currentGame &&
+            !currentGame.started &&
+            prevGameId.current !== currentGame.id &&
+            pathname !== '/new-game' &&
+            pathname !== '/pending' &&
+            pathname !== '/game'
+        ) {
             prevGameId.current = currentGame.id;
             setPasswordGame(undefined);
             router.push('/pending');
@@ -107,14 +117,17 @@ export default function PlayScreen() {
         if (!currentGame) {
             prevGameId.current = undefined;
         }
-    }, [currentGame]);
+    }, [currentGame, pathname]);
 
-    // A live handoff means an in-progress game: jump straight to the board.
+    // A live handoff means an in-progress game (e.g. resuming one from the
+    // lobby): jump straight to the board. When we're on the pending screen,
+    // that screen owns the handoff→board transition, so skip it here to avoid
+    // pushing the board twice.
     useEffect(() => {
-        if (handoff) {
+        if (handoff && pathname !== '/pending' && pathname !== '/game') {
             router.push('/game');
         }
-    }, [handoff]);
+    }, [handoff, pathname]);
 
     const joinWithPassword = (game: GameSummary, mode: 'join' | 'watch') => {
         if (game.needsPassword) {

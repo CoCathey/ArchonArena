@@ -115,7 +115,10 @@ export function connectToGame(handoff: HandoffMessage): void {
     });
 
     socket.on('cleargamestate', () => {
-        useGameStore.getState().setRootState(undefined);
+        // The game node only sends this when the game is actually torn down
+        // (game over, rematch, or a player left). Signal screens to leave the
+        // board — as opposed to the transient rootState reset on (re)connect.
+        useGameStore.getState().markCleared();
     });
 }
 

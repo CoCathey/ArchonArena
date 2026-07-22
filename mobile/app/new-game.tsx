@@ -108,11 +108,13 @@ export default function NewGameScreen() {
     const [timeLimit, setTimeLimit] = useState('45');
     const [submitted, setSubmitted] = useState(false);
 
-    // Once the lobby acknowledges the game we are put into it; the play tab's
-    // navigation effect opens the pending screen, so just close this modal.
+    // Once the lobby acknowledges the game, replace this modal with the pending
+    // screen in a single navigation. (Closing the modal and letting the Play
+    // tab open pending separately races two navigations against each other,
+    // which cancels out on web.)
     useEffect(() => {
         if (submitted && currentGame) {
-            router.back();
+            router.replace('/pending');
         }
     }, [submitted, currentGame]);
 
