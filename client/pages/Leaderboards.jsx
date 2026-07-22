@@ -41,11 +41,16 @@ const Leaderboards = () => {
         (scope === 'state' && !!location?.country && !!location?.state);
 
     const { data, isFetching } = useGetLeaderboardQuery(
-        { pool, scope, limit: PAGE_SIZE, offset: page * PAGE_SIZE, ...scopeParams },
+        // Over-fetch one row so we can tell whether a next page exists even
+        // when the current page is exactly full (otherwise "Next" stays
+        // enabled on a full final page and advances to an empty page).
+        { pool, scope, limit: PAGE_SIZE + 1, offset: page * PAGE_SIZE, ...scopeParams },
         { skip: !scopeReady }
     );
 
-    const entries = data?.entries || [];
+    const rawEntries = data?.entries || [];
+    const hasMore = rawEntries.length > PAGE_SIZE;
+    const entries = rawEntries.slice(0, PAGE_SIZE);
 
     const scopes = [
         ['world', t('World')],
@@ -214,7 +219,7 @@ const Leaderboards = () => {
                             <HeroButton
                                 size='sm'
                                 variant='tertiary'
-                                isDisabled={entries.length < PAGE_SIZE}
+                                isDisabled={!hasMore}
                                 onPress={() => setPage((current) => current + 1)}
                             >
                                 {t('Next')}

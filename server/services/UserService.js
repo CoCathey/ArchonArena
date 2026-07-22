@@ -232,7 +232,11 @@ class UserService extends EventEmitter {
         }
 
         if (permissions) {
-            existingPermissions = this.mapPermissions(permissions);
+            // Diff against the roles actually present in UserRoles (no Admin
+            // cascade), so that demoting/removing roles on a superuser account
+            // computes the correct add/remove set instead of treating every
+            // implied permission as a phantom existing row.
+            existingPermissions = this.mapPermissions(permissions, { cascade: false });
         } else {
             existingPermissions = {};
         }
@@ -414,23 +418,68 @@ class UserService extends EventEmitter {
         };
     }
 
-    verifyRefreshToken(username, refreshToken) {
+    /**
+     * Verify a refresh token presented on POST /api/account/token.
+     *
+     * @param {string} username the account the caller claims to be
+     * @param {object} refreshToken the stored token row for that account
+     *        (from mapTokens: { id, token, tokenId, expiry, ... })
+     * @param {string} providedToken the secret token value the caller sends
+     *        back (the `token` string they received at login)
+     *
+     * SECURITY: the caller MUST prove possession of the secret token value.
+     * Previously this only recomputed the HMAC from the stored row's own
+     * fields and compared it to that same row - a tautology that always
+     * passed - so anyone who knew a username and a (sequential, guessable)
+     * token id could mint a session for that account. We now constant-time
+     * compare the caller-supplied secret against the stored token, and we
+     * enforce expiry against the correct field (`expiry`; the old `exp`
+     * lookup was always undefined, so tokens never expired).
+     */
+    verifyRefreshToken(username, refreshToken, providedToken) {
+        if (!refreshToken || typeof refreshToken.token !== 'string') {
+            return false;
+        }
+
         let hmac = crypto.createHmac(
             'sha512',
             this.configService.getValueForSection('lobby', 'hmacSecret')
         );
         let encodedToken = hmac.update(`REFRESH ${username} ${refreshToken.tokenId}`).digest('hex');
 
-        if (encodedToken !== refreshToken.token) {
+        // Integrity: the stored token must be the HMAC of (username, tokenId).
+        if (!this.constantTimeEquals(encodedToken, refreshToken.token)) {
             return false;
         }
 
-        let now = moment().utc();
-        if (refreshToken.exp < now) {
+        // Possession: the caller must present the same secret value they were
+        // issued at login. This is the check that actually gates the refresh.
+        if (!this.constantTimeEquals(String(providedToken || ''), refreshToken.token)) {
+            return false;
+        }
+
+        // Expiry. mapTokens exposes the column as `expiry`; keep `exp` as a
+        // fallback for any legacy caller shape.
+        const expiry = refreshToken.expiry || refreshToken.exp;
+        if (!expiry || moment(expiry).utc().isBefore(moment().utc())) {
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * Constant-time string comparison that never throws on length mismatch.
+     */
+    constantTimeEquals(a, b) {
+        const bufferA = Buffer.from(String(a), 'utf8');
+        const bufferB = Buffer.from(String(b), 'utf8');
+
+        if (bufferA.length !== bufferB.length) {
+            return false;
+        }
+
+        return crypto.timingSafeEqual(bufferA, bufferB);
     }
 
     async updateRefreshTokenUsage(tokenId, ip) {
@@ -715,7 +764,7 @@ class UserService extends EventEmitter {
         }
     }
 
-    mapPermissions(permissions) {
+    mapPermissions(permissions, { cascade = true } = {}) {
         let ret = {
             canEditNews: false,
             canManageUsers: false,
@@ -790,8 +839,11 @@ class UserService extends EventEmitter {
 
         // ARCHON: the Admin role is a superuser - it implies every management
         // permission, so a single "Admin" grant gives full access without
-        // also needing UserManager, NewsManager, etc. individually.
-        if (ret.isAdmin) {
+        // also needing UserManager, NewsManager, etc. individually. This
+        // cascade is for runtime authorization only; callers that need the
+        // roles actually backed by UserRoles rows (e.g. the permission-diff in
+        // update()) pass { cascade: false } to avoid phantom add/remove.
+        if (cascade && ret.isAdmin) {
             ret.canEditNews = true;
             ret.canManageUsers = true;
             ret.canManagePermissions = true;

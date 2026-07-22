@@ -22,11 +22,21 @@ const base64url = (buffer) => buffer.toString('base64url');
  *  - db and userService are injected for testability.
  */
 class OidcService {
-    constructor(configService, userService, db = require('../../db'), fetchImpl = fetch) {
+    constructor(
+        configService,
+        userService,
+        db = require('../../db'),
+        fetchImpl = fetch,
+        banlistService = null
+    ) {
         this.configService = configService;
         this.userService = userService;
         this.db = db;
         this.fetch = fetchImpl;
+        // Optional: when provided, new-account creation is refused from
+        // banned IPs (mirrors password registration). Injected by the API
+        // layer; left null in pure unit tests.
+        this.banlistService = banlistService;
         this.discoveryCache = null;
         this.jwksCache = null;
     }
@@ -244,7 +254,10 @@ class OidcService {
             return user.username;
         }
 
-        if (claims.email && claims.email_verified) {
+        // Strict boolean: a provider that sends email_verified as the string
+        // "false" (or any truthy non-true value) must NOT auto-link by email,
+        // which would otherwise be an account-takeover vector.
+        if (claims.email && claims.email_verified === true) {
             const existing = await this.userService.getUserByEmail(claims.email);
             if (existing) {
                 await this.linkIdentity(existing.id, provider, claims.sub, claims.email);
@@ -253,6 +266,24 @@ class OidcService {
                 );
 
                 return existing.username;
+            }
+        }
+
+        // Creating a brand-new (pre-verified) account: enforce the IP ban here
+        // too, otherwise SSO is a ban-evasion path that password registration
+        // is not (register refuses banned IPs before creating an account).
+        if (this.banlistService && ip) {
+            let banned;
+            try {
+                banned = await this.banlistService.getEntryByIp(ip);
+            } catch (err) {
+                logger.error('OIDC ban lookup failed', err);
+
+                throw new Error('Could not verify account eligibility');
+            }
+
+            if (banned) {
+                throw new Error(`Refused ${provider} account creation from banned ip ${ip}`);
             }
         }
 

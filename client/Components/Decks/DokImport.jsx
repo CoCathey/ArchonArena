@@ -74,8 +74,17 @@ const DokImport = ({ onDone, compact }) => {
                     } else {
                         failed++;
                     }
-                } catch {
-                    failed++;
+                } catch (err) {
+                    // The API layer rejects 200 + {success:false}, so an
+                    // already-owned deck ("Deck already exists.") surfaces here
+                    // rather than in the else branch above. Count it as already
+                    // imported, not failed, so re-running a collection import
+                    // doesn't report owned decks as errors.
+                    if (/already exists/i.test(err?.data?.message || '')) {
+                        already++;
+                    } else {
+                        failed++;
+                    }
                 }
 
                 done++;

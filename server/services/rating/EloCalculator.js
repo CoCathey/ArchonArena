@@ -159,7 +159,17 @@ function calculateGameResult(game, configOverrides = {}) {
     const { winner, loser, winnerKeys, loserKeys } = game;
     const resultType = game.resultType || 'keys';
 
-    const sasDiff = (winner.deckSas ?? 0) - (loser.deckSas ?? 0);
+    // Only apply the SAS handicap when BOTH decks have a known SAS. Treating a
+    // single missing SAS as 0 would model that deck as the weakest possible
+    // (real SAS runs ~40-120) and skew the exchange badly - and missing SAS is
+    // routine (DoK enrichment is async/rate-limited; a deleted deck nulls the
+    // join). With one side unknown we fall back to an even (SAS-neutral) match.
+    const bothSasKnown =
+        winner.deckSas !== null &&
+        winner.deckSas !== undefined &&
+        loser.deckSas !== null &&
+        loser.deckSas !== undefined;
+    const sasDiff = bothSasKnown ? winner.deckSas - loser.deckSas : 0;
     const winnerExpected = expectedScore(winner.rating, loser.rating, sasDiff, config);
     const loserExpected = 1 - winnerExpected;
 

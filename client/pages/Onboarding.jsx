@@ -80,8 +80,13 @@ const Onboarding = () => {
     const finish = async () => {
         try {
             await completeOnboarding().unwrap();
-        } catch {
-            // Non-fatal: the wizard will simply be offered again next login
+        } catch (err) {
+            // Do NOT navigate on failure: '/' (Lobby) redirects any
+            // onboarded=false user straight back to /welcome, so pretending
+            // success here soft-locks the user in a loop. Surface the error
+            // and let them retry from the wizard.
+            toast.danger(err?.data?.message || t('Could not finish setup, please try again'));
+            return;
         }
 
         toast.success(t("You're all set - welcome to the Arena!"));
@@ -105,8 +110,10 @@ const Onboarding = () => {
             } else {
                 toast.danger(result.message || t('Could not save location'));
             }
-        } catch {
-            toast.danger(t('Could not save location'));
+        } catch (err) {
+            // The API layer rejects 200 + {success:false}, so the real server
+            // reason (e.g. "Unknown country code") arrives here, not above.
+            toast.danger(err?.data?.message || t('Could not save location'));
         }
     };
 
@@ -121,8 +128,10 @@ const Onboarding = () => {
             } else {
                 toast.danger(result.message || t('Could not join club'));
             }
-        } catch {
-            toast.danger(t('Could not join club'));
+        } catch (err) {
+            // Surface the server reason (e.g. "No club matches that join code")
+            // instead of a generic message.
+            toast.danger(err?.data?.message || t('Could not join club'));
         }
     };
 
@@ -136,8 +145,8 @@ const Onboarding = () => {
             } else {
                 toast.danger(result.message || t('Could not join club'));
             }
-        } catch {
-            toast.danger(t('Could not join club'));
+        } catch (err) {
+            toast.danger(err?.data?.message || t('Could not join club'));
         }
     };
 
@@ -185,8 +194,8 @@ const Onboarding = () => {
             } else {
                 toast.danger(result.message || t('Could not save that image'));
             }
-        } catch {
-            toast.danger(t('Could not save that image'));
+        } catch (err) {
+            toast.danger(err?.data?.message || t('Could not save that image'));
         }
     };
 

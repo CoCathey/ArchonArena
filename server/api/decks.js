@@ -345,7 +345,7 @@ module.exports.init = function (server) {
         passport.authenticate('jwt', { session: false }),
         wrapAsync(async function (req, res) {
             if (!req.user.permissions || !req.user.permissions.canVerifyDecks) {
-                return res.status(403);
+                return res.status(403).send({ success: false, message: 'Forbidden' });
             }
 
             let id = req.params.id;

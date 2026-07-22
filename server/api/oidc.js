@@ -6,10 +6,19 @@ const { wrapAsync } = require('../util.js');
 const ConfigService = require('../services/ConfigService');
 const UserService = require('../services/UserService');
 const OidcService = require('../services/auth/OidcService');
+const BanlistService = require('../services/BanlistService');
 
 const configService = new ConfigService();
 const userService = new UserService(configService);
-const oidcService = new OidcService(configService, userService);
+const banlistService = new BanlistService(null, configService);
+// Pass the banlist so SSO account creation refuses banned IPs (ban evasion).
+const oidcService = new OidcService(
+    configService,
+    userService,
+    undefined,
+    undefined,
+    banlistService
+);
 
 const STATE_COOKIE = 'aa_oidc_state';
 

@@ -16,5 +16,6 @@ export const TAG_TYPES = {
     TOURNAMENTS: 'Tournaments',
     FRIENDS: 'Friends',
     CLUBS: 'Clubs',
-    STORES: 'Stores'
+    STORES: 'Stores',
+    RATINGS: 'Ratings'
 };

@@ -44,7 +44,16 @@ describe('RatingService', function () {
         client = { release: vi.fn() };
         db = {
             query: vi.fn().mockResolvedValue([]),
-            queryTran: vi.fn().mockResolvedValue([]),
+            // The winner's RatingHistory insert is the idempotency gate and
+            // uses RETURNING "Id"; a real insert yields one row. Other tran
+            // statements (Ratings upserts, loser history, COMMIT/ROLLBACK)
+            // don't have their return value inspected.
+            queryTran: vi.fn().mockImplementation(async (c, sql) => {
+                if (sql && sql.includes('INSERT INTO "RatingHistory"')) {
+                    return [{ Id: 1 }];
+                }
+                return [];
+            }),
             startTransaction: vi.fn().mockResolvedValue(client)
         };
         service = new RatingService(configService(), db);
@@ -149,6 +158,25 @@ describe('RatingService', function () {
             await service.processGame(GAME_UUID);
 
             expect(db.startTransaction).not.toHaveBeenCalled();
+        });
+
+        it('does not touch Ratings when the history insert conflicts (concurrent gate)', async function () {
+            // Pre-check passes (not yet rated) but a concurrent run committed
+            // the history row first, so our RETURNING insert yields no rows.
+            primeHappyPath(gameRows());
+            db.queryTran.mockImplementation(async (c, sql) => {
+                if (sql && sql.includes('INSERT INTO "RatingHistory"')) {
+                    return []; // ON CONFLICT DO NOTHING -> already rated
+                }
+                return [];
+            });
+
+            await service.processGame(GAME_UUID);
+
+            const tranSql = db.queryTran.mock.calls.map(([, sql]) => sql || '');
+            expect(tranSql.filter((sql) => sql.includes('INSERT INTO "Ratings"')).length).toBe(0);
+            expect(db.queryTran).toHaveBeenCalledWith(client, 'ROLLBACK');
+            expect(client.release).toHaveBeenCalled();
         });
 
         it('skips rematch-overwritten results', async function () {
@@ -425,7 +453,7 @@ describe('RatingService', function () {
 
             const [sql, params] = db.query.mock.calls[0];
             expect(sql).toContain('u."Country" = $3');
-            expect(sql).toContain('u."State" ILIKE $4');
+            expect(sql).toContain('lower(u."State") = lower($4)');
             expect(params[2]).toBe('US');
             expect(params[3]).toBe('Texas');
         });

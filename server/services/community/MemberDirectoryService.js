@@ -9,10 +9,14 @@ class MemberDirectoryService {
     }
 
     async stats() {
+        // Count the SAME population that search() lists (non-disabled AND
+        // verified) so the "Members" / "Joined 24h" tiles match the number of
+        // members a user can actually page through. Counting unverified
+        // accounts here made the tiles overstate the browsable directory.
         const rows = await this.db.query(
             'SELECT COUNT(*) AS "Total", ' +
                 'COUNT(*) FILTER (WHERE "Registered" > now() AT TIME ZONE \'utc\' - interval \'24 hours\') AS "Joined24h" ' +
-                'FROM "Users" WHERE "Disabled" IS NOT TRUE',
+                'FROM "Users" WHERE "Disabled" IS NOT TRUE AND "Verified" IS TRUE',
             []
         );
 
