@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
 import {
     FlatList,
+    KeyboardAvoidingView,
     Modal,
+    Platform,
     RefreshControl,
     StyleSheet,
     Text,
@@ -95,11 +97,30 @@ export default function PlayScreen() {
         { game: GameSummary; mode: 'join' | 'watch' } | undefined
     >();
     const [password, setPassword] = useState('');
+    const [refreshing, setRefreshing] = useState(false);
     const prevGameId = useRef<string | undefined>(undefined);
+    const pathname = usePathname();
 
-    // When we land in a pending game, open the pending screen once.
+    // The game list is live over the socket, but honour a pull-to-refresh:
+    // reconnect if we've dropped, and show a brief spinner as acknowledgement.
+    const onRefresh = () => {
+        setRefreshing(true);
+        connectLobby();
+        setTimeout(() => setRefreshing(false), 800);
+    };
+
+    // When we join a pending game from the lobby, open the pending screen once.
+    // Skip when we're on the New game modal (it navigates to pending itself) or
+    // already on pending/game, so we never push it twice.
     useEffect(() => {
-        if (currentGame && !currentGame.started && prevGameId.current !== currentGame.id) {
+        if (
+            currentGame &&
+            !currentGame.started &&
+            prevGameId.current !== currentGame.id &&
+            pathname !== '/new-game' &&
+            pathname !== '/pending' &&
+            pathname !== '/game'
+        ) {
             prevGameId.current = currentGame.id;
             setPasswordGame(undefined);
             router.push('/pending');
@@ -107,14 +128,17 @@ export default function PlayScreen() {
         if (!currentGame) {
             prevGameId.current = undefined;
         }
-    }, [currentGame]);
+    }, [currentGame, pathname]);
 
-    // A live handoff means an in-progress game: jump straight to the board.
+    // A live handoff means an in-progress game (e.g. resuming one from the
+    // lobby): jump straight to the board. When we're on the pending screen,
+    // that screen owns the handoff→board transition, so skip it here to avoid
+    // pushing the board twice.
     useEffect(() => {
-        if (handoff) {
+        if (handoff && pathname !== '/pending' && pathname !== '/game') {
             router.push('/game');
         }
-    }, [handoff]);
+    }, [handoff, pathname]);
 
     const joinWithPassword = (game: GameSummary, mode: 'join' | 'watch') => {
         if (game.needsPassword) {
@@ -224,8 +248,8 @@ export default function PlayScreen() {
                 contentContainerStyle={{ padding: spacing.md, paddingBottom: 48 }}
                 refreshControl={
                     <RefreshControl
-                        refreshing={status === 'connecting'}
-                        onRefresh={() => connectLobby()}
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
                         tintColor={colors.textDim}
                     />
                 }
@@ -243,7 +267,10 @@ export default function PlayScreen() {
                 animationType='fade'
                 onRequestClose={() => setPasswordGame(undefined)}
             >
-                <View style={styles.modalBackdrop}>
+                <KeyboardAvoidingView
+                    style={styles.modalBackdrop}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                >
                     <View style={styles.modalCard}>
                         <Text style={styles.modalTitle}>
                             {passwordGame?.mode === 'watch' ? 'Watch game' : 'Join game'}
@@ -269,7 +296,7 @@ export default function PlayScreen() {
                             <Button title='Enter' onPress={submitPassword} />
                         </View>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
         </View>
     );

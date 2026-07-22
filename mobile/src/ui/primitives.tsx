@@ -66,14 +66,15 @@ export function Button(props: {
     );
 }
 
-export function TextField(
-    props: TextInputProps & { label?: string; error?: string; containerStyle?: ViewStyle }
-) {
-    const { label, error, containerStyle, style, ...rest } = props;
+export const TextField = React.forwardRef<
+    TextInput,
+    TextInputProps & { label?: string; error?: string; containerStyle?: ViewStyle }
+>(function TextField({ label, error, containerStyle, style, ...rest }, ref) {
     return (
         <View style={[{ marginBottom: spacing.md }, containerStyle]}>
             {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
             <TextInput
+                ref={ref}
                 placeholderTextColor={colors.textFaint}
                 autoCapitalize='none'
                 autoCorrect={false}
@@ -83,7 +84,7 @@ export function TextField(
             {error ? <Text style={styles.fieldError}>{error}</Text> : null}
         </View>
     );
-}
+});
 
 export function Card(props: { children: React.ReactNode; style?: ViewStyle }) {
     return <View style={[styles.card, props.style]}>{props.children}</View>;
@@ -133,6 +134,7 @@ const styles = StyleSheet.create({
         borderRadius: radius.md
     },
     buttonSmall: {
+        minHeight: 40,
         paddingVertical: 7,
         paddingHorizontal: spacing.md,
         borderRadius: radius.sm

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import {
+    ActivityIndicator,
     FlatList,
     KeyboardAvoidingView,
     Modal,
@@ -11,6 +12,7 @@ import {
     Text,
     View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Deck } from '../src/api/types';
 import { fetchDecks, fetchStandaloneDecks } from '../src/api/client';
 import { lobby } from '../src/net/lobbySocket';
@@ -56,8 +58,10 @@ export default function PendingGameScreen() {
     const [myDecks, setMyDecks] = useState<Deck[]>([]);
     const [standaloneDecks, setStandaloneDecks] = useState<Deck[]>([]);
     const [loadingDecks, setLoadingDecks] = useState(false);
+    const [deckError, setDeckError] = useState<string | undefined>();
     const [chatText, setChatText] = useState('');
     const navigatedToGame = useRef(false);
+    const insets = useSafeAreaInsets();
 
     // Handoff arrives when the owner starts the game: open the board.
     useEffect(() => {
@@ -78,22 +82,34 @@ export default function PendingGameScreen() {
         }
     }, [currentGame]);
 
-    const openDeckModal = async () => {
-        setDeckModal(true);
+    const loadDecks = async () => {
         setLoadingDecks(true);
+        setDeckError(undefined);
         try {
-            const [mine, standalone] = await Promise.all([
-                fetchDecks({ pageSize: 100 }).catch(() => ({ decks: [] as Deck[] })),
-                fetchStandaloneDecks().catch(() => ({ decks: [] as Deck[] }))
+            const [mineRes, standaloneRes] = await Promise.allSettled([
+                fetchDecks({ pageSize: 100 }),
+                fetchStandaloneDecks()
             ]);
-            setMyDecks(mine.decks ?? []);
-            setStandaloneDecks(standalone.decks ?? []);
-            if ((mine.decks ?? []).length === 0 && (standalone.decks ?? []).length > 0) {
+            const mine = mineRes.status === 'fulfilled' ? mineRes.value.decks ?? [] : [];
+            const standalone =
+                standaloneRes.status === 'fulfilled' ? standaloneRes.value.decks ?? [] : [];
+            setMyDecks(mine);
+            setStandaloneDecks(standalone);
+            if (mineRes.status === 'rejected' && standaloneRes.status === 'rejected') {
+                // Distinct from a genuine empty library — don't tell a user with
+                // decks that they have none.
+                setDeckError('Could not load decks. Check your connection and try again.');
+            } else if (mine.length === 0 && standalone.length > 0) {
                 setDeckTab('standalone');
             }
         } finally {
             setLoadingDecks(false);
         }
+    };
+
+    const openDeckModal = () => {
+        setDeckModal(true);
+        loadDecks();
     };
 
     if (!currentGame) {
@@ -128,7 +144,7 @@ export default function PendingGameScreen() {
         <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={styles.container}
-            keyboardVerticalOffset={90}
+            keyboardVerticalOffset={insets.top + 44}
         >
             <ScrollView contentContainerStyle={{ padding: spacing.md }}>
                 <Text style={styles.gameName}>{currentGame.name}</Text>
@@ -202,13 +218,22 @@ export default function PendingGameScreen() {
                 {messages.length > 0 ? (
                     <View style={styles.chatBox}>
                         {messages.slice(-30).map((message, index) => (
-                            <LogLine key={index} message={message} onCardPress={() => {}} />
+                            <LogLine
+                                key={String(message.date ?? index)}
+                                message={message}
+                                onCardPress={() => {}}
+                            />
                         ))}
                     </View>
                 ) : null}
             </ScrollView>
 
-            <View style={styles.chatInputRow}>
+            <View
+                style={[
+                    styles.chatInputRow,
+                    { paddingBottom: Math.max(insets.bottom, spacing.md) }
+                ]}
+            >
                 <TextField
                     placeholder='Say something…'
                     value={chatText}
@@ -216,6 +241,7 @@ export default function PendingGameScreen() {
                     containerStyle={{ flex: 1, marginBottom: 0 }}
                     onSubmitEditing={sendChat}
                     returnKeyType='send'
+                    autoCapitalize='sentences'
                 />
                 <Button small title='Send' onPress={sendChat} />
             </View>
@@ -225,7 +251,7 @@ export default function PendingGameScreen() {
                 animationType='slide'
                 onRequestClose={() => setDeckModal(false)}
             >
-                <View style={styles.modalContainer}>
+                <View style={[styles.modalContainer, { paddingTop: insets.top + 12 }]}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Choose a deck</Text>
                         <Button small variant='secondary' title='Close' onPress={() => setDeckModal(false)} />
@@ -270,16 +296,35 @@ export default function PendingGameScreen() {
                                 onPick={() => pickDeck(item, deckTab === 'standalone')}
                             />
                         )}
-                        contentContainerStyle={{ padding: spacing.md }}
+                        contentContainerStyle={{
+                            padding: spacing.md,
+                            paddingBottom: insets.bottom + spacing.md
+                        }}
                         ListEmptyComponent={
-                            <EmptyState
-                                title={loadingDecks ? 'Loading decks…' : 'No decks'}
-                                subtitle={
-                                    deckTab === 'mine'
-                                        ? 'Import decks in the Decks tab first, or use a standalone deck.'
-                                        : undefined
-                                }
-                            />
+                            loadingDecks ? (
+                                <ActivityIndicator
+                                    color={colors.brand}
+                                    style={{ marginTop: spacing.xl }}
+                                />
+                            ) : deckError ? (
+                                <View style={{ padding: spacing.md }}>
+                                    <ErrorBanner message={deckError} />
+                                    <Button
+                                        variant='secondary'
+                                        title='Retry'
+                                        onPress={loadDecks}
+                                    />
+                                </View>
+                            ) : (
+                                <EmptyState
+                                    title='No decks'
+                                    subtitle={
+                                        deckTab === 'mine'
+                                            ? 'Import decks in the Decks tab first, or use a standalone deck.'
+                                            : undefined
+                                    }
+                                />
+                            )
                         }
                     />
                 </View>
@@ -351,8 +396,7 @@ const styles = StyleSheet.create({
     },
     modalContainer: {
         flex: 1,
-        backgroundColor: colors.bg,
-        paddingTop: 60
+        backgroundColor: colors.bg
     },
     modalHeader: {
         flexDirection: 'row',

@@ -1,8 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
     FlatList,
+    Keyboard,
     KeyboardAvoidingView,
     Modal,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
     Platform,
     Pressable,
     StyleSheet,
@@ -10,6 +13,7 @@ import {
     TextInput,
     View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ChatMessage } from '../api/types';
 import { colors, radius, spacing } from '../theme';
 import { LogLine } from './LogMessages';
@@ -24,20 +28,46 @@ export default function LogSheet(props: {
     onCardPress: (card: CardSummary) => void;
 }) {
     const [text, setText] = useState('');
+    const [keyboardOpen, setKeyboardOpen] = useState(false);
     const listRef = useRef<FlatList<ChatMessage>>(null);
+    const insets = useSafeAreaInsets();
 
+    // Shrink the sheet while typing so it (and its Close button) stay on-screen
+    // above the keyboard on small devices.
+    useEffect(() => {
+        const show = Keyboard.addListener('keyboardWillShow', () => setKeyboardOpen(true));
+        const hide = Keyboard.addListener('keyboardWillHide', () => setKeyboardOpen(false));
+        return () => {
+            show.remove();
+            hide.remove();
+        };
+    }, []);
+    // Only auto-scroll to the newest line when the user is already near the
+    // bottom, so scrolling up to read history isn't yanked away.
+    const atBottom = useRef(true);
+
+    // Jump to the latest line whenever the sheet is (re)opened.
     useEffect(() => {
         if (props.visible) {
+            atBottom.current = true;
             const timer = setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
             return () => clearTimeout(timer);
         }
         return undefined;
-    }, [props.visible, props.messages.length]);
+    }, [props.visible]);
+
+    const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+        const distanceFromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height;
+        atBottom.current = distanceFromBottom < 60;
+    };
 
     const send = () => {
         if (text.trim()) {
             props.onSend(text.trim());
             setText('');
+            atBottom.current = true;
+            requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
         }
     };
 
@@ -51,7 +81,7 @@ export default function LogSheet(props: {
             <View style={styles.backdrop}>
                 <Pressable style={{ flex: 1 }} onPress={props.onClose} />
                 <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-                    <View style={styles.sheet}>
+                    <View style={[styles.sheet, { height: keyboardOpen ? '52%' : '75%' }]}>
                         <View style={styles.header}>
                             <Text style={styles.title}>Game log</Text>
                             <Pressable onPress={props.onClose} hitSlop={12}>
@@ -66,11 +96,20 @@ export default function LogSheet(props: {
                                 <LogLine message={item} onCardPress={props.onCardPress} />
                             )}
                             style={styles.list}
-                            onContentSizeChange={() =>
-                                listRef.current?.scrollToEnd({ animated: false })
-                            }
+                            onScroll={onScroll}
+                            scrollEventThrottle={100}
+                            onContentSizeChange={() => {
+                                if (atBottom.current) {
+                                    listRef.current?.scrollToEnd({ animated: false });
+                                }
+                            }}
                         />
-                        <View style={styles.inputRow}>
+                        <View
+                            style={[
+                                styles.inputRow,
+                                { paddingBottom: Math.max(insets.bottom, spacing.sm) }
+                            ]}
+                        >
                             <TextInput
                                 value={text}
                                 onChangeText={setText}
@@ -101,9 +140,7 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: radius.lg,
         borderTopRightRadius: radius.lg,
         borderColor: colors.border,
-        borderWidth: 1,
-        height: 440,
-        paddingBottom: 24
+        borderWidth: 1
     },
     header: {
         flexDirection: 'row',

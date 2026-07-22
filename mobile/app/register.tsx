@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import {
     KeyboardAvoidingView,
@@ -19,29 +19,39 @@ export default function RegisterScreen() {
     const [error, setError] = useState<string | undefined>();
     const [notice, setNotice] = useState<string | undefined>();
     const [busy, setBusy] = useState(false);
+    const scrollRef = useRef<ScrollView>(null);
+    const backTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+    useEffect(() => () => clearTimeout(backTimer.current), []);
+
+    // Surface validation/API errors at the top of the (bottom-anchored) form.
+    const fail = (message: string) => {
+        setError(message);
+        scrollRef.current?.scrollTo({ y: 0, animated: true });
+    };
 
     const submit = async () => {
         setError(undefined);
         setNotice(undefined);
 
         if (username.trim().length < 3 || username.trim().length > 15) {
-            setError('Username must be 3-15 characters');
+            fail('Username must be 3-15 characters');
             return;
         }
         if (!/^[A-Za-z0-9_-]+$/.test(username.trim())) {
-            setError('Usernames may only use a-z, 0-9, _ and -');
+            fail('Usernames may only use a-z, 0-9, _ and -');
             return;
         }
         if (!email.includes('@')) {
-            setError('Enter a valid email address');
+            fail('Enter a valid email address');
             return;
         }
         if (password.length < 6) {
-            setError('Password must be at least 6 characters');
+            fail('Password must be at least 6 characters');
             return;
         }
         if (password !== confirm) {
-            setError('Passwords do not match');
+            fail('Passwords do not match');
             return;
         }
 
@@ -49,15 +59,15 @@ export default function RegisterScreen() {
         try {
             const result = await register(username.trim(), email.trim(), password);
             if (!result.success) {
-                setError(result.message ?? 'Registration failed');
+                fail(result.message ?? 'Registration failed');
                 return;
             }
             setNotice(
                 'Account created. If email activation is enabled you will receive a message; otherwise you can sign in now.'
             );
-            setTimeout(() => router.back(), 2500);
+            backTimer.current = setTimeout(() => router.back(), 2500);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Registration failed');
+            fail(err instanceof Error ? err.message : 'Registration failed');
         } finally {
             setBusy(false);
         }
@@ -68,7 +78,11 @@ export default function RegisterScreen() {
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={styles.safe}
         >
-            <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps='handled'>
+            <ScrollView
+                ref={scrollRef}
+                contentContainerStyle={styles.container}
+                keyboardShouldPersistTaps='handled'
+            >
                 <ErrorBanner message={error} />
                 {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 

@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../theme';
 import { CARD_ASPECT, CARDBACK, cardImageUrl } from './cardImages';
+import { STATUS_TOKEN_ICONS, enhancementPip } from './cardIcons';
 import type { CardSummary } from './types';
 
 function TokenPip(props: { value: number; color: string; label?: string }) {
@@ -11,6 +12,23 @@ function TokenPip(props: { value: number; color: string; label?: string }) {
             <Text style={styles.tokenPipText}>
                 {props.label ? `${props.label}${props.value}` : props.value}
             </Text>
+        </View>
+    );
+}
+
+// A status token (enrage/stun/ward) shown as its real icon, with a count only
+// when it is stacked more than once.
+function StatusIcon(props: { source: number; size: number; count?: number }) {
+    return (
+        <View style={styles.statusIcon}>
+            <Image
+                source={props.source}
+                style={{ width: props.size, height: props.size }}
+                contentFit='contain'
+            />
+            {props.count && props.count > 1 ? (
+                <Text style={styles.statusCount}>{props.count}</Text>
+            ) : null}
         </View>
     );
 }
@@ -30,6 +48,15 @@ export default function CardTile(props: {
     const ward = card.tokens?.ward ?? 0;
     const enrage = card.tokens?.enrage ?? 0;
     const stun = card.stunned || (card.tokens?.stun ?? 0) > 0;
+    const statusSize = Math.max(14, Math.round(width * 0.26));
+
+    // Enhancement "bonus" pips — composited by the web canvas, absent from the
+    // raw card art, so we overlay them here (top-left, as on the physical card).
+    const enhancements = (card.enhancements ?? [])
+        .filter((pip): pip is string => typeof pip === 'string' && pip !== '')
+        .map((pip) => ({ name: pip, source: enhancementPip(pip) }))
+        .filter((pip) => pip.source !== undefined);
+    const pipSize = Math.max(12, Math.round(width * 0.24));
 
     const faceUrl = card.facedown ? undefined : cardImageUrl(card);
 
@@ -48,7 +75,7 @@ export default function CardTile(props: {
         <Pressable
             onPress={() => props.onPress?.(card)}
             onLongPress={() => props.onLongPress?.(card)}
-            delayLongPress={220}
+            delayLongPress={450}
             disabled={props.disabled}
             style={({ pressed }) => [
                 styles.container,
@@ -78,19 +105,33 @@ export default function CardTile(props: {
                     <Image source={CARDBACK} style={styles.image} contentFit='cover' />
                 )}
 
-                {stun ? (
-                    <View style={styles.stunOverlay}>
-                        <Text style={styles.stunText}>STUN</Text>
-                    </View>
-                ) : null}
+                {stun ? <View style={styles.stunTint} pointerEvents='none' /> : null}
             </View>
+
+            {enhancements.length > 0 ? (
+                <View style={styles.enhancementColumn} pointerEvents='none'>
+                    {enhancements.map((pip, index) => (
+                        <Image
+                            key={`${pip.name}-${index}`}
+                            source={pip.source as number}
+                            style={{ width: pipSize, height: pipSize }}
+                            contentFit='contain'
+                        />
+                    ))}
+                </View>
+            ) : null}
 
             <View style={styles.tokenColumn} pointerEvents='none'>
                 {damage > 0 ? <TokenPip value={damage} color='#b3261e' /> : null}
                 {power > 0 ? <TokenPip value={power} color='#2e7d32' label='+' /> : null}
                 {amber > 0 ? <TokenPip value={amber} color='#b8860b' /> : null}
-                {ward > 0 ? <TokenPip value={ward} color='#4a5fa5' label='W' /> : null}
-                {enrage > 0 ? <TokenPip value={enrage} color='#a53f4a' label='E' /> : null}
+                {enrage > 0 ? (
+                    <StatusIcon source={STATUS_TOKEN_ICONS.enrage} size={statusSize} count={enrage} />
+                ) : null}
+                {stun ? <StatusIcon source={STATUS_TOKEN_ICONS.stun} size={statusSize} /> : null}
+                {ward > 0 ? (
+                    <StatusIcon source={STATUS_TOKEN_ICONS.ward} size={statusSize} count={ward} />
+                ) : null}
             </View>
 
             {upgradeCount + childCount > 0 ? (
@@ -116,7 +157,10 @@ const styles = StyleSheet.create({
         height: '100%'
     },
     exhausted: {
-        transform: [{ rotate: '90deg' }, { scale: 0.86 }]
+        // Scale down enough that the 90°-rotated card fits within its own
+        // (un-rotated) slot — otherwise it overflows into neighbouring cards
+        // and its extended edges fall outside the tappable area.
+        transform: [{ rotate: '90deg' }, { scale: 0.7 }]
     },
     newCard: {
         shadowColor: colors.brand,
@@ -125,27 +169,39 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 0 },
         elevation: 5
     },
-    stunOverlay: {
+    stunTint: {
         position: 'absolute',
         top: 0,
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: 'rgba(10, 10, 20, 0.55)',
+        backgroundColor: 'rgba(10, 10, 20, 0.35)'
+    },
+    enhancementColumn: {
+        position: 'absolute',
+        top: '18%',
+        left: 2,
+        gap: 1,
+        alignItems: 'center'
+    },
+    statusIcon: {
         alignItems: 'center',
         justifyContent: 'center'
     },
-    stunText: {
-        color: '#ffd166',
+    statusCount: {
+        position: 'absolute',
+        color: '#fff',
+        fontSize: 9,
         fontWeight: '900',
-        fontSize: 10,
-        letterSpacing: 1
+        textShadowColor: '#000',
+        textShadowRadius: 3
     },
     tokenColumn: {
         position: 'absolute',
         top: 2,
         right: 2,
-        gap: 2
+        gap: 2,
+        alignItems: 'flex-end'
     },
     tokenPip: {
         minWidth: 18,

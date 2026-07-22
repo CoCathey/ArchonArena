@@ -8,6 +8,9 @@ import type {
     UserDetails
 } from './types';
 
+/** Abort REST calls that hang (common on flaky mobile networks). */
+const REQUEST_TIMEOUT_MS = 15000;
+
 export class ApiError extends Error {
     status?: number;
     constructor(message: string, status?: number) {
@@ -35,16 +38,24 @@ async function rawFetch<T>(
     }
 
     let response: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
         response = await fetch(`${serverUrl()}${path}`, {
             method: options.method ?? 'GET',
             headers,
-            body: options.body === undefined ? undefined : JSON.stringify(options.body)
+            body: options.body === undefined ? undefined : JSON.stringify(options.body),
+            signal: controller.signal
         });
     } catch (err) {
+        const timedOut = err instanceof Error && err.name === 'AbortError';
         throw new ApiError(
-            `Could not reach the server at ${serverUrl()}. Check your connection and the server URL.`
+            timedOut
+                ? `The server at ${serverUrl()} took too long to respond. Check your connection and try again.`
+                : `Could not reach the server at ${serverUrl()}. Check your connection and the server URL.`
         );
+    } finally {
+        clearTimeout(timeout);
     }
 
     if (response.status === 401) {
