@@ -74,7 +74,9 @@ export const SidebarMenu = [
         childItems: [
             { path: '/play', title: 'Play Online' },
             { path: '/play-irl', title: 'Play IRL' },
-            { path: '/decks', title: 'My Decks', showOnlyWhenLoggedIn: true },
+            // 'My Decks' lives in its own top-level tab below (for signed-in
+            // players); keeping it out of this submenu avoids Play also
+            // lighting up on /decks.
             { path: '/stats', title: 'Stats' },
             { path: '/tournaments', title: 'Tournaments' },
             { path: '/matches', title: 'Game History', showOnlyWhenLoggedIn: true }
@@ -90,7 +92,9 @@ export const SidebarMenu = [
             { path: '/community/clubs', title: 'Clubs' },
             { path: '/community/members', title: 'Members' },
             { path: '/community/top-players', title: 'Top Players' },
-            { path: '/community/ratings', title: 'Ratings' },
+            // 'My Stats' (/community/ratings) is its own top-level tab below;
+            // keeping it out of this submenu avoids Community also lighting
+            // up on that page.
             { path: '/leaderboards', title: 'Leaderboards' },
             { path: '/community/news', title: 'News' },
             { path: '/community/articles', title: 'Articles' },

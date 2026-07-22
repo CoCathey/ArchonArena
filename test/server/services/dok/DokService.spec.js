@@ -214,6 +214,26 @@ describe('DokService', function () {
             const result = await service.listOwnerDecks('p');
 
             expect(result).toMatchObject({ configured: true, error: true });
+            expect(result.errorDetail).toContain('HTTP 500');
+        });
+
+        it('surfaces a helpful hint for auth and endpoint failures', async function () {
+            fetchMock.mockResolvedValue({ ok: false, status: 401 });
+            expect((await service.listOwnerDecks('p')).errorDetail).toContain('API key rejected');
+
+            fetchMock.mockResolvedValue({ ok: false, status: 404 });
+            expect((await service.listOwnerDecks('p')).errorDetail).toContain(
+                'filterUrl may be wrong'
+            );
+        });
+
+        it('reports a connection failure detail', async function () {
+            fetchMock.mockRejectedValue(new Error('getaddrinfo ENOTFOUND'));
+
+            const result = await service.listOwnerDecks('p');
+
+            expect(result.error).toBe(true);
+            expect(result.errorDetail).toContain('could not connect');
         });
 
         it('returns a partial list when a later page fails', async function () {

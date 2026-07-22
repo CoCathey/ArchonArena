@@ -201,7 +201,9 @@ module.exports.init = function (server) {
             if (result.error) {
                 return res.send({
                     success: false,
-                    message: 'Could not reach Decks of KeyForge. Please try again in a moment.'
+                    message: result.errorDetail
+                        ? `Decks of KeyForge request failed: ${result.errorDetail}`
+                        : 'Could not reach Decks of KeyForge. Please try again in a moment.'
                 });
             }
 

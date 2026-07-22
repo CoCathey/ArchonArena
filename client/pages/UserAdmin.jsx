@@ -10,6 +10,7 @@ import Panel from '../Components/Site/Panel';
 import ApiStatus from '../Components/Site/ApiStatus';
 import ReactTable from '../Components/Table/ReactTable';
 import AdminRatings from '../Components/Admin/AdminRatings';
+import AdminUserDanger from '../Components/Admin/AdminUserDanger';
 import { useFindUserQuery, useSaveUserMutation } from '../redux/api';
 import { clearUserSessions } from '../redux/slices/adminSlice';
 
@@ -330,6 +331,13 @@ const UserAdmin = () => {
 
                                 {user?.permissions.isAdmin || user?.permissions.canManageUsers ? (
                                     <AdminRatings username={currentUser.username} />
+                                ) : null}
+
+                                {user?.permissions.canManageUsers ? (
+                                    <AdminUserDanger
+                                        username={currentUser.username}
+                                        onDeleted={() => setSearchUsername('')}
+                                    />
                                 ) : null}
 
                                 {user?.permissions.canManagePermissions ? (

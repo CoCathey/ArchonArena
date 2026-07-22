@@ -587,6 +587,21 @@ export const api = createApi({
             }),
             invalidatesTags: [{ type: TAG_TYPES.ADMIN, id: 'USER' }]
         }),
+        // ARCHON: admin account tools
+        adminResetPassword: builder.mutation({
+            query: ({ username, newPassword }) => ({
+                url: `/user/${encodeURIComponent(username)}/reset-password`,
+                method: 'POST',
+                body: { newPassword }
+            })
+        }),
+        adminDeleteUser: builder.mutation({
+            query: (username) => ({
+                url: `/user/${encodeURIComponent(username)}`,
+                method: 'DELETE'
+            }),
+            invalidatesTags: [{ type: TAG_TYPES.ADMIN, id: 'USER' }]
+        }),
         verifyDeck: builder.mutation({
             query: (deckId) => ({
                 url: `/decks/${deckId}/verify`,
@@ -732,6 +747,8 @@ export const {
     useDeleteAccountMutation,
     useFindUserQuery,
     useSaveUserMutation,
+    useAdminResetPasswordMutation,
+    useAdminDeleteUserMutation,
     useVerifyDeckMutation,
     useVerifyAllDecksMutation,
     useGetBanlistQuery,

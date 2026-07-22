@@ -192,10 +192,28 @@ if grep -qE "^DOK_API_KEY=.+" .env.production 2>/dev/null; then
         }).then((r) => console.log(r.status)).catch((e) => console.log('ERR:' + e.message));
     " 2>/dev/null | tail -1)"
     case "$dok_probe" in
-        200 | 404) ok "Decks of KeyForge reachable from the lobby, API key accepted (probe: $dok_probe)" ;;
+        200 | 404) ok "Decks of KeyForge (SAS endpoint) reachable, API key accepted (probe: $dok_probe)" ;;
         401 | 403) bad "DoK rejected the API key (HTTP $dok_probe)" "regenerate the key on your DoK profile and update DOK_API_KEY in .env.production, then: $DC up -d lobby" ;;
         429) warn "DoK rate limit hit during probe (HTTP 429)" "harmless if a bulk import just ran; re-check in a minute" ;;
         *) bad "cannot reach decksofkeyforge.com from the lobby ($dok_probe)" "check VPS outbound connectivity/DNS: $DC exec lobby ping -c1 decksofkeyforge.com" ;;
+    esac
+
+    # Bulk import uses a DIFFERENT endpoint (the deck filter) than SAS. Probe
+    # it too - this is the one that powers "import your whole collection".
+    filter_probe="$($DC exec -T lobby node -e "
+        fetch('https://decksofkeyforge.com/public-api/v1/decks/filter', {
+            method: 'POST',
+            headers: { 'Api-Key': process.env.DOK_API_KEY || '', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ owner: 'a', page: 0, pageSize: 1 }),
+            signal: AbortSignal.timeout(10000)
+        }).then((r) => console.log(r.status)).catch((e) => console.log('ERR:' + e.message));
+    " 2>/dev/null | tail -1)"
+    case "$filter_probe" in
+        200) ok "DoK bulk-import (deck filter) endpoint reachable (probe: 200)" ;;
+        401 | 403) bad "DoK filter endpoint rejected the key (HTTP $filter_probe)" "the key may lack filter access; regenerate it on DoK" ;;
+        404) bad "DoK filter endpoint 404 - the bulk-import URL is wrong for this DoK API" "report this: dok.filterUrl needs updating in config" ;;
+        429) warn "DoK filter probe rate-limited (429)" "re-check in a minute" ;;
+        *) bad "DoK filter endpoint unreachable ($filter_probe)" "same network path as above; if SAS probe passed but this failed, it is endpoint-specific" ;;
     esac
 else
     warn "DOK_API_KEY not set" "SAS scores and Decks of KeyForge bulk import stay disabled until set (get a key from your DoK profile)"

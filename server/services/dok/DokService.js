@@ -177,15 +177,17 @@ class DokService {
 
     /**
      * Fetch one page of a DoK user's public decks via the filter endpoint.
-     * Returns an array of { uuid, name, sasRating } (uuid is the Master
-     * Vault id, i.e. what our importer needs) or null on any failure.
+     * Returns { decks: [{ uuid, name, sasRating }] } on success (uuid is the
+     * Master Vault id, i.e. what our importer needs) or { error } describing
+     * the failure (HTTP status, timeout, rate limit) so callers can tell the
+     * user what actually went wrong.
      */
     async fetchOwnerDeckPage(dokUsername, page) {
         const config = this.getConfig();
         const filterUrl = this.getFilterUrl();
 
         if (!filterUrl) {
-            return null;
+            return { error: 'no filter endpoint configured' };
         }
 
         // User-initiated: wait briefly for a slot rather than skipping.
@@ -194,7 +196,7 @@ class DokService {
                 `DoK per-minute rate limit reached; could not fetch owner deck page ${page}`
             );
 
-            return null;
+            return { error: 'per-minute rate limit reached' };
         }
 
         try {
@@ -212,38 +214,49 @@ class DokService {
             });
 
             if (!response.ok) {
+                let hint = '';
+                if (response.status === 401 || response.status === 403) {
+                    hint = ' (API key rejected)';
+                } else if (response.status === 404) {
+                    hint = ' (endpoint not found - filterUrl may be wrong)';
+                } else if (response.status === 429) {
+                    hint = ' (DoK rate limit)';
+                }
                 logger.warn(
                     `DoK filter API returned ${response.status} for owner ${dokUsername} page ${page}`
                 );
 
-                return null;
+                return { error: `HTTP ${response.status}${hint}` };
             }
 
             const body = await response.json();
             const decks = body && Array.isArray(body.decks) ? body.decks : null;
 
             if (!decks) {
-                return null;
+                return { error: 'unexpected response shape (no decks array)' };
             }
 
-            return decks
-                .map((deck) => ({
-                    uuid: this.isUuid(deck.keyforgeId)
-                        ? deck.keyforgeId
-                        : this.isUuid(deck.id)
-                        ? deck.id
-                        : null,
-                    name: typeof deck.name === 'string' ? deck.name : null,
-                    sasRating:
-                        typeof deck.sasRating === 'number' ? Math.round(deck.sasRating) : null
-                }))
-                .filter((deck) => deck.uuid);
+            return {
+                decks: decks
+                    .map((deck) => ({
+                        uuid: this.isUuid(deck.keyforgeId)
+                            ? deck.keyforgeId
+                            : this.isUuid(deck.id)
+                            ? deck.id
+                            : null,
+                        name: typeof deck.name === 'string' ? deck.name : null,
+                        sasRating:
+                            typeof deck.sasRating === 'number' ? Math.round(deck.sasRating) : null
+                    }))
+                    .filter((deck) => deck.uuid)
+            };
         } catch (err) {
+            const detail = err.name === 'TimeoutError' ? 'request timed out' : err.message;
             logger.warn(
-                `Failed to fetch DoK decks for owner ${dokUsername} page ${page}: ${err.message}`
+                `Failed to fetch DoK decks for owner ${dokUsername} page ${page}: ${detail}`
             );
 
-            return null;
+            return { error: `could not connect (${detail})` };
         }
     }
 
@@ -274,15 +287,22 @@ class DokService {
 
         // Hard page ceiling as a runaway guard on top of the deck cap.
         for (let page = 0; page < 100; page++) {
-            const pageDecks = await this.fetchOwnerDeckPage(owner, page);
+            const pageResult = await this.fetchOwnerDeckPage(owner, page);
 
-            if (pageDecks === null) {
+            if (pageResult.error) {
                 if (page === 0) {
-                    return { configured: true, error: true, decks: [] };
+                    return {
+                        configured: true,
+                        error: true,
+                        errorDetail: pageResult.error,
+                        decks: []
+                    };
                 }
 
                 break; // partial success - return what we already have
             }
+
+            const pageDecks = pageResult.decks;
 
             if (pageDecks.length === 0) {
                 break;

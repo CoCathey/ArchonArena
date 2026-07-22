@@ -1,4 +1,5 @@
 const passport = require('passport');
+const bcrypt = require('bcrypt');
 
 const UserService = require('../services/UserService.js');
 const DeckService = require('../services/DeckService.js');
@@ -143,6 +144,71 @@ module.exports.init = function (server) {
                     message: 'An error occurred verifying decks.  Please try again later.'
                 });
             }
+
+            res.send({ success: true });
+        })
+    );
+
+    // ARCHON: admin sets a new password for a user and clears their sessions,
+    // so the admin can hand them a temporary password when they're locked out.
+    server.post(
+        '/api/user/:username/reset-password',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!req.user.permissions || !req.user.permissions.canManageUsers) {
+                return res.status(403).send({ success: false, message: 'Forbidden' });
+            }
+
+            const newPassword = req.body.newPassword || '';
+            if (newPassword.length < 6) {
+                return res.send({
+                    success: false,
+                    message: 'Password must be at least 6 characters'
+                });
+            }
+
+            const user = await userService.getUserByUsername(req.params.username);
+            if (!user) {
+                return res.status(404).send({ success: false, message: 'Not found' });
+            }
+
+            const hash = await bcrypt.hash(newPassword, 10);
+            await userService.setPassword(user, hash);
+            // Force re-login everywhere the old credentials might be cached.
+            await userService.clearUserSessions(req.params.username);
+
+            logger.info(`Admin ${req.user.username} reset the password for ${req.params.username}`);
+
+            res.send({ success: true });
+        })
+    );
+
+    // ARCHON: admin deletes (anonymizes) a user. Soft delete: the account row
+    // and its id survive so rating history / game records stay intact, but the
+    // username is freed, the password/PII wiped, roles and sessions removed,
+    // and the account disabled. Cannot delete yourself here.
+    server.delete(
+        '/api/user/:username',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!req.user.permissions || !req.user.permissions.canManageUsers) {
+                return res.status(403).send({ success: false, message: 'Forbidden' });
+            }
+
+            if (req.params.username.toLowerCase() === req.user.username.toLowerCase()) {
+                return res.send({
+                    success: false,
+                    message: 'You cannot delete your own account from here.'
+                });
+            }
+
+            const user = await userService.getUserByUsername(req.params.username);
+            if (!user) {
+                return res.status(404).send({ success: false, message: 'Not found' });
+            }
+
+            await userService.anonymizeUser(user);
+            logger.info(`Admin ${req.user.username} deleted user ${req.params.username}`);
 
             res.send({ success: true });
         })
