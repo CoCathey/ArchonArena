@@ -14,6 +14,26 @@ CREATE TABLE IF NOT EXISTS public."Tournaments"
     "Status" text COLLATE pg_catalog."default" NOT NULL DEFAULT 'registration',
     "RoundCount" integer,
     "CurrentRound" integer NOT NULL DEFAULT 0,
+    -- v2: scheduling, registration and format controls
+    "StartTime" timestamp without time zone,
+    "PlayerCap" integer,
+    "BestOf" integer NOT NULL DEFAULT 1,
+    "PlayoffBestOf" integer,
+    "CutTo" integer,
+    "Stage" text COLLATE pg_catalog."default" NOT NULL DEFAULT 'main',
+    "SeedMethod" text COLLATE pg_catalog."default" NOT NULL DEFAULT 'registration',
+    "Visibility" text COLLATE pg_catalog."default" NOT NULL DEFAULT 'public',
+    "JoinCode" text COLLATE pg_catalog."default",
+    "RoundTimerMinutes" integer,
+    "RoundStartedAt" timestamp without time zone,
+    "CheckInOpenedAt" timestamp without time zone,
+    "RatedGames" boolean NOT NULL DEFAULT false,
+    "RequireDeckRegistration" boolean NOT NULL DEFAULT false,
+    "SasMin" integer,
+    "SasMax" integer,
+    "HideDecklists" boolean NOT NULL DEFAULT false,
+    "GameTimeLimit" integer,
+    "Announcement" text COLLATE pg_catalog."default",
     "CreatedAt" timestamp without time zone NOT NULL,
     "StartedAt" timestamp without time zone,
     "FinishedAt" timestamp without time zone,
@@ -29,4 +49,9 @@ TABLESPACE pg_default;
 CREATE INDEX IF NOT EXISTS "IX_Tournaments_Status"
     ON public."Tournaments" USING btree
     ("Status" ASC NULLS LAST, "Id" DESC NULLS LAST)
+    TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS "IX_Tournaments_Visibility"
+    ON public."Tournaments" USING btree
+    ("Visibility" ASC NULLS LAST, "Status" ASC NULLS LAST, "Id" DESC NULLS LAST)
     TABLESPACE pg_default;

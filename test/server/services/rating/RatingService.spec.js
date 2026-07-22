@@ -119,6 +119,47 @@ describe('RatingService', function () {
             expect(db.startTransaction).not.toHaveBeenCalled();
         });
 
+        it('skips games from unrated tournaments', async function () {
+            db.query.mockImplementation(async (sql) => {
+                if (sql.includes('FROM "Games"')) {
+                    return gameRows();
+                }
+                if (sql.includes('FROM "TournamentMatchGames"')) {
+                    return [{ RatedGames: false }];
+                }
+                return [];
+            });
+
+            await service.processGame(GAME_UUID);
+
+            expect(db.startTransaction).not.toHaveBeenCalled();
+        });
+
+        it('applies the tournament K multiplier for rated tournaments', async function () {
+            db.query.mockImplementation(async (sql) => {
+                if (sql.includes('FROM "Games"')) {
+                    return gameRows();
+                }
+                if (sql.includes('FROM "TournamentMatchGames"')) {
+                    return [{ RatedGames: true }];
+                }
+                return [];
+            });
+
+            await service.processGame(GAME_UUID);
+
+            const ratingInserts = db.queryTran.mock.calls.filter(([, sql]) =>
+                (sql || '').includes('INSERT INTO "Ratings"')
+            );
+
+            expect(ratingInserts.length).toBe(2);
+
+            // Same even matchup as the base case (~+35) but boosted by
+            // the default tournamentKMultiplier (1.1): 64*1.1*1.1*0.5 ~ 39.
+            const winnerParams = ratingInserts[0][2];
+            expect(winnerParams[2]).toBeGreaterThan(1235);
+        });
+
         it('skips games with no winner', async function () {
             primeHappyPath(gameRows({ winner: { WinnerId: null }, loser: { WinnerId: null } }));
 

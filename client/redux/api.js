@@ -315,6 +315,10 @@ export const api = createApi({
                 { type: TAG_TYPES.TOURNAMENTS, id }
             ]
         }),
+        getTournamentHistory: builder.query({
+            query: (username) => `/tournaments/history/${encodeURIComponent(username)}`,
+            providesTags: [TAG_TYPES.TOURNAMENTS]
+        }),
         // ARCHON: community (friends, members, clubs)
         getFriends: builder.query({
             query: () => '/friends',
@@ -712,6 +716,7 @@ export const {
     useGetEventDetailQuery,
     useCreateTournamentMutation,
     useTournamentActionMutation,
+    useGetTournamentHistoryQuery,
     useGetFriendsQuery,
     useFriendActionMutation,
     useGetMembersQuery,

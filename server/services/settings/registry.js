@@ -165,6 +165,30 @@ const REGISTRY = {
             }
         }
     },
+    tournament: {
+        title: 'Tournaments',
+        description:
+            'Native tournament engine limits and automation. Per-event settings (format, best-of, caps, SAS bounds) live on each event; these are the site-wide guardrails.',
+        fields: {
+            maxPlayerCap: {
+                type: 'number',
+                label: 'Highest player cap an organizer may set',
+                min: 2,
+                max: 4096,
+                default: 512
+            },
+            autoCreateGames: {
+                type: 'boolean',
+                label: 'Auto-create lobby games for online event pairings',
+                default: true
+            },
+            allowRated: {
+                type: 'boolean',
+                label: 'Organizers may mark events as rated (Amber)',
+                default: true
+            }
+        }
+    },
     regions: {
         title: 'Regions',
         description:

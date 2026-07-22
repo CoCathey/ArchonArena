@@ -1,6 +1,8 @@
 -- Table: public."TournamentPlayers"
 -- Registrations for tournaments; Dropped players stay for history but
--- stop being paired.
+-- stop being paired. Waitlisted players are beyond the player cap and
+-- promote in FIFO order. DeckId is the registered event deck; FinalRank
+-- is stamped when the event finishes.
 
 CREATE TABLE IF NOT EXISTS public."TournamentPlayers"
 (
@@ -9,6 +11,10 @@ CREATE TABLE IF NOT EXISTS public."TournamentPlayers"
     "UserId" integer NOT NULL,
     "Dropped" boolean NOT NULL DEFAULT false,
     "Seed" integer,
+    "DeckId" integer,
+    "CheckedIn" boolean NOT NULL DEFAULT false,
+    "Waitlisted" boolean NOT NULL DEFAULT false,
+    "FinalRank" integer,
     "CreatedAt" timestamp without time zone NOT NULL,
     CONSTRAINT "PK_TournamentPlayers" PRIMARY KEY ("Id"),
     CONSTRAINT "UQ_TournamentPlayers_Tournament_User" UNIQUE ("TournamentId", "UserId"),
@@ -19,7 +25,16 @@ CREATE TABLE IF NOT EXISTS public."TournamentPlayers"
     CONSTRAINT "FK_TournamentPlayers_Users" FOREIGN KEY ("UserId")
         REFERENCES public."Users" ("Id") MATCH SIMPLE
         ON UPDATE NO ACTION
-        ON DELETE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT "FK_TournamentPlayers_Decks" FOREIGN KEY ("DeckId")
+        REFERENCES public."Decks" ("Id") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL
 )
 
 TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS "IX_TournamentPlayers_User"
+    ON public."TournamentPlayers" USING btree
+    ("UserId" ASC NULLS LAST)
+    TABLESPACE pg_default;

@@ -48,6 +48,8 @@ class Game extends EventEmitter {
         this.allowSpectators = details.allowSpectators;
         this.cancelPromptUsed = false;
         this.challonge = details.challonge;
+        // ARCHON: tournament linkage rides along so GAMEWIN can auto-report
+        this.tournament = details.tournament;
         this.chatCommands = new ChatCommands(this);
         this.createdAt = new Date();
         this.currentAbilityWindow = null;
@@ -1698,6 +1700,7 @@ class Game extends EventEmitter {
             previousWinner: this.previousWinner,
             startedAt: this.startedAt,
             swap: this.swap,
+            tournament: this.tournament,
             winReason: this.winReason,
             winner: this.winner ? this.winner.name : undefined,
             spectators: spectators

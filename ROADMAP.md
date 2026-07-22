@@ -214,24 +214,43 @@ much stronger deck pays less.
 ## Phase 7 — Tournament engine _(PRIORITY)_
 
 -   [x] Standalone **Tournament Service** (own tables/API, zero gameplay-engine coupling;
-        docs/design/tournament-engine.md; migration 27).
--   [x] Formats: Swiss (score groups, rematch-avoiding backtracking, byes) and single
-        elimination (seeded, top-seed byes); Archon/Sealed/Alliance per event.
+        docs/design/tournament-engine.md; migrations 27 + 32).
+-   [x] Formats: Swiss (score groups, rematch-avoiding backtracking, byes, folded seeded
+        round 1) and single elimination (seeded, top-seed byes); Archon/Sealed/Alliance
+        per event.
 -   [x] Event lifecycle: create (any logged-in user organizes), registration window,
         drops (self or TO), round pairing gated on complete results, finish/cancel.
 -   [x] Result flow: participants report open results, organizer can correct; byes
         auto-win; table numbers per pairing for IRL play.
--   [x] Standings: points → strength-of-schedule → fewest byes; live on the event page.
+-   [x] Standings: points → strength-of-schedule → extended SoS → fewest byes, with
+        W-L records and game counts; live on the event page.
 -   [x] Public pages: tournament list + create form, event page with players, per-round
         pairings, reporting buttons, standings, TO controls.
--   [x] Tests: pairing algorithms + lifecycle/authorization (26 tests).
--   [ ] **Online automation (increment 2):** auto-created games per pairing, GAMEWIN
-        auto-reporting, round timers, no-show handling.
--   [ ] Tournament results feed the Rating Service (weighting **(admin-config)**).
--   [ ] Formats: double elimination, round robin, Swiss cut to top-N.
--   [ ] TO tools: deck registration with SAS caps/bands **(admin-config per event)**,
-        penalties, printable pairings, QR join codes.
+-   [x] **Online automation (increment 2):** auto-created lobby games per pairing
+        (reserved for the paired players, registered decks pre-selected, auto-start
+        when both are seated), GAMEWIN auto-reporting (idempotent, series-aware),
+        round timers with a live clock, "Open my table" recovery, no-show/forfeit
+        awards, auto-forfeit of open matches on drops.
+-   [x] Tournament results feed the Rating Service: unrated events never move Amber;
+        rated events apply the tournament K multiplier (**admin-config** allowRated).
+-   [x] Formats: double elimination (full winners/losers bracket templates with
+        grand-final reset), round robin (circle-method full schedule), Swiss cut to
+        top-N single-elim playoff (own best-of); best-of 1/3/5 series everywhere.
+-   [x] Registration operations: player caps with FIFO waitlists + auto-promotion,
+        scheduled start times, private events with join codes, TO-opened check-in
+        (optionally shedding no-shows at start), co-organizers/judges (staff),
+        seeding by registration/rating/random/manual, per-event announcements.
+-   [x] TO tools: deck registration with SAS caps/bands per event (DeckSas-backed,
+        decks locked at start, decklist visibility control), penalties (forfeit,
+        no-show, double loss), printable pairings/standings, bracket visualization,
+        result-correction locking once later bracket results build on them.
+-   [x] Player experience: "Your Match" panel (opponent + Amber + deck, join/rejoin
+        your table, bye notice), final placements with podium display, personal
+        tournament record (trophy history) via /api/tournaments/history.
+-   [x] Tests: pairing algorithms + bracket templates + lifecycle/authorization/
+        automation (68 tournament tests + rating gating tests).
 -   [ ] Hybrid events (online + paper results feeding one standing).
+-   [ ] QR join codes / check-in kiosk flows for IRL events.
 
 ## Phase 8 — Modern UI
 

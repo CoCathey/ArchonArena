@@ -135,6 +135,22 @@ class RatingService {
             return;
         }
 
+        // ARCHON: tournament games only move Amber when their event is
+        // marked rated - and then with the tournament K multiplier.
+        const tournamentRows = await this.db.query(
+            'SELECT t."RatedGames" FROM "TournamentMatchGames" tmg ' +
+                'JOIN "Tournaments" t ON t."Id" = tmg."TournamentId" ' +
+                'WHERE tmg."GameUuid" = $1 LIMIT 1',
+            [gameUuid]
+        );
+        const tournamentRow = tournamentRows && tournamentRows[0];
+
+        if (tournamentRow && !tournamentRow.RatedGames) {
+            return; // unrated event: games never touch the ladder
+        }
+
+        const isTournament = !!tournamentRow;
+
         const pool = game.GameFormat || 'archon';
         const eloConfig = normalizeConfig(config.elo);
 
@@ -159,10 +175,8 @@ class RatingService {
                 winnerKeys: winnerRow.Keys || 0,
                 loserKeys: loserRow.Keys || 0,
                 resultType: resultType,
-                // Tournament games get a K bonus (tournamentKMultiplier);
-                // set when tournament auto-reporting feeds the rating engine
-                // (roadmap) - lobby-created games are never tournament games.
-                isTournament: false
+                // Tournament games get a K bonus (tournamentKMultiplier)
+                isTournament: isTournament
             },
             config.elo
         );

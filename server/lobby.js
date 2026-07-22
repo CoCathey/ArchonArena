@@ -10,6 +10,9 @@ const ServiceFactory = require('./services/ServiceFactory');
 const DeckService = require('./services/DeckService');
 const UserService = require('./services/UserService');
 const ConfigService = require('./services/ConfigService');
+// ARCHON: native tournaments create/report lobby games automatically
+const TournamentService = require('./services/tournament/TournamentService');
+const tournamentEvents = require('./services/tournament/tournamentEvents');
 const User = require('./models/User');
 const { sortBy } = require('./Array');
 
@@ -34,6 +37,13 @@ class Lobby {
         this.router.on('onWorkerTimedOut', this.onWorkerTimedOut.bind(this));
         this.router.on('onNodeReconnected', this.onNodeReconnected.bind(this));
         this.router.on('onWorkerStarted', this.onWorkerStarted.bind(this));
+
+        // ARCHON: tournament engine integration - auto-created table
+        // games per pairing and auto-reported results (Phase 7 inc. 2)
+        this.tournamentService = options.tournamentService || new TournamentService();
+        this.router.on('onGameWin', this.onTournamentGameWin.bind(this));
+        tournamentEvents.on('roundPaired', this.onTournamentRoundPaired.bind(this));
+        tournamentEvents.on('ensureMatchGame', this.onTournamentEnsureMatchGame.bind(this));
 
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
 
@@ -318,15 +328,44 @@ class Lobby {
         this.broadcastGameList();
     }
 
-    clearStalePendingGames() {
+    async clearStalePendingGames() {
         const timeout = 15 * 60 * 1000;
         let staleGames = Object.values(this.games).filter(
-            (game) => !game.started && Date.now() - game.createdAt > timeout
+            (game) => !game.started && !game.tournament && Date.now() - game.createdAt > timeout
         );
 
         for (let game of staleGames) {
             logger.info(`closed pending game ${game.id} due to inactivity`);
             delete this.games[game.id];
+        }
+
+        // ARCHON: tournament tables wait much longer for their players,
+        // but disappear once their match is decided (TO award, forfeit)
+        // or the round has moved on.
+        const tournamentGames = Object.values(this.games).filter(
+            (game) => !game.started && game.tournament
+        );
+
+        for (let game of tournamentGames) {
+            const age = Date.now() - game.createdAt;
+            let stale = age > 6 * 60 * 60 * 1000;
+
+            if (!stale && age > 60 * 1000) {
+                try {
+                    stale = !(await this.tournamentService.isMatchOpen(
+                        game.tournament.tournamentId,
+                        game.tournament.matchId
+                    ));
+                } catch (err) {
+                    logger.error('Failed to check tournament match state', err);
+                }
+            }
+
+            if (stale) {
+                logger.info(`closed tournament pending game ${game.id} (match resolved or stale)`);
+                delete this.games[game.id];
+                staleGames.push(game);
+            }
         }
 
         if (staleGames.length > 0) {
@@ -519,6 +558,7 @@ class Lobby {
             let gameToJoin = sortedGames.find(
                 (game) =>
                     !game.started &&
+                    !game.tournament &&
                     game.gameType === gameDetails.gameType &&
                     game.gameFormat === gameDetails.gameFormat &&
                     Object.values(game.players).length < 2 &&
@@ -576,6 +616,19 @@ class Lobby {
 
         this.sendGameState(game);
         this.broadcastGameMessage('updategame', game);
+
+        // ARCHON: joining your tournament table auto-selects your
+        // registered deck and starts the game once both players are in.
+        if (game.tournament) {
+            const deckId = game.tournament.decks?.[socket.user.username];
+            const selection = deckId
+                ? this.applyDeckSelection(game, socket.user.username, deckId, false)
+                : Promise.resolve();
+
+            selection
+                .catch((err) => logger.error('Failed to auto-select tournament deck', err))
+                .then(() => this.startTournamentGameIfReady(game));
+        }
     }
 
     onStartGame(socket, gameId) {
@@ -773,80 +826,94 @@ class Lobby {
             return;
         }
 
-        return Promise.all([
-            this.cardService.getAllCards(),
-            isStandalone
-                ? this.deckService.getStandaloneDeckById(deckId)
-                : this.deckService.getById(deckId)
-        ])
-            .then((results) => {
-                let [cards, deck] = results;
-
-                for (let card of deck.cards) {
-                    let house = card.house;
-
-                    card.card = cards[card.id];
-                    if (house) {
-                        card.house = house;
-                    }
+        return this.applyDeckSelection(game, socket.user.username, deckId, isStandalone)
+            .then(() => {
+                // ARCHON: tournament tables launch as soon as both
+                // players are seated with decks.
+                if (game.tournament) {
+                    this.startTournamentGameIfReady(game);
                 }
-
-                let deckUsageLevel = 0;
-                if (
-                    deck.usageCount >
-                    this.configService.getValueForSection('lobby', 'lowerDeckThreshold')
-                ) {
-                    deckUsageLevel = 1;
-                }
-
-                if (
-                    deck.usageCount >
-                    this.configService.getValueForSection('lobby', 'middleDeckThreshold')
-                ) {
-                    deckUsageLevel = 2;
-                }
-
-                if (
-                    deck.usageCount >
-                    this.configService.getValueForSection('lobby', 'upperDeckThreshold')
-                ) {
-                    deckUsageLevel = 3;
-                }
-
-                let hasEnhancementsSet = true;
-                if (deck.cards.some((c) => c.enhancements && c.enhancements[0] === '')) {
-                    hasEnhancementsSet = false;
-                }
-
-                if (isStandalone) {
-                    deck.verified = true;
-                }
-
-                deck.status = {
-                    basicRules: hasEnhancementsSet,
-                    extendedStatus: [],
-                    noUnreleasedCards: true,
-                    officialRole: true,
-                    usageLevel: deckUsageLevel,
-                    verified: !!deck.verified,
-                    impossible: isStandalone && deck.id >= 5
-                };
-
-                deck.usageCount = 0;
-
-                if (game.gameFormat === 'alliance') {
-                    deck.name = 'Alliance Deck';
-                }
-
-                game.selectDeck(socket.user.username, deck);
-
-                this.sendGameState(game);
             })
             .catch((err) => {
                 logger.info(err);
 
                 return;
             });
+    }
+
+    /**
+     * ARCHON: deck loading/status logic shared by manual selection and
+     * tournament auto-selection (which has a username but no socket).
+     */
+    applyDeckSelection(game, username, deckId, isStandalone) {
+        return Promise.all([
+            this.cardService.getAllCards(),
+            isStandalone
+                ? this.deckService.getStandaloneDeckById(deckId)
+                : this.deckService.getById(deckId)
+        ]).then((results) => {
+            let [cards, deck] = results;
+
+            for (let card of deck.cards) {
+                let house = card.house;
+
+                card.card = cards[card.id];
+                if (house) {
+                    card.house = house;
+                }
+            }
+
+            let deckUsageLevel = 0;
+            if (
+                deck.usageCount >
+                this.configService.getValueForSection('lobby', 'lowerDeckThreshold')
+            ) {
+                deckUsageLevel = 1;
+            }
+
+            if (
+                deck.usageCount >
+                this.configService.getValueForSection('lobby', 'middleDeckThreshold')
+            ) {
+                deckUsageLevel = 2;
+            }
+
+            if (
+                deck.usageCount >
+                this.configService.getValueForSection('lobby', 'upperDeckThreshold')
+            ) {
+                deckUsageLevel = 3;
+            }
+
+            let hasEnhancementsSet = true;
+            if (deck.cards.some((c) => c.enhancements && c.enhancements[0] === '')) {
+                hasEnhancementsSet = false;
+            }
+
+            if (isStandalone) {
+                deck.verified = true;
+            }
+
+            deck.status = {
+                basicRules: hasEnhancementsSet,
+                extendedStatus: [],
+                noUnreleasedCards: true,
+                officialRole: true,
+                usageLevel: deckUsageLevel,
+                verified: !!deck.verified,
+                impossible: isStandalone && deck.id >= 5
+            };
+
+            deck.usageCount = 0;
+
+            if (game.gameFormat === 'alliance') {
+                deck.name = 'Alliance Deck';
+            }
+
+            game.selectDeck(username, deck);
+
+            this.sendGameState(game);
+        });
     }
 
     onConnectFailed(socket) {
@@ -943,6 +1010,219 @@ class Lobby {
 
         this.broadcastGameMessage('removegame', game);
         delete this.games[gameId];
+    }
+
+    // ARCHON: tournament engine integration ---------------------------------
+    // Online events get their table games created automatically per
+    // pairing; GAMEWIN results flow back into the tournament service;
+    // best-of series spin up their next game.
+
+    findTournamentGame(matchId) {
+        return Object.values(this.games).find(
+            (game) => game.tournament && game.tournament.matchId === matchId
+        );
+    }
+
+    async onTournamentRoundPaired({ tournamentId }) {
+        try {
+            const matches = await this.tournamentService.getMatchesNeedingGames(tournamentId);
+
+            for (const matchInfo of matches) {
+                await this.ensureTournamentGame(matchInfo);
+            }
+        } catch (err) {
+            logger.error(`Failed to create games for tournament ${tournamentId}`, err);
+        }
+    }
+
+    async onTournamentEnsureMatchGame({ tournamentId, matchId }) {
+        try {
+            const matches = await this.tournamentService.getMatchesNeedingGames(tournamentId);
+            const matchInfo = matches.find((entry) => entry.matchId === matchId);
+
+            if (matchInfo) {
+                await this.ensureTournamentGame(matchInfo);
+            }
+        } catch (err) {
+            logger.error(`Failed to open game for tournament match ${matchId}`, err);
+        }
+    }
+
+    async onTournamentGameWin(gameSave) {
+        if (!gameSave || !gameSave.tournament) {
+            return;
+        }
+
+        try {
+            const result = await this.tournamentService.recordGameWin(gameSave);
+
+            if (result?.handled && result.matchComplete === false && result.nextGameNumber) {
+                // Series continues: put the next game up right away so
+                // the players find their table when they leave this one.
+                const matches = await this.tournamentService.getMatchesNeedingGames(
+                    gameSave.tournament.tournamentId
+                );
+                const matchInfo = matches.find(
+                    (entry) => entry.matchId === gameSave.tournament.matchId
+                );
+
+                if (matchInfo) {
+                    await this.ensureTournamentGame(matchInfo);
+                }
+            }
+        } catch (err) {
+            logger.error('Failed to process tournament game result', err);
+        }
+    }
+
+    /**
+     * Create the lobby game for a tournament pairing unless one is
+     * already up. Players who are online and idle are seated
+     * immediately with their registered decks; everyone else joins
+     * from the lobby or the event page. The game starts itself once
+     * both players are seated with decks.
+     */
+    async ensureTournamentGame(matchInfo) {
+        const existing = this.findTournamentGame(matchInfo.matchId);
+
+        if (
+            existing &&
+            (!existing.started || existing.tournament.gameNumber === matchInfo.gameNumber)
+        ) {
+            return;
+        }
+
+        const users = await Promise.all(
+            matchInfo.players.map((player) => this.userService.getUserByUsername(player.username))
+        );
+
+        if (users.some((user) => !user)) {
+            logger.error(
+                `Tournament match ${matchInfo.matchId}: could not load players ${matchInfo.players
+                    .map((player) => player.username)
+                    .join(', ')}`
+            );
+
+            return;
+        }
+
+        const tableLabel = matchInfo.table ? ` T${matchInfo.table}` : '';
+        const seriesLabel = matchInfo.bestOf > 1 ? ` (game ${matchInfo.gameNumber})` : '';
+        const name =
+            `${matchInfo.tournamentName} R${matchInfo.round}${tableLabel}: ${matchInfo.players[0].username} vs ${matchInfo.players[1].username}${seriesLabel}`.slice(
+                0,
+                255
+            );
+
+        const game = new PendingGame(users[0], {
+            allowSpectators: true,
+            gameFormat: matchInfo.gameFormat,
+            gameType: 'competitive',
+            gameTimeLimit: matchInfo.gameTimeLimit || undefined,
+            useGameTimeLimit: !!matchInfo.gameTimeLimit,
+            hideDeckLists: matchInfo.hideDecklists,
+            muteSpectators: true,
+            name: name,
+            showHand: false,
+            previousWinner: matchInfo.previousWinner || undefined,
+            tournament: {
+                tournamentId: matchInfo.tournamentId,
+                matchId: matchInfo.matchId,
+                gameNumber: matchInfo.gameNumber,
+                bestOf: matchInfo.bestOf,
+                round: matchInfo.round,
+                table: matchInfo.table,
+                players: matchInfo.players.map((player) => player.username),
+                decks: Object.fromEntries(
+                    matchInfo.players.map((player) => [player.username, player.deckId])
+                )
+            }
+        });
+
+        this.games[game.id] = game;
+
+        await this.tournamentService.attachGame(
+            matchInfo.tournamentId,
+            matchInfo.matchId,
+            matchInfo.gameNumber,
+            game.id
+        );
+
+        // Seat everyone who is online and not busy in another game.
+        for (const player of matchInfo.players) {
+            const socket = this.socketsByName[player.username];
+
+            if (!socket || this.findGameForUser(player.username)) {
+                continue;
+            }
+
+            const joinError = game.join(socket.id, socket.user);
+
+            if (joinError) {
+                continue;
+            }
+
+            socket.joinChannel(game.id);
+
+            if (player.deckId) {
+                try {
+                    await this.applyDeckSelection(game, player.username, player.deckId, false);
+                } catch (err) {
+                    logger.error(
+                        `Failed to auto-select deck ${player.deckId} for ${player.username}`,
+                        err
+                    );
+                }
+            }
+        }
+
+        this.broadcastGameMessage('newgame', game);
+        this.sendGameState(game);
+
+        logger.info(`Created tournament game ${game.id} for match ${matchInfo.matchId} (${name})`);
+
+        this.startTournamentGameIfReady(game);
+    }
+
+    /**
+     * Tournament games skip the owner-driven start: as soon as both
+     * paired players are seated with decks, the game launches and both
+     * players are handed off to the game node.
+     */
+    startTournamentGameIfReady(game) {
+        if (!game || game.started || !game.tournament) {
+            return;
+        }
+
+        const players = Object.values(game.getPlayers());
+
+        if (players.length < 2 || players.some((player) => !player.deck)) {
+            return;
+        }
+
+        const gameNode = this.router.startGame(game);
+
+        if (!gameNode) {
+            logger.error(`No game nodes available for tournament game ${game.id}`);
+
+            return;
+        }
+
+        game.node = gameNode;
+        game.started = true;
+
+        this.broadcastGameMessage('updategame', game);
+
+        for (const player of Object.values(game.getPlayersAndSpectators())) {
+            const socket = this.sockets[player.id];
+
+            if (!socket || !socket.user) {
+                logger.error(`Wanted to handoff to ${player.name}, but couldn't find a socket`);
+                continue;
+            }
+
+            this.sendHandoff(socket, gameNode, game.id);
+        }
     }
 
     onGameRematch(oldGame) {

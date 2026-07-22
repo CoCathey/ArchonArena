@@ -76,7 +76,8 @@ class PendingGame {
             players: players,
             previousWinner: this.previousWinner,
             startedAt: this.createdAt,
-            swap: this.swap
+            swap: this.swap,
+            tournament: this.tournament
         };
     }
 
@@ -126,6 +127,15 @@ class PendingGame {
     join(id, user, password) {
         if (_.size(this.players) === 2 || this.started) {
             return 'Game full';
+        }
+
+        // ARCHON: tournament tables are reserved for their paired players
+        if (
+            this.tournament &&
+            Array.isArray(this.tournament.players) &&
+            !this.tournament.players.includes(user.username)
+        ) {
+            return 'This table is reserved for its tournament pairing';
         }
 
         if (this.isUserBlocked(user)) {
@@ -366,6 +376,16 @@ class PendingGame {
                     avatar: spectator.user.avatar
                 };
             }),
+            tournament: this.tournament
+                ? {
+                      tournamentId: this.tournament.tournamentId,
+                      matchId: this.tournament.matchId,
+                      gameNumber: this.tournament.gameNumber,
+                      round: this.tournament.round,
+                      table: this.tournament.table,
+                      players: this.tournament.players
+                  }
+                : undefined,
             useGameTimeLimit: this.useGameTimeLimit
         };
     }
@@ -413,6 +433,7 @@ class PendingGame {
             spectators,
             started: this.started,
             swap: this.swap,
+            tournament: this.tournament,
             useGameTimeLimit: this.useGameTimeLimit
         };
     }

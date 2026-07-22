@@ -9,6 +9,7 @@ import { faLock, faTrash } from '@fortawesome/free-solid-svg-icons';
 
 import Avatar from '../Site/Avatar';
 import AlertPanel from '../Site/AlertPanel';
+import Link from '../Navigation/Link';
 import { lobbyActions } from '../../redux/slices/lobbySlice';
 import TimeLimitIcon from '../../assets/img/Timelimit.png';
 import ShowHandIcon from '../../assets/img/ShowHandIcon.png';
@@ -240,6 +241,20 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
                                                     ) : null}
                                                     {t(game.gameFormat)}
                                                 </span>
+                                                {game.tournament ? (
+                                                    <Link
+                                                        href={`/tournaments/${game.tournament.tournamentId}`}
+                                                        className='rounded-sm border border-amber-400/50 bg-amber-400/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-300 hover:bg-amber-400/20'
+                                                        title={t(
+                                                            'Tournament match - open event page'
+                                                        )}
+                                                    >
+                                                        {t('Tournament')}
+                                                        {game.tournament.round
+                                                            ? ` R${game.tournament.round}`
+                                                            : ''}
+                                                    </Link>
+                                                ) : null}
                                                 {game.gamePrivate && isAdmin ? (
                                                     <span className='rounded-sm border border-border/70 bg-overlay/80 px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted'>
                                                         Private

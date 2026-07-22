@@ -263,10 +263,13 @@ class GameRouter extends EventEmitter {
                 break;
             case 'GAMEWIN':
                 // ARCHON: rate the game once its result is persisted. Best
-                // effort and idempotent; never blocks the game flow.
+                // effort and idempotent; never blocks the game flow. The
+                // lobby also listens so tournament matches auto-report.
                 Promise.resolve(this.gameService.update(message.arg.game))
                     .then(() => this.ratingService.processGame(message.arg.game.gameId))
                     .catch((err) => logger.error('Failed to save/rate finished game', err));
+
+                this.emit('onGameWin', message.arg.game);
                 break;
             case 'REMATCH':
                 this.gameService.update(message.arg.game);

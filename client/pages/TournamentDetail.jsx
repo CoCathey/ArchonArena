@@ -1,15 +1,48 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
-import { Button as HeroButton, toast } from '@heroui/react';
+import { Button as HeroButton, Input, toast } from '@heroui/react';
 import { useParams } from 'react-router-dom';
 
 import Panel from '../Components/Site/Panel';
+import SelectDeckModal from '../Components/Games/SelectDeckModal';
+import RoundTimer from '../Components/Tournaments/RoundTimer';
+import BracketView from '../Components/Tournaments/BracketView';
+import MyMatchPanel from '../Components/Tournaments/MyMatchPanel';
+import RoundsPanel from '../Components/Tournaments/RoundsPanel';
+import StandingsPanel from '../Components/Tournaments/StandingsPanel';
+import PlayersPanel from '../Components/Tournaments/PlayersPanel';
+import printPairings from '../Components/Tournaments/printPairings';
 import { useGetEventDetailQuery, useTournamentActionMutation } from '../redux/api';
 
+const formatNames = {
+    swiss: 'Swiss',
+    'single-elim': 'Single Elimination',
+    'double-elim': 'Double Elimination',
+    'round-robin': 'Round Robin'
+};
+
+const Badge = ({ children, tone = 'default', title }) => (
+    <span
+        title={title}
+        className={`rounded px-1.5 py-0.5 text-xs uppercase tracking-wide ${
+            tone === 'amber'
+                ? 'bg-amber-400/15 text-amber-300'
+                : tone === 'green'
+                ? 'bg-emerald-500/15 text-emerald-400'
+                : 'bg-surface-tertiary/70 text-muted'
+        }`}
+    >
+        {children}
+    </span>
+);
+Badge.displayName = 'TournamentBadge';
+
 /**
- * ARCHON: tournament page (Phase 7): registration, per-round pairings
- * with result reporting, standings, and organizer controls.
+ * ARCHON: tournament page (Phase 7): registration with join codes and
+ * deck registration, check-in, per-round pairings with series scores
+ * and judge tools, bracket visualization, live standings, round timer,
+ * and one-click access to auto-created online games.
  */
 const TournamentDetail = () => {
     const { t } = useTranslation();
@@ -17,6 +50,12 @@ const TournamentDetail = () => {
     const user = useSelector((state) => state.account.user);
     const { data, refetch } = useGetEventDetailQuery(id, { pollingInterval: 15000 });
     const [runAction, actionState] = useTournamentActionMutation();
+
+    const [joinCode, setJoinCode] = useState('');
+    const [showJoinCode, setShowJoinCode] = useState(false);
+    const [showDeckPicker, setShowDeckPicker] = useState(false);
+    const [editingAnnouncement, setEditingAnnouncement] = useState(null);
+    const [staffName, setStaffName] = useState('');
 
     if (!data?.success) {
         return (
@@ -30,8 +69,7 @@ const TournamentDetail = () => {
         );
     }
 
-    const { tournament, players, matches, standings } = data;
-    const activePlayers = players.filter((player) => !player.dropped);
+    const { tournament, players, matches, standings, staff } = data;
 
     const act = async (action, body, successMessage) => {
         try {
@@ -42,48 +80,173 @@ const TournamentDetail = () => {
                     toast.success(successMessage);
                 }
                 refetch();
-            } else {
-                toast.danger(result.message || t('Action failed'));
+
+                return true;
             }
+
+            toast.danger(result.message || t('Action failed'));
         } catch {
             toast.danger(t('Action failed'));
         }
+
+        return false;
     };
 
-    const rounds = [];
-    for (const match of matches) {
-        (rounds[match.round] = rounds[match.round] || []).push(match);
-    }
+    const register = async () => {
+        if (tournament.visibility === 'private' && !tournament.canManage && !showJoinCode) {
+            setShowJoinCode(true);
+
+            return;
+        }
+
+        const ok = await act(
+            'register',
+            tournament.visibility === 'private' ? { joinCode } : {},
+            t('You are registered')
+        );
+
+        if (ok) {
+            setShowJoinCode(false);
+            setJoinCode('');
+
+            if (tournament.requireDeckRegistration) {
+                setShowDeckPicker(true);
+            }
+        }
+    };
+
+    const onDeckSelected = async (deck) => {
+        setShowDeckPicker(false);
+        await act('register-deck', { deckId: deck.id }, t('Deck registered'));
+    };
+
+    const startTournament = () => {
+        if (
+            tournament.checkInOpen &&
+            players.some((player) => !player.waitlisted && !player.dropped && !player.checkedIn)
+        ) {
+            const dropNoShows = window.confirm(
+                t('Remove players who have not checked in? Cancel keeps everyone in the event.')
+            );
+
+            act('start', { dropNoShows }, t('Tournament started'));
+        } else {
+            act('start', {}, t('Tournament started'));
+        }
+    };
+
+    const myPlayer = user ? players.find((player) => player.userId === user.id) : null;
+    const swissRoundsDone =
+        tournament.format === 'swiss' &&
+        tournament.stage === 'main' &&
+        tournament.roundCount &&
+        tournament.currentRound >= tournament.roundCount;
 
     const statusLabel =
         tournament.status === 'registration'
-            ? t('Open Registration')
+            ? tournament.checkInOpen
+                ? t('Check-in Open')
+                : t('Open Registration')
             : tournament.status === 'active'
-            ? t('Round {{round}} of {{total}}', {
-                  round: tournament.currentRound,
-                  total: tournament.roundCount || '?'
-              })
+            ? tournament.stage === 'playoff'
+                ? t('Playoff - Round {{round}} of {{total}}', {
+                      round: tournament.currentRound,
+                      total: tournament.roundCount || '?'
+                  })
+                : t('Round {{round}} of {{total}}', {
+                      round: tournament.currentRound,
+                      total: tournament.roundCount || '?'
+                  })
             : t(tournament.status);
 
+    const hasBracket = matches.some((match) => match.bracket);
+
+    const startTimeLabel = tournament.startTime
+        ? new Date(tournament.startTime).toLocaleString()
+        : null;
+
     return (
-        <div className='mx-auto w-full max-w-5xl space-y-4'>
+        <div className='mx-auto w-full max-w-6xl space-y-4'>
             <Panel title={tournament.name}>
-                <div className='flex flex-wrap items-center gap-x-4 gap-y-2 text-sm'>
-                    <span className='text-amber-300'>
-                        {tournament.format === 'swiss' ? t('Swiss') : t('Single Elimination')}
-                        {' - '}
-                        {tournament.gameFormat}
-                        {' - '}
-                        {tournament.mode === 'irl' ? t('In Person') : t('Online')}
-                    </span>
+                <div className='flex flex-wrap items-center gap-x-3 gap-y-2 text-sm'>
+                    <Badge tone='amber'>
+                        {t(formatNames[tournament.format] || tournament.format)}
+                        {tournament.cutTo ? ` → ${t('Top {{n}}', { n: tournament.cutTo })}` : ''}
+                    </Badge>
+                    <Badge>{tournament.gameFormat}</Badge>
+                    <Badge>{tournament.mode === 'irl' ? t('In Person') : t('Online')}</Badge>
+                    {tournament.bestOf > 1 && (
+                        <Badge>{t('Bo{{n}}', { n: tournament.bestOf })}</Badge>
+                    )}
+                    {tournament.playoffBestOf > 1 && tournament.cutTo && (
+                        <Badge>{t('Playoff Bo{{n}}', { n: tournament.playoffBestOf })}</Badge>
+                    )}
+                    {tournament.rated && (
+                        <Badge tone='amber' title={t('Games move Amber ratings')}>
+                            {t('Rated')}
+                        </Badge>
+                    )}
+                    {tournament.visibility === 'private' && <Badge>{t('Private')}</Badge>}
+                    {(tournament.sasMin != null || tournament.sasMax != null) && (
+                        <Badge title={t('Registered decks must fit this SAS band')}>{`${t('SAS')} ${
+                            tournament.sasMin ?? 0
+                        }-${tournament.sasMax ?? '∞'}`}</Badge>
+                    )}
                     <span className='text-muted'>{statusLabel}</span>
+                    {tournament.status === 'active' && (
+                        <RoundTimer
+                            roundStartedAt={tournament.roundStartedAt}
+                            roundTimerMinutes={tournament.roundTimerMinutes}
+                        />
+                    )}
+                    {startTimeLabel && tournament.status === 'registration' && (
+                        <span className='text-muted'>
+                            {t('Starts {{time}}', { time: startTimeLabel })}
+                        </span>
+                    )}
                     <span className='text-muted'>
                         {t('Organized by {{organizer}}', { organizer: tournament.organizer })}
+                        {staff.length > 0 &&
+                            ` - ${t('judges')}: ${staff
+                                .map((member) => member.username)
+                                .join(', ')}`}
                     </span>
-                    <span className='ml-auto flex flex-wrap gap-2'>
-                        {user &&
-                            tournament.status === 'registration' &&
-                            (tournament.isRegistered ? (
+                </div>
+
+                <div className='mt-2 flex flex-wrap items-center gap-2'>
+                    {user &&
+                        tournament.status === 'registration' &&
+                        (tournament.isRegistered || tournament.isWaitlisted ? (
+                            <>
+                                {tournament.isWaitlisted && (
+                                    <Badge>{t('You are on the waitlist')}</Badge>
+                                )}
+                                {tournament.checkInOpen &&
+                                    !tournament.isWaitlisted &&
+                                    (tournament.isCheckedIn ? (
+                                        <Badge tone='green'>{t('Checked in')}</Badge>
+                                    ) : (
+                                        <HeroButton
+                                            size='sm'
+                                            variant='primary'
+                                            onPress={() =>
+                                                act('check-in', {}, t('You are checked in'))
+                                            }
+                                        >
+                                            {t('Check In')}
+                                        </HeroButton>
+                                    ))}
+                                <HeroButton
+                                    size='sm'
+                                    variant='tertiary'
+                                    onPress={() => setShowDeckPicker(true)}
+                                >
+                                    {myPlayer?.hasDeck
+                                        ? t('Change Deck ({{deck}})', {
+                                              deck: myPlayer.deckName || t('registered')
+                                          })
+                                        : t('Register Deck')}
+                                </HeroButton>
                                 <HeroButton
                                     size='sm'
                                     variant='tertiary'
@@ -91,65 +254,240 @@ const TournamentDetail = () => {
                                 >
                                     {t('Unregister')}
                                 </HeroButton>
-                            ) : (
-                                <HeroButton
-                                    size='sm'
-                                    variant='primary'
-                                    onPress={() => act('register', {}, t('You are registered'))}
-                                >
+                            </>
+                        ) : (
+                            <>
+                                <HeroButton size='sm' variant='primary' onPress={register}>
                                     {t('Register')}
                                 </HeroButton>
-                            ))}
-                        {user && tournament.status === 'active' && tournament.isRegistered && (
-                            <HeroButton
-                                size='sm'
-                                variant='tertiary'
-                                onPress={() => act('drop', {}, t('You dropped from the event'))}
-                            >
-                                {t('Drop')}
-                            </HeroButton>
-                        )}
-                        {tournament.canManage && tournament.status === 'registration' && (
-                            <HeroButton
-                                size='sm'
-                                variant='primary'
-                                isPending={actionState.isLoading}
-                                onPress={() => act('start', {}, t('Tournament started'))}
-                            >
-                                {t('Start Tournament')}
-                            </HeroButton>
-                        )}
-                        {tournament.canManage && tournament.status === 'active' && (
-                            <>
-                                <HeroButton
-                                    size='sm'
-                                    variant='primary'
-                                    isPending={actionState.isLoading}
-                                    onPress={() => act('next-round', {}, t('Next round paired'))}
-                                >
-                                    {t('Pair Next Round')}
-                                </HeroButton>
-                                <HeroButton
-                                    size='sm'
-                                    variant='tertiary'
-                                    onPress={() => act('finish', {}, t('Tournament complete'))}
-                                >
-                                    {t('Finish')}
-                                </HeroButton>
+                                {showJoinCode && (
+                                    <span className='flex items-center gap-1'>
+                                        <Input
+                                            className='w-36'
+                                            value={joinCode}
+                                            placeholder={t('Join code')}
+                                            onChange={(event) => setJoinCode(event.target.value)}
+                                        />
+                                        <HeroButton size='sm' variant='primary' onPress={register}>
+                                            {t('Join')}
+                                        </HeroButton>
+                                    </span>
+                                )}
                             </>
-                        )}
-                        {tournament.canManage &&
-                            ['registration', 'active'].includes(tournament.status) && (
+                        ))}
+                    {user && tournament.status === 'active' && tournament.isRegistered && (
+                        <HeroButton
+                            size='sm'
+                            variant='tertiary'
+                            onPress={() => {
+                                if (window.confirm(t('Drop from the event?'))) {
+                                    act('drop', {}, t('You dropped from the event'));
+                                }
+                            }}
+                        >
+                            {t('Drop')}
+                        </HeroButton>
+                    )}
+
+                    {tournament.canManage && (
+                        <span className='ml-auto flex flex-wrap gap-2'>
+                            {tournament.status === 'registration' && (
+                                <>
+                                    {!tournament.checkInOpen && (
+                                        <HeroButton
+                                            size='sm'
+                                            variant='tertiary'
+                                            onPress={() =>
+                                                act('open-check-in', {}, t('Check-in is open'))
+                                            }
+                                        >
+                                            {t('Open Check-in')}
+                                        </HeroButton>
+                                    )}
+                                    <HeroButton
+                                        size='sm'
+                                        variant='primary'
+                                        isPending={actionState.isLoading}
+                                        onPress={startTournament}
+                                    >
+                                        {t('Start Tournament')}
+                                    </HeroButton>
+                                </>
+                            )}
+                            {tournament.status === 'active' && (
+                                <>
+                                    {swissRoundsDone && tournament.cutTo ? (
+                                        <HeroButton
+                                            size='sm'
+                                            variant='primary'
+                                            isPending={actionState.isLoading}
+                                            onPress={() =>
+                                                act('cut', {}, t('Playoff bracket created'))
+                                            }
+                                        >
+                                            {t('Cut to Top {{n}}', { n: tournament.cutTo })}
+                                        </HeroButton>
+                                    ) : (
+                                        <HeroButton
+                                            size='sm'
+                                            variant='primary'
+                                            isPending={actionState.isLoading}
+                                            onPress={() =>
+                                                act('next-round', {}, t('Next round paired'))
+                                            }
+                                        >
+                                            {t('Pair Next Round')}
+                                        </HeroButton>
+                                    )}
+                                    <HeroButton
+                                        size='sm'
+                                        variant='tertiary'
+                                        onPress={() => act('finish', {}, t('Tournament complete'))}
+                                    >
+                                        {t('Finish')}
+                                    </HeroButton>
+                                </>
+                            )}
+                            {['registration', 'active'].includes(tournament.status) && (
                                 <HeroButton
                                     size='sm'
                                     variant='tertiary'
-                                    onPress={() => act('cancel', {}, t('Tournament cancelled'))}
+                                    onPress={() => {
+                                        if (window.confirm(t('Cancel this tournament?'))) {
+                                            act('cancel', {}, t('Tournament cancelled'));
+                                        }
+                                    }}
                                 >
-                                    {t('Cancel')}
+                                    {t('Cancel Event')}
                                 </HeroButton>
                             )}
-                    </span>
+                        </span>
+                    )}
                 </div>
+
+                {tournament.announcement && editingAnnouncement === null && (
+                    <div className='mt-3 rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-amber-200'>
+                        <span className='mr-2 font-bold uppercase tracking-wide text-amber-300'>
+                            {t('Announcement')}
+                        </span>
+                        <span className='whitespace-pre-wrap'>{tournament.announcement}</span>
+                    </div>
+                )}
+
+                {tournament.canManage && (
+                    <div className='mt-3 space-y-2 border-t border-border/50 pt-2'>
+                        {editingAnnouncement === null ? (
+                            <div className='flex flex-wrap gap-2 text-xs'>
+                                <button
+                                    type='button'
+                                    className='text-muted underline-offset-2 hover:text-foreground hover:underline'
+                                    onClick={() =>
+                                        setEditingAnnouncement(tournament.announcement || '')
+                                    }
+                                >
+                                    {tournament.announcement
+                                        ? t('Edit announcement')
+                                        : t('Post announcement')}
+                                </button>
+                                {tournament.visibility === 'private' && tournament.joinCode && (
+                                    <span className='text-muted'>
+                                        {t('Join code')}:{' '}
+                                        <span className='select-all font-mono text-foreground'>
+                                            {tournament.joinCode}
+                                        </span>
+                                    </span>
+                                )}
+                            </div>
+                        ) : (
+                            <div className='space-y-1'>
+                                <textarea
+                                    className='min-h-16 w-full rounded-md border border-border/65 bg-surface-secondary/55 px-3 py-2 text-sm text-foreground focus:outline-none'
+                                    value={editingAnnouncement}
+                                    maxLength={2000}
+                                    onChange={(event) => setEditingAnnouncement(event.target.value)}
+                                />
+                                <div className='flex gap-2'>
+                                    <HeroButton
+                                        size='sm'
+                                        variant='primary'
+                                        onPress={async () => {
+                                            const ok = await act(
+                                                'update',
+                                                { announcement: editingAnnouncement },
+                                                t('Announcement updated')
+                                            );
+
+                                            if (ok) {
+                                                setEditingAnnouncement(null);
+                                            }
+                                        }}
+                                    >
+                                        {t('Save')}
+                                    </HeroButton>
+                                    <HeroButton
+                                        size='sm'
+                                        variant='tertiary'
+                                        onPress={() => setEditingAnnouncement(null)}
+                                    >
+                                        {t('Cancel')}
+                                    </HeroButton>
+                                </div>
+                            </div>
+                        )}
+                        {tournament.isOrganizer && (
+                            <div className='flex flex-wrap items-center gap-2 text-xs'>
+                                <span className='text-muted'>{t('Judges')}:</span>
+                                {staff.map((member) => (
+                                    <span
+                                        key={member.userId}
+                                        className='inline-flex items-center gap-1 rounded bg-surface-tertiary/70 px-1.5 py-0.5 text-foreground'
+                                    >
+                                        {member.username}
+                                        <button
+                                            type='button'
+                                            className='text-muted hover:text-red-400'
+                                            onClick={() =>
+                                                act(
+                                                    'staff/remove',
+                                                    { userId: member.userId },
+                                                    t('Judge removed')
+                                                )
+                                            }
+                                        >
+                                            ×
+                                        </button>
+                                    </span>
+                                ))}
+                                <Input
+                                    className='w-40'
+                                    value={staffName}
+                                    placeholder={t('Add judge by username')}
+                                    onChange={(event) => setStaffName(event.target.value)}
+                                />
+                                <HeroButton
+                                    size='sm'
+                                    variant='tertiary'
+                                    className='!h-7'
+                                    onPress={async () => {
+                                        if (
+                                            staffName.trim() &&
+                                            (await act(
+                                                'staff/add',
+                                                { username: staffName.trim() },
+                                                t('Judge added')
+                                            ))
+                                        ) {
+                                            setStaffName('');
+                                        }
+                                    }}
+                                >
+                                    {t('Add')}
+                                </HeroButton>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {tournament.description && (
                     <p className='mt-2 whitespace-pre-wrap text-sm text-muted'>
                         {tournament.description}
@@ -157,204 +495,55 @@ const TournamentDetail = () => {
                 )}
             </Panel>
 
+            <MyMatchPanel
+                tournament={tournament}
+                matches={matches}
+                players={players}
+                user={user}
+                act={act}
+            />
+
+            {hasBracket && (
+                <Panel title={tournament.stage === 'playoff' ? t('Playoff Bracket') : t('Bracket')}>
+                    <BracketView matches={matches} currentUsername={user?.username} />
+                </Panel>
+            )}
+
             <div className='grid gap-4 lg:grid-cols-2'>
-                <Panel
-                    title={
-                        tournament.status === 'registration'
-                            ? t('Players ({{count}})', { count: activePlayers.length })
-                            : t('Standings')
-                    }
-                >
-                    {tournament.status === 'registration' ? (
-                        activePlayers.length === 0 ? (
-                            <div className='text-sm text-muted'>{t('No players yet')}</div>
-                        ) : (
-                            <ul className='space-y-1 text-sm'>
-                                {activePlayers.map((player) => (
-                                    <li
-                                        key={player.userId}
-                                        className='flex items-center justify-between rounded bg-surface-secondary/50 px-2 py-1'
-                                    >
-                                        <span className='text-foreground'>{player.username}</span>
-                                        {tournament.canManage && (
-                                            <HeroButton
-                                                size='sm'
-                                                variant='tertiary'
-                                                className='!h-6 !px-2 text-xs'
-                                                onPress={() =>
-                                                    act(
-                                                        'drop',
-                                                        { userId: player.userId },
-                                                        t('Player removed')
-                                                    )
-                                                }
-                                            >
-                                                {t('Remove')}
-                                            </HeroButton>
-                                        )}
-                                    </li>
-                                ))}
-                            </ul>
+                {tournament.status === 'registration' ? (
+                    <PlayersPanel tournament={tournament} players={players} act={act} />
+                ) : (
+                    <StandingsPanel
+                        tournament={tournament}
+                        standings={standings}
+                        players={players}
+                        currentUsername={user?.username}
+                    />
+                )}
+
+                <RoundsPanel
+                    tournament={tournament}
+                    matches={matches}
+                    user={user}
+                    act={act}
+                    actionPending={actionState.isLoading}
+                    onPrint={(round) =>
+                        printPairings(
+                            tournament,
+                            matches.filter((match) => match.round === round),
+                            round,
+                            standings
                         )
-                    ) : (
-                        <table className='w-full text-sm'>
-                            <thead>
-                                <tr className='border-b border-border/70 text-left text-xs uppercase tracking-wide text-muted'>
-                                    <th className='px-2 py-1.5 w-10'>#</th>
-                                    <th className='px-2 py-1.5'>{t('Player')}</th>
-                                    <th className='px-2 py-1.5 text-right'>{t('Points')}</th>
-                                    <th className='px-2 py-1.5 text-right'>{t('SOS')}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {standings.map((entry) => (
-                                    <tr
-                                        key={entry.id}
-                                        className={`border-b border-border/40 ${
-                                            entry.username === user?.username ? 'bg-accent/15' : ''
-                                        }`}
-                                    >
-                                        <td className='px-2 py-1.5 text-muted'>{entry.rank}</td>
-                                        <td className='px-2 py-1.5 font-semibold text-foreground'>
-                                            {entry.username}
-                                            {entry.dropped && (
-                                                <span className='ml-1 text-xs text-muted'>
-                                                    ({t('dropped')})
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className='px-2 py-1.5 text-right font-bold text-amber-300'>
-                                            {entry.points}
-                                        </td>
-                                        <td className='px-2 py-1.5 text-right text-muted'>
-                                            {entry.sos}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    )}
-                </Panel>
-
-                <Panel title={t('Rounds')}>
-                    {rounds.filter(Boolean).length === 0 ? (
-                        <div className='text-sm text-muted'>
-                            {t('Pairings appear when the tournament starts')}
-                        </div>
-                    ) : (
-                        <div className='space-y-3'>
-                            {rounds.map(
-                                (roundMatches, roundNumber) =>
-                                    roundMatches && (
-                                        <div key={roundNumber}>
-                                            <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
-                                                {t('Round {{round}}', { round: roundNumber })}
-                                            </div>
-                                            <div className='space-y-1'>
-                                                {roundMatches.map((match) => {
-                                                    const canReport =
-                                                        tournament.status === 'active' &&
-                                                        match.player2Id &&
-                                                        (tournament.canManage ||
-                                                            (!match.winnerId &&
-                                                                (user?.id === match.player1Id ||
-                                                                    user?.id === match.player2Id)));
-
-                                                    return (
-                                                        <div
-                                                            key={match.id}
-                                                            className='flex flex-wrap items-center gap-2 rounded bg-surface-secondary/50 px-2 py-1.5 text-sm'
-                                                        >
-                                                            {match.table && (
-                                                                <span className='text-xs text-muted'>
-                                                                    {t('Table {{table}}', {
-                                                                        table: match.table
-                                                                    })}
-                                                                </span>
-                                                            )}
-                                                            {match.player2 ? (
-                                                                <span className='text-foreground'>
-                                                                    {[
-                                                                        match.player1,
-                                                                        match.player2
-                                                                    ].map((name, index) => (
-                                                                        <span key={name}>
-                                                                            {index === 1 && ' vs '}
-                                                                            <span
-                                                                                className={
-                                                                                    match.winnerId &&
-                                                                                    ((index === 0 &&
-                                                                                        match.winnerId ===
-                                                                                            match.player1Id) ||
-                                                                                        (index ===
-                                                                                            1 &&
-                                                                                            match.winnerId ===
-                                                                                                match.player2Id))
-                                                                                        ? 'font-bold text-amber-300'
-                                                                                        : ''
-                                                                                }
-                                                                            >
-                                                                                {name}
-                                                                            </span>
-                                                                        </span>
-                                                                    ))}
-                                                                </span>
-                                                            ) : (
-                                                                <span className='text-foreground'>
-                                                                    {match.player1}{' '}
-                                                                    <span className='text-xs text-muted'>
-                                                                        ({t('bye')})
-                                                                    </span>
-                                                                </span>
-                                                            )}
-                                                            {canReport && (
-                                                                <span className='ml-auto flex gap-1'>
-                                                                    {[
-                                                                        [
-                                                                            match.player1Id,
-                                                                            match.player1
-                                                                        ],
-                                                                        [
-                                                                            match.player2Id,
-                                                                            match.player2
-                                                                        ]
-                                                                    ].map(([playerId, name]) => (
-                                                                        <HeroButton
-                                                                            key={playerId}
-                                                                            size='sm'
-                                                                            variant='tertiary'
-                                                                            className='!h-6 !px-2 text-xs'
-                                                                            onPress={() =>
-                                                                                act(
-                                                                                    `matches/${match.id}/result`,
-                                                                                    {
-                                                                                        winnerId:
-                                                                                            playerId
-                                                                                    },
-                                                                                    t(
-                                                                                        'Result recorded'
-                                                                                    )
-                                                                                )
-                                                                            }
-                                                                        >
-                                                                            {t('{{name}} won', {
-                                                                                name
-                                                                            })}
-                                                                        </HeroButton>
-                                                                    ))}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    )
-                            )}
-                        </div>
-                    )}
-                </Panel>
+                    }
+                />
             </div>
+
+            {showDeckPicker && (
+                <SelectDeckModal
+                    onClose={() => setShowDeckPicker(false)}
+                    onDeckSelected={onDeckSelected}
+                />
+            )}
         </div>
     );
 };

@@ -1,6 +1,12 @@
 -- Table: public."TournamentMatches"
--- One row per pairing per round. Player2Id NULL means a bye (auto-win
--- for Player1). WinnerId NULL means unreported.
+-- One row per pairing per round. Player2Id NULL with a bye ResultType
+-- means a bye (auto-win for Player1). WinnerId NULL with no ResultType
+-- means unreported. Elimination brackets pre-create slots whose players
+-- are unknown (both player columns NULL) and fill them from the source
+-- match references as results come in. Round is the gating "wave"
+-- number; Bracket/BracketRound/BracketPos position a match inside the
+-- winners ('W') / losers ('L') / grand finals ('GF') structure.
+-- Player1Wins/Player2Wins carry best-of series game scores.
 
 CREATE TABLE IF NOT EXISTS public."TournamentMatches"
 (
@@ -8,11 +14,22 @@ CREATE TABLE IF NOT EXISTS public."TournamentMatches"
     "TournamentId" integer NOT NULL,
     "Round" integer NOT NULL,
     "TableNumber" integer,
-    "Player1Id" integer NOT NULL,
+    "Player1Id" integer,
     "Player2Id" integer,
     "WinnerId" integer,
     "ReportedBy" integer,
     "ReportedAt" timestamp without time zone,
+    "Bracket" text COLLATE pg_catalog."default",
+    "BracketRound" integer,
+    "BracketPos" integer,
+    "P1SourceMatchId" integer,
+    "P1SourceIsLoser" boolean NOT NULL DEFAULT false,
+    "P2SourceMatchId" integer,
+    "P2SourceIsLoser" boolean NOT NULL DEFAULT false,
+    "Player1Wins" integer NOT NULL DEFAULT 0,
+    "Player2Wins" integer NOT NULL DEFAULT 0,
+    "BestOf" integer NOT NULL DEFAULT 1,
+    "ResultType" text COLLATE pg_catalog."default",
     CONSTRAINT "PK_TournamentMatches" PRIMARY KEY ("Id"),
     CONSTRAINT "FK_TournamentMatches_Tournaments" FOREIGN KEY ("TournamentId")
         REFERENCES public."Tournaments" ("Id") MATCH SIMPLE
