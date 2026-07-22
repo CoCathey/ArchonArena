@@ -1,8 +1,26 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing } from '../theme';
 import HouseIcon from '../ui/HouseIcon';
 import type { PlayerState, PromptButton } from './types';
+
+const HOUSE_NAMES = new Set([
+    'brobnar',
+    'dis',
+    'ekwidon',
+    'geistoid',
+    'logos',
+    'mars',
+    'ouboros',
+    'redemption',
+    'sanctum',
+    'saurian',
+    'shadows',
+    'skyborn',
+    'staralliance',
+    'unfathomable',
+    'untamed'
+]);
 
 function promptText(value: PlayerState['menuTitle']): string | undefined {
     if (!value) {
@@ -37,8 +55,19 @@ export default function PromptPanel(props: {
     const hasHouseSelectControl = (me.controls ?? []).some(
         (control) => control.type === 'house-select'
     );
-    const houseButtons = buttons.filter((button) => button.icon);
-    const plainButtons = buttons.filter((button) => !button.icon);
+    // House buttons show as an icon grid: either explicit icon buttons
+    // (Choose Active House) or, for a house-select targeting control, the
+    // house-named buttons. Everything else — Done / Cancel / Autoresolve —
+    // renders as plain buttons so the user is never left without a way out.
+    const iconButtons = buttons.filter((button) => button.icon);
+    const houseButtons =
+        iconButtons.length > 0
+            ? iconButtons
+            : hasHouseSelectControl
+            ? buttons.filter((button) => HOUSE_NAMES.has(String(button.text ?? '').toLowerCase()))
+            : [];
+    const houseSet = new Set(houseButtons);
+    const plainButtons = buttons.filter((button) => !houseSet.has(button));
     const title = promptText(me.menuTitle);
 
     if (!title && buttons.length === 0) {
@@ -49,12 +78,9 @@ export default function PromptPanel(props: {
         <View style={styles.container}>
             {title ? <Text style={styles.title}>{title}</Text> : null}
 
-            {houseButtons.length > 0 || hasHouseSelectControl ? (
+            {houseButtons.length > 0 ? (
                 <View style={styles.houseRow}>
-                    {(houseButtons.length > 0
-                        ? houseButtons
-                        : buttons
-                    ).map((button, index) => (
+                    {houseButtons.map((button, index) => (
                         <Pressable
                             key={`${String(button.arg)}-${index}`}
                             onPress={() => props.onButton(button)}
@@ -77,12 +103,8 @@ export default function PromptPanel(props: {
                 </View>
             ) : null}
 
-            {plainButtons.length > 0 && houseButtons.length === 0 && !hasHouseSelectControl ? (
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.buttonRow}
-                >
+            {plainButtons.length > 0 ? (
+                <View style={styles.buttonRow}>
                     {plainButtons.map((button, index) => (
                         <Pressable
                             key={`${String(button.arg)}-${index}`}
@@ -97,7 +119,7 @@ export default function PromptPanel(props: {
                             <Text style={styles.promptButtonText}>{String(button.text ?? '')}</Text>
                         </Pressable>
                     ))}
-                </ScrollView>
+                </View>
             ) : null}
         </View>
     );
@@ -122,19 +144,24 @@ const styles = StyleSheet.create({
         marginBottom: 6
     },
     buttonRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
         gap: spacing.sm,
         paddingHorizontal: 2
     },
     promptButton: {
         backgroundColor: colors.brand,
         borderRadius: radius.sm,
-        paddingHorizontal: 14,
-        paddingVertical: 9
+        paddingHorizontal: 16,
+        minHeight: 44,
+        alignItems: 'center',
+        justifyContent: 'center'
     },
     promptButtonText: {
         color: '#161006',
         fontWeight: '700',
-        fontSize: 14
+        fontSize: 15
     },
     houseRow: {
         flexDirection: 'row',

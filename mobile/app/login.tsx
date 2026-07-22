@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { router } from 'expo-router';
 import {
     KeyboardAvoidingView,
@@ -6,6 +6,7 @@ import {
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,11 +25,18 @@ export default function LoginScreen() {
     const [showServer, setShowServer] = useState(false);
     const [error, setError] = useState<string | undefined>();
     const [busy, setBusy] = useState(false);
+    const passwordRef = useRef<TextInput>(null);
+    const scrollRef = useRef<ScrollView>(null);
+
+    const fail = (message: string) => {
+        setError(message);
+        scrollRef.current?.scrollTo({ y: 0, animated: true });
+    };
 
     const submit = async () => {
         setError(undefined);
         if (!username.trim() || !password) {
-            setError('Enter your username and password');
+            fail('Enter your username and password');
             return;
         }
         setBusy(true);
@@ -38,13 +46,13 @@ export default function LoginScreen() {
             }
             const result = await login(username.trim(), password);
             if (!result.success) {
-                setError(result.message ?? 'Login failed');
+                fail(result.message ?? 'Login failed');
                 return;
             }
             await connectLobby();
             router.replace('/(tabs)');
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Login failed');
+            fail(err instanceof Error ? err.message : 'Login failed');
         } finally {
             setBusy(false);
         }
@@ -57,6 +65,7 @@ export default function LoginScreen() {
                 style={{ flex: 1 }}
             >
                 <ScrollView
+                    ref={scrollRef}
                     contentContainerStyle={styles.container}
                     keyboardShouldPersistTaps='handled'
                 >
@@ -74,8 +83,11 @@ export default function LoginScreen() {
                         placeholder='Your username'
                         textContentType='username'
                         returnKeyType='next'
+                        onSubmitEditing={() => passwordRef.current?.focus()}
+                        submitBehavior='submit'
                     />
                     <TextField
+                        ref={passwordRef}
                         label='Password'
                         value={password}
                         onChangeText={setPassword}

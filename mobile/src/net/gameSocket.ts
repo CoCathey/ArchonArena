@@ -5,6 +5,7 @@ import type { GameState } from '../game/types';
 import { useAuthStore } from '../stores/authStore';
 import { useGameStore } from '../stores/gameStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { buildGameNodeUrl } from './gameNodeUrl';
 import { patch } from './jsonpatch';
 
 let socket: Socket | undefined;
@@ -16,20 +17,7 @@ export function getGameSocket(): Socket | undefined {
 
 /** Build the game node origin from a lobby handoff message. */
 export function gameNodeUrl(handoff: HandoffMessage): string {
-    const lobbyUrl = useSettingsStore.getState().serverUrl;
-    const lobbyHost = lobbyUrl.replace(/^https?:\/\//, '').replace(/[:/].*$/, '');
-    const lobbyProtocol = lobbyUrl.startsWith('http://') ? 'http' : 'https';
-
-    const host = handoff.address && handoff.address !== 'undefined' ? handoff.address : lobbyHost;
-    const protocol = handoff.protocol ?? lobbyProtocol;
-
-    let url = `${protocol}://${host}`;
-    const standardPorts = [80, 443];
-    if (handoff.port && !standardPorts.includes(handoff.port)) {
-        url += `:${handoff.port}`;
-    }
-
-    return url;
+    return buildGameNodeUrl(handoff, useSettingsStore.getState().serverUrl);
 }
 
 /**
@@ -56,7 +44,9 @@ export function connectToGame(handoff: HandoffMessage): void {
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-        reconnectionAttempts: 5,
+        // Mobile networks drop often (backgrounding, WiFi↔cellular, tunnels);
+        // keep trying for ~1 min before surfacing a failure the user can retry.
+        reconnectionAttempts: 12,
         transports: ['websocket'],
         auth: (cb) => {
             // Prefer the freshest JWT we hold; the handoff token was newest at
@@ -115,8 +105,42 @@ export function connectToGame(handoff: HandoffMessage): void {
     });
 
     socket.on('cleargamestate', () => {
-        useGameStore.getState().setRootState(undefined);
+        // The game node only sends this when the game is actually torn down
+        // (game over, rematch, or a player left). Signal screens to leave the
+        // board — as opposed to the transient rootState reset on (re)connect.
+        useGameStore.getState().markCleared();
     });
+}
+
+/**
+ * Nudge the game socket to reconnect — used when returning from the background
+ * or when the user taps "Retry" after a failure. socket.connect() also resets
+ * socket.io's exhausted reconnection counter, so a previously-failed socket
+ * starts trying again. No-op when there's no game or it's already live.
+ */
+export function reconnectGameSocket(): void {
+    if (!socket || socket.connected) {
+        return;
+    }
+    useGameStore.getState().setStatus('reconnecting');
+    socket.connect();
+}
+
+/**
+ * Force a fresh full game state from the server. Cycling the connection makes
+ * the game node reset its per-player diff baseline and resend the complete
+ * state, which recovers a client whose board has drifted out of sync (the
+ * "both players stuck on Waiting for opponent" case). Listeners are kept.
+ */
+export function resyncGame(): void {
+    if (!socket) {
+        return;
+    }
+    const store = useGameStore.getState();
+    store.setStatus('reconnecting');
+    store.setRootState(undefined); // the next gamestate will be a full snapshot
+    socket.disconnect();
+    socket.connect();
 }
 
 /** Send an in-game command (a Game method) to the game node. */
