@@ -44,7 +44,9 @@ export function connectToGame(handoff: HandoffMessage): void {
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-        reconnectionAttempts: 5,
+        // Mobile networks drop often (backgrounding, WiFi↔cellular, tunnels);
+        // keep trying for ~1 min before surfacing a failure the user can retry.
+        reconnectionAttempts: 12,
         transports: ['websocket'],
         auth: (cb) => {
             // Prefer the freshest JWT we hold; the handoff token was newest at
@@ -108,6 +110,20 @@ export function connectToGame(handoff: HandoffMessage): void {
         // board — as opposed to the transient rootState reset on (re)connect.
         useGameStore.getState().markCleared();
     });
+}
+
+/**
+ * Nudge the game socket to reconnect — used when returning from the background
+ * or when the user taps "Retry" after a failure. socket.connect() also resets
+ * socket.io's exhausted reconnection counter, so a previously-failed socket
+ * starts trying again. No-op when there's no game or it's already live.
+ */
+export function reconnectGameSocket(): void {
+    if (!socket || socket.connected) {
+        return;
+    }
+    useGameStore.getState().setStatus('reconnecting');
+    socket.connect();
 }
 
 /** Send an in-game command (a Game method) to the game node. */
