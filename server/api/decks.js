@@ -19,6 +19,17 @@ const dokService = new DokService(configService);
 const UserService = require('../services/UserService');
 const userService = new UserService(configService);
 
+// ARCHON: the DoK collection-import "prepare" step can drive many outbound
+// requests against the shared, per-minute DoK budget; cap how often a single
+// user can trigger it so one account can't starve SAS enrichment for everyone.
+const { rateLimit } = require('./rateLimit');
+const dokPrepareLimit = rateLimit({
+    name: 'dok-prepare',
+    windowMs: 10 * 60 * 1000,
+    max: 10,
+    message: 'Too many Decks of KeyForge import attempts. Please wait a few minutes and try again.'
+});
+
 module.exports.init = function (server) {
     server.get(
         '/api/standalone-decks',
@@ -156,6 +167,7 @@ module.exports.init = function (server) {
     server.post(
         '/api/decks/import/dok/prepare',
         passport.authenticate('jwt', { session: false }),
+        dokPrepareLimit,
         wrapAsync(async function (req, res) {
             const dokUsername = (req.body.dokUsername || '').trim();
 

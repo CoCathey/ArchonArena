@@ -2,8 +2,17 @@ const passport = require('passport');
 
 const TournamentService = require('../services/tournament/TournamentService');
 const { wrapAsync } = require('../util.js');
+const { rateLimit } = require('./rateLimit');
 
 const tournamentService = new TournamentService();
+
+const tournamentCreateLimit = rateLimit({
+    name: 'tournament-create',
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    message:
+        'You have created several tournaments recently. Please wait a while before creating another.'
+});
 
 /**
  * ARCHON: native tournament engine API (Phase 7). Reads are public;
@@ -23,6 +32,7 @@ module.exports.init = function (server) {
     server.post(
         '/api/tournaments',
         passport.authenticate('jwt', { session: false }),
+        tournamentCreateLimit,
         wrapAsync(async (req, res) => {
             res.send(await tournamentService.create(req.user, req.body));
         })
