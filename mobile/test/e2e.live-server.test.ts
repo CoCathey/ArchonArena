@@ -206,7 +206,6 @@ describe.skipIf(!RUN)('live server protocol', () => {
                 showHand: false,
                 gamePrivate: false,
                 gameFormat: 'normal',
-                gameType: 'casual',
                 useGameTimeLimit: false,
                 gameTimeLimit: 45,
                 quickJoin: false,

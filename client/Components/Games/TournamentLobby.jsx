@@ -306,7 +306,6 @@ const TournamentLobby = () => {
             {matchesToCreate?.length > 0 && (
                 <NewGame
                     onClosed={() => setMatchesToCreate([])}
-                    defaultGameType='competitive'
                     defaultPrivate
                     defaultTimeLimit={45}
                     getParticipantName={getParticipantName}

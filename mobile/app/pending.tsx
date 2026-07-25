@@ -149,10 +149,9 @@ export default function PendingGameScreen() {
             <ScrollView contentContainerStyle={{ padding: spacing.md }}>
                 <Text style={styles.gameName}>{currentGame.name}</Text>
                 <Text style={styles.gameMeta}>
-                    {String(currentGame.gameType ?? 'casual')}
                     {currentGame.gameFormat && currentGame.gameFormat !== 'normal'
-                        ? ` · ${currentGame.gameFormat}`
-                        : ''}
+                        ? currentGame.gameFormat
+                        : 'Archon'}
                 </Text>
 
                 <ErrorBanner message={gameError} />

@@ -53,7 +53,6 @@ function GameRow(props: {
                 </Text>
                 <View style={styles.badgeRow}>
                     {game.started ? <Badge text='In progress' color='#274a33' textColor='#7ed494' /> : null}
-                    {game.gameType ? <Badge text={String(game.gameType)} /> : null}
                     {game.gameFormat && game.gameFormat !== 'normal' ? (
                         <Badge text={String(game.gameFormat)} />
                     ) : null}

@@ -16,7 +16,6 @@ class PendingGame {
         this.gameFormat = details.gameFormat;
         this.gamePrivate = !!details.gamePrivate;
         this.gameTimeLimit = details.gameTimeLimit;
-        this.gameType = details.gameType;
         this.hideDeckLists = details.hideDeckLists;
         this.id = randomUUID();
         this.muteSpectators = details.muteSpectators;
@@ -72,7 +71,6 @@ class PendingGame {
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
             gameId: this.id,
-            gameType: this.gameType,
             players: players,
             previousWinner: this.previousWinner,
             startedAt: this.createdAt,
@@ -356,7 +354,6 @@ class PendingGame {
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
-            gameType: this.gameType,
             id: this.id,
             messages: activePlayer ? this.gameChat.messages : undefined,
             muteSpectators: this.muteSpectators,
@@ -420,7 +417,6 @@ class PendingGame {
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
             gameTimeLimit: this.gameTimeLimit,
-            gameType: this.gameType,
             hideDeckLists: this.hideDeckLists,
             id: this.id,
             muteSpectators: this.muteSpectators,

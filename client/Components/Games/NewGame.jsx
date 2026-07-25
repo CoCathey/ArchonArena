@@ -10,7 +10,6 @@ import { lobbySendMessage } from '../../redux/socketActions';
 import Panel from '../Site/Panel';
 import GameFormats from './GameFormats';
 import GameOptions from './GameOptions';
-import GameTypes from './GameTypes';
 
 const GameNameMaxLength = 64;
 
@@ -18,7 +17,6 @@ const GameNameMaxLength = 64;
  * @typedef NewGameProps
  * @property {boolean} [quickJoin] The new game is quick join
  * @property {any} [tournament] Whether or not we're operating under the tournament UI
- * @property {import("../../typedefs").GameType} [defaultGameType] The default game type to use
  * @property {number} [defaultTimeLimit] The default time limit to use
  * @property {boolean} [defaultPrivate] Whether or not the game defaults to private
  * @property {function(string): string} [getParticipantName] A function to get the participant name of a participant in a tournament
@@ -32,7 +30,6 @@ const GameNameMaxLength = 64;
 const NewGame = ({
     quickJoin,
     tournament,
-    defaultGameType,
     defaultPrivate,
     defaultTimeLimit,
     getParticipantName,
@@ -58,8 +55,7 @@ const NewGame = ({
             .number()
             .min(10, t('Games must be at least 10 minutes long'))
             .max(120, t('Games must be less than 2 hours')),
-        gameFormat: yup.string().required(),
-        gameType: yup.string().required()
+        gameFormat: yup.string().required()
     });
 
     const initialValues = {
@@ -68,7 +64,6 @@ const NewGame = ({
         requirePassword: false,
         allowSpectators: true,
         gameFormat: 'normal',
-        gameType: defaultGameType || 'casual',
         useGameTimeLimit: !!defaultTimeLimit,
         gameTimeLimit: defaultTimeLimit || 45,
         gamePrivate: defaultPrivate,
@@ -195,8 +190,8 @@ const NewGame = ({
                         {quickJoin && (
                             <div className='rounded-md border border-border/45 bg-surface-secondary/32 px-3 py-1.5 text-xs text-muted'>
                                 <Trans>
-                                    Choose a game mode and type. We&apos;ll match you to an open
-                                    game or create one with default options.
+                                    Choose a game format. We&apos;ll match you to an open game or
+                                    create one with default options.
                                 </Trans>
                             </div>
                         )}
@@ -257,11 +252,6 @@ const NewGame = ({
                         >
                             <GameFormats formProps={formProps} />
                         </div>
-                        {!tournament && (
-                            <div className={quickJoin ? 'mt-4' : ''}>
-                                <GameTypes formProps={formProps} />
-                            </div>
-                        )}
 
                         <div className='mt-6 flex justify-center gap-2 border-t border-border/55 pt-4'>
                             <Button variant='primary' type='submit'>

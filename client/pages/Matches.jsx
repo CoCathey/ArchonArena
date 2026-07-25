@@ -89,7 +89,6 @@ const Matches = () => {
                       <td className='whitespace-nowrap'>
                           {myKeys} x {oppKeys}
                       </td>
-                      <td className='whitespace-nowrap'>{t(game.gameType)}</td>
                       <td className='whitespace-nowrap'>{t(game.gameFormat)}</td>
                       <td className='whitespace-nowrap'>
                           {moment(game.startedAt).format('YYYY-MM-DD HH:mm')}
@@ -126,9 +125,6 @@ const Matches = () => {
                         </th>
                         <th className='px-2 py-2 font-semibold'>
                             <Trans>Keys</Trans>
-                        </th>
-                        <th className='px-2 py-2 font-semibold'>
-                            <Trans>Type</Trans>
                         </th>
                         <th className='px-2 py-2 font-semibold'>
                             <Trans>Format</Trans>

@@ -19,14 +19,6 @@ import AdaptiveIcon from '../../assets/img/adaptive.png';
 import AllianceIcon from '../../assets/img/alliance.png';
 import UnchainedIcon from '../../assets/img/601.png';
 
-const typeBadgeClass = {
-    beginner:
-        'bg-emerald-500/12 text-emerald-700 border-emerald-500/28 dark:bg-emerald-600/25 dark:text-emerald-300 dark:border-emerald-500/40',
-    casual: 'bg-amber-500/12 text-amber-700 border-amber-500/28 dark:bg-amber-600/20 dark:text-amber-300 dark:border-amber-500/40',
-    competitive:
-        'bg-[color:color-mix(in_oklab,var(--brand)_12%,white)] text-[color:color-mix(in_oklab,var(--brand)_85%,black)] border-[color:color-mix(in_oklab,var(--brand)_35%,transparent)] dark:bg-rose-600/20 dark:text-rose-300 dark:border-rose-500/40'
-};
-
 const gameFormatIcons = [
     ['sealed', { src: SealedIcon, title: 'Sealed game format', noInvert: false }],
     ['alliance', { src: AllianceIcon, title: 'Alliance game format', noInvert: true }],
@@ -146,9 +138,9 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
         [socket]
     );
 
-    const groupedGames = useMemo(() => {
+    const filteredGames = useMemo(() => {
         const isAdmin = !!user?.permissions?.canManageGames;
-        const groups = { beginner: [], casual: [], competitive: [] };
+        const visible = [];
 
         for (const game of games) {
             if (!game.started && game.gamePrivate && !isAdmin) {
@@ -159,24 +151,17 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
                 continue;
             }
 
-            if (!gameFilter[game.gameFormat] || !gameFilter[game.gameType]) {
+            if (!gameFilter[game.gameFormat]) {
                 continue;
             }
 
-            if (groups[game.gameType]) {
-                groups[game.gameType].push(game);
-            }
+            visible.push(game);
         }
 
-        return groups;
+        return visible;
     }, [gameFilter, games, user]);
 
-    const sectionOrder = ['beginner', 'casual', 'competitive'];
-    const renderedSections = sectionOrder
-        .filter((type) => groupedGames[type]?.length > 0)
-        .map((type) => ({ games: groupedGames[type], type }));
-
-    if (renderedSections.length === 0) {
+    if (filteredGames.length === 0) {
         return (
             <div className='w-full'>
                 <AlertPanel
@@ -189,205 +174,188 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
 
     return (
         <div className='w-full space-y-3'>
-            {renderedSections.map(({ games: typeGames, type }) => (
-                <section key={type} className='space-y-2'>
-                    <div className='inline-flex items-center rounded-md border border-border/70 bg-surface-secondary/65 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-foreground'>
-                        {t(type)} ({typeGames.length})
-                    </div>
-                    <div className='space-y-2'>
-                        {typeGames.map((game) => {
-                            const isAdmin = !!user?.permissions?.canManageGames;
-                            const elapsedMs = Math.max(0, moment().diff(moment(game.createdAt)));
-                            const elapsed = moment.utc(elapsedMs).format('HH:mm');
-                            const players = Object.values(game.players || {});
-                            const iconClass = 'h-5 w-5 object-contain invert-[0.9]';
-                            const formatStyle =
-                                gameFormatStyles[game.gameFormat] || gameFormatStyles.normal;
-                            const formatMeta = gameFormatIconMap[game.gameFormat];
-                            const rowTone =
-                                game.node && isAdmin
-                                    ? 'bg-surface-secondary/52'
-                                    : 'bg-surface-secondary/38';
-                            const seats = [players[0], players[1]];
+            <section className='space-y-2'>
+                <div className='space-y-2'>
+                    {filteredGames.map((game) => {
+                        const isAdmin = !!user?.permissions?.canManageGames;
+                        const elapsedMs = Math.max(0, moment().diff(moment(game.createdAt)));
+                        const elapsed = moment.utc(elapsedMs).format('HH:mm');
+                        const players = Object.values(game.players || {});
+                        const iconClass = 'h-5 w-5 object-contain invert-[0.9]';
+                        const formatStyle =
+                            gameFormatStyles[game.gameFormat] || gameFormatStyles.normal;
+                        const formatMeta = gameFormatIconMap[game.gameFormat];
+                        const rowTone =
+                            game.node && isAdmin
+                                ? 'bg-surface-secondary/52'
+                                : 'bg-surface-secondary/38';
+                        const seats = [players[0], players[1]];
 
-                            return (
-                                <div
-                                    key={game.id}
-                                    className={`rounded-md border border-border/50 px-3 py-2 transition hover:border-border/60 hover:bg-surface-secondary/58 ${rowTone}`}
-                                >
-                                    <div className='flex flex-wrap items-start justify-between gap-2'>
-                                        <div className='min-w-0'>
-                                            <div className='flex flex-wrap items-center gap-1.5'>
-                                                <span className='truncate text-base font-semibold text-foreground'>
-                                                    {game.name}
-                                                </span>
-                                                <span className='text-xs text-muted'>
-                                                    [{elapsed}]
-                                                </span>
-                                                <span
-                                                    className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide ${formatStyle.pillClass}`}
-                                                >
-                                                    {formatMeta ? (
-                                                        <img
-                                                            src={formatMeta.src}
-                                                            className={`h-4 w-4 object-contain ${
-                                                                formatMeta.noInvert
-                                                                    ? ''
-                                                                    : formatStyle.iconClass
-                                                            }`}
-                                                            alt={t(formatMeta.title)}
-                                                            title={t(formatMeta.title)}
-                                                        />
-                                                    ) : null}
-                                                    {t(game.gameFormat)}
-                                                </span>
-                                                {game.tournament ? (
-                                                    <Link
-                                                        href={`/tournaments/${game.tournament.tournamentId}`}
-                                                        className='rounded-sm border border-amber-400/50 bg-amber-400/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-300 hover:bg-amber-400/20'
-                                                        title={t(
-                                                            'Tournament match - open event page'
-                                                        )}
-                                                    >
-                                                        {t('Tournament')}
-                                                        {game.tournament.round
-                                                            ? ` R${game.tournament.round}`
-                                                            : ''}
-                                                    </Link>
-                                                ) : null}
-                                                {game.gamePrivate && isAdmin ? (
-                                                    <span className='rounded-sm border border-border/70 bg-overlay/80 px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted'>
-                                                        Private
-                                                    </span>
-                                                ) : null}
-                                                {game.node && isAdmin ? (
-                                                    <span className='rounded-sm border border-border/70 bg-overlay/80 px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted'>
-                                                        {game.node}
-                                                    </span>
-                                                ) : null}
-                                            </div>
-                                        </div>
-                                        <div className='flex items-center gap-1.5'>
-                                            <span
-                                                className={`rounded-sm border px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide ${
-                                                    typeBadgeClass[type] ||
-                                                    'border-border/70 text-muted'
-                                                }`}
-                                            >
-                                                {t(type)}
+                        return (
+                            <div
+                                key={game.id}
+                                className={`rounded-md border border-border/50 px-3 py-2 transition hover:border-border/60 hover:bg-surface-secondary/58 ${rowTone}`}
+                            >
+                                <div className='flex flex-wrap items-start justify-between gap-2'>
+                                    <div className='min-w-0'>
+                                        <div className='flex flex-wrap items-center gap-1.5'>
+                                            <span className='truncate text-base font-semibold text-foreground'>
+                                                {game.name}
                                             </span>
-                                            {isAdmin ? (
-                                                <Button
-                                                    isIconOnly
-                                                    size='sm'
-                                                    variant='tertiary'
-                                                    className='h-7 w-7 text-muted hover:text-foreground'
-                                                    title={t('Remove game')}
-                                                    onPress={() => removeGame(game)}
-                                                >
-                                                    <Icon icon={faTrash} />
-                                                </Button>
-                                            ) : null}
-                                        </div>
-                                    </div>
-
-                                    <div className='mt-2 rounded-md border border-border/45 bg-overlay/45 p-2'>
-                                        <div className='grid gap-2 sm:grid-cols-2'>
-                                            {seats.map((player, seatIndex) => {
-                                                if (player) {
-                                                    const userClass = `username ${
-                                                        player.role
-                                                            ? `${player.role.toLowerCase()}-role`
-                                                            : ''
-                                                    }`;
-
-                                                    return (
-                                                        <div
-                                                            key={`${game.id}-${player.name}`}
-                                                            className='flex min-h-11 items-center gap-2 rounded-md border border-border/45 bg-surface-secondary/55 px-2 py-1.5 text-foreground'
-                                                        >
-                                                            <Avatar imgPath={player.avatar} />
-                                                            <span className={userClass}>
-                                                                {player.name}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                }
-
-                                                if (canJoin(game)) {
-                                                    return (
-                                                        <button
-                                                            key={`${game.id}-seat-${seatIndex}`}
-                                                            type='button'
-                                                            className='flex min-h-11 items-center gap-2 rounded-md border border-dashed border-border/50 bg-surface-secondary/35 px-2 py-1.5 text-left text-foreground/78 transition hover:cursor-pointer hover:border-accent/45 hover:bg-accent/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/45'
-                                                            onClick={() => joinGame(game)}
-                                                        >
-                                                            <span className='h-7 w-7 rounded-full border border-dashed border-border/55 bg-surface-secondary/55' />
-                                                            <span className='text-sm font-semibold text-[color:var(--brand)]'>
-                                                                {t('+ Join')}
-                                                            </span>
-                                                        </button>
-                                                    );
-                                                }
-
-                                                return (
-                                                    <div
-                                                        key={`${game.id}-seat-${seatIndex}`}
-                                                        className='flex min-h-11 items-center rounded-md border border-border/50 bg-surface-secondary/45 px-2 py-1.5 text-sm text-muted'
-                                                    >
-                                                        {t('Open slot')}
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-
-                                    <div className='mt-2 flex flex-wrap items-center justify-between gap-2'>
-                                        <div className='flex items-center gap-1.5 text-foreground'>
-                                            {game.needsPassword ? (
-                                                <Icon
-                                                    icon={faLock}
-                                                    className='text-sm text-foreground/85'
-                                                    title={t('Password protected')}
-                                                />
-                                            ) : null}
-                                            {statusIcons.map(([key, icon]) => {
-                                                if (!game[key]) {
-                                                    return null;
-                                                }
-
-                                                return (
+                                            <span className='text-xs text-muted'>[{elapsed}]</span>
+                                            <span
+                                                className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide ${formatStyle.pillClass}`}
+                                            >
+                                                {formatMeta ? (
                                                     <img
-                                                        key={key}
-                                                        src={icon.src}
-                                                        className={
-                                                            icon.noInvert
-                                                                ? 'h-5 w-5 object-contain'
-                                                                : iconClass
-                                                        }
-                                                        alt={t(icon.title)}
-                                                        title={t(icon.title)}
+                                                        src={formatMeta.src}
+                                                        className={`h-4 w-4 object-contain ${
+                                                            formatMeta.noInvert
+                                                                ? ''
+                                                                : formatStyle.iconClass
+                                                        }`}
+                                                        alt={t(formatMeta.title)}
+                                                        title={t(formatMeta.title)}
                                                     />
-                                                );
-                                            })}
+                                                ) : null}
+                                                {t(game.gameFormat)}
+                                            </span>
+                                            {game.tournament ? (
+                                                <Link
+                                                    href={`/tournaments/${game.tournament.tournamentId}`}
+                                                    className='rounded-sm border border-amber-400/50 bg-amber-400/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-300 hover:bg-amber-400/20'
+                                                    title={t('Tournament match - open event page')}
+                                                >
+                                                    {t('Tournament')}
+                                                    {game.tournament.round
+                                                        ? ` R${game.tournament.round}`
+                                                        : ''}
+                                                </Link>
+                                            ) : null}
+                                            {game.gamePrivate && isAdmin ? (
+                                                <span className='rounded-sm border border-border/70 bg-overlay/80 px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted'>
+                                                    Private
+                                                </span>
+                                            ) : null}
+                                            {game.node && isAdmin ? (
+                                                <span className='rounded-sm border border-border/70 bg-overlay/80 px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted'>
+                                                    {game.node}
+                                                </span>
+                                            ) : null}
                                         </div>
-                                        {canWatch(game) ? (
+                                    </div>
+                                    <div className='flex items-center gap-1.5'>
+                                        {isAdmin ? (
                                             <Button
+                                                isIconOnly
                                                 size='sm'
                                                 variant='tertiary'
-                                                className='text-foreground/75 hover:text-foreground'
-                                                onPress={() => watchGame(game)}
+                                                className='h-7 w-7 text-muted hover:text-foreground'
+                                                title={t('Remove game')}
+                                                onPress={() => removeGame(game)}
                                             >
-                                                {t('Watch')}
+                                                <Icon icon={faTrash} />
                                             </Button>
                                         ) : null}
                                     </div>
                                 </div>
-                            );
-                        })}
-                    </div>
-                </section>
-            ))}
+
+                                <div className='mt-2 rounded-md border border-border/45 bg-overlay/45 p-2'>
+                                    <div className='grid gap-2 sm:grid-cols-2'>
+                                        {seats.map((player, seatIndex) => {
+                                            if (player) {
+                                                const userClass = `username ${
+                                                    player.role
+                                                        ? `${player.role.toLowerCase()}-role`
+                                                        : ''
+                                                }`;
+
+                                                return (
+                                                    <div
+                                                        key={`${game.id}-${player.name}`}
+                                                        className='flex min-h-11 items-center gap-2 rounded-md border border-border/45 bg-surface-secondary/55 px-2 py-1.5 text-foreground'
+                                                    >
+                                                        <Avatar imgPath={player.avatar} />
+                                                        <span className={userClass}>
+                                                            {player.name}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            }
+
+                                            if (canJoin(game)) {
+                                                return (
+                                                    <button
+                                                        key={`${game.id}-seat-${seatIndex}`}
+                                                        type='button'
+                                                        className='flex min-h-11 items-center gap-2 rounded-md border border-dashed border-border/50 bg-surface-secondary/35 px-2 py-1.5 text-left text-foreground/78 transition hover:cursor-pointer hover:border-accent/45 hover:bg-accent/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/45'
+                                                        onClick={() => joinGame(game)}
+                                                    >
+                                                        <span className='h-7 w-7 rounded-full border border-dashed border-border/55 bg-surface-secondary/55' />
+                                                        <span className='text-sm font-semibold text-[color:var(--brand)]'>
+                                                            {t('+ Join')}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            }
+
+                                            return (
+                                                <div
+                                                    key={`${game.id}-seat-${seatIndex}`}
+                                                    className='flex min-h-11 items-center rounded-md border border-border/50 bg-surface-secondary/45 px-2 py-1.5 text-sm text-muted'
+                                                >
+                                                    {t('Open slot')}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className='mt-2 flex flex-wrap items-center justify-between gap-2'>
+                                    <div className='flex items-center gap-1.5 text-foreground'>
+                                        {game.needsPassword ? (
+                                            <Icon
+                                                icon={faLock}
+                                                className='text-sm text-foreground/85'
+                                                title={t('Password protected')}
+                                            />
+                                        ) : null}
+                                        {statusIcons.map(([key, icon]) => {
+                                            if (!game[key]) {
+                                                return null;
+                                            }
+
+                                            return (
+                                                <img
+                                                    key={key}
+                                                    src={icon.src}
+                                                    className={
+                                                        icon.noInvert
+                                                            ? 'h-5 w-5 object-contain'
+                                                            : iconClass
+                                                    }
+                                                    alt={t(icon.title)}
+                                                    title={t(icon.title)}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                    {canWatch(game) ? (
+                                        <Button
+                                            size='sm'
+                                            variant='tertiary'
+                                            className='text-foreground/75 hover:text-foreground'
+                                            onPress={() => watchGame(game)}
+                                        >
+                                            {t('Watch')}
+                                        </Button>
+                                    ) : null}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </section>
         </div>
     );
 };

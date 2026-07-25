@@ -13,7 +13,6 @@ import {
     lobbyStartGameRequested
 } from '../../redux/socketActions';
 import PendingGamePlayers from './PendingGamePlayers';
-import GameTypeInfo from './GameTypeInfo';
 import { Constants } from '../../constants';
 
 import ChargeMp3 from '../../assets/sound/charge.mp3';
@@ -333,9 +332,6 @@ const PendingGame = () => {
                             {formatLabel(currentGame.gameFormat)}
                         </span>
                         <span className='rounded-md border border-border/60 bg-surface-secondary/42 px-2 py-0.5 text-xs text-foreground/75'>
-                            {formatLabel(currentGame.gameType)}
-                        </span>
-                        <span className='rounded-md border border-border/60 bg-surface-secondary/42 px-2 py-0.5 text-xs text-foreground/75'>
                             {t('{{players}} / 2 players', { players: playerCountInGame })}
                         </span>
                         <span
@@ -356,8 +352,6 @@ const PendingGame = () => {
                         </span>
                         <span>{getGameStatus()}</span>
                     </div>
-
-                    <GameTypeInfo gameType={currentGame.gameType} />
 
                     {requiresDeckSelection && (
                         <AlertPanel

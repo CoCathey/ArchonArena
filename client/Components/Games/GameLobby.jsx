@@ -44,7 +44,6 @@ const createMockLobbyGames = () => {
         full: false,
         gameFormat: 'normal',
         gamePrivate: false,
-        gameType: 'casual',
         id: `mock-${Math.random().toString(36).slice(2, 10)}`,
         messages: [],
         needsPassword: false,
@@ -73,31 +72,27 @@ const createMockLobbyGames = () => {
         withDemoNode(
             makeGame({
                 gameFormat: 'normal',
-                gameType: 'beginner',
-                name: 'Beginner Open Normal',
+                name: 'Open Normal',
                 players: { admin: mockPlayers.admin }
             })
         ),
         withDemoNode(
             makeGame({
                 gameFormat: 'sealed',
-                gameType: 'casual',
-                name: 'Casual Sealed + Time',
+                name: 'Sealed + Time',
                 useGameTimeLimit: true
             })
         ),
         withDemoNode(
             makeGame({
                 gameFormat: 'reversal',
-                gameType: 'competitive',
-                name: 'Competitive Reversal (password)',
+                name: 'Reversal (password)',
                 needsPassword: true
             })
         ),
         withDemoNode(
             makeGame({
                 gameFormat: 'adaptive-bo1',
-                gameType: 'competitive',
                 name: 'Adaptive Bo1 + Show Hand',
                 showHand: true
             })
@@ -105,7 +100,6 @@ const createMockLobbyGames = () => {
         withDemoNode(
             makeGame({
                 gameFormat: 'alliance',
-                gameType: 'casual',
                 name: 'Alliance Feature Match',
                 players: { admin: mockPlayers.admin, test: mockPlayers.test },
                 started: true,
@@ -115,7 +109,6 @@ const createMockLobbyGames = () => {
         withDemoNode(
             makeGame({
                 gameFormat: 'unchained',
-                gameType: 'beginner',
                 name: 'Unchained Ladder',
                 players: { admin: mockPlayers.admin, contributor: mockPlayers.contributor },
                 started: false,
@@ -126,7 +119,6 @@ const createMockLobbyGames = () => {
         withDemoNode(
             makeGame({
                 gameFormat: 'normal',
-                gameType: 'casual',
                 name: 'Everything On',
                 needsPassword: true,
                 showHand: true,
@@ -143,9 +135,6 @@ const GameLobby = ({ gameId }) => {
     const location = useLocation();
     const filters = useMemo(
         () => [
-            { name: 'beginner', label: t('Beginner') },
-            { name: 'casual', label: t('Casual') },
-            { name: 'competitive', label: t('Competitive') },
             { name: 'normal', label: t('Normal') },
             { name: 'sealed', label: t('Sealed') },
             { name: 'reversal', label: t('Reversal') },

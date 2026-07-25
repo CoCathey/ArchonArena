@@ -16,12 +16,6 @@ import { useLobbyStore } from '../src/stores/lobbyStore';
 import { colors, radius, spacing } from '../src/theme';
 import { Button, ErrorBanner, TextField } from '../src/ui/primitives';
 
-const GAME_TYPES = [
-    { name: 'beginner', label: 'Beginner' },
-    { name: 'casual', label: 'Casual' },
-    { name: 'competitive', label: 'Competitive' }
-] as const;
-
 const GAME_FORMATS = [
     { name: 'normal', label: 'Archon' },
     { name: 'unchained', label: 'Unchained' },
@@ -105,7 +99,6 @@ export default function NewGameScreen() {
     const gameError = useLobbyStore((state) => state.gameError);
 
     const [name, setName] = useState(`${username ?? 'My'}'s game`);
-    const [gameType, setGameType] = useState<(typeof GAME_TYPES)[number]['name']>('casual');
     const [gameFormat, setGameFormat] =
         useState<(typeof GAME_FORMATS)[number]['name']>('normal');
     const [requirePassword, setRequirePassword] = useState(false);
@@ -136,7 +129,6 @@ export default function NewGameScreen() {
             showHand,
             gamePrivate,
             gameFormat,
-            gameType,
             useGameTimeLimit: useTimeLimit,
             gameTimeLimit: Math.max(10, Math.min(120, parseInt(timeLimit, 10) || 45)),
             quickJoin,
@@ -173,9 +165,6 @@ export default function NewGameScreen() {
                     if none exists.
                 </Text>
             )}
-
-            <Text style={styles.sectionLabel}>Game type</Text>
-            <Segmented options={GAME_TYPES} value={gameType} onChange={setGameType} />
 
             <Text style={styles.sectionLabel}>Format</Text>
             <Segmented options={GAME_FORMATS} value={gameFormat} onChange={setGameFormat} />

@@ -30,9 +30,6 @@ describe('settings registry validation', function () {
         expect(validateSection('rating', { elo: { kFactor: 0 } })).toContain(
             'elo.kFactor must be at least 1'
         );
-        expect(validateSection('rating', { ratedTypes: ['ranked'] })).toContain(
-            "ratedTypes contains unknown value 'ranked'"
-        );
         expect(validateSection('rating', { elo: { keyDiffMultipliers: { 9: 1 } } })).toContain(
             "elo.keyDiffMultipliers has unknown key '9'"
         );

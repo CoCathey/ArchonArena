@@ -12,7 +12,6 @@ describe('GameService.findByUserName', function () {
     // Flat player-rows the PG query emits (one per player per game).
     const row = (game, player, deck, keys, winner) => ({
         GameId: game,
-        GameType: 'competitive',
         GameFormat: 'archon',
         StartedAt: '2026-07-01T10:00:00Z',
         FinishedAt: '2026-07-01T10:20:00Z',

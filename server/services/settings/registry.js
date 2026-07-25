@@ -22,12 +22,6 @@ const REGISTRY = {
             'SAS-adjusted Elo settings. Changes apply to games finished after the change; the recalculation tool (roadmap) can rebuild history.',
         fields: {
             enabled: { type: 'boolean', label: 'Rated play enabled', default: true },
-            ratedTypes: {
-                type: 'stringArray',
-                label: 'Rated game types',
-                allowed: ['beginner', 'casual', 'competitive'],
-                default: ['casual', 'competitive']
-            },
             leaderboardMinGames: {
                 type: 'number',
                 label: 'Games required for leaderboards',

@@ -1,9 +1,9 @@
 # Design: Rating Engine (SAS-adjusted Elo)
 
 Status: **Increments 1–2 shipped** — pure calculator (increment 1) plus persistence and
-live game-end integration (increment 2). Rated play is ON by default for casual +
-competitive 2-player games. Admin settings service wiring and the recalculation tool are
-follow-ups (see ROADMAP.md Phase 5).
+live game-end integration (increment 2). Rated play is ON by default for all 2-player
+games (there is no per-game "type" distinction). Admin settings service wiring and the
+recalculation tool are follow-ups (see ROADMAP.md Phase 5).
 
 Increment 2 (`RatingService`, `server/services/rating/RatingService.js`):
 
@@ -13,10 +13,10 @@ Increment 2 (`RatingService`, `server/services/rating/RatingService.js`):
 -   **Idempotent by construction**: pre-check on `RatingHistory` plus a
     `UNIQUE (GameId, UserId)` constraint means duplicate GAMEWINs, rematch re-saves, or
     crashes can never double-rate a game.
--   **What rates**: exactly-2-player games with a recorded winner whose `GameType` is in
-    `rating.ratedTypes` (default casual + competitive) and whose `WinReason` is not
+-   **What rates**: exactly-2-player games with a recorded winner whose `WinReason` is not
     excluded (default excludes `rematch`). Win reasons map to calculator result types:
-    `keys`→keys, `concede`→concede, `clock`/`* after time`→timeout.
+    `keys`→keys, `concede`→concede, `clock`/`* after time`→timeout. (Games no longer carry
+    a type; every 2-player game is eligible.)
 -   **SAS at game time**: joins `GamePlayers → Decks → DeckSas` by deck uuid, so the
     Phase 4 cache feeds the handicap with no extra fetches; missing SAS degrades to an
     even-deck matchup.

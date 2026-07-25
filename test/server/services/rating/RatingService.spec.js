@@ -11,7 +11,6 @@ describe('RatingService', function () {
     const gameRows = (overrides = {}) => [
         {
             GameDbId: 10,
-            GameType: 'competitive',
             GameFormat: 'archon',
             WinnerId: 1,
             WinReason: 'keys',
@@ -23,7 +22,6 @@ describe('RatingService', function () {
         },
         {
             GameDbId: 10,
-            GameType: 'competitive',
             GameFormat: 'archon',
             WinnerId: 1,
             WinReason: 'keys',
@@ -86,7 +84,7 @@ describe('RatingService', function () {
     });
 
     describe('processGame', function () {
-        it('rates a finished competitive 2 player game', async function () {
+        it('rates a finished 2 player game', async function () {
             primeHappyPath(gameRows());
 
             await service.processGame(GAME_UUID);
@@ -118,14 +116,16 @@ describe('RatingService', function () {
             expect(winnerParams[3]).toBe(1); // games played incremented
         });
 
-        it('skips games that are not rated types', async function () {
-            primeHappyPath(
-                gameRows({ winner: { GameType: 'beginner' }, loser: { GameType: 'beginner' } })
-            );
+        it('rates every 2 player game regardless of any former game type', async function () {
+            // Game types (beginner/casual/competitive) have been removed: a
+            // finished 2-player game with a winner always rates now.
+            primeHappyPath(gameRows());
 
             await service.processGame(GAME_UUID);
 
-            expect(db.startTransaction).not.toHaveBeenCalled();
+            const tranSql = db.queryTran.mock.calls.map(([, sql]) => sql || '');
+            expect(tranSql.filter((sql) => sql.includes('INSERT INTO "Ratings"')).length).toBe(2);
+            expect(db.queryTran).toHaveBeenCalledWith(client, 'COMMIT');
         });
 
         it('skips games from unrated tournaments', async function () {

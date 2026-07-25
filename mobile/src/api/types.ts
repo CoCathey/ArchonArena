@@ -90,7 +90,6 @@ export interface GameSummary {
     started?: boolean;
     allowSpectators?: boolean;
     gameFormat?: string;
-    gameType?: string;
     gamePrivate?: boolean;
     needsPassword?: boolean;
     showHand?: boolean;
@@ -155,7 +154,6 @@ export interface NewGameRequest {
     password?: string;
     allowSpectators: boolean;
     gameFormat: string;
-    gameType: string;
     gamePrivate?: boolean;
     hideDeckLists?: boolean;
     showHand?: boolean;

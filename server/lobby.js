@@ -559,7 +559,6 @@ class Lobby {
                 (game) =>
                     !game.started &&
                     !game.tournament &&
-                    game.gameType === gameDetails.gameType &&
                     game.gameFormat === gameDetails.gameFormat &&
                     Object.values(game.players).length < 2 &&
                     !game.password &&
@@ -1139,7 +1138,6 @@ class Lobby {
         const game = new PendingGame(users[0], {
             allowSpectators: true,
             gameFormat: matchInfo.gameFormat,
-            gameType: 'competitive',
             gameTimeLimit: matchInfo.gameTimeLimit || undefined,
             useGameTimeLimit: !!matchInfo.gameTimeLimit,
             hideDeckLists: matchInfo.hideDecklists,
@@ -1268,7 +1266,6 @@ class Lobby {
             adaptive: game.adaptive,
             gameFormat: game.gameFormat,
             gameTimeLimit: game.gameTimeLimit,
-            gameType: game.gameType,
             hideDeckLists: game.hideDeckLists,
             showHand: game.showHand,
             allowSpectators: game.allowSpectators,
@@ -1397,7 +1394,6 @@ class Lobby {
             adaptive: game.adaptive,
             gameFormat: game.gameFormat,
             gameTimeLimit: game.gameTimeLimit,
-            gameType: game.gameType,
             hideDeckLists: game.hideDeckLists,
             showHand: game.showHand,
             allowSpectators: game.allowSpectators,
@@ -1641,7 +1637,6 @@ class Lobby {
             syncGame.createdAt = game.startedAt;
             syncGame.gameFormat = game.gameFormat;
             syncGame.gamePrivate = game.gamePrivate;
-            syncGame.gameType = game.gameType;
             syncGame.id = game.id;
             syncGame.node = this.router.workers[nodeName];
             syncGame.password = game.password;

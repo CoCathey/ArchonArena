@@ -17,8 +17,8 @@ class GameService {
 
         try {
             let newGame = await this.db.query(
-                'INSERT INTO "Games" ("GameId", "GameType", "GameFormat", "StartedAt") VALUES ($1, $2, $3, $4) RETURNING "Id"',
-                [game.gameId, game.gameType, game.gameFormat, game.startedAt]
+                'INSERT INTO "Games" ("GameId", "GameFormat", "StartedAt") VALUES ($1, $2, $3) RETURNING "Id"',
+                [game.gameId, game.gameFormat, game.startedAt]
             );
 
             if (!newGame || newGame.length === 0) {
@@ -131,13 +131,13 @@ class GameService {
      *
      * Returns games newest-first with position zero always the requested
      * player (and their deck), matching what the client expects:
-     * { gameId, gameType, gameFormat, startedAt, finishedAt, winReason,
+     * { gameId, gameFormat, startedAt, finishedAt, winReason,
      *   winner, players: [{ name, deck, keys }], decks: [{ name, identity }] }.
      */
     async findByUserName(username) {
         const rows = await this.db.query(
             'WITH user_games AS (' +
-                'SELECT g."Id", g."GameId", g."GameType", g."GameFormat", g."StartedAt", ' +
+                'SELECT g."Id", g."GameId", g."GameFormat", g."StartedAt", ' +
                 'g."FinishedAt", g."WinReason", g."WinnerId" ' +
                 'FROM "Games" g ' +
                 'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
@@ -145,7 +145,7 @@ class GameService {
                 'WHERE u."Username" = $1 AND g."FinishedAt" IS NOT NULL ' +
                 'ORDER BY g."FinishedAt" DESC LIMIT 30' +
                 ') ' +
-                'SELECT ug."GameId", ug."GameType", ug."GameFormat", ug."StartedAt", ' +
+                'SELECT ug."GameId", ug."GameFormat", ug."StartedAt", ' +
                 'ug."FinishedAt", ug."WinReason", wu."Username" AS "Winner", gp."Keys", ' +
                 'pu."Username" AS "PlayerName", d."Name" AS "DeckName", ' +
                 'd."Identity" AS "DeckIdentity" ' +
@@ -166,7 +166,6 @@ class GameService {
             if (!byGame.has(row.GameId)) {
                 byGame.set(row.GameId, {
                     gameId: row.GameId,
-                    gameType: row.GameType,
                     gameFormat: row.GameFormat,
                     startedAt: row.StartedAt,
                     finishedAt: row.FinishedAt,

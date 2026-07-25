@@ -31,10 +31,6 @@
  */
 
 /**
- * @typedef {'casual' | 'beginner'| 'competitive' | 'adaptive-bo1'} GameType
- */
-
-/**
  * @typedef PendingDeck
  * @property {string} [name] The name of the deck
  * @property {boolean} selected Whether or not a deck is selected
@@ -67,7 +63,6 @@
  * @property {Date} createdAt When the game was created
  * @property {GameFormat} gameFormat The format of the game
  * @property {boolean} gamePrivate Whether or not the game is private
- * @property {GameType} gameType The type of game
  * @property {string} id The game id guid
  * @property {any[]} messages The game chat messages
  * @property {boolean} muteSpectators Whether or not spectators are muted (unable to chat)

@@ -4,8 +4,6 @@ const { isValidCountry, regionForCountry, countriesInRegion } = require('./regio
 
 const DEFAULT_RATING_CONFIG = {
     enabled: true,
-    // Game types (beginner/casual/competitive) that move ratings.
-    ratedTypes: ['casual', 'competitive'],
     // Win reasons that never rate (a rematch overwrites the winner record).
     excludedWinReasons: ['rematch'],
     // Rated games required to appear on leaderboards.
@@ -119,7 +117,7 @@ class RatingService {
         }
 
         const rows = await this.db.query(
-            'SELECT g."Id" AS "GameDbId", g."GameType", g."GameFormat", g."WinnerId", g."WinReason", ' +
+            'SELECT g."Id" AS "GameDbId", g."GameFormat", g."WinnerId", g."WinReason", ' +
                 'gp."PlayerId", gp."Keys", d."Uuid" AS "DeckUuid", ds."SasRating" ' +
                 'FROM "Games" g ' +
                 'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
@@ -135,11 +133,7 @@ class RatingService {
 
         const game = rows[0];
 
-        if (!game.WinnerId || !game.GameType) {
-            return;
-        }
-
-        if (!config.ratedTypes.includes(game.GameType)) {
+        if (!game.WinnerId) {
             return;
         }
 
