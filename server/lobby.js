@@ -599,9 +599,32 @@ class Lobby {
         const amber = await this.getMatchmakingAmber(username, format);
 
         this.matchmaking.enqueue({ username, format, amber, joinedAt: Date.now() });
-        socket.send('matchmaking', { status: 'searching', format });
+        socket.send('matchmaking', {
+            status: 'searching',
+            format,
+            queued: this.matchmaking.size(format)
+        });
 
         this.runMatchmaking();
+    }
+
+    // Tell everyone still waiting how many players are in their format's queue,
+    // so the "searching…" UI can show a live count. Runs after each sweep.
+    broadcastQueueSizes() {
+        if (!this.matchmaking) {
+            return;
+        }
+
+        for (const entry of this.matchmaking.list()) {
+            const socket = this.socketsByName[entry.username];
+            if (socket) {
+                socket.send('matchmaking', {
+                    status: 'searching',
+                    format: entry.format,
+                    queued: this.matchmaking.size(entry.format)
+                });
+            }
+        }
     }
 
     onLeaveQueue(socket) {
@@ -654,6 +677,8 @@ class Lobby {
         for (const [a, b] of this.matchmaking.collectMatches(Date.now(), canPair)) {
             this.createMatchedGame(a, b);
         }
+
+        this.broadcastQueueSizes();
     }
 
     createMatchedGame(a, b) {

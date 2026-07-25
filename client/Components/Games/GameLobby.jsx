@@ -210,6 +210,14 @@ const GameLobby = ({ gameId }) => {
         }
     }, [currentGame]);
 
+    // Deep link from the onboarding "play your first game" step.
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        if (params.get('quickmatch') === '1') {
+            setShowQuickMatch(true);
+        }
+    }, [location.search]);
+
     useEffect(() => {
         if (!currentGame && gameId && visibleGames.length > 0) {
             const game = visibleGames.find((x) => x.id === gameId);

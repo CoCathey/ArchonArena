@@ -77,7 +77,11 @@ const Onboarding = () => {
         return <div className='py-10 text-center text-muted'>{t('Loading...')}</div>;
     }
 
-    const finish = async () => {
+    const finish = async (destination) => {
+        // Called both directly (onPress passes a click event) and with an
+        // explicit path from the final step; only honour a string destination.
+        const target = typeof destination === 'string' ? destination : '/';
+
         try {
             await completeOnboarding().unwrap();
         } catch (err) {
@@ -90,7 +94,7 @@ const Onboarding = () => {
         }
 
         toast.success(t("You're all set - welcome to the Arena!"));
-        navigate('/');
+        navigate(target);
     };
 
     const saveLocation = async () => {
@@ -207,7 +211,8 @@ const Onboarding = () => {
         t('Where are you from?'),
         t('Join a club'),
         t('Import your decks'),
-        t('Add a profile picture')
+        t('Add a profile picture'),
+        t('Play your first game')
     ];
 
     const stepFooter = (onContinue, continueLabel, pending) => (
@@ -505,7 +510,26 @@ const Onboarding = () => {
                                 setAvatarPreview(URL.createObjectURL(file));
                             }}
                         />
-                        {stepFooter(finish, t('Finish'), completeState.isLoading)}
+                        {stepFooter(() => setStep(4), t('Continue'))}
+                    </>
+                )}
+
+                {step === 4 && (
+                    <>
+                        <p className='mb-3 text-sm text-muted'>
+                            {t(
+                                "You're all set. Jump into Quick Match and we'll pair you with an available opponent near your Amber - no waiting for someone to open a game."
+                            )}
+                        </p>
+                        <ul className='mb-1 list-disc space-y-1 pl-5 text-sm text-muted'>
+                            <li>{t('Pick a format and we find you an opponent.')}</li>
+                            <li>{t('Your Amber (rating) moves with every result.')}</li>
+                        </ul>
+                        {stepFooter(
+                            () => finish('/play?quickmatch=1'),
+                            t('Find a match'),
+                            completeState.isLoading
+                        )}
                     </>
                 )}
             </Panel>

@@ -48,6 +48,17 @@ class MatchmakingService {
     }
 
     /**
+     * Snapshot of who is currently queued, for broadcasting live queue sizes.
+     * @returns {Array<{username: string, format: string}>}
+     */
+    list() {
+        return Array.from(this.entries.values()).map((entry) => ({
+            username: entry.username,
+            format: entry.format
+        }));
+    }
+
+    /**
      * Add (or refresh) a player in the queue. Re-queueing for the same format
      * keeps the original wait so a player can't game the tolerance by
      * re-joining; switching format starts a fresh wait.

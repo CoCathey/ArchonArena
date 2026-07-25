@@ -27,6 +27,18 @@ describe('MatchmakingService', function () {
             expect(service.size()).toBe(1);
         });
 
+        it('lists queued players with their formats', function () {
+            enqueue('alice', 1200, { format: 'normal' });
+            enqueue('bob', 1300, { format: 'sealed' });
+
+            const list = service.list().sort((a, b) => a.username.localeCompare(b.username));
+
+            expect(list).toEqual([
+                { username: 'alice', format: 'normal' },
+                { username: 'bob', format: 'sealed' }
+            ]);
+        });
+
         it('ignores entries missing a username or format', function () {
             expect(service.enqueue({ username: '', format: 'normal', amber: 1200 })).toBe(false);
             expect(service.enqueue({ username: 'x', format: '', amber: 1200 })).toBe(false);

@@ -135,6 +135,7 @@ const handleMessage = (state, message, args) => {
             if (info.status === 'searching') {
                 state.searching = true;
                 state.matchmakingFormat = info.format;
+                state.matchmakingQueued = info.queued;
                 state.matchmakingError = undefined;
             } else if (info.status === 'matched') {
                 // The paired game arrives via 'gamestate' right after this.

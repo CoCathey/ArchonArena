@@ -32,6 +32,7 @@ const QuickMatchPanel = ({ onClose }) => {
     const dispatch = useDispatch();
     const searching = useSelector((state) => state.lobby.searching);
     const searchingFormat = useSelector((state) => state.lobby.matchmakingFormat);
+    const queued = useSelector((state) => state.lobby.matchmakingQueued);
     const error = useSelector((state) => state.lobby.matchmakingError);
     const [format, setFormat] = useState('normal');
     const [elapsed, setElapsed] = useState(0);
@@ -90,6 +91,9 @@ const QuickMatchPanel = ({ onClose }) => {
                     </div>
                     <div className='text-xs text-muted'>
                         {t('Elapsed: {{seconds}}s', { seconds: elapsed })}
+                        {queued > 1
+                            ? ` · ${t('{{count}} searching this format', { count: queued })}`
+                            : ` · ${t('first in the queue')}`}
                     </div>
                     <div className='max-w-sm text-xs text-muted'>
                         <Trans>
