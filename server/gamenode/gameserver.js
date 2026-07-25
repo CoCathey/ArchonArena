@@ -345,7 +345,9 @@ class GameServer {
         this.gameSocket.send('GAMEWIN', {
             game: game.getSaveState(),
             winner: winner.name,
-            reason: reason
+            reason: reason,
+            // ARCHON: recorded play-by-play for the replay viewer.
+            replay: game.getReplay()
         });
     }
 

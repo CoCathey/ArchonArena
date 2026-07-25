@@ -3,6 +3,7 @@ import moment from 'moment';
 
 import AlertPanel from '../Components/Site/AlertPanel';
 import Panel from '../Components/Site/Panel';
+import Link from '../Components/Navigation/Link';
 import { useGetUserGamesQuery } from '../redux/api';
 
 import { Trans, useTranslation } from 'react-i18next';
@@ -96,6 +97,14 @@ const Matches = () => {
                       <td className='whitespace-nowrap'>
                           {duration.get('minutes')}m {duration.get('seconds')}s
                       </td>
+                      <td className='whitespace-nowrap'>
+                          <Link
+                              href={`/replay/${game.gameId}`}
+                              className='text-amber-300 underline'
+                          >
+                              {t('Replay')}
+                          </Link>
+                      </td>
                   </tr>
               );
           })
@@ -134,6 +143,9 @@ const Matches = () => {
                         </th>
                         <th className='px-2 py-2 font-semibold'>
                             <Trans>Duration</Trans>
+                        </th>
+                        <th className='px-2 py-2 font-semibold'>
+                            <Trans>Replay</Trans>
                         </th>
                     </tr>
                 </thead>

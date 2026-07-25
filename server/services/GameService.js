@@ -195,6 +195,45 @@ class GameService {
 
         return games;
     }
+
+    /**
+     * ARCHON: persist a finished game's replay (structured play-by-play),
+     * keyed to the game's DB row. Best-effort and idempotent (one replay per
+     * game); oversized captures are skipped rather than stored.
+     */
+    async saveReplay(gameUuid, replay) {
+        if (!gameUuid || !replay) {
+            return;
+        }
+
+        const data = JSON.stringify(replay);
+        // Guard against a pathologically large log bloating storage.
+        if (data.length > 2000000) {
+            logger.warn(`Skipping oversized replay for game ${gameUuid} (${data.length} bytes)`);
+            return;
+        }
+
+        await this.db.query(
+            'INSERT INTO "GameReplays" ("GameDbId", "Data", "CreatedAt") ' +
+                'SELECT "Id", $2::jsonb, now() AT TIME ZONE \'utc\' FROM "Games" WHERE "GameId" = $1 ' +
+                'ON CONFLICT ("GameDbId") DO NOTHING',
+            [gameUuid, data]
+        );
+    }
+
+    /**
+     * ARCHON: the stored replay for a finished game (by external GameId), or
+     * null if none was recorded.
+     */
+    async getReplay(gameUuid) {
+        const rows = await this.db.query(
+            'SELECT gr."Data" FROM "GameReplays" gr ' +
+                'JOIN "Games" g ON g."Id" = gr."GameDbId" WHERE g."GameId" = $1',
+            [gameUuid]
+        );
+
+        return rows && rows[0] ? rows[0].Data : null;
+    }
 }
 
 module.exports = GameService;

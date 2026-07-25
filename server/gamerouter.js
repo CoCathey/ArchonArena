@@ -266,6 +266,9 @@ class GameRouter extends EventEmitter {
                 // effort and idempotent; never blocks the game flow. The
                 // lobby also listens so tournament matches auto-report.
                 Promise.resolve(this.gameService.update(message.arg.game))
+                    .then(() =>
+                        this.gameService.saveReplay(message.arg.game.gameId, message.arg.replay)
+                    )
                     .then(() => this.ratingService.processGame(message.arg.game.gameId))
                     .catch((err) => logger.error('Failed to save/rate finished game', err));
 

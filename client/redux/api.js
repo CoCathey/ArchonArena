@@ -674,6 +674,9 @@ export const api = createApi({
             query: () => '/games',
             providesTags: [{ type: TAG_TYPES.GAMES, id: GAMES_ID }]
         }),
+        getGameReplay: builder.query({
+            query: (gameId) => `/games/${encodeURIComponent(gameId)}/replay`
+        }),
         removeLobbyMessage: builder.mutation({
             query: (messageId) => ({
                 url: `/messages/${messageId}`,
@@ -765,6 +768,7 @@ export const {
     useAddBanlistMutation,
     useDeleteBanlistMutation,
     useGetUserGamesQuery,
+    useGetGameReplayQuery,
     useRemoveLobbyMessageMutation
 } = api;
 

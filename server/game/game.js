@@ -1748,6 +1748,27 @@ class Game extends EventEmitter {
         };
     }
 
+    /**
+     * ARCHON: a self-contained recording of the finished game for the replay
+     * viewer - the structured play-by-play log plus enough header to render it
+     * standalone. Captured at game end (read-only; no gameplay-engine coupling).
+     */
+    getReplay() {
+        return {
+            gameId: this.id,
+            gameFormat: this.gameFormat,
+            startedAt: this.startedAt,
+            finishedAt: this.finishedAt,
+            winner: this.winner ? this.winner.name : undefined,
+            winReason: this.winReason,
+            players: this.getPlayers().map((player) => ({
+                name: player.name,
+                deck: player.deckData ? player.deckData.identity : undefined
+            })),
+            messages: this.gameChat ? this.gameChat.messages : []
+        };
+    }
+
     /*
      * This information is sent to the client
      */

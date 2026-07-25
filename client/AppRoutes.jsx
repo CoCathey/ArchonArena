@@ -15,6 +15,7 @@ import Logout from './pages/Logout';
 // ARCHON: new navigation targets
 import CommunityNews from './pages/CommunityNews';
 import ContentPageGuard from './Components/Navigation/ContentPageGuard';
+import Replay from './pages/Replay';
 import Leaderboards from './pages/Leaderboards';
 import Matches from './pages/Matches';
 import Placeholder from './pages/Placeholder';
@@ -113,6 +114,7 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/patreon' element={<Patreon code={getParam('code')} />} />
             {/* ARCHON: game history + community news are live features */}
             <Route path='/matches' element={<Matches />} />
+            <Route path='/replay/:gameId' element={<Replay />} />
             <Route
                 path='/community/news'
                 element={

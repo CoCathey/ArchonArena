@@ -100,8 +100,9 @@ const Messages = ({ messages, onCardMouseOver, onCardMouseOut }) => {
             const hasStartOfTurn = hasStartOfTurnAlert(message.message);
             const hasPhaseStart = hasPhaseStartAlert(message.message);
             let className = classNames('message', 'mb-1', {
-                'this-player': message.activePlayer && message.activePlayer == owner.name,
-                'other-player': message.activePlayer && message.activePlayer !== owner.name,
+                'this-player': owner && message.activePlayer && message.activePlayer == owner.name,
+                'other-player':
+                    owner && message.activePlayer && message.activePlayer !== owner.name,
                 'chat-bubble': Object.values(message.message).some(
                     (m) => m.name && m.argType === 'player'
                 ),

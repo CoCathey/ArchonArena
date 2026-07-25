@@ -84,3 +84,46 @@ describe('GameService.findByUserName', function () {
         expect(params).toEqual(['alice']);
     });
 });
+
+describe('GameService replays', function () {
+    let db;
+    let service;
+
+    beforeEach(function () {
+        db = { query: vi.fn().mockResolvedValue([]) };
+        service = new GameService(db);
+    });
+
+    it('saveReplay does nothing without a game id or replay', async function () {
+        await service.saveReplay(null, { messages: [] });
+        await service.saveReplay('g1', null);
+
+        expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it('saveReplay persists the serialized replay keyed to the game', async function () {
+        const replay = { messages: [{ id: 1 }], winner: 'alice' };
+
+        await service.saveReplay('game-uuid', replay);
+
+        expect(db.query).toHaveBeenCalledTimes(1);
+        const [sql, params] = db.query.mock.calls[0];
+        expect(sql).toContain('INSERT INTO "GameReplays"');
+        expect(params[0]).toBe('game-uuid');
+        expect(params[1]).toBe(JSON.stringify(replay));
+    });
+
+    it('saveReplay skips an oversized replay', async function () {
+        await service.saveReplay('game-uuid', { messages: 'x'.repeat(2000001) });
+
+        expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it('getReplay returns the stored data, or null when absent', async function () {
+        db.query.mockResolvedValueOnce([{ Data: { messages: [], winner: 'bob' } }]);
+        expect(await service.getReplay('game-uuid')).toEqual({ messages: [], winner: 'bob' });
+
+        db.query.mockResolvedValueOnce([]);
+        expect(await service.getReplay('missing')).toBeNull();
+    });
+});
