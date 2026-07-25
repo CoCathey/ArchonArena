@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS public."Ratings"
     "Rating" integer NOT NULL,
     "GamesPlayed" integer NOT NULL DEFAULT 0,
     "UpdatedAt" timestamp without time zone NOT NULL,
+    -- How far inactive-player decay has been applied (null = never decayed).
+    "LastDecayAt" timestamp without time zone,
     CONSTRAINT "PK_Ratings" PRIMARY KEY ("UserId", "Pool"),
     CONSTRAINT "FK_Ratings_Users_UserId" FOREIGN KEY ("UserId")
         REFERENCES public."Users" ("Id") MATCH SIMPLE

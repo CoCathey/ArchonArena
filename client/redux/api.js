@@ -431,6 +431,18 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.RATINGS]
         }),
+        // ARCHON: seasons & rating decay (site-wide admin operations)
+        getRatingSeason: builder.query({
+            query: () => '/admin/ratings/season'
+        }),
+        applyRatingDecay: builder.mutation({
+            query: () => ({ url: '/admin/ratings/decay', method: 'POST' }),
+            invalidatesTags: [TAG_TYPES.RATINGS]
+        }),
+        startNewSeason: builder.mutation({
+            query: () => ({ url: '/admin/ratings/new-season', method: 'POST' }),
+            invalidatesTags: [TAG_TYPES.RATINGS]
+        }),
         // ARCHON: runtime admin settings
         getAdminSettings: builder.query({
             query: () => '/admin/settings'
@@ -694,6 +706,9 @@ export const {
     useGetSiteContentQuery,
     useAdminSetRatingMutation,
     useAdminResetRatingsMutation,
+    useGetRatingSeasonQuery,
+    useApplyRatingDecayMutation,
+    useStartNewSeasonMutation,
     useGetLeaderboardQuery,
     useGetRatingsQuery,
     useGetAdminSettingsQuery,

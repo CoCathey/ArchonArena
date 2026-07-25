@@ -81,6 +81,57 @@ module.exports.init = function (server) {
         })
     );
 
+    // ----- Seasons & rating decay (site-wide operations; isAdmin only)
+    const ensureAdmin = (req, res) => {
+        if (req.user?.permissions?.isAdmin) {
+            return true;
+        }
+
+        res.status(403).send({ success: false, message: 'Forbidden' });
+
+        return false;
+    };
+
+    server.get(
+        '/api/admin/ratings/season',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!ensureAdmin(req, res)) {
+                return;
+            }
+
+            const season = await ratingService.getCurrentSeason();
+
+            res.send({ success: true, ...season });
+        })
+    );
+
+    server.post(
+        '/api/admin/ratings/decay',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!ensureAdmin(req, res)) {
+                return;
+            }
+
+            const result = await ratingService.applyDecay();
+
+            res.send({ success: true, ...result });
+        })
+    );
+
+    server.post(
+        '/api/admin/ratings/new-season',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!ensureAdmin(req, res)) {
+                return;
+            }
+
+            res.send(await ratingService.startNewSeason());
+        })
+    );
+
     server.get(
         '/api/account/location',
         passport.authenticate('jwt', { session: false }),

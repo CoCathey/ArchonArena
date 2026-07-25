@@ -11,8 +11,62 @@ const DEFAULT_RATING_CONFIG = {
     // Maximum rows a single leaderboard request may return.
     leaderboardMaxLimit: 100,
     // Overrides for the Elo calculator (see eloDefaults.js).
-    elo: {}
+    elo: {},
+    // Inactive-player rating decay (off by default).
+    decay: { enabled: false, graceDays: 30, pointsPerWeek: 20, floor: 1200 },
+    // Season soft-reset policy, applied when an admin starts a new season.
+    season: { carryFactor: 0.5, baseline: 1200 }
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WEEK_MS = 7 * DAY_MS;
+
+/**
+ * Pure rating-decay calculation for one rating row. Returns the new rating and
+ * the instant decay has now been applied through (so it is idempotent and
+ * never re-decays the same span), or null when nothing decays.
+ *
+ * Decay only bites after `graceDays` of inactivity (since UpdatedAt), then
+ * removes `pointsPerWeek` for each further whole week, never below `floor`.
+ */
+function computeDecay(ratingBefore, updatedAtMs, lastDecayAtMs, nowMs, decayConfig) {
+    if (!decayConfig || !decayConfig.enabled) {
+        return null;
+    }
+
+    const graceMs = Math.max(0, decayConfig.graceDays ?? 30) * DAY_MS;
+
+    if (nowMs - updatedAtMs <= graceMs) {
+        return null; // still within the activity grace window
+    }
+
+    // Resume from the later of "grace expired" and "already decayed through",
+    // so a game played since the last decay correctly restarts the clock.
+    const from = Math.max(lastDecayAtMs || 0, updatedAtMs + graceMs);
+    const periods = Math.floor((nowMs - from) / WEEK_MS);
+
+    if (periods < 1) {
+        return null;
+    }
+
+    const floor = decayConfig.floor ?? 1200;
+    const pointsPerWeek = Math.max(0, decayConfig.pointsPerWeek ?? 20);
+    const newRating = Math.max(floor, ratingBefore - periods * pointsPerWeek);
+
+    return { newRating, decayThroughMs: from + periods * WEEK_MS };
+}
+
+/**
+ * Pure season soft-reset: regress a rating toward the baseline, keeping
+ * `carryFactor` of the distance from it (0 = full reset to baseline, 1 = no
+ * change), never below `floor`.
+ */
+function computeSeasonReset(ratingBefore, baseline, carryFactor, floor) {
+    const carry = Math.min(1, Math.max(0, carryFactor));
+    const reset = Math.round(baseline + (ratingBefore - baseline) * carry);
+
+    return Math.max(floor, reset);
+}
 
 // Map a game format (Games.GameFormat) onto a rating pool. The client only
 // surfaces three pools on the leaderboards/ratings pages - 'archon', 'sealed'
@@ -72,6 +126,16 @@ class RatingService {
                 ...DEFAULT_RATING_CONFIG.elo,
                 ...(fileConfig.elo || {}),
                 ...(adminConfig.elo || {})
+            },
+            decay: {
+                ...DEFAULT_RATING_CONFIG.decay,
+                ...(fileConfig.decay || {}),
+                ...(adminConfig.decay || {})
+            },
+            season: {
+                ...DEFAULT_RATING_CONFIG.season,
+                ...(fileConfig.season || {}),
+                ...(adminConfig.season || {})
             }
         };
     }
@@ -408,6 +472,117 @@ class RatingService {
     }
 
     /**
+     * Apply inactive-player rating decay across all pools. Idempotent: each row
+     * records how far decay has been applied (LastDecayAt), so re-running only
+     * decays newly-elapsed weeks. Safe to call on a schedule or from admin.
+     */
+    async applyDecay(nowMs) {
+        const config = this.getConfig();
+        const decayConfig = config.decay || {};
+
+        if (!decayConfig.enabled) {
+            return { decayed: 0, scanned: 0 };
+        }
+
+        const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+        // Epochs are pulled straight from the (UTC) stored timestamps so the
+        // decay math never depends on the server's local timezone.
+        const rows = await this.db.query(
+            'SELECT "UserId", "Pool", "Rating", ' +
+                'EXTRACT(EPOCH FROM "UpdatedAt") AS "UpdatedEpoch", ' +
+                'EXTRACT(EPOCH FROM "LastDecayAt") AS "DecayEpoch" FROM "Ratings"'
+        );
+
+        let decayed = 0;
+        for (const row of rows || []) {
+            const result = computeDecay(
+                row.Rating,
+                Number(row.UpdatedEpoch) * 1000,
+                row.DecayEpoch != null ? Number(row.DecayEpoch) * 1000 : null,
+                now,
+                decayConfig
+            );
+
+            if (!result) {
+                continue;
+            }
+
+            await this.db.query(
+                'UPDATE "Ratings" SET "Rating" = $1, ' +
+                    '"LastDecayAt" = to_timestamp($2) AT TIME ZONE \'utc\' ' +
+                    'WHERE "UserId" = $3 AND "Pool" = $4',
+                [result.newRating, result.decayThroughMs / 1000, row.UserId, row.Pool]
+            );
+
+            if (result.newRating < row.Rating) {
+                decayed++;
+            }
+        }
+
+        return { decayed, scanned: (rows || []).length };
+    }
+
+    /**
+     * Start a new season: soft-reset every rating toward the baseline and
+     * record the season. Returns the new season number and how many ratings
+     * moved. The per-game RatingHistory audit is left untouched.
+     */
+    async startNewSeason() {
+        const config = this.getConfig();
+        const seasonConfig = config.season || {};
+        const eloConfig = normalizeConfig(config.elo);
+        const baseline = seasonConfig.baseline ?? eloConfig.defaultRating;
+        const floor = eloConfig.ratingFloor;
+        const carry = seasonConfig.carryFactor ?? 0.5;
+
+        const rows = await this.db.query('SELECT "UserId", "Pool", "Rating" FROM "Ratings"');
+
+        let adjusted = 0;
+        for (const row of rows || []) {
+            const newRating = computeSeasonReset(row.Rating, baseline, carry, floor);
+
+            if (newRating !== row.Rating) {
+                adjusted++;
+            }
+
+            await this.db.query(
+                'UPDATE "Ratings" SET "Rating" = $1, "LastDecayAt" = NULL ' +
+                    'WHERE "UserId" = $2 AND "Pool" = $3',
+                [newRating, row.UserId, row.Pool]
+            );
+        }
+
+        const inserted = await this.db.query(
+            'INSERT INTO "Seasons" ("StartedAt") VALUES (now() AT TIME ZONE \'utc\') ' +
+                'RETURNING "Id", "StartedAt"'
+        );
+        const season = inserted && inserted[0] ? inserted[0] : null;
+
+        return {
+            success: true,
+            season: season ? season.Id : null,
+            startedAt: season ? season.StartedAt : null,
+            adjusted
+        };
+    }
+
+    /**
+     * The current (latest) season, or season 1 with no recorded start if none
+     * has been started yet.
+     */
+    async getCurrentSeason() {
+        const rows = await this.db.query(
+            'SELECT "Id", "StartedAt" FROM "Seasons" ORDER BY "Id" DESC LIMIT 1'
+        );
+
+        if (rows && rows[0]) {
+            return { number: rows[0].Id, startedAt: rows[0].StartedAt };
+        }
+
+        return { number: 1, startedAt: null };
+    }
+
+    /**
      * Public ratings for a user by username: [{ pool, rating, gamesPlayed }].
      */
     async getRatingsForUsername(username) {
@@ -587,3 +762,5 @@ class RatingService {
 }
 
 module.exports = RatingService;
+module.exports.computeDecay = computeDecay;
+module.exports.computeSeasonReset = computeSeasonReset;

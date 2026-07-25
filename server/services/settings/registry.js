@@ -127,6 +127,54 @@ const REGISTRY = {
                         default: DEFAULT_ELO_CONFIG.resultTypeMultipliers
                     }
                 }
+            },
+            decay: {
+                type: 'section',
+                label: 'Rating decay (inactive players)',
+                fields: {
+                    enabled: { type: 'boolean', label: 'Decay enabled', default: false },
+                    graceDays: {
+                        type: 'number',
+                        label: 'Days of inactivity before decay starts',
+                        min: 1,
+                        max: 365,
+                        default: 30
+                    },
+                    pointsPerWeek: {
+                        type: 'number',
+                        label: 'Amber lost per further week of inactivity',
+                        min: 1,
+                        max: 500,
+                        default: 20
+                    },
+                    floor: {
+                        type: 'number',
+                        label: 'Decay will not drop a rating below',
+                        min: 0,
+                        max: 4000,
+                        default: 1200
+                    }
+                }
+            },
+            season: {
+                type: 'section',
+                label: 'Seasons',
+                fields: {
+                    carryFactor: {
+                        type: 'number',
+                        label: 'Season reset: fraction of the gap from baseline kept (0 = full reset, 1 = no reset)',
+                        min: 0,
+                        max: 1,
+                        default: 0.5
+                    },
+                    baseline: {
+                        type: 'number',
+                        label: 'Season reset baseline (ratings regress toward this)',
+                        min: 100,
+                        max: 4000,
+                        default: 1200
+                    }
+                }
             }
         }
     },

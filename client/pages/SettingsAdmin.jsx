@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Button as HeroButton, Label, toast } from '@heroui/react';
 
 import Panel from '../Components/Site/Panel';
+import SeasonOperations from '../Components/Admin/SeasonOperations';
 import {
     useGetAdminSettingsQuery,
     useResetAdminSettingsMutation,
@@ -365,6 +366,7 @@ const SettingsAdmin = () => {
                     </div>
                 </Panel>
             ))}
+            <SeasonOperations />
         </div>
     );
 };
