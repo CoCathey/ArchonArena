@@ -14,6 +14,7 @@ import Login from './pages/LoginContainer';
 import Logout from './pages/Logout';
 // ARCHON: new navigation targets
 import CommunityNews from './pages/CommunityNews';
+import ContentPageGuard from './Components/Navigation/ContentPageGuard';
 import Leaderboards from './pages/Leaderboards';
 import Matches from './pages/Matches';
 import Placeholder from './pages/Placeholder';
@@ -112,7 +113,14 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/patreon' element={<Patreon code={getParam('code')} />} />
             {/* ARCHON: game history + community news are live features */}
             <Route path='/matches' element={<Matches />} />
-            <Route path='/community/news' element={<CommunityNews />} />
+            <Route
+                path='/community/news'
+                element={
+                    <ContentPageGuard pageKey='news'>
+                        <CommunityNews />
+                    </ContentPageGuard>
+                }
+            />
             {/* ARCHON: placeholders for roadmap features (see ROADMAP.md) */}
             <Route path='/play-irl' element={<PlayIrl />} />
             <Route
@@ -173,28 +181,34 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route
                 path='/community/articles'
                 element={
-                    <Placeholder
-                        title='Articles'
-                        description='Strategy articles and community content are planned.'
-                    />
+                    <ContentPageGuard pageKey='articles'>
+                        <Placeholder
+                            title='Articles'
+                            description='Strategy articles and community content are planned.'
+                        />
+                    </ContentPageGuard>
                 }
             />
             <Route
                 path='/community/blogs'
                 element={
-                    <Placeholder
-                        title='Blogs'
-                        description='Player blogs are planned as part of community features.'
-                    />
+                    <ContentPageGuard pageKey='blogs'>
+                        <Placeholder
+                            title='Blogs'
+                            description='Player blogs are planned as part of community features.'
+                        />
+                    </ContentPageGuard>
                 }
             />
             <Route
                 path='/community/forums'
                 element={
-                    <Placeholder
-                        title='Forums'
-                        description='Discussion forums are planned as part of community features.'
-                    />
+                    <ContentPageGuard pageKey='forums'>
+                        <Placeholder
+                            title='Forums'
+                            description='Discussion forums are planned as part of community features.'
+                        />
+                    </ContentPageGuard>
                 }
             />
             <Route path='*' element={<NotFound />} />

@@ -22,11 +22,20 @@ module.exports.init = function (server) {
         '/api/content',
         wrapAsync(async (req, res) => {
             const content = settingsService.getSection('content') || {};
+            const navigation = settingsService.getSection('navigation') || {};
 
             res.send({
                 success: true,
                 about: content.aboutMarkdown || '',
-                privacy: content.privacyMarkdown || ''
+                privacy: content.privacyMarkdown || '',
+                // Optional Community content pages, visible unless an admin has
+                // explicitly turned them off. Consumed by the sidebar nav.
+                pages: {
+                    news: navigation.showNews !== false,
+                    articles: navigation.showArticles !== false,
+                    blogs: navigation.showBlogs !== false,
+                    forums: navigation.showForums !== false
+                }
             });
         })
     );

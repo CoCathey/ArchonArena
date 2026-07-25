@@ -230,6 +230,17 @@ const REGISTRY = {
                 default: ''
             }
         }
+    },
+    navigation: {
+        title: 'Navigation & Pages',
+        description:
+            'Show or hide the optional Community content pages. Turning a page off removes its link from the sidebar navigation.',
+        fields: {
+            showNews: { type: 'boolean', label: 'Show the News page', default: true },
+            showArticles: { type: 'boolean', label: 'Show the Articles page', default: true },
+            showBlogs: { type: 'boolean', label: 'Show the Blogs page', default: true },
+            showForums: { type: 'boolean', label: 'Show the Forums page', default: true }
+        }
     }
 };
 

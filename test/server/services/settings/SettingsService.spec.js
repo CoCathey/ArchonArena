@@ -34,6 +34,24 @@ describe('settings registry validation', function () {
             "elo.keyDiffMultipliers has unknown key '9'"
         );
     });
+
+    it('accepts navigation page toggles and rejects invalid ones', function () {
+        expect(
+            validateSection('navigation', {
+                showNews: true,
+                showArticles: false,
+                showBlogs: true,
+                showForums: false
+            })
+        ).toEqual([]);
+
+        expect(validateSection('navigation', { showForums: 'no' })).toContain(
+            'showForums must be true or false'
+        );
+        expect(validateSection('navigation', { showTournaments: true })).toEqual([
+            'showTournaments is not an editable setting'
+        ]);
+    });
 });
 
 describe('SettingsService', function () {

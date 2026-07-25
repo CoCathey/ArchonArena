@@ -5,6 +5,8 @@
  * @property {boolean} [showOnlyWhenLoggedIn] Whether or not this menu item only shows for logged in users
  * @property {boolean} [showOnlyWhenLoggedOut] Whether or not this menu item only shows for logged out users
  * @property {Permission} [permission] The permission required to see this menu item
+ * @property {string} [pageKey] Key of an admin-toggleable content page (see the
+ *   'navigation' site setting); the item is hidden when that page is turned off
  * @property {MenuItem[]} [childItems] Child menu items
  */
 
@@ -96,10 +98,10 @@ export const SidebarMenu = [
             // keeping it out of this submenu avoids Community also lighting
             // up on that page.
             { path: '/leaderboards', title: 'Leaderboards' },
-            { path: '/community/news', title: 'News' },
-            { path: '/community/articles', title: 'Articles' },
-            { path: '/community/blogs', title: 'Blogs' },
-            { path: '/community/forums', title: 'Forums' }
+            { path: '/community/news', title: 'News', pageKey: 'news' },
+            { path: '/community/articles', title: 'Articles', pageKey: 'articles' },
+            { path: '/community/blogs', title: 'Blogs', pageKey: 'blogs' },
+            { path: '/community/forums', title: 'Forums', pageKey: 'forums' }
         ]
     },
     // ARCHON: quick links for signed-in players, chess.com-style

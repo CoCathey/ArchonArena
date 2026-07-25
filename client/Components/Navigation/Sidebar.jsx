@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom';
 import { Button as HeroButton } from '@heroui/react';
 
 import { SidebarMenu, ProfileMenu } from '../../menus';
+import { useGetSiteContentQuery } from '../../redux/api';
 import Avatar from '../Site/Avatar';
 import BugReportModal from '../Site/BugReportModal';
 import LanguageSelector from './LanguageSelector';
@@ -21,6 +22,8 @@ import BrandMark from '../../assets/img/aa_mark.svg';
 const Sidebar = ({ appName, user }) => {
     const { t } = useTranslation();
     const location = useLocation();
+    const { data: siteContent } = useGetSiteContentQuery();
+    const contentPages = siteContent?.pages;
     const [openSection, setOpenSection] = useState(null);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
@@ -63,6 +66,13 @@ const Sidebar = ({ appName, user }) => {
         }
 
         if (item.permission && !user?.permissions?.[item.permission]) {
+            return false;
+        }
+
+        // Admin-toggleable content pages (News/Articles/Blogs/Forums): hidden
+        // only when the 'navigation' site setting explicitly turns them off, so
+        // links stay visible while the flags are still loading.
+        if (item.pageKey && contentPages && contentPages[item.pageKey] === false) {
             return false;
         }
 
