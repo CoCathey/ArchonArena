@@ -10,12 +10,12 @@ sets can be pulled in — see [docs/UPSTREAM.md](docs/UPSTREAM.md).
 
 ## What Archon Arena adds
 
-- **SAS-adjusted Elo ratings** — chess-style Elo modified by key differential and deck SAS
-  (power) difference, fully admin-configurable
-- **Rankings** — worldwide, region, country, and state leaderboards
-- **Tournaments** — online, in-person, and hybrid events with TO tools
-- **Keybringer SSO** — sign in with your Keybringer account
-- **Deck SAS integration** — SAS/AERC scores from Decks of KeyForge
+-   **SAS-adjusted Elo ratings** — chess-style Elo modified by key differential and deck SAS
+    (power) difference, fully admin-configurable
+-   **Rankings** — worldwide, region, country, and state leaderboards
+-   **Tournaments** — online, in-person, and hybrid events with TO tools
+-   **Keybringer SSO** — sign in with your Keybringer account
+-   **Deck SAS integration** — SAS/AERC scores from Decks of KeyForge
 
 See [ROADMAP.md](ROADMAP.md) for the full plan and current status.
 

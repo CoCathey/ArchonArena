@@ -7,11 +7,11 @@ fixes and new-set support can be pulled in with minimal conflict.
 
 ## Provenance
 
-| | |
-|---|---|
-| Upstream repo | `https://github.com/keyteki/keyteki` |
+|                 |                                            |
+| --------------- | ------------------------------------------ |
+| Upstream repo   | `https://github.com/keyteki/keyteki`       |
 | Imported commit | `296c2742212db7e6652a0913ce21ae17b49d6e2e` |
-| Imported date | 2026-06-28 (upstream commit date) |
+| Imported date   | 2026-06-28 (upstream commit date)          |
 
 The import was a verbatim snapshot (shallow), not a git-history merge, to keep this
 repository small. Upstream history remains available on GitHub.

@@ -1,3 +1,7 @@
 .prettierignore
 infrastructure/lobby/templates
 infrastructure/node/templates
+# Build output.
+dist
+# The Expo mobile app is a separate project with its own formatting/toolchain.
+mobile

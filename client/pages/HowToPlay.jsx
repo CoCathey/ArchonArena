@@ -31,8 +31,8 @@ const HowToPlay = () => {
                 <p>
                     <Trans i18nKey='howtoplay.thisguide'>
                         This guide is aimed at players familiar with Keyforge: the Unique Deck Game
-                        who want to start playing online using the Archon Arena platform. If
-                        you are new to this cardgame in general, there is a{' '}
+                        who want to start playing online using the Archon Arena platform. If you are
+                        new to this cardgame in general, there is a{' '}
                         <a
                             href='https://www.youtube.com/watch?v=D7qt2H9Im2Q'
                             target='_blank'
@@ -179,13 +179,13 @@ const HowToPlay = () => {
                 </h3>
                 <p>
                     <Trans i18nKey='howtoplay.about'>
-                        Archon Arena is building rated play, rankings, and tournaments on top of
-                        the classic casual experience. There are three categories (beginner, casual
-                        and competitive) to be chosen when creating a game which gives an
-                        indication of what to expect. Most players very much appreciate a formal
-                        concede by clicking the ‘Concede’ button and typing ‘gg’ before leaving a
-                        game — and once rated play launches, finishing or formally conceding rated
-                        games will matter for your rating. Happy gaming!
+                        Archon Arena is building rated play, rankings, and tournaments on top of the
+                        classic casual experience. There are three categories (beginner, casual and
+                        competitive) to be chosen when creating a game which gives an indication of
+                        what to expect. Most players very much appreciate a formal concede by
+                        clicking the ‘Concede’ button and typing ‘gg’ before leaving a game — and
+                        once rated play launches, finishing or formally conceding rated games will
+                        matter for your rating. Happy gaming!
                     </Trans>
                 </p>
             </Panel>

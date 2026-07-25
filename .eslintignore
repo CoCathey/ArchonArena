@@ -3,3 +3,6 @@ node_modules
 dist
 public
 *.ts
+# The Expo mobile app is a separate project with its own TS/toolchain; the
+# root (web) ESLint config cannot parse its .tsx files. It lints itself.
+mobile
