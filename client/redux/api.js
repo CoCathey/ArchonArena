@@ -291,6 +291,13 @@ export const api = createApi({
             query: (username) => `/ratings/${encodeURIComponent(username)}`,
             providesTags: [TAG_TYPES.RATINGS]
         }),
+        // ARCHON: platform statistics & analytics (public aggregate lookups)
+        getMetaStats: builder.query({
+            query: () => '/stats/meta'
+        }),
+        getPlayerStats: builder.query({
+            query: (username) => `/stats/player/${encodeURIComponent(username)}`
+        }),
         // ARCHON: native tournament engine (in-platform events)
         listEvents: builder.query({
             query: (params) => ({ url: '/tournaments', params }),
@@ -714,6 +721,8 @@ export const {
     useStartNewSeasonMutation,
     useGetLeaderboardQuery,
     useGetRatingsQuery,
+    useGetMetaStatsQuery,
+    useGetPlayerStatsQuery,
     useGetAdminSettingsQuery,
     useSaveAdminSettingsMutation,
     useResetAdminSettingsMutation,

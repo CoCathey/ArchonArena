@@ -15,6 +15,8 @@ const onboarding = require('./onboarding');
 const bugReports = require('./bug-reports');
 const decks = require('./decks');
 const games = require('./games');
+// ARCHON: platform statistics & analytics
+const stats = require('./stats');
 const cards = require('./cards');
 const news = require('./news');
 const user = require('./user');
@@ -44,6 +46,8 @@ module.exports.init = function (server, options) {
     bugReports.init(server);
     decks.init(server);
     games.init(server);
+    // ARCHON: platform statistics & analytics
+    stats.init(server);
     cards.init(server);
     news.init(server);
     user.init(server);

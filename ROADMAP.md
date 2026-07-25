@@ -322,13 +322,14 @@ much stronger deck pays less.
 
 ## Phase 11 — Statistics & analytics
 
--   [ ] **Statistics Engine** service: consumes game-end + replay events, computes aggregates
-        async (never in game path).
--   [ ] Player stats: win rates by house/set/format, key rates, average game length.
+-   [x] **Statistics Engine** service (`StatisticsService`): on-demand, TTL-cached
+        aggregation over persisted games (never in the game path).
+-   [x] Player stats: win rates by house & format, key rates, average game length.
 -   [ ] Deck stats: per-deck W/L, SAS vs. performance deltas.
--   [ ] Meta dashboards: house/set win rates, SAS bands vs. win %, matchup matrices.
+-   [x] Meta dashboards: house win rates, SAS bands vs. win %, format popularity.
+        (Set win rates and matchup matrices still pending.)
 -   [ ] Admin analytics: DAU/MAU, games/day, queue health, funnel metrics.
--   [ ] Public API for stats (rate-limited, cached, versioned).
+-   [x] Public API for stats (`/api/stats/*`), cached. (Rate limiting + versioning pending.)
 
 ## Phase 12 — Platform APIs
 

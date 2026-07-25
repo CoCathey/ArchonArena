@@ -16,6 +16,7 @@ import Logout from './pages/Logout';
 import CommunityNews from './pages/CommunityNews';
 import ContentPageGuard from './Components/Navigation/ContentPageGuard';
 import Replay from './pages/Replay';
+import Stats from './pages/Stats';
 import Leaderboards from './pages/Leaderboards';
 import Matches from './pages/Matches';
 import Placeholder from './pages/Placeholder';
@@ -143,15 +144,7 @@ const AppRoutes = ({ currentGame, user }) => {
                     />
                 }
             />
-            <Route
-                path='/stats'
-                element={
-                    <Placeholder
-                        title='Stats'
-                        description='Win rates by house and set, key rates, deck performance, and meta dashboards are coming with the statistics engine.'
-                    />
-                }
-            />
+            <Route path='/stats' element={<Stats />} />
             <Route path='/tournaments' element={<Tournaments />} />
             <Route path='/tournaments/:id' element={<TournamentDetail />} />
             <Route
