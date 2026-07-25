@@ -4,6 +4,7 @@ import { Button } from '@heroui/react';
 
 import Panel from '../Site/Panel';
 import Avatar from '../Site/Avatar';
+import PlayerAmber from '../Site/PlayerAmber';
 
 /**
  * @typedef PendingGamePlayersProps
@@ -136,6 +137,11 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck }) => {
                             <div className='flex min-w-0 items-center gap-2'>
                                 <Avatar imgPath={player.avatar} />
                                 <span className={userClass}>{player.name}</span>
+                                <PlayerAmber
+                                    username={player.name}
+                                    format={currentGame.gameFormat}
+                                    className='ml-auto'
+                                />
                             </div>
                             <span
                                 className={`shrink-0 whitespace-nowrap rounded border px-1.5 py-0 text-xs font-medium leading-4 ${readiness.tone}`}

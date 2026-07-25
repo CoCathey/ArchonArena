@@ -9,6 +9,7 @@ import { faLock, faTrash } from '@fortawesome/free-solid-svg-icons';
 
 import Avatar from '../Site/Avatar';
 import AlertPanel from '../Site/AlertPanel';
+import PlayerAmber from '../Site/PlayerAmber';
 import Link from '../Navigation/Link';
 import { lobbyActions } from '../../redux/slices/lobbySlice';
 import TimeLimitIcon from '../../assets/img/Timelimit.png';
@@ -279,6 +280,11 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
                                                         <span className={userClass}>
                                                             {player.name}
                                                         </span>
+                                                        <PlayerAmber
+                                                            username={player.name}
+                                                            format={game.gameFormat}
+                                                            className='ml-auto'
+                                                        />
                                                     </div>
                                                 );
                                             }

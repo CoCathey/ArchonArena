@@ -26,6 +26,7 @@ import { authActions } from '../../redux/slices/authSlice';
 import { PatreonStatus } from '../../types';
 import Avatar from '../Site/Avatar';
 import ProfileLocation from './ProfileLocation';
+import ProfileRankCard from './ProfileRankCard';
 import Panel from '../Site/Panel';
 
 /**
@@ -96,6 +97,7 @@ const ProfileMain = ({ user, formProps, section }) => {
     if (section === 'account') {
         return (
             <div className='space-y-3'>
+                <ProfileRankCard username={user?.username} />
                 <Panel type='default' compactHeader title={t('Credentials')}>
                     <div className='grid gap-2 md:grid-cols-2'>
                         <TextField
