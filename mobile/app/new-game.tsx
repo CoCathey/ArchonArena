@@ -16,11 +16,9 @@ import { useLobbyStore } from '../src/stores/lobbyStore';
 import { colors, radius, spacing } from '../src/theme';
 import { Button, ErrorBanner, TextField } from '../src/ui/primitives';
 
-const GAME_FORMATS = [
-    { name: 'normal', label: 'Archon' },
-    { name: 'unchained', label: 'Unchained' },
-    { name: 'reversal', label: 'Reversal' }
-] as const;
+// Unchained and Reversal are hidden from the UI for now (the engine still
+// supports them), matching the web client's format list.
+const GAME_FORMATS = [{ name: 'normal', label: 'Archon' }] as const;
 
 /** Expansion flags the web client submits; only used by sealed formats. */
 const DEFAULT_EXPANSIONS: Record<string, boolean> = {
@@ -166,8 +164,17 @@ export default function NewGameScreen() {
                 </Text>
             )}
 
-            <Text style={styles.sectionLabel}>Format</Text>
-            <Segmented options={GAME_FORMATS} value={gameFormat} onChange={setGameFormat} />
+            {/* Only worth a picker once more than one format is offered. */}
+            {GAME_FORMATS.length > 1 ? (
+                <>
+                    <Text style={styles.sectionLabel}>Format</Text>
+                    <Segmented
+                        options={GAME_FORMATS}
+                        value={gameFormat}
+                        onChange={setGameFormat}
+                    />
+                </>
+            ) : null}
 
             {!quickJoin ? (
                 <>

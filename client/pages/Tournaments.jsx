@@ -205,11 +205,10 @@ const Tournaments = () => {
                                     <option value='archon'>{t('Archon')}</option>
                                     <option value='sealed'>{t('Sealed')}</option>
                                     <option value='alliance'>{t('Alliance')}</option>
-                                    <option value='reversal'>
-                                        {t("Reversal (pilot your opponent's deck)")}
-                                    </option>
+                                    {/* ARCHON: Reversal is hidden from the UI for
+                                        now; the engine still supports it. */}
                                     <option value='adaptive-bo1'>
-                                        {t('Adaptive Bo1 (play, swap, chain bid)')}
+                                        {t('Adaptive (play, swap, chain bid)')}
                                     </option>
                                 </select>
                             </div>

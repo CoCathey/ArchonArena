@@ -9,14 +9,13 @@ import { lobbyActions } from '../../redux/slices/lobbySlice';
 import { lobbySendMessage } from '../../redux/socketActions';
 
 // Formats a player can queue for. 'normal' is surfaced as Archon (its rating
-// pool) to match how ratings are branded elsewhere.
+// pool) to match how ratings are branded elsewhere. Unchained and Reversal are
+// hidden from the UI for now - the engine still supports them.
 const FORMATS = [
     { name: 'normal', label: 'Archon' },
     { name: 'sealed', label: 'Sealed' },
     { name: 'alliance', label: 'Alliance' },
-    { name: 'reversal', label: 'Reversal' },
-    { name: 'adaptive-bo1', label: 'Adaptive (Bo1)' },
-    { name: 'unchained', label: 'Unchained' }
+    { name: 'adaptive-bo1', label: 'Adaptive' }
 ];
 
 /**

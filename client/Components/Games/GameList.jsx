@@ -24,10 +24,7 @@ const gameFormatIcons = [
     ['sealed', { src: SealedIcon, title: 'Sealed game format', noInvert: false }],
     ['alliance', { src: AllianceIcon, title: 'Alliance game format', noInvert: true }],
     ['reversal', { src: ReversalIcon, title: 'Reversal game format', noInvert: false }],
-    [
-        'adaptive-bo1',
-        { src: AdaptiveIcon, title: 'Adaptive (Best of 1) game format', noInvert: false }
-    ],
+    ['adaptive-bo1', { src: AdaptiveIcon, title: 'Adaptive game format', noInvert: false }],
     ['unchained', { src: UnchainedIcon, title: 'Unchained game format', noInvert: false }]
 ];
 

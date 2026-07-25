@@ -10,12 +10,13 @@ const GameFormats = ({
 }) => {
     const { t } = useTranslation();
 
-    const formats = [
+    // ARCHON: Normal is the headline mode and gets a full-width tile; the rest
+    // sit under it in a smaller row. Unchained and Reversal are hidden from the
+    // UI for now - the engine still supports them, they are just not offerable.
+    const [primaryFormat, ...secondaryFormats] = [
         { name: 'normal', label: t('Normal') },
-        { name: 'unchained', label: t('Unchained') },
         { name: 'sealed', label: t('Sealed') },
-        { name: 'reversal', label: t('Reversal') },
-        { name: 'adaptive-bo1', label: t('Adaptive - Best of 1') },
+        { name: 'adaptive-bo1', label: t('Adaptive') },
         { name: 'alliance', label: t('Alliance') }
     ];
 
@@ -41,6 +42,24 @@ const GameFormats = ({
     ];
     const expansionNames = expansions.map((expansion) => expansion.name);
 
+    const renderFormat = (format, sizeClasses) => (
+        <label className='block cursor-pointer' key={format.name}>
+            <input
+                checked={formProps.values.gameFormat === format.name}
+                className='peer sr-only'
+                name='gameFormat'
+                onChange={() => formProps.setFieldValue('gameFormat', format.name)}
+                type='radio'
+                value={format.name}
+            />
+            <div
+                className={`rounded-md border border-border/20 bg-surface-secondary/78 text-foreground/92 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-colors hover:bg-surface-secondary/92 peer-checked:border-accent/55 peer-checked:bg-[color:color-mix(in_oklab,var(--surface-secondary)_82%,var(--brand)_18%)] peer-checked:text-foreground ${sizeClasses}`}
+            >
+                {format.label}
+            </div>
+        </label>
+    );
+
     const setAllExpansions = (nextValue) => {
         for (const expansionName of expansionNames) {
             formProps.setFieldValue(expansionName, nextValue);
@@ -54,24 +73,16 @@ const GameFormats = ({
                     <div className='mb-1 text-sm font-semibold text-foreground'>
                         <Trans>Game mode</Trans>
                     </div>
-                    <div className='grid gap-x-3.5 gap-y-1 sm:grid-cols-2 lg:grid-cols-3'>
-                        {formats.map((format) => (
-                            <label className='block cursor-pointer' key={format.name}>
-                                <input
-                                    checked={formProps.values.gameFormat === format.name}
-                                    className='peer sr-only'
-                                    name='gameFormat'
-                                    onChange={() =>
-                                        formProps.setFieldValue('gameFormat', format.name)
-                                    }
-                                    type='radio'
-                                    value={format.name}
-                                />
-                                <div className='rounded-md border border-border/20 bg-surface-secondary/78 px-3 py-2 text-sm text-foreground/92 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-colors hover:bg-surface-secondary/92 peer-checked:border-accent/55 peer-checked:bg-[color:color-mix(in_oklab,var(--surface-secondary)_82%,var(--brand)_18%)] peer-checked:text-foreground'>
-                                    {format.label}
-                                </div>
-                            </label>
-                        ))}
+                    <div className='space-y-1'>
+                        {renderFormat(
+                            primaryFormat,
+                            'px-4 py-3.5 text-center text-base font-semibold'
+                        )}
+                        <div className='grid gap-x-3.5 gap-y-1 sm:grid-cols-3'>
+                            {secondaryFormats.map((format) =>
+                                renderFormat(format, 'px-3 py-2 text-sm')
+                            )}
+                        </div>
                     </div>
                     {formProps.errors.gameFormat ? (
                         <div className='mt-1 text-xs text-red-300'>

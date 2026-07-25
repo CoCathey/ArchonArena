@@ -86,15 +86,15 @@ const createMockLobbyGames = () => {
         ),
         withDemoNode(
             makeGame({
-                gameFormat: 'reversal',
-                name: 'Reversal (password)',
+                gameFormat: 'sealed',
+                name: 'Sealed (password)',
                 needsPassword: true
             })
         ),
         withDemoNode(
             makeGame({
                 gameFormat: 'adaptive-bo1',
-                name: 'Adaptive Bo1 + Show Hand',
+                name: 'Adaptive + Show Hand',
                 showHand: true
             })
         ),
@@ -109,8 +109,8 @@ const createMockLobbyGames = () => {
         ),
         withDemoNode(
             makeGame({
-                gameFormat: 'unchained',
-                name: 'Unchained Ladder',
+                gameFormat: 'adaptive-bo1',
+                name: 'Adaptive Ladder',
                 players: { admin: mockPlayers.admin, contributor: mockPlayers.contributor },
                 started: false,
                 full: true,
@@ -136,12 +136,13 @@ const GameLobby = ({ gameId }) => {
     const location = useLocation();
     const filters = useMemo(
         () => [
+            // ARCHON: Unchained and Reversal are hidden from the UI for now.
+            // Dropping them here also keeps games in those formats out of the
+            // list (GameList hides any format without a filter entry).
             { name: 'normal', label: t('Normal') },
             { name: 'sealed', label: t('Sealed') },
-            { name: 'reversal', label: t('Reversal') },
-            { name: 'adaptive-bo1', label: t('Adaptive (Bo1)') },
-            { name: 'alliance', label: t('Alliance') },
-            { name: 'unchained', label: t('Unchained') }
+            { name: 'adaptive-bo1', label: t('Adaptive') },
+            { name: 'alliance', label: t('Alliance') }
         ],
         [t]
     );
@@ -184,7 +185,18 @@ const GameLobby = ({ gameId }) => {
 
         const filter = localStorage.getItem('gameFilter');
         if (filter) {
-            setCurrentFilter({ ...filterDefaults, ...JSON.parse(filter) });
+            // ARCHON: only restore keys we still offer - a filter saved before a
+            // format was retired must not silently re-enable it.
+            const saved = JSON.parse(filter);
+            const restored = { ...filterDefaults };
+
+            for (const key of Object.keys(restored).concat('onlyShowNew')) {
+                if (key in saved) {
+                    restored[key] = saved[key];
+                }
+            }
+
+            setCurrentFilter(restored);
         }
     }, [filterDefaults]);
 

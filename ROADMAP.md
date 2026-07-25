@@ -884,6 +884,12 @@ turns a feature-complete site into a habit.
 -   [x] Quick Match UI with live queue sizes and a searching state; first-game step in
         onboarding hands new players into the queue.
 -   [x] Game types removed — every game is the same; rating pools follow format instead.
+-   [x] Offered formats narrowed to Normal (headline), Sealed, Adaptive and Alliance across
+        New Game, the lobby filters, Quick Match, the tournament create form and the mobile
+        app. Unchained and Reversal are hidden from the UI — the engine and the stored games
+        still support them, they are simply not offerable. Re-list them by restoring their
+        entries in `GameFormats.jsx`, `GameLobby.jsx`, `QuickMatchPanel.jsx`,
+        `pages/Tournaments.jsx` and `mobile/app/new-game.tsx`.
 -   [ ] Post-game result screen with the Amber change → **I4**.
 -   [ ] Matchmaking parameters **(admin-config)**: base tolerance, widening rate, max wait.
 -   [ ] Queue health telemetry (depth, wait time, match quality) → **N8**.
