@@ -12,8 +12,9 @@ const DEFAULT_RATING_CONFIG = {
     leaderboardMaxLimit: 100,
     // Overrides for the Elo calculator (see eloDefaults.js).
     elo: {},
-    // Inactive-player rating decay (off by default).
-    decay: { enabled: false, graceDays: 30, pointsPerWeek: 20, floor: 1200 },
+    // Inactive-player rating decay (off by default). autoApplyHours drives the
+    // lobby's automatic decay sweep (0 = manual only).
+    decay: { enabled: false, graceDays: 30, pointsPerWeek: 20, floor: 1200, autoApplyHours: 24 },
     // Season soft-reset policy, applied when an admin starts a new season.
     season: { carryFactor: 0.5, baseline: 1200 }
 };

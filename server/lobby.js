@@ -69,6 +69,17 @@ class Lobby {
             this.matchmakingSweep.unref();
         }
 
+        // Automatic inactive-player rating decay. Ticks hourly but only applies
+        // as often as the admin-configured cadence (decay.autoApplyHours), and
+        // is a no-op while decay is disabled. applyDecay is idempotent (it
+        // writes absolute ratings gated by LastDecayAt), so a tick with nothing
+        // due - or one overlapping another lobby instance - is harmless.
+        this.lastDecayRunMs = 0;
+        this.decaySweep = setInterval(() => this.runDecaySweep(), 60 * 60 * 1000);
+        if (this.decaySweep && this.decaySweep.unref) {
+            this.decaySweep.unref();
+        }
+
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
 
         this.io =
@@ -100,6 +111,37 @@ class Lobby {
 
         setInterval(() => this.clearStalePendingGames(), 60 * 1000); // every minute
         setInterval(() => this.clearOldRefreshTokens(), 2 * 60 * 60 * 1000); // every 2 hours
+    }
+
+    // Periodic (hourly-checked) automatic rating decay, gated by the
+    // admin-configured cadence. See the constructor for why this is safe.
+    async runDecaySweep() {
+        if (!this.ratingService) {
+            return;
+        }
+
+        try {
+            const decay = this.ratingService.getConfig().decay || {};
+            const hours = decay.enabled ? decay.autoApplyHours || 0 : 0;
+
+            if (hours <= 0) {
+                return;
+            }
+
+            const now = Date.now();
+            if (now - this.lastDecayRunMs < hours * 60 * 60 * 1000) {
+                return;
+            }
+
+            this.lastDecayRunMs = now;
+            const result = await this.ratingService.applyDecay(now);
+
+            if (result && result.decayed > 0) {
+                logger.info(`Rating decay auto-applied to ${result.decayed} rating(s)`);
+            }
+        } catch (err) {
+            logger.error('Rating decay sweep failed', err);
+        }
     }
 
     async init() {

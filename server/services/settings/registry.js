@@ -153,6 +153,13 @@ const REGISTRY = {
                         min: 0,
                         max: 4000,
                         default: 1200
+                    },
+                    autoApplyHours: {
+                        type: 'number',
+                        label: 'Auto-apply decay every N hours (0 = manual only)',
+                        min: 0,
+                        max: 168,
+                        default: 24
                     }
                 }
             },
