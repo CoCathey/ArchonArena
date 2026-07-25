@@ -39,7 +39,6 @@ import Register from './pages/Register';
 import ResetPassword from './pages/ResetPassword';
 import Security from './pages/Security.jsx';
 import SettingsAdmin from './pages/SettingsAdmin';
-import TournamentLobby from './Components/Games/TournamentLobby';
 import Unauthorised from './pages/Unauthorised';
 import UserAdmin from './pages/UserAdmin';
 import GameLobby from './Components/Games/GameLobby';
@@ -88,10 +87,6 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route
                 path='/reset-password'
                 element={<ResetPassword id={getParam('id')} token={getParam('token')} />}
-            />
-            <Route
-                path='/tournamentlobby'
-                element={requirePermission('canManageTournaments', <TournamentLobby />)}
             />
             <Route path='/security' element={<Security />} />
             <Route path='/users' element={requirePermission('canManageUsers', <UserAdmin />)} />

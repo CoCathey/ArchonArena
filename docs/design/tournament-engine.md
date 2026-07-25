@@ -5,7 +5,7 @@ top-N cut), single elimination, double elimination and round robin, online and i
 person: create → register (caps, waitlists, join codes, check-in, deck registration
 with SAS bands) → pair rounds → play (auto-created games online) → results
 (auto-reported or manual, best-of series) → standings → final placements and player
-history. Inspired by the operational depth of Challonge/TopDeck and the
+history. Inspired by the operational depth of established tournament platforms and the
 play-in-platform integration of chess.com events — plus KeyForge-only conditions
 (increment 5) that no other game could offer: deck swap policies, set legality,
 house restrictions, one-Archon-per-event uniqueness, SAS chain handicaps,
@@ -14,9 +14,9 @@ Adaptive Bo1 events.
 
 ## Current architecture (analysis)
 
-TCO's only tournament support was the Challonge integration (external service,
-API-key driven, TO-permission gated) — kept intact as "Challonge Events" under
-Other. The native engine replaces it for everything new.
+TCO's only tournament support was an external, API-key-driven integration with a
+third-party bracket service. That integration has been removed: every tournament
+now runs on the native, in-platform engine described here.
 
 ## Architecture
 
@@ -64,7 +64,7 @@ RatingService.processGame
     elimination wave (ties share placement — 3rd/3rd, 5th…8th), everyone else by
     standings; stamped into `TournamentPlayers.FinalRank` and served as player
     history (`/api/tournaments/history/:username`).
--   **Registration operations** (Challonge/TopDeck-style): player caps with FIFO
+-   **Registration operations** (tournament-platform-style): player caps with FIFO
     waitlists and automatic promotion, private events with 8-char join codes,
     TO-opened check-in with optional shed-no-shows at start, per-event deck
     registration validated against DoK SAS bands (`DeckSas`), decks locked at

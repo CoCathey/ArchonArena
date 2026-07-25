@@ -58,10 +58,6 @@ class User {
         return this.userData.email;
     }
 
-    get challonge() {
-        return this.userData.challonge;
-    }
-
     get verified() {
         return this.userData.verified;
     }
@@ -148,7 +144,6 @@ class User {
             settings: this.userData.settings,
             permissions: this.userData.permissions,
             verified: this.userData.verified,
-            challonge: this.userData.challonge,
             // ARCHON: drives the first-run wizard redirect (Phase 9)
             onboarded: !!this.userData.onboarded,
             // ARCHON: linked Decks of KeyForge account (prefills bulk import)

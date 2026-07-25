@@ -47,7 +47,6 @@ class Game extends EventEmitter {
         this.adaptive = { chains: 0, selection: [], biddingWinner: '' };
         this.allowSpectators = details.allowSpectators;
         this.cancelPromptUsed = false;
-        this.challonge = details.challonge;
         // ARCHON: tournament linkage rides along so GAMEWIN can auto-report
         this.tournament = details.tournament;
         // ARCHON: pre-assigned chains (SAS handicap / Chainbound events);
@@ -1733,7 +1732,6 @@ class Game extends EventEmitter {
 
         return {
             adaptive: this.adaptive,
-            challonge: this.challonge,
             finishedAt: this.finishedAt,
             gameFormat: this.gameFormat,
             gameId: this.id,
@@ -1767,7 +1765,6 @@ class Game extends EventEmitter {
             return {
                 adaptive: this.adaptive,
                 cancelPromptUsed: this.cancelPromptUsed,
-                challonge: this.challonge,
                 forcePassAvailable: this.forcePassAvailable,
                 gameFormat: this.gameFormat,
                 gamePrivate: this.gamePrivate,
@@ -1835,7 +1832,6 @@ class Game extends EventEmitter {
         return {
             adaptive: this.adaptive,
             allowSpectators: this.allowSpectators,
-            challonge: this.challonge,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,

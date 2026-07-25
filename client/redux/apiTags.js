@@ -8,7 +8,6 @@ export const TAG_TYPES = {
     BLOCKLIST: 'Blocklist',
     ADMIN: 'Admin',
     BANLIST: 'Banlist',
-    CHALLONGE: 'Challonge',
     GAMES: 'Games',
     LOBBY: 'Lobby',
     OIDC: 'Oidc',

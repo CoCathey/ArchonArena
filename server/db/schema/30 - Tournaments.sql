@@ -1,6 +1,6 @@
 -- Table: public."Tournaments"
--- Archon Arena tournament engine (Phase 7). Distinct from the legacy
--- Challonge integration; this is the native event system.
+-- Archon Arena tournament engine (Phase 7): the native, in-platform event
+-- system. All tournaments run on the platform itself.
 
 CREATE TABLE IF NOT EXISTS public."Tournaments"
 (

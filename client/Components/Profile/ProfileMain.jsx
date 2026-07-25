@@ -334,42 +334,6 @@ const ProfileMain = ({ user, formProps, section }) => {
                     )}
                 </div>
             </Panel>
-            <Panel
-                type='default'
-                compactHeader
-                title={t('API Keys')}
-                className='border border-warning/70 bg-warning/10'
-                titleClass='text-amber-300'
-            >
-                <div className='grid gap-3 md:grid-cols-2'>
-                    <TextField>
-                        <Label htmlFor='formGridChallongeKey'>{t('Challonge API Key')}</Label>
-                        <Input
-                            id='formGridChallongeKey'
-                            name='challongeApiKey'
-                            type='password'
-                            placeholder={t('Enter challonge API key')}
-                            value={formProps.values.challongeApiKey}
-                            onBlur={formProps.handleBlur}
-                            onChange={formProps.handleChange}
-                        />
-                    </TextField>
-                    <TextField>
-                        <Label htmlFor='formGridChallongeDomain'>
-                            {t('Challonge API Subdomain')}
-                        </Label>
-                        <Input
-                            id='formGridChallongeDomain'
-                            name='challongeApiSubdomain'
-                            type='password'
-                            placeholder={t('Enter challonge API subdomain')}
-                            value={formProps.values.challongeApiSubdomain}
-                            onBlur={formProps.handleBlur}
-                            onChange={formProps.handleChange}
-                        />
-                    </TextField>
-                </div>
-            </Panel>
         </div>
     );
 };

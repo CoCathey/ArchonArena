@@ -337,7 +337,6 @@ module.exports.init = function (server, options) {
                 username: req.body.username,
                 avatar: req.body.username,
                 email: req.body.email,
-                challonge: req.body.challonge,
                 registerIp: ip
             };
 
@@ -876,8 +875,6 @@ module.exports.init = function (server, options) {
             if (userToSet.password && userToSet.password !== '') {
                 user.password = await bcrypt.hash(userToSet.password, 10);
             }
-
-            user.challonge = userToSet.challonge;
 
             if (userToSet.avatar) {
                 user.settings.avatar = await processAvatar(userToSet, user);

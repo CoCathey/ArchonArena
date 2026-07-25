@@ -2,7 +2,6 @@ import { combineReducers } from 'redux';
 import auth from '../slices/authSlice';
 import cards from '../slices/cardsSlice';
 import games from '../slices/gamesSlice';
-import challonge from '../slices/challongeSlice';
 import admin from '../slices/adminSlice';
 import user from '../slices/userSlice';
 import account from '../slices/accountSlice';
@@ -13,7 +12,6 @@ const rootReducer = combineReducers({
     auth,
     cards,
     games,
-    challonge,
     admin,
     user,
     account,

@@ -38,7 +38,6 @@ const isUnauthorizedError = (error = {}) => {
 const NEWS_LIST_ID = 'LIST';
 const DECKS_LIST_ID = 'LIST';
 const BANLIST_ID = 'LIST';
-const CHALLONGE_ID = 'LIST';
 const SESSIONS_ID = 'LIST';
 const BLOCKLIST_ID = 'LIST';
 const GAMES_ID = 'LIST';
@@ -292,8 +291,7 @@ export const api = createApi({
             query: (username) => `/ratings/${encodeURIComponent(username)}`,
             providesTags: [TAG_TYPES.RATINGS]
         }),
-        // ARCHON: native tournament engine ("event" naming avoids clashing
-        // with the legacy Challonge getTournaments endpoint below)
+        // ARCHON: native tournament engine (in-platform events)
         listEvents: builder.query({
             query: (params) => ({ url: '/tournaments', params }),
             providesTags: [TAG_TYPES.TOURNAMENTS]
@@ -660,38 +658,6 @@ export const api = createApi({
             }),
             invalidatesTags: [{ type: TAG_TYPES.BANLIST, id: BANLIST_ID }]
         }),
-        getTournaments: builder.query({
-            query: () => '/challonge/tournaments',
-            providesTags: [{ type: TAG_TYPES.CHALLONGE, id: CHALLONGE_ID }]
-        }),
-        getFullTournament: builder.mutation({
-            query: (tournamentId) => ({
-                url: '/challonge/fullTournament',
-                method: 'POST',
-                body: { data: tournamentId }
-            })
-        }),
-        getMatches: builder.mutation({
-            query: (tournamentId) => ({
-                url: '/challonge/matches',
-                method: 'POST',
-                body: { data: tournamentId }
-            })
-        }),
-        getParticipants: builder.mutation({
-            query: (tournamentId) => ({
-                url: '/challonge/participants',
-                method: 'POST',
-                body: { data: tournamentId }
-            })
-        }),
-        attachMatchLink: builder.mutation({
-            query: (data) => ({
-                url: '/challonge/attachMatchLink',
-                method: 'POST',
-                body: data
-            })
-        }),
         getUserGames: builder.query({
             query: () => '/games',
             providesTags: [{ type: TAG_TYPES.GAMES, id: GAMES_ID }]
@@ -783,11 +749,6 @@ export const {
     useGetBanlistQuery,
     useAddBanlistMutation,
     useDeleteBanlistMutation,
-    useGetTournamentsQuery,
-    useGetFullTournamentMutation,
-    useGetMatchesMutation,
-    useGetParticipantsMutation,
-    useAttachMatchLinkMutation,
     useGetUserGamesQuery,
     useRemoveLobbyMessageMutation
 } = api;

@@ -62,8 +62,6 @@ const initialValues = {
     avatar: undefined,
     email: '',
     username: '',
-    challongeApiKey: '',
-    challongeApiSubdomain: '',
     settings: {
         background: '',
         cardSize: ''
@@ -83,8 +81,8 @@ const ProfileSection = Object.freeze({
     Gameplay: 'gameplay'
 });
 
-// ARCHON: the Integrations tab (Patreon linking, Challonge API keys, and -
-// once SSO is enabled - Keybringer account linking) is hidden for now. All
+// ARCHON: the Integrations tab (Patreon linking and - once SSO is enabled -
+// Keybringer account linking) is hidden for now. All
 // of its code (ProfileMain's integrations section, the server endpoints)
 // stays live; flip this to true to bring the tab back.
 const SHOW_INTEGRATIONS = false;
@@ -138,11 +136,6 @@ const Profile = ({ onSubmit, isLoading }) => {
         initialValues.gameOptions = user.settings.optionSettings;
     }
 
-    if (user.challonge) {
-        initialValues.challongeApiKey = user.challonge.key;
-        initialValues.challongeApiSubdomain = user.challonge.subdomain;
-    }
-
     const schema = yup.object({
         avatar: yup
             .mixed()
@@ -186,10 +179,6 @@ const Profile = ({ onSubmit, isLoading }) => {
                  */
                 const submitValues = {
                     avatar: values.avatar ? await toBase64(values.avatar) : null,
-                    challonge: {
-                        key: values.challongeApiKey,
-                        subdomain: values.challongeApiSubdomain
-                    },
                     email: values.email,
                     username: values.username,
                     password: values.password,

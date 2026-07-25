@@ -112,12 +112,6 @@ export const SidebarMenu = [
             { path: '/how-to-play', title: 'How To Play' },
             { path: '/about', title: 'About' },
             { path: '/privacy', title: 'Privacy Policy' },
-            {
-                path: '/tournamentlobby',
-                title: 'Challonge Events',
-                showOnlyWhenLoggedIn: true,
-                permission: 'canManageTournaments'
-            },
             { path: '/admin/settings', title: 'Site Settings', permission: 'isAdmin' },
             { path: '/admin/bug-reports', title: 'Bug Reports', permission: 'isAdmin' },
             { path: '/news', title: 'News Admin', permission: 'canEditNews' },

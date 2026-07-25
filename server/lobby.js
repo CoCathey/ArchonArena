@@ -584,7 +584,7 @@ class Lobby {
         }
 
         let game = new PendingGame(socket.user, gameDetails);
-        game.newGame(socket.id, socket.user, gameDetails.password, !game.challonge);
+        game.newGame(socket.id, socket.user, gameDetails.password, true);
         socket.joinChannel(game.id);
 
         this.sendGameState(game);

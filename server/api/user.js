@@ -46,8 +46,8 @@ const targetOutranksActor = (targetPermissions, actorPermissions) => {
 };
 
 // Fields that must never be exposed to a user-management lookup: another
-// user's refresh tokens (hash/ip), Challonge API key, Patreon token, and
-// reset/activation tokens. getFullDetails() only strips the password.
+// user's refresh tokens (hash/ip), Patreon token, and reset/activation
+// tokens. getFullDetails() only strips the password.
 const stripSensitiveUserFields = (user) => {
     if (!user) {
         return user;
@@ -59,11 +59,6 @@ const stripSensitiveUserFields = (user) => {
     delete user.activationToken;
     delete user.activationTokenExpiry;
     delete user.patreon;
-
-    if (user.challonge) {
-        user.challonge = { ...user.challonge };
-        delete user.challonge.key;
-    }
 
     return user;
 };
