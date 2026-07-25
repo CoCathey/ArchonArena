@@ -8,11 +8,17 @@
 > New systems are built _around_ the gameplay engine as loosely-coupled services, never by
 > rewriting working gameplay.
 
+**Last full codebase audit:** 2026-07-25.
+
 ## How this document is used
 
 -   Every feature and task lives here **before** it is built.
 -   Items are checked off (`[x]`) when complete and eventually pruned to the CHANGELOG.
--   Each phase lists **why** it is sequenced where it is.
+-   **Sequencing lives in the [Prioritized backlog](#prioritized-backlog)**, not in the phase
+    numbers. Phases are thematic groupings of related work; the backlog says what to build next.
+-   Backlog items carry an ID (`I1`, `N3`, `F2`), explicit **dependencies**, and
+    **acceptance criteria** so an item can be picked up and finished without re-deriving scope.
+-   Each phase lists **why** it is grouped the way it is.
 -   Anything marked **(admin-config)** must be runtime-configurable by site admins via the
     admin panel / settings service — no redeploy needed to tune it.
 
@@ -32,7 +38,495 @@
 
 ---
 
-## Phase 0 — Working fork & foundation _(PRIORITY)_
+## Where the platform stands (2026-07-25)
+
+**The engineering is far ahead of the operations.** Almost every headline system in this
+roadmap — ratings, tournaments, community, matchmaking, statistics, replays, a native iOS
+app — is built, tested, and wired end to end. What is missing is the last mile: the site is
+not yet serving players at archonarena.com, and a handful of player-facing surfaces that
+turn those systems into a habit-forming loop (public profiles, post-game results,
+notifications) do not exist yet.
+
+**Built and working**
+
+| Area               | State                                                                                                                                                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gameplay engine    | keyteki fork, 14 sets, 38,221-test baseline, green in CI                                                                                                                                                                              |
+| Brand & navigation | Full rebrand, chess.com-style sidebar, landing hero, token-based light/dark theme                                                                                                                                                     |
+| Auth               | Local + Keybringer OIDC (PKCE, JWKS, auto-link, link/unlink UI)                                                                                                                                                                       |
+| Decks              | Master Vault import, DoK SAS enrichment, rate-limited outbound calls, bulk collection import                                                                                                                                          |
+| Ratings ("Amber")  | SAS-adjusted Elo, FIDE-style K tiers, provisional K, floors, decay, seasons, admin tools, pools (Archon/Sealed/Alliance)                                                                                                              |
+| Rankings           | Leaderboards (world/region/country/state), Top Players, personal Ratings page, W–L records                                                                                                                                            |
+| Tournaments        | Swiss / single-elim / double-elim / round robin / cut-to-top-N, Bo1/3/5, waitlists, check-in, staff, seeding, penalties, brackets, printables, online automation, KeyForge conditions (deck rules, chains, Triad, Reversal, Adaptive) |
+| Matchmaking        | Quick Match queue with Amber-proximity pairing and widening tolerance                                                                                                                                                                 |
+| Community          | Friends, member directory, clubs + invite codes, local store directory, Play IRL hub, onboarding wizard                                                                                                                               |
+| Statistics         | Meta dashboard (house win rates, SAS bands, format share) + per-player breakdowns, TTL-cached                                                                                                                                         |
+| Match history      | Game History page on PostgreSQL; recorded play-by-play + step-through viewer                                                                                                                                                          |
+| Admin              | Settings service + `/admin/settings` (rating, DoK, tournament, regions, content, navigation), user/ratings/banlist/nodes/motd/news/bug-report admin                                                                                   |
+| Mobile             | Expo iOS app (`mobile/`): login, decks, lobby, pending, full board, spectate, reconnect; EAS + TestFlight runbook                                                                                                                     |
+| Ops                | CI (typecheck/lint/build/test + CodeQL), prod compose + Caddy TLS, `deploy/healthcheck.sh`, Sentry wired client + server                                                                                                              |
+
+**Incomplete — built but not finished**
+
+-   **Replays** capture the chat/play-by-play log only; there is no board-state snapshot,
+    no retention policy, no share link.
+-   **Spectating** works from the lobby game list, but there is no Watch hub, no broadcast
+    delay, and no caster mode.
+-   **SAS** shows on the deck summary only — not on deck lists, lobby games, or the pre-game
+    screen; the AERC component breakdown stored in `DeckSas.RawData` is never displayed.
+-   **Meta dashboards** lack set win rates and matchup matrices; there are no per-deck stats
+    and no admin/operational analytics.
+-   **Admin-config coverage** stops short of auth (SSO-only mode), matchmaking, replay
+    retention, and moderation policy; there is no feature-flag section and only a
+    last-editor audit trail.
+-   **Clubs** have no leaderboards, approval-based joins, or ownership transfer.
+
+**Missing entirely**
+
+-   **Public player profiles.** No `/players/:username` route exists; no username anywhere on
+    the site is clickable. For a competitive community platform this is the single largest hole.
+-   **Post-game result screen.** A rated game ends with no indication that Amber moved.
+-   **Notifications** of any kind — in-app, email, or push.
+-   **Moderation tooling** beyond the inherited block list / ban list: no reports, mutes,
+    timeouts, or moderation queue.
+-   **Teams**, **versioned public API**, **Discord**, **coaching/AI**, **streaming tools**,
+    **organized-play program**, **Learn hub** (the `/learn` route is a placeholder).
+-   **Schema migration ledger.** Migrations are applied by hand with no record of what ran.
+
+**Not yet verified in production:** DNS, live WebSocket pass-through, Keycloak client
+registration, DoK API key, uptime monitoring, off-host backups.
+
+---
+
+## Prioritized backlog
+
+### Immediate — make the platform real
+
+_Goal: a live, safe, sticky site. Nothing below this line is worth much until players can
+reach the platform and feel the competitive loop close._
+
+#### I1 — Go live on archonarena.com and verify end to end
+
+**Why:** every system in this document is speculative until real players are on it. This is
+the single highest-value item on the roadmap.
+**Tasks**
+
+-   Owner: provision the VPS, point Porkbun DNS at it (docs/DEPLOYMENT.md §2), register the
+    Keycloak client in the keybringer realm, obtain a DoK API key.
+-   Bring up `docker-compose.prod.yml` + Caddy; set `SENTRY_DSN`.
+-   Verify WebSocket pass-through to the game node end to end on the live host.
+-   Point an external uptime monitor at the site; alert on 5xx and on TLS expiry.
+-   Run `deploy/healthcheck.sh` on the host until it is all-PASS.
+
+**Depends on:** owner actions (VPS, DNS, Keycloak, DoK key). Blocks: I3–I7, all near-term work.
+**Acceptance criteria**
+
+-   Two players on two different networks complete a full game start-to-finish through
+    `https://archonarena.com`, including a reconnect mid-game.
+-   Keybringer SSO login and local registration both succeed against the live host.
+-   A deck imports with SAS attached from the live DoK key.
+-   `deploy/healthcheck.sh` reports zero FAILs; a deliberately triggered error appears in Sentry.
+-   Uptime monitor green for 24 continuous hours.
+
+#### I2 — Schema migration ledger and runner
+
+**Why:** production schema state is currently untracked. Migrations are applied file-by-file
+by hand (docs/DEPLOYMENT.md §4), nothing records what ran, and the schema directory already
+contains two duplicate ordinals (`40 - Seasons.sql` / `40 - TournamentMatchGames.sql`,
+`41 - GameReplays.sql` / `41 - TournamentPlayerDecks.sql`). Every future feature ships a
+migration; this is the highest-leverage operational fix on the list.
+**Tasks**
+
+-   Add a `SchemaMigrations` ledger table (filename, checksum, applied-at, applied-by).
+-   `npm run migrate`: applies pending files in order inside a transaction, idempotent,
+    refuses to run when a previously-applied file's checksum has changed.
+-   Renumber the duplicate ordinals; document the "one numbered migration per schema change"
+    rule in CONTRIBUTING.md.
+-   Wire the runner into the deploy path and add a pending-migration assertion to
+    `deploy/healthcheck.sh`.
+
+**Depends on:** nothing. Blocks: safe iteration on every schema-touching item below.
+**Acceptance criteria**
+
+-   A fresh database and a database at any historical point both converge to the same schema.
+-   Running the migrator twice in a row is a no-op the second time.
+-   Editing an already-applied migration file fails loudly instead of silently diverging.
+-   `healthcheck.sh` FAILs when the running code needs a migration that has not been applied.
+
+#### I3 — Public player profiles
+
+**Why:** a competitive platform is built on players looking each other up. Every piece of
+data is already served by an existing API (`/api/ratings/:username`,
+`/api/stats/player/:username`, `/api/tournaments/history`, `/api/games`) — this is assembly,
+not new systems, and it makes the whole site feel connected.
+**Tasks**
+
+-   Route `/players/:username` with avatar, country/region, Amber per pool + world rank, W–L,
+    house win rates, recent games (each linking to its replay), clubs, and tournament trophies.
+-   Add a public per-player recent-games endpoint (the current `/api/games` is self-only).
+-   Make every username across the site link to it: leaderboards, Top Players, member
+    directory, lobby game list, pending game, tournament players/standings/"Your Match",
+    game history, club member lists.
+-   Privacy-safe fields only (no email, no IP); respect disabled accounts.
+-   Optional short bio, editable from the account page.
+
+**Depends on:** I1 (worth shipping to a live site). Blocks: N2, N7, F3.
+**Acceptance criteria**
+
+-   Every username rendered outside the game board navigates to that player's profile.
+-   The page renders correctly for a brand-new player with zero games and for a disabled account.
+-   No private field (email, IP, password state, OIDC subject) appears in the payload — asserted
+    by a test.
+-   Profile loads in one round trip per panel and is server-cached like the stats endpoints.
+
+#### I4 — Post-game result screen with Amber change
+
+**Why:** the rating engine is the heart of the platform and it is currently invisible at the
+moment it matters most. Players finish a rated game with no feedback that anything happened.
+**Tasks**
+
+-   Expose per-game rating deltas (RatingHistory already stores before/after) via an endpoint
+    keyed by game id, authorised to that game's participants.
+-   Game-end screen: Amber before → after with the delta, new world rank, provisional progress
+    ("3 of 10 placement games"), key result, opponent, and the SAS handicap that was applied.
+-   Buttons: rematch, view replay, back to lobby.
+-   Unrated games say so explicitly rather than showing nothing.
+
+**Depends on:** I3 (rank/profile links). Blocks: N4.
+**Acceptance criteria**
+
+-   Winner and loser both see their own delta within a few seconds of GAMEWIN.
+-   The screen never blocks or delays leaving the game, and never touches the gameplay engine.
+-   An unrated or abandoned game shows an explicit "not rated" state instead of a blank panel.
+-   Deltas shown always match `RatingHistory` for that game.
+
+#### I5 — Pre-launch security and abuse pass
+
+**Why:** the moment the site is public it is a target, and account/auth endpoints are the
+softest surface. Rate limiting exists (`server/api/rateLimit.js`) but is applied only to bug
+reports, community actions, deck DoK prepare, and tournament creation — not to login,
+registration, or password reset.
+**Tasks**
+
+-   Rate-limit and add progressive back-off to login, registration, password reset, and
+    activation; lock out after repeated failures.
+-   `npm audit` triage; upgrade `helmet` (pinned at v3, several majors behind) and review its
+    CSP/headers against the live site.
+-   Review every endpoint for authorisation (especially the admin and tournament-organizer
+    routes) and for user-supplied content rendered without escaping.
+-   Secrets audit: confirm nothing sensitive is settings-service-editable or logged.
+-   Write the findings and the standing checklist to `docs/SECURITY.md`.
+
+**Depends on:** nothing. Blocks: public announcement of the site.
+**Acceptance criteria**
+
+-   A scripted credential-stuffing attempt against login is throttled and locked out, with a test.
+-   No high or critical advisory outstanding in `npm audit`, or each is documented with a reason.
+-   `docs/SECURITY.md` exists with the checklist, the date it was last run, and the results.
+
+#### I6 — Terms of Service and transactional email polish
+
+**Why:** taking public sign-ups needs terms, and the activation/reset emails are plain text
+that inherit only the site name from config.
+**Tasks**
+
+-   `/terms` page, admin-editable through Site Settings > Site Content alongside About/Privacy.
+-   Registration and onboarding reference the terms; record acceptance against the account.
+-   Branded HTML email template (header, mark, footer, plain-text fallback) for activation,
+    password reset, and future notification mail.
+
+**Depends on:** nothing. Blocks: I1's public announcement.
+**Acceptance criteria**
+
+-   `/terms` renders the built-in text and is overridable from the admin settings page.
+-   Activation and reset emails render correctly in a major HTML client and degrade to
+    readable plain text.
+
+#### I7 — Off-host backups and a rehearsed restore
+
+**Why:** docs/DEPLOYMENT.md §5 says it plainly — a backup on the same disk is not a backup.
+Ratings, tournament history, and replays are unrecoverable if the VPS is lost.
+**Tasks**
+
+-   Nightly `pg_dump` shipped to object storage, encrypted, with retention.
+-   Also back up uploaded avatars, custom backgrounds, and card art.
+-   Monitor backup freshness; alert when the newest backup is older than 48h.
+-   Rehearse a full restore into a scratch environment and write the timing into the runbook.
+
+**Depends on:** I1.
+**Acceptance criteria**
+
+-   A restore from an off-host backup produces a working site with intact ratings, tournaments,
+    and decks, and the runbook records how long it took.
+-   A deliberately stale backup triggers the freshness alert.
+
+### Near-term — the retention loop
+
+_Goal: reasons to come back tomorrow. Sequenced after players exist, because each of these is
+tuned by what live usage shows._
+
+#### N1 — Full replays, share links, and the Watch hub
+
+**Why:** replays currently capture the message log only, and `/watch` is a placeholder.
+Replays are also the substrate for coaching, AI analysis, and streaming tools later.
+**Tasks**
+
+-   Capture board-state snapshots alongside the message stream at the message layer (never
+    inside gameplay resolution); version the recording format.
+-   Replay viewer: board rendering, jump to key forges, turn scrubber, per-player perspective.
+-   Retention budget and policy **(admin-config)**; the current 2 MB oversized-capture skip
+    becomes an explicit, surfaced policy.
+-   Share links for replays and matches (public, no auth).
+-   Watch hub: live games list, featured match, spectator counts, optional broadcast delay
+    **(admin-config)**; verify hidden-information redaction for spectators.
+
+**Depends on:** I2 (retention migration), I3 (profile links from replays).
+**Acceptance criteria**
+
+-   A finished game can be replayed board-state-by-board-state by someone who did not play it.
+-   A spectator (live or replay) can never see hidden information, asserted by a test.
+-   Retention is enforced by a job and configurable without redeploy.
+
+#### N2 — Notifications
+
+**Why:** tournaments and asynchronous community features are only useful if players are told
+things happened. Round pairings in particular are unusable without a ping.
+**Tasks**
+
+-   In-app notification centre (bell + unread state) with a typed event taxonomy.
+-   Email notifications for round pairings, tournament start, friend requests, club invites,
+    with per-category opt-out in account settings.
+-   Web push once the PWA lands (N6).
+
+**Depends on:** I6 (email template), I3 (linking to profiles). Blocks: F2 (Discord reuses the taxonomy).
+**Acceptance criteria**
+
+-   Pairing a tournament round notifies every paired player in-app and by email within a minute.
+-   Every category can be turned off per player, and opt-out is honoured (tested).
+-   No notification path can block or slow a gameplay or tournament operation.
+
+#### N3 — Deck intelligence
+
+**Why:** SAS is the platform's differentiator against a generic ladder, and it is currently
+under-displayed — the SAS the platform already stores appears on one screen.
+**Tasks**
+
+-   Show SAS on deck lists, lobby games, and the pre-game screen (Phase 4 leftovers).
+-   AERC component breakdown from the stored `DeckSas.RawData`.
+-   Per-deck stats: W/L, SAS-vs-performance delta, best/worst matchups, "your best deck".
+-   Periodic background SAS refresh sweep (today refresh is access-triggered only).
+
+**Depends on:** I2 (any stats migration).
+**Acceptance criteria**
+
+-   A player can see, without leaving the deck page, how their deck performs relative to what
+    its SAS predicts.
+-   Deck lists and lobby games show SAS whenever it is cached, and degrade silently when not.
+-   The refresh sweep respects the existing per-minute DoK budget and never starves live requests.
+
+#### N4 — Ladder maturity
+
+**Why:** seasons and decay exist in the engine but are invisible to players, and there is no
+way to correct the ladder after tuning the Elo config.
+**Tasks**
+
+-   Season display: current season on leaderboards, season archive, end-of-season summary.
+-   Season rewards/badges surfaced on profiles (depends on I3).
+-   Activity window on boards **(admin-config)**.
+-   Rating recalculation tool: replay `RatingHistory` under a new config, admin-triggered,
+    dry-run first.
+
+**Depends on:** I3, I4.
+**Acceptance criteria**
+
+-   A player can see which season they are in, where they finished in prior seasons, and what
+    a soft reset did to their Amber.
+-   Recalculation produces a diff report before it commits, and is idempotent for an unchanged config.
+
+#### N5 — Moderation toolkit
+
+**Why:** the platform inherits a block list and ban list and has a `canModerateChat` role, but
+no way to report anything or act proportionately. Community size makes this urgent, not optional.
+**Tasks**
+
+-   Reports: player, chat message, deck name, club, store listing — with reason and context capture.
+-   Moderation queue with claim/resolve, and graduated actions (warn, mute, timeout, ban) with
+    reason and expiry.
+-   Full audit log of moderator actions (replacing the settings service's last-editor-only trail).
+-   Policy thresholds **(admin-config)**.
+
+**Depends on:** I3 (profiles are where reports start), N2 (notifying the reporter).
+**Acceptance criteria**
+
+-   Any player can report from the surface where the problem appears, in two clicks.
+-   Every moderator action is attributable, reversible, and visible in the audit log.
+-   A muted or timed-out player is blocked from the relevant surfaces and told why and for how long.
+
+#### N6 — Design system, responsive, accessibility, PWA
+
+**Why:** theme tokens and light/dark palettes exist, but there is no documented component
+library, no responsive pass, and no accessibility work. Mobile web is the default first
+experience for most new players.
+**Tasks**
+
+-   UI audit doc: component inventory, duplication, and the modernization order.
+-   Document the token set and build the shared component library on top of it.
+-   Page-by-page responsive pass (decks → community → tournaments → profile → game UI last,
+    since the board carries the most gameplay risk).
+-   Accessibility: keyboard navigation, contrast, focus order, screen-reader landmarks.
+-   PWA: installable, offline shell, push notifications (feeds N2).
+
+**Depends on:** nothing hard; sequence after the play loop is proven.
+**Acceptance criteria**
+
+-   Every non-game page is usable at 375 px wide without horizontal scrolling.
+-   Lobby, decks, tournaments, and profile are fully keyboard-navigable and pass a contrast audit.
+-   The site is installable and receives a push notification on a phone.
+
+#### N7 — Teams and club competition
+
+**Why:** clubs exist but are inert — the local-scene story the platform is aiming at needs
+competition between groups, not just membership lists.
+**Tasks**
+
+-   Club leaderboards, approval-based joins, ownership transfer (the recorded Clubs v1 follow-ups).
+-   Team rosters distinct from clubs, team events in the tournament engine, team rating.
+
+**Depends on:** I3, existing tournament engine.
+**Acceptance criteria**
+
+-   A club page ranks its members and can run a club-only event.
+-   A team can register as a unit for a team event and carries a team rating that updates from results.
+
+#### N8 — Admin analytics and operations dashboard
+
+**Why:** after launch, decisions need numbers: is the funnel working, is the queue healthy,
+are tournaments completing.
+**Tasks**
+
+-   DAU/MAU, games/day, matchmaking queue depth and wait times, tournament completion rates.
+-   Funnel: register → onboard → first deck → first game → second game.
+-   Feature-flag section in the settings registry for gradual rollout.
+-   Redis pub/sub settings-snapshot invalidation for multi-lobby deployments.
+-   Extend the admin panel to tournaments and moderation.
+
+**Depends on:** I1 (needs traffic), N5 (moderation surfaces).
+**Acceptance criteria**
+
+-   An admin can answer "how many people played yesterday and how many came back" without SQL.
+-   A feature flag can be flipped at runtime and takes effect on every lobby process.
+
+#### N9 — Tournament engine follow-ons
+
+**Why:** the engine is the most complete system on the platform; these are the remaining gaps
+organizers will hit in practice.
+**Tasks**
+
+-   Hybrid events (online + paper results feeding one standing).
+-   QR join codes / check-in kiosk flows for IRL events.
+-   Alliance-specific conditions (pod legality checks per event).
+-   Archon Adaptive Bo3 (full swap/bid series) as a match type.
+
+**Depends on:** existing tournament engine.
+**Acceptance criteria**
+
+-   A store can run a paper event on the platform with QR check-in and no laptop per table.
+-   An Alliance event rejects an illegal pod at registration with a clear reason.
+
+#### N10 — Staging, zero-downtime deploys, upstream sync
+
+**Why:** with players on the site, "restart and hope" stops being acceptable, and upstream
+keyteki card fixes need a routine path in.
+**Tasks**
+
+-   `staging.archonarena.com` deploying from main.
+-   Deploy script: drain the game node (finish or migrate live games), deploy, restart, verify.
+-   Scheduled upstream keyteki merge process (docs/UPSTREAM.md) with the card regression suite
+    as the gate.
+-   Load-test game nodes and matchmaking to find the per-node ceiling.
+
+**Depends on:** I1, I2.
+**Acceptance criteria**
+
+-   A deploy during active play does not end anyone's game.
+-   An upstream merge lands with the full card suite green and a recorded diff of gameplay changes.
+-   The documented per-node concurrent-game ceiling is backed by a load test.
+
+### Future — differentiation
+
+_Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
+Each is worth doing; none should displace the loop above._
+
+#### F1 — Versioned public API
+
+Versioned `/api/v1` (profiles, ratings, rankings, tournaments, match history, deck metadata),
+API keys and OAuth scopes **(admin-config rate limits)**, webhooks for tournament and match
+events, OpenAPI spec with a generated docs page. Also brings rate limiting and versioning to
+the currently unversioned public stats endpoints.
+**Depends on:** I3, N1. **Acceptance:** a third-party app authenticates, reads a leaderboard,
+and receives a webhook on tournament completion, using only the published docs.
+
+#### F2 — Discord integration
+
+OAuth account linking, a bot for tournament announcements and pairing pings and result
+reporting, per-club webhooks **(admin-config)**, rich presence.
+**Depends on:** N2 (event taxonomy), F1 (webhooks). **Acceptance:** a club's Discord receives
+pairings for its event without anyone copying anything by hand.
+
+#### F3 — Coaching and AI analysis
+
+Coaching profiles/marketplace with booking, shared replay review rooms (coach and student
+stepping through together), AI game analysis (blunder detection, alternative lines,
+win-probability per turn) over the replay event stream, AI deck insights in SAS context.
+**Depends on:** N1 (board-state replays are the input). **Acceptance:** a coach and student
+step through the same replay in sync, and a finished game produces a win-probability graph.
+
+#### F4 — Streaming and content tools
+
+OBS overlay endpoints (game state, names, Amber, key count), featured-match page and caster
+mode with both hands visible and delay enforced, clip/share moments from replays.
+**Depends on:** N1. **Acceptance:** a caster streams an event match with overlays and an
+enforced delay, with no way for the stream to leak hidden information to live players.
+
+#### F5 — Organized play program
+
+Sanctioned event tooling, TO certification levels, an OP points/season circuit distinct from
+Amber **(admin-config point tables)**, regional/national/world championship structures,
+prize and invite tracking, top-N qualification reports.
+**Depends on:** N7, N9. **Acceptance:** a multi-event season awards circuit points and
+produces a qualification report without manual spreadsheets.
+
+#### F6 — Learn hub
+
+Replace the `/learn` placeholder: interactive tutorial against the real engine, puzzles
+("forge this turn"), a strategy library, and a first-game funnel that hands new players
+straight into Quick Match.
+**Depends on:** N6. **Acceptance:** a player who has never played KeyForge completes the
+tutorial and their first real game in one session.
+
+#### F7 — Mobile general availability
+
+App Store release of the existing Expo iOS app, Android build, feature parity with the web
+platform (tournaments, community, profiles), push notifications.
+**Depends on:** N2, N6. **Acceptance:** both stores carry a build that can play, enter a
+tournament, and receive pairing pushes.
+
+#### F8 — Scale-out
+
+Redis-backed leaderboard sorted sets, Redis-shared DoK rate-limit counter for multi-process
+deployments, multi-lobby settings invalidation, revisit Kubernetes (charts retained in
+`infrastructure/`) if VPS scaling stops being enough.
+**Depends on:** N10 load testing telling us which ceiling is hit first.
+**Acceptance:** a documented scaling step exists for each ceiling the load test finds.
+
+---
+
+## Phase-by-phase status
+
+Phases group related work thematically. Sequencing lives in the backlog above; the backlog ID
+in a `→` note points to where an unfinished item is scheduled.
+
+## Phase 0 — Working fork & foundation
 
 -   [x] Create ArchonArena repo from keyteki source (github.com/keyteki/keyteki import).
 -   [x] Preserve upstream remap path so upstream gameplay/card fixes can be pulled in later
@@ -40,59 +534,61 @@
 -   [x] Get server + client building locally (`npm install`, dev build passes).
 -   [x] Get test suite running; record baseline pass rate before any changes
         (docs/TEST-BASELINE.md: 38,221 passed / 0 failed).
--   [ ] CI pipeline (GitHub Actions): lint, test, build on every PR (upstream workflows
-        imported; need pruning of TCO deploy jobs + secrets for our repo).
--   [x] Dockerfile + docker-compose for one-command local stack (inherited from upstream;
-        PostgreSQL + Redis, no MongoDB needed).
+-   [x] CI pipeline (GitHub Actions): `.github/workflows/ci.yml` runs typecheck, lint, build
+        and the full test suite on every push and PR; CodeQL runs weekly. TCO deploy jobs pruned.
+-   [x] Dockerfile + docker-compose for one-command local stack (PostgreSQL + Redis).
 -   [ ] Document dev environment setup in `docs/DEVELOPMENT.md` (upstream
-        docs/local-development.md covers most; needs Archon Arena pass).
+        `docs/local-development.md` plus `AGENTS.md` cover most of it; needs an Archon Arena pass
+        that includes the platform services, migrations, and seeding).
 
 **Why first:** nothing else can be verified stable without a reproducible build/test baseline.
 
-## Phase 1 — Rebrand to Archon Arena _(PRIORITY)_
+## Phase 1 — Rebrand to Archon Arena
 
 -   [x] Rename user-visible strings: site title, page titles, navbar, about/help pages.
 -   [x] package.json name/description, manifest, HTML meta tags, OpenGraph tags.
 -   [x] Replace TCO branding references in client UI components.
 -   [x] Logo + favicons: Archon Arena mark (amber keyhole in hexagonal arena) generated
-        by scripts/generate-brand-assets.js; theme-color metas updated. Full site color
-        theme pass still open (below).
--   [ ] Site-wide color theme aligned to the brand mark (accent/amber pass over the UI);
-        owner may also supply custom art to replace the generated mark.
--   [ ] Email templates (registration, password reset) rebranded.
--   [x] Legal pages: privacy policy rewritten for Archon Arena (what/why/who/retention,
-        no ads or trackers); About page rewritten (platform intro, ratings explainer,
-        lineage credits, FFG/Ghost Galaxy IP acknowledgement). ToS still open.
+        by scripts/generate-brand-assets.js; theme-color metas updated.
+-   [x] Site-wide color theme: token-based light/dark palettes keyed to the brand amber
+        (`client/styles/tailwind.css`). Owner may still supply custom art to replace the
+        generated mark.
+-   [x] Transactional emails carry the site name from config (`appName`); they are plain text.
+        → **I6** for branded HTML templates.
+-   [x] Legal pages: privacy policy rewritten for Archon Arena; About page rewritten
+        (platform intro, ratings explainer, lineage credits, FFG/Ghost Galaxy IP
+        acknowledgement).
 -   [x] **About/Privacy admin-editable**: Site Settings > Site Content accepts Markdown
         that replaces either built-in page (react-markdown, HTML-escaped; empty = built-in).
+-   [ ] Terms of Service page → **I6**.
 -   [ ] Keep internal code identifiers stable where renaming risks gameplay breakage
         (rename UI-facing only; engine internals renamed opportunistically later).
 
 **Why early:** cheap, zero gameplay risk, and everything deployed from day one carries the
 correct identity.
 
-## Phase 2 — Production deployment on ArchonArena.com _(PRIORITY)_
+## Phase 2 — Production deployment on ArchonArena.com
 
 -   [x] Choose hosting (VPS w/ Docker Compose to start; K8s charts retained for later) —
         rationale in docs/DEPLOYMENT.md.
 -   [x] Production docker-compose: web, game node(s), Postgres, Redis, reverse proxy
         (docker-compose.prod.yml).
 -   [x] Caddy reverse proxy with automatic TLS (deploy/Caddyfile).
--   [ ] Point ArchonArena.com DNS (Porkbun) at the host — **owner action**; records
-        documented in docs/DEPLOYMENT.md §2.
--   [ ] WebSocket pass-through for game server verified end-to-end on the live host
-        (routing designed in Caddyfile; needs a real deploy to verify).
 -   [x] Environment/secrets management (.env.production.example, gitignored secrets,
         env-mapped config keys).
--   [x] DB backup + restore runbook (docs/DEPLOYMENT.md §5); automating off-host copies
-        still open.
--   [ ] Health checks + uptime monitoring + error tracking (e.g. Sentry self-host or SaaS).
--   [ ] Staging environment (staging.archonarena.com) deploying from main.
--   [ ] Zero-downtime deploy script (at minimum: drain game node, deploy, restart).
--   [ ] Migrate legacy MongoDB usage → PostgreSQL (incremental; new services are PG-only,
-        legacy stores migrated table-by-table with dual-write shim where needed).
+-   [x] Health-check script covering containers, TLS, game-node wiring, migrations, card data,
+        env and disk (`deploy/healthcheck.sh`).
+-   [x] Error tracking wired client + server (Sentry); needs `SENTRY_DSN` set on the host.
+-   [x] Legacy MongoDB removed from the running application — all services are PostgreSQL-only.
+        Two unused standalone scripts and the `monk` dependency remain (housekeeping below).
+-   [ ] Point ArchonArena.com DNS (Porkbun) at the host — **owner action** → **I1**.
+-   [ ] WebSocket pass-through for game server verified end-to-end on the live host → **I1**.
+-   [ ] Uptime monitoring configured and alerting → **I1**.
+-   [ ] Automated off-host backups + rehearsed restore → **I7**.
+-   [ ] Staging environment (staging.archonarena.com) deploying from main → **N10**.
+-   [ ] Zero-downtime deploy script (drain game node, deploy, restart) → **N10**.
 
-## Phase 3 — Authentication: Keybringer SSO _(PRIORITY)_
+## Phase 3 — Authentication: Keybringer SSO
 
 Keybringer runs Keycloak (`account.keybringer.com/realms/keybringer`) — standard
 OpenID Connect.
@@ -108,19 +604,19 @@ OpenID Connect.
         button appears only when the server reports SSO enabled.
 -   [x] Tests: request construction, RS256 verification, nonce/issuer/key rejection,
         identity resolution paths (13 tests).
--   [ ] **Owner action:** register the Keycloak client in the keybringer realm (client
-        id/secret, redirect URIs for archonarena.com + localhost) and set OIDC\_\* env vars.
 -   [x] Sign-up entry point: "Sign up with Keybringer" on the Register page (shared
         SsoButton; hidden until SSO is configured).
 -   [x] Link/unlink UI in account settings (Connected Services), with orphan
         protection: unlink refused while the account has no password and no other
         identity.
+-   [ ] **Owner action:** register the Keycloak client in the keybringer realm (client
+        id/secret, redirect URIs for archonarena.com + localhost) and set OIDC\_\* env vars → **I1**.
 -   [ ] Admin setting: SSO-only mode (disable local registration) **(admin-config)**.
 -   [ ] RP-initiated logout against Keycloak; session revocation on unlink.
 -   [ ] Role mapping: Keycloak roles/groups → Archon Arena roles (admin, TO, moderator).
 -   [ ] Password-set flow for SSO-created accounts.
 
-## Phase 4 — Deck service: Decks of KeyForge SAS integration _(PRIORITY)_
+## Phase 4 — Deck service: Decks of KeyForge SAS integration
 
 -   [x] Current-state analysis of TCO deck import (Master Vault API) —
         docs/design/deck-sas.md.
@@ -128,26 +624,23 @@ OpenID Connect.
         (server/services/dok/DokService.js; DeckSas table keyed by Master Vault uuid).
 -   [x] Store SAS snapshot + fetch date; stale rows refresh in the background on access
         (bounded per request).
--   [x] Config-driven **(admin-config-ready)**: DoK API key (DOK_API_KEY), refresh
-        interval, timeout, enable/disable.
+-   [x] Config-driven **(admin-config)**: refresh interval, timeout, per-minute cap and
+        enable/disable are all editable at runtime from Site Settings > Decks of KeyForge.
+        The API key itself stays env-only (`DOK_API_KEY`) on purpose.
 -   [x] Graceful degradation when DoK is down (cached values, SAS simply absent).
 -   [x] **Per-minute rate limiting** on all outbound DoK calls (process-wide sliding
         window; maxRequestsPerMinute, default 25, admin-tunable to match DoK patron
         tiers 50/100/250). Enrichment skips over budget; bulk import caches SAS from the
-        filter response so a collection costs ~1-2 calls, not one-per-deck. Redis-backed
-        shared counter is the follow-up for multi-process scale.
+        filter response so a collection costs ~1-2 calls, not one-per-deck.
 -   [x] Tests: enrichment, refresh windows, API failure paths, rate limiting (32 tests).
--   [x] **Bulk / live import from Decks of KeyForge** (docs/design/dok-import.md): a
-        player enters their DoK username; the DoK filter API lists their whole collection
-        and every deck they don't already own is imported (via Master Vault) with SAS,
-        with a live progress bar. Re-running syncs newly-added decks. In onboarding and
-        the Decks import modal. DoK username remembered (Users.DokUsername).
--   [ ] Show SAS on deck _lists_, lobby games, and pre-game screen (deck page done).
--   [ ] Periodic refresh sweep job (currently access-triggered only).
--   [ ] Wire DoK settings into the runtime admin settings service once it exists.
--   [ ] AERC component breakdown display from stored RawData.
+-   [x] **Bulk / live import from Decks of KeyForge** (docs/design/dok-import.md), with a live
+        progress bar, re-run sync, and a remembered DoK username (Users.DokUsername).
+-   [ ] Show SAS on deck _lists_, lobby games, and pre-game screen → **N3**.
+-   [ ] Periodic refresh sweep job (currently access-triggered only) → **N3**.
+-   [ ] AERC component breakdown display from stored RawData → **N3**.
+-   [ ] Redis-backed shared rate-limit counter for multi-process scale → **F8**.
 
-## Phase 5 — Rating engine: SAS-adjusted Elo _(PRIORITY)_
+## Phase 5 — Rating engine: SAS-adjusted Elo
 
 Chess Elo, modified by (a) key differential of the result and (b) SAS (power) difference
 between the two decks. Playing up in SAS and winning big should pay more; stomping with a
@@ -156,8 +649,7 @@ much stronger deck pays less.
 -   [x] Core algorithm as a pure calculator (`server/services/rating/EloCalculator.js`;
         design: docs/design/rating-engine.md): SAS handicap folded into expected score,
         key-differential margin-of-victory multipliers, provisional K, rating floor.
--   [x] All calculator parameters override-driven **(admin-config)** with validation:
-        K-factor, provisional K + game count, sasWeight, MoV tables, floor, default rating.
+-   [x] All calculator parameters override-driven **(admin-config)** with validation.
 -   [x] Unit tests: algorithm properties (zero-sum, monotonicity in key diff, SAS handicap
         direction), golden-value tests, config edge cases (27 tests).
 -   [x] RatingService orchestration layer: hooks GAMEWIN at the lobby/router layer
@@ -165,15 +657,17 @@ much stronger deck pays less.
 -   [x] DB: Ratings + RatingHistory tables (migration 24) with per-game Elo config
         snapshot; SAS joined from DeckSas at rating time.
 -   [x] Public API: GET /api/ratings/:username (pool, rating, gamesPlayed, provisional).
--   [ ] Show ratings in the UI (profile page, lobby player names) — with Phase 6
-        leaderboards.
--   [ ] Wire admin settings service overrides into RatingService (needs settings service).
--   [ ] Rating decay policy **(admin-config)**.
--   [ ] Provisional/placement UX (badge until N games).
--   [ ] Separate rating pools **(admin-config)**: e.g. Archon, Alliance, Sealed; per-format.
--   [ ] Recalculation tool (replay rating history after config change; admin-triggered).
+-   [x] Ratings shown in the UI: lobby game list, pending game, profile rank card, Ratings
+        and Leaderboards pages.
+-   [x] Admin settings service overrides wired into RatingService at rating time.
+-   [x] Rating decay policy **(admin-config)**: grace days, points per week, floor, and an
+        auto-apply schedule (migration 37).
+-   [x] Provisional/placement badge until N games.
+-   [x] Separate rating pools: Archon / Sealed / Alliance, mapped from game format.
+-   [ ] Per-game rating delta surfaced to players → **I4**.
+-   [ ] Recalculation tool (replay rating history after config change; admin-triggered) → **N4**.
 
-## Phase 6 — Rankings & leaderboards _(PRIORITY)_
+## Phase 6 — Rankings & leaderboards
 
 -   [x] Player profile fields: country (validated ISO-3166 alpha-2) + state/province
         (US/CA dropdowns, free text elsewhere) — Profile > Account > Location; migration 25.
@@ -181,37 +675,30 @@ much stronger deck pays less.
 -   [x] **Region mapping admin-configurable**: Site Settings > Regions lets admins move
         any country to a different region (stringMap overrides; defaults untouched).
 -   [x] **Admin rating tools**: view / set / reset any player's Amber per pool from User
-        Admin (RatingHistory kept as audit trail; reset re-enters at default as
-        provisional).
--   [x] **FIDE-style K tiers** (from the owner's original ranked system): ≥2100 → K24,
-        ≥2400 → K16 (admin-config thresholds/values); top of ladder moves in smaller steps.
--   [x] **Tournament K multiplier** (config tournamentKMultiplier, default 1.1): calculator
-        support landed; activates when tournament results feed the rating engine.
--   [x] **W–L records** on the Ratings page and Leaderboards (aggregated from
-        RatingHistory; games played still shown).
+        Admin (RatingHistory kept as audit trail; reset re-enters at default as provisional).
+-   [x] **FIDE-style K tiers**: ≥2100 → K24, ≥2400 → K16 (admin-config thresholds/values).
+-   [x] **Tournament K multiplier** (config tournamentKMultiplier, default 1.1).
+-   [x] **W–L records** on the Ratings page and Leaderboards (aggregated from RatingHistory).
 -   [x] Leaderboards: worldwide, region, country, state over rating pools; disabled
         accounts excluded; provisional flag shown.
--   [x] Minimum games threshold to appear on boards (rating.leaderboardMinGames,
-        config-driven).
+-   [x] Minimum games threshold to appear on boards (rating.leaderboardMinGames).
 -   [x] Leaderboard UI (Community > Leaderboards): scope tabs follow the viewer's saved
         location, pool tabs (Archon/Sealed/Alliance), pagination, own-row highlight.
 -   [x] Public API: GET /api/ratings/leaderboard (paginated, capped limit).
--   [x] **"Amber" branding**: player ratings are surfaced as Amber (KeyForge Æmber,
-        Clash-Royale-trophies style) via a shared AmberValue component - display only,
-        the Elo math is unchanged. Deck power stays "SAS" to avoid confusion.
--   [x] **Top Players page** (Community > Top Players): worldwide top 25 by Amber per
-        pool, podium for the top three (with avatars). Leaderboard query now returns
-        avatars; distinct from the scoped Leaderboards explorer.
--   [x] **Ratings page** (Community > Ratings): personal Amber per pool with world rank
-        (#N of M, added to getRatingsForUsername), games, provisional badge, and a plain
-        "How Amber works" explainer.
--   [ ] Redis-backed leaderboard cache (sorted sets) once traffic warrants; PG indexes
-        carry current scale fine.
--   [ ] Activity window on boards **(admin-config)**.
--   [ ] Seasons: start/end, soft reset rules **(admin-config)**.
--   [ ] Player rank card on profile page; ratings shown on lobby player names.
+-   [x] **"Amber" branding**: ratings surfaced as Amber via a shared AmberValue component —
+        display only, the Elo math is unchanged. Deck power stays "SAS" to avoid confusion.
+-   [x] **Top Players page**: worldwide top 25 by Amber per pool, podium for the top three.
+-   [x] **Ratings page**: personal Amber per pool with world rank (#N of M), games,
+        provisional badge, and a plain "How Amber works" explainer.
+-   [x] **Seasons**: season records, soft reset toward a configurable baseline with a carry
+        factor, admin season operations UI (migration 37).
+-   [x] Player rank card on the profile page; Amber shown on lobby player names.
+-   [ ] Public player profile pages, with every username on the site linking to one → **I3**.
+-   [ ] Season display, archive, and end-of-season summary for players → **N4**.
+-   [ ] Activity window on boards **(admin-config)** → **N4**.
+-   [ ] Redis-backed leaderboard cache (sorted sets) once traffic warrants → **F8**.
 
-## Phase 7 — Tournament engine _(PRIORITY)_
+## Phase 7 — Tournament engine
 
 -   [x] Standalone **Tournament Service** (own tables/API, zero gameplay-engine coupling;
         docs/design/tournament-engine.md; migrations 27 + 32).
@@ -226,11 +713,10 @@ much stronger deck pays less.
         W-L records and game counts; live on the event page.
 -   [x] Public pages: tournament list + create form, event page with players, per-round
         pairings, reporting buttons, standings, TO controls.
--   [x] **Online automation (increment 2):** auto-created lobby games per pairing
-        (reserved for the paired players, registered decks pre-selected, auto-start
-        when both are seated), GAMEWIN auto-reporting (idempotent, series-aware),
-        round timers with a live clock, "Open my table" recovery, no-show/forfeit
-        awards, auto-forfeit of open matches on drops.
+-   [x] **Online automation:** auto-created lobby games per pairing (reserved for the paired
+        players, registered decks pre-selected, auto-start when both are seated), GAMEWIN
+        auto-reporting (idempotent, series-aware), round timers with a live clock, "Open my
+        table" recovery, no-show/forfeit awards, auto-forfeit of open matches on drops.
 -   [x] Tournament results feed the Rating Service: unrated events never move Amber;
         rated events apply the tournament K multiplier (**admin-config** allowRated).
 -   [x] Formats: double elimination (full winners/losers bracket templates with
@@ -249,129 +735,159 @@ much stronger deck pays less.
         tournament record (trophy history) via /api/tournaments/history.
 -   [x] Tests: pairing algorithms + bracket templates + lifecycle/authorization/
         automation (68 tournament tests + rating gating tests).
--   [x] **KeyForge-only conditions** (increment 5, docs/design/tournament-engine.md;
-        migration 33): deck swap policy (locked vs between-rounds), set legality
-        (allowed expansions), house restrictions (required/banned houses),
-        one-Archon-per-event uniqueness (same Master Vault uuid cannot enter twice),
-        SAS chain handicap (stronger deck starts chained, auto-applied to online
-        games via the engine's adaptive-chains path; per-chain SAS + cap
-        **admin-config**), Chainbound-style event chains (match wins accrue chains
-        carried through the event), the official **Triad** format (3-deck pools,
-        per-match opponent ban + pick, online tables wait for both picks), and
-        Reversal / Adaptive Bo1 event formats (with event→lobby format mapping,
-        also fixing tournament games being hidden from lobby filters).
--   [ ] Hybrid events (online + paper results feeding one standing).
--   [ ] QR join codes / check-in kiosk flows for IRL events.
--   [ ] Alliance-specific conditions (pod legality checks per event).
--   [ ] Archon Adaptive Bo3 (full swap/bid series) as a match type.
+-   [x] **KeyForge-only conditions** (migration 33): deck swap policy (locked vs
+        between-rounds), set legality (allowed expansions), house restrictions
+        (required/banned houses), one-Archon-per-event uniqueness, SAS chain handicap
+        (stronger deck starts chained, auto-applied to online games via the engine's
+        adaptive-chains path; per-chain SAS + cap **admin-config**), Chainbound-style event
+        chains, the official **Triad** format (3-deck pools, per-match opponent ban + pick),
+        and Reversal / Adaptive Bo1 event formats with event→lobby format mapping.
+-   [ ] Hybrid events (online + paper results feeding one standing) → **N9**.
+-   [ ] QR join codes / check-in kiosk flows for IRL events → **N9**.
+-   [ ] Alliance-specific conditions (pod legality checks per event) → **N9**.
+-   [ ] Archon Adaptive Bo3 (full swap/bid series) as a match type → **N9**.
+-   [ ] Round-pairing notifications → **N2**.
 
 ## Phase 8 — Modern UI
 
--   [ ] UI audit of TCO client (React versions, component inventory) — doc.
--   [ ] Design system: tokens, typography, dark/light themes, component library.
 -   [x] Chess.com-style navigation: fixed left sidebar (Play/Learn/Watch/Community/Other
         with flyout submenus, Sign Up/Log In at bottom) on all non-game screens; in-game
         keeps the slim top bar so the board keeps full width.
 -   [x] Home page rebuilt as a landing hero (news → Community > News; lobby chat and
         promo banners removed; admin MOTD/banner notices retained).
--   [x] Placeholder pages routed for Learn, Watch, Play IRL, Stats, Tournaments, and
-        Community subpages so navigation is complete ahead of the features.
--   [ ] Incremental page-by-page modernization (decks → profile → game UI last,
-        since game UI carries the most gameplay risk).
--   [ ] Responsive layouts (desktop-first, tablet functional, mobile readable).
--   [ ] Accessibility pass (keyboard nav, contrast, screen-reader landmarks).
+-   [x] Placeholder pages routed for Learn, Watch, and Community subpages so navigation is
+        complete ahead of the features; Stats, Tournaments, and Play IRL have since shipped.
+-   [x] Design tokens: light/dark palettes, brand amber, typography, table/chat/nav tokens
+        (`client/styles/tailwind.css`).
+-   [ ] UI audit of the client (component inventory, duplication, modernization order) → **N6**.
+-   [ ] Documented component library on top of the tokens → **N6**.
+-   [ ] Incremental page-by-page modernization (decks → profile → game UI last, since game
+        UI carries the most gameplay risk) → **N6**.
+-   [ ] Responsive layouts (desktop-first, tablet functional, mobile readable) → **N6**.
+-   [ ] Accessibility pass (keyboard nav, contrast, screen-reader landmarks) → **N6**.
 
 ## Phase 9 — Player identity & community
 
--   [ ] Rich player profiles: avatar, bio, location, ratings, badges, favorite decks,
-        match history summary.
 -   [x] **Clubs v1** (local scenes/stores): create/join/leave, club pages with member
-        lists, owner remove/disband (server/services/community/ClubService). Follow-ups:
-        club leaderboards, approval-based joins, ownership transfer.
+        lists, owner remove/disband (server/services/community/ClubService).
 -   [x] **Club invite codes**: every club gets a shareable 8-char join code (owner-visible
         with copy button); join-by-code endpoint used by the club page and onboarding.
 -   [x] **First-run onboarding wizard** (`/welcome`, docs/design/onboarding.md): new
         accounts are walked through location, club join (code or search), deck import,
-        and profile picture - all skippable; completion stamped in Users.OnboardedAt
-        (existing users backfilled as onboarded). Follow-ups: highlight a "play your
-        first game" step once casual matchmaking lands.
+        profile picture, and a first-game step — all skippable; completion stamped in
+        Users.OnboardedAt (existing users backfilled as onboarded).
 -   [x] **Member directory**: public searchable member list (username/country filters,
         rating-sorted, privacy-safe fields only) with joined-24h/total/online stats.
 -   [x] **Play IRL + local stores** (`/play-irl`, docs/design/rankings-amber-and-irl.md):
         in-person play hub with a community-contributed local game store / venue directory
         (searchable by name/city + country; adder or admin can remove; Stores schema 38 /
-        migration 31, ON DELETE SET NULL keeps listings if the contributor leaves) and
-        shortcuts to in-person tournaments and clubs. Follow-ups: map view, store-hosted
-        event listings, verified/official store badges.
--   [ ] **Teams** (competitive): rosters, team events, team rating.
+        migration 31) and shortcuts to in-person tournaments and clubs.
 -   [x] **Friends v1**: requests by username, accept/decline/cancel/remove, mutual-request
         auto-accept, online presence dots (server/services/community/FriendService).
-        Follow-ups: block-list integration, DMs (moderated), friend activity feed.
--   [ ] Moderation tools: reports, mutes, bans, audit log **(admin-config policies)**.
+-   [ ] Rich public player profiles: avatar, bio, location, ratings, badges, favourite decks,
+        match history summary → **I3**.
+-   [ ] Club leaderboards, approval-based joins, ownership transfer → **N7**.
+-   [ ] **Teams** (competitive): rosters, team events, team rating → **N7**.
+-   [ ] Moderation tools: reports, mutes, bans, audit log **(admin-config policies)** → **N5**.
+-   [ ] Friend activity feed, DMs (moderated), block-list integration → **N5**/**N7**.
+-   [ ] Store follow-ups: map view, store-hosted event listings, verified/official badges → **N7**.
 
 ## Phase 10 — Match history, replays & spectating
 
--   [ ] **Replay Service:** persist full game event stream per match (engine already
-        event-driven; capture at the message layer, storage-budgeted **(admin-config
-        retention)**).
--   [ ] Replay viewer: step through games, jump to key turns.
--   [ ] Match history page: filters by deck, opponent, format, result.
--   [ ] Spectator mode: live view with hidden-information redaction; optional delay
-        **(admin-config)**; spectator count display.
--   [ ] Share links for replays/matches.
+-   [x] **Replay capture v1**: the structured play-by-play is recorded at game end and stored
+        per game (GameReplays, migration 38; `Game.getReplay()` reads the chat log only, no
+        gameplay coupling); oversized captures are skipped.
+-   [x] Replay viewer v1 (`/replay/:gameId`): step/scrub through the recorded log, reusing the
+        in-game Messages renderer.
+-   [x] Match history page (`/matches`), ported from the legacy MongoDB aggregation to
+        PostgreSQL.
+-   [x] Spectating from the lobby game list, with spectator lists and mute-spectators support
+        inherited from the engine.
+-   [ ] Board-state snapshots in the recording + a board replay viewer → **N1**.
+-   [ ] Storage-budgeted retention **(admin-config)** → **N1**.
+-   [ ] Watch hub: live games, featured match, spectator counts, optional delay
+        **(admin-config)**, verified hidden-information redaction → **N1**.
+-   [ ] Share links for replays/matches → **N1**.
+-   [ ] Match history filters by deck, opponent, format, result → **N1**.
 
 ## Phase 11 — Statistics & analytics
 
 -   [x] **Statistics Engine** service (`StatisticsService`): on-demand, TTL-cached
         aggregation over persisted games (never in the game path).
 -   [x] Player stats: win rates by house & format, key rates, average game length.
--   [ ] Deck stats: per-deck W/L, SAS vs. performance deltas.
 -   [x] Meta dashboards: house win rates, SAS bands vs. win %, format popularity.
-        (Set win rates and matchup matrices still pending.)
--   [ ] Admin analytics: DAU/MAU, games/day, queue health, funnel metrics.
--   [x] Public API for stats (`/api/stats/*`), cached. (Rate limiting + versioning pending.)
+-   [x] Public API for stats (`/api/stats/*`), cached.
+-   [ ] Set win rates and matchup matrices on the meta dashboard → **N3**.
+-   [ ] Deck stats: per-deck W/L, SAS vs. performance deltas → **N3**.
+-   [ ] Admin analytics: DAU/MAU, games/day, queue health, funnel metrics → **N8**.
+-   [ ] Rate limiting + versioning for the public stats API → **F1**.
 
 ## Phase 12 — Platform APIs
 
--   [ ] Versioned public REST API (`/api/v1`): profiles, ratings, rankings, tournaments,
-        match history, deck metadata.
--   [ ] API keys + OAuth scopes for third-party apps **(admin-config rate limits)**.
--   [ ] Webhooks: tournament events, match completion.
--   [ ] OpenAPI spec, generated docs page.
+-   [ ] Versioned public REST API (`/api/v1`) → **F1**.
+-   [ ] API keys + OAuth scopes for third-party apps **(admin-config rate limits)** → **F1**.
+-   [ ] Webhooks: tournament events, match completion → **F1**.
+-   [ ] OpenAPI spec, generated docs page → **F1**.
 
 ## Phase 13 — Coaching & AI analysis
 
--   [ ] Coaching profiles/marketplace: coaches list availability, students book sessions.
--   [ ] Shared replay review rooms (coach + student stepping through a replay together).
+-   [ ] Coaching profiles/marketplace: coaches list availability, students book sessions → **F3**.
+-   [ ] Shared replay review rooms (coach + student stepping through a replay together) → **F3**.
 -   [ ] AI game analysis: blunder detection, alternative-line suggestions, win-probability
-        graph per turn (model over replay event stream).
--   [ ] AI deck insights: strengths/weaknesses vs. meta, SAS-context commentary.
+        graph per turn (model over the replay event stream) → **F3**.
+-   [ ] AI deck insights: strengths/weaknesses vs. meta, SAS-context commentary → **F3**.
 
 ## Phase 14 — Mobile support
 
--   [ ] Mobile-responsive web as baseline (from Phase 8).
--   [ ] PWA: installable, push notifications for round pairings/turn timers.
--   [ ] Evaluate React Native wrapper vs. PWA-only — decision doc.
+-   [x] **Expo iOS app** (`mobile/`): sign in/register against the lobby (JWT + refresh,
+        tokens in the iOS keychain), live game list, create/join/watch games, deck library
+        with house icons + SAS and Master Vault import, pending game, and the full game board
+        (HUDs, battlelines, prompts, card menus, pile viewers, log/chat, spectator mode,
+        reconnect, concede/leave, manual mode). Protocol-identical to the web client.
+-   [x] EAS build config + TestFlight runbook (`mobile/TESTFLIGHT.md`); keep-awake during play;
+        mobile network resilience (timeouts, reconnect).
+-   [ ] Mobile-responsive web as the baseline → **N6**.
+-   [ ] PWA: installable, push notifications for round pairings/turn timers → **N6**/**N2**.
+-   [ ] App Store release, Android build, platform feature parity (tournaments, community,
+        profiles) → **F7**.
 
 ## Phase 15 — Streaming & content tools
 
--   [ ] Overlay endpoints for OBS (current game state, player names, ratings, key count).
--   [ ] Featured-match page for events; caster mode (both hands visible, delay enforced).
--   [ ] Clip/share moments from replays.
+-   [ ] Overlay endpoints for OBS (current game state, player names, ratings, key count) → **F4**.
+-   [ ] Featured-match page for events; caster mode (both hands visible, delay enforced) → **F4**.
+-   [ ] Clip/share moments from replays → **F4**.
 
 ## Phase 16 — Discord integration
 
--   [ ] Discord OAuth account linking.
--   [ ] Bot: tournament announcements, round pairings pings, result reporting commands.
--   [ ] Webhooks to club/team Discord servers **(admin-config per club)**.
--   [ ] Rich presence ("Playing on Archon Arena").
+-   [ ] Discord OAuth account linking → **F2**.
+-   [ ] Bot: tournament announcements, round pairings pings, result reporting commands → **F2**.
+-   [ ] Webhooks to club/team Discord servers **(admin-config per club)** → **F2**.
+-   [ ] Rich presence ("Playing on Archon Arena") → **F2**.
 
 ## Phase 17 — Organized play program
 
--   [ ] Sanctioned event tooling: TO certification levels, event sanctioning workflow.
--   [ ] OP points/season circuit distinct from Elo **(admin-config point tables)**.
--   [ ] Regional/national/world championship series structures.
--   [ ] Prize/invite tracking, top-N qualification reports.
+-   [ ] Sanctioned event tooling: TO certification levels, event sanctioning workflow → **F5**.
+-   [ ] OP points/season circuit distinct from Elo **(admin-config point tables)** → **F5**.
+-   [ ] Regional/national/world championship series structures → **F5**.
+-   [ ] Prize/invite tracking, top-N qualification reports → **F5**.
+
+## Phase 18 — Matchmaking & the competitive play loop
+
+The loop a competitive player repeats: queue → play → see the result → play again. Added as
+its own phase because it cuts across the lobby, rating engine, and UI, and because it is what
+turns a feature-complete site into a habit.
+
+-   [x] **Quick Match** matchmaking (`server/services/matchmaking/MatchmakingService.js`):
+        in-memory queue pairing on Amber proximity with tolerance that widens with wait time,
+        FIFO fairness, format-scoped, `canPair` guard for block-lists and in-game players.
+        The service holds no sockets and no clock, so pairing is deterministic and unit-tested.
+-   [x] Quick Match UI with live queue sizes and a searching state; first-game step in
+        onboarding hands new players into the queue.
+-   [x] Game types removed — every game is the same; rating pools follow format instead.
+-   [ ] Post-game result screen with the Amber change → **I4**.
+-   [ ] Matchmaking parameters **(admin-config)**: base tolerance, widening rate, max wait.
+-   [ ] Queue health telemetry (depth, wait time, match quality) → **N8**.
+-   [ ] Rematch and rated-rematch flow from the result screen → **I4**.
 
 ---
 
@@ -380,15 +896,17 @@ much stronger deck pays less.
 -   [x] **Settings service**: typed registry, DB-backed (SiteSettings), in-memory
         snapshot with periodic refresh, who/when audit, defaults in code
         (docs/design/settings-service.md).
--   [x] Admin settings UI at /admin/settings (isAdmin): rating engine (all Elo knobs,
-        rated types, leaderboard threshold) and DoK sections editable at runtime.
--   [ ] Wire remaining **(admin-config)** flags through the registry as their features
-        land (auth SSO-only mode, tournament defaults, region definitions...).
--   [ ] Redis pub/sub snapshot invalidation for multi-lobby deployments.
--   [ ] Full audit-log table (currently last-editor only).
--   [ ] Feature flags section for gradual rollout of new systems.
--   [ ] Broader **admin panel** (users, tournaments, moderation, analytics) as those
-        systems arrive.
+-   [x] Admin settings UI at /admin/settings (isAdmin) covering rating (Elo knobs, decay,
+        seasons, leaderboard threshold), DoK, tournaments, regions, site content, and
+        navigation page visibility.
+-   [x] Admin tooling: user admin (roles, disable, delete, password reset), per-player rating
+        set/reset, season operations, ban list, nodes, MOTD, news, bug reports.
+-   [ ] Wire remaining **(admin-config)** flags through the registry: auth SSO-only mode,
+        matchmaking parameters, replay retention, moderation policy thresholds.
+-   [ ] Redis pub/sub snapshot invalidation for multi-lobby deployments → **N8**.
+-   [ ] Full audit-log table (currently last-editor only) → **N5**.
+-   [ ] Feature flags section for gradual rollout of new systems → **N8**.
+-   [ ] Admin panel coverage for tournaments, moderation, and analytics → **N5**/**N8**.
 
 ## Cross-cutting: Quality & operations
 
@@ -398,26 +916,35 @@ much stronger deck pays less.
         given ~2 min to recover; "Leave Game" now also leaves over the lobby
         socket so a stranded player can always escape and the lobby tears the game
         down on the node instead of leaving a ghost.
--   [ ] Gameplay regression suite kept green on every PR (card tests from upstream).
--   [ ] Load testing for game nodes + matchmaking before public launch.
--   [ ] Upstream sync process: periodically merge keyteki card fixes (`docs/UPSTREAM.md`).
--   [ ] Data migration/versioning discipline: every schema change is a numbered migration.
--   [ ] Security: dependency audit, rate limiting, OWASP pass before launch.
+-   [x] Gameplay regression suite kept green on every PR (the full card suite runs in CI).
+-   [x] **In-app bug reports** (BugReportService, migration 34) with an admin triage page —
+        the beta feedback channel.
+-   [ ] Data migration/versioning discipline: ledger + runner, one numbered migration per
+        schema change → **I2**.
+-   [ ] Security: dependency audit, auth rate limiting, OWASP pass before launch → **I5**.
+-   [ ] Load testing for game nodes + matchmaking before public launch → **N10**.
+-   [ ] Upstream sync process: periodically merge keyteki card fixes (`docs/UPSTREAM.md`) → **N10**.
 
----
+## Known defects & housekeeping
 
-## Immediate next steps (working queue)
+Small, real, and worth clearing while touching the surrounding code. None is urgent on its own.
 
-1. ~~Import keyteki source into this repo (Phase 0).~~ ✅
-2. ~~Initial rebrand pass — user-visible strings (Phase 1).~~ ✅
-3. ~~Get build + tests green; record baseline (Phase 0).~~ ✅
-4. ~~Docker compose stack + deployment docs for ArchonArena.com (Phase 2).~~ ✅
-5. ~~Keybringer OIDC login flow (Phase 3).~~ ✅ (owner: register Keycloak client)
-6. ~~DoK SAS fetch + display (Phase 4).~~ ✅
-7. ~~SAS-adjusted Elo calculator (Phase 5, increment 1).~~ ✅
-8. **Owner actions:** provision a VPS + point Porkbun DNS (docs/DEPLOYMENT.md §2);
-   register the Keycloak client (docs/design/keybringer-sso.md); get a DoK API key.
-9. RatingService persistence + GAMEWIN wiring (Phase 5, increment 2).
-10. Rankings: profile location fields + leaderboards (Phase 6).
-11. Site Settings service + admin panel foundations (cross-cutting).
-12. Tournament engine data model + Swiss pairing core (Phase 7).
+-   [ ] **Duplicate schema ordinals**: `server/db/schema/` contains `40 - Seasons.sql` and
+        `40 - TournamentMatchGames.sql`, plus `41 - GameReplays.sql` and
+        `41 - TournamentPlayerDecks.sql`. Ordering is still deterministic (alphabetical) and
+        the files are independent, but the numbering no longer means anything. Fix with **I2**.
+-   [ ] **Dead legacy router**: `client/routes.jsx` (re-exported by `client/routes.js`) is
+        unreferenced — `client/AppRoutes.jsx` is the live router. The dead file lists a stale,
+        much smaller route set and misleads anyone reading it. Delete both.
+-   [ ] **Dead MongoDB code**: `server/stats.js` and `server/scripts/addsealed.js` are
+        standalone scripts still importing `monk`; neither is loaded by the application
+        (`server/api/index.js` requires `./stats`, which is `server/api/stats.js`). Port or
+        delete them, then drop the `monk` dependency.
+-   [ ] **Third-party font loading**: `client/styles/tailwind.css` pulls Noto Sans and Orbitron
+        from `fonts.googleapis.com`, while the privacy page states the site uses no third-party
+        trackers. Self-host both (there is already a `client/assets/fonts/` directory).
+-   [ ] **`helmet` pinned at v3**, several majors behind. Upgrade with **I5**.
+-   [ ] **Silent replay drop**: `GameService.saveReplay` skips captures over 2 MB with only a
+        log line. Fold into the retention policy in **N1** so the behaviour is explicit and
+        visible.
+-   [ ] **`docs/DEVELOPMENT.md` missing** — Phase 0's last open item.
