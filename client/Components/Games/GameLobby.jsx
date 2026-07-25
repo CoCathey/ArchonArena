@@ -7,6 +7,7 @@ import NewGame from './NewGame';
 import GameList from './GameList';
 import PendingGame from './PendingGame';
 import PasswordGame from './PasswordGame';
+import QuickMatchPanel from './QuickMatchPanel';
 import AlertPanel from '../Site/AlertPanel';
 import Panel from '../Site/Panel';
 import { lobbyActions } from '../../redux/slices/lobbySlice';
@@ -164,7 +165,7 @@ const GameLobby = ({ gameId }) => {
     );
     const user = useSelector((state) => state.account.user);
     const [currentFilter, setCurrentFilter] = useState(filterDefaults);
-    const [quickJoin, setQuickJoin] = useState(false);
+    const [showQuickMatch, setShowQuickMatch] = useState(false);
     const topRef = useRef(null);
     const useMockGames = useMemo(() => {
         const search = new URLSearchParams(location.search);
@@ -197,10 +198,17 @@ const GameLobby = ({ gameId }) => {
         localStorage.setItem('gameFilter', JSON.stringify(nextFilter));
     };
 
-    const openNewGame = (isQuickJoin) => {
-        setQuickJoin(isQuickJoin);
+    const openNewGame = () => {
+        setShowQuickMatch(false);
         dispatch(lobbyActions.startNewGame());
     };
+
+    // Once matched (or otherwise in a game), drop the Quick Match panel.
+    useEffect(() => {
+        if (currentGame) {
+            setShowQuickMatch(false);
+        }
+    }, [currentGame]);
 
     useEffect(() => {
         if (!currentGame && gameId && visibleGames.length > 0) {
@@ -244,7 +252,10 @@ const GameLobby = ({ gameId }) => {
 
     return (
         <div className='mx-auto w-full max-w-6xl' ref={topRef}>
-            {newGame && <NewGame key={`new-game-${newGameInstance}`} quickJoin={quickJoin} />}
+            {newGame && <NewGame key={`new-game-${newGameInstance}`} />}
+            {showQuickMatch && !currentGame && (
+                <QuickMatchPanel onClose={() => setShowQuickMatch(false)} />
+            )}
             {currentGame?.started === false && <PendingGame />}
             {passwordGame && <PasswordGame />}
 
@@ -261,7 +272,7 @@ const GameLobby = ({ gameId }) => {
                             className='w-full'
                             variant='primary'
                             isDisabled={!user}
-                            onPress={() => openNewGame(false)}
+                            onPress={() => openNewGame()}
                         >
                             <Trans>New Game</Trans>
                         </Button>
@@ -269,9 +280,9 @@ const GameLobby = ({ gameId }) => {
                             className='w-full'
                             variant='tertiary'
                             isDisabled={!user}
-                            onPress={() => openNewGame(true)}
+                            onPress={() => setShowQuickMatch(true)}
                         >
-                            <Trans>Quick Join</Trans>
+                            <Trans>Find Match</Trans>
                         </Button>
                     </div>
 

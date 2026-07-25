@@ -7,7 +7,8 @@ const defaultState = {
     newGameInstance: 0,
     users: [],
     messages: [],
-    windowBlurred: false
+    windowBlurred: false,
+    searching: false
 };
 
 const handleGameState = (state, game, username) => {
@@ -128,6 +129,27 @@ const handleMessage = (state, message, args) => {
             state.newGame = false;
             state.currentGame = undefined;
             break;
+        case 'matchmaking': {
+            // Quick Match status from the server: searching | matched | error | idle.
+            const info = args[0] || {};
+            if (info.status === 'searching') {
+                state.searching = true;
+                state.matchmakingFormat = info.format;
+                state.matchmakingError = undefined;
+            } else if (info.status === 'matched') {
+                // The paired game arrives via 'gamestate' right after this.
+                state.searching = false;
+                state.matchmakingError = undefined;
+            } else if (info.status === 'error') {
+                state.searching = false;
+                state.matchmakingError = info.message;
+            } else {
+                // 'idle' / cancelled
+                state.searching = false;
+                state.matchmakingError = undefined;
+            }
+            break;
+        }
     }
 };
 
@@ -183,6 +205,17 @@ const lobbySlice = createSlice({
         },
         cancelNewGame: (state) => {
             state.newGame = false;
+        },
+        startSearching: (state, action) => {
+            state.searching = true;
+            state.matchmakingFormat = action.payload;
+            state.matchmakingError = undefined;
+        },
+        stopSearching: (state) => {
+            state.searching = false;
+        },
+        clearMatchmakingError: (state) => {
+            state.matchmakingError = undefined;
         },
         clearChatStatus: (state) => {
             state.lobbyError = false;

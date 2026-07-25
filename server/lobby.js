@@ -13,8 +13,21 @@ const ConfigService = require('./services/ConfigService');
 // ARCHON: native tournaments create/report lobby games automatically
 const TournamentService = require('./services/tournament/TournamentService');
 const tournamentEvents = require('./services/tournament/tournamentEvents');
+// ARCHON: Quick Match matchmaking queue (Amber-based pairing)
+const MatchmakingService = require('./services/matchmaking/MatchmakingService');
+const RatingService = require('./services/rating/RatingService');
 const User = require('./models/User');
 const { sortBy } = require('./Array');
+
+// ARCHON: game formats a player can queue for in Quick Match.
+const MATCHMAKING_FORMATS = [
+    'normal',
+    'sealed',
+    'reversal',
+    'adaptive-bo1',
+    'alliance',
+    'unchained'
+];
 
 class Lobby {
     constructor(server, options = {}) {
@@ -44,6 +57,17 @@ class Lobby {
         this.router.on('onGameWin', this.onTournamentGameWin.bind(this));
         tournamentEvents.on('roundPaired', this.onTournamentRoundPaired.bind(this));
         tournamentEvents.on('ensureMatchGame', this.onTournamentEnsureMatchGame.bind(this));
+
+        // ARCHON: Quick Match matchmaking - queue players and pair them by Amber.
+        this.ratingService = options.ratingService || new RatingService(this.configService);
+        this.matchmaking = options.matchmaking || new MatchmakingService();
+        // Re-attempt pairings periodically so waiting players match as their
+        // Amber tolerance widens, even when nobody new joins. Unref'd so it
+        // never keeps the process (or a test runner) alive on its own.
+        this.matchmakingSweep = setInterval(() => this.runMatchmaking(), 3000);
+        if (this.matchmakingSweep && this.matchmakingSweep.unref) {
+            this.matchmakingSweep.unref();
+        }
 
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
 
@@ -414,7 +438,9 @@ class Lobby {
         socket.registerEvent('getnodestatus', this.onGetNodeStatus.bind(this));
         socket.registerEvent('getsealeddeck', this.onGetSealedDeck.bind(this));
         socket.registerEvent('joingame', this.onJoinGame.bind(this));
+        socket.registerEvent('joinqueue', this.onJoinQueue.bind(this));
         socket.registerEvent('leavegame', this.onLeaveGame.bind(this));
+        socket.registerEvent('leavequeue', this.onLeaveQueue.bind(this));
         socket.registerEvent('lobbychat', this.onLobbyChat.bind(this));
         socket.registerEvent('motd', this.onMotdChange.bind(this));
         socket.registerEvent('newgame', this.onNewGame.bind(this));
@@ -522,6 +548,8 @@ class Lobby {
             return;
         }
 
+        this.matchmaking?.dequeue(socket.user.username);
+
         this.broadcastUserMessage(socket.user, 'userleft');
 
         delete this.users[socket.user.username];
@@ -545,7 +573,150 @@ class Lobby {
         }
     }
 
+    // ARCHON: Quick Match - enter the matchmaking queue for a format. We look
+    // up the player's Amber for that format's pool so pairing favours opponents
+    // of a similar rating, then try to pair immediately.
+    async onJoinQueue(socket, details) {
+        if (!socket.user) {
+            return;
+        }
+
+        const username = socket.user.username;
+
+        if (this.findGameForUser(username)) {
+            socket.send('matchmaking', {
+                status: 'error',
+                message: 'Leave your current game before finding a match'
+            });
+
+            return;
+        }
+
+        const format =
+            details && MATCHMAKING_FORMATS.includes(details.gameFormat)
+                ? details.gameFormat
+                : 'normal';
+        const amber = await this.getMatchmakingAmber(username, format);
+
+        this.matchmaking.enqueue({ username, format, amber, joinedAt: Date.now() });
+        socket.send('matchmaking', { status: 'searching', format });
+
+        this.runMatchmaking();
+    }
+
+    onLeaveQueue(socket) {
+        if (!socket.user) {
+            return;
+        }
+
+        this.matchmaking.dequeue(socket.user.username);
+        socket.send('matchmaking', { status: 'idle' });
+    }
+
+    async getMatchmakingAmber(username, format) {
+        try {
+            const pool = this.ratingService.normalizePool(format);
+            const ratings = await this.ratingService.getRatingsForUsername(username);
+            const entry = (ratings || []).find((rating) => rating.pool === pool);
+
+            return entry ? entry.rating : MatchmakingService.DEFAULT_AMBER;
+        } catch (err) {
+            logger.error('Failed to look up matchmaking Amber', err);
+
+            return MatchmakingService.DEFAULT_AMBER;
+        }
+    }
+
+    runMatchmaking() {
+        if (!this.matchmaking) {
+            return;
+        }
+
+        const canPair = (a, b) => {
+            const socketA = this.socketsByName[a.username];
+            const socketB = this.socketsByName[b.username];
+
+            if (!socketA || !socketB) {
+                return false;
+            }
+
+            if (this.findGameForUser(a.username) || this.findGameForUser(b.username)) {
+                return false;
+            }
+
+            // Respect block-lists in both directions.
+            return (
+                !socketA.user.hasUserBlocked(socketB.user) &&
+                !socketB.user.hasUserBlocked(socketA.user)
+            );
+        };
+
+        for (const [a, b] of this.matchmaking.collectMatches(Date.now(), canPair)) {
+            this.createMatchedGame(a, b);
+        }
+    }
+
+    createMatchedGame(a, b) {
+        const socketA = this.socketsByName[a.username];
+        const socketB = this.socketsByName[b.username];
+
+        const requeue = (entry, socket) => {
+            if (socket) {
+                this.matchmaking.enqueue({
+                    username: entry.username,
+                    format: entry.format,
+                    amber: entry.amber,
+                    joinedAt: Date.now()
+                });
+            }
+        };
+
+        // A player may have disconnected or entered another game between
+        // pairing and creation; requeue whoever is still available.
+        if (!socketA || !socketB) {
+            requeue(a, socketA);
+            requeue(b, socketB);
+
+            return;
+        }
+
+        const game = new PendingGame(socketA.user, {
+            allowSpectators: true,
+            gameFormat: a.format,
+            name: `Quick Match: ${a.username} vs ${b.username}`,
+            quickMatch: true
+        });
+
+        game.newGame(socketA.id, socketA.user, null, true);
+        const joinError = game.join(socketB.id, socketB.user);
+
+        if (joinError) {
+            logger.info(`Quick Match join failed (${a.username} vs ${b.username}): ${joinError}`);
+            requeue(a, socketA);
+            requeue(b, socketB);
+
+            return;
+        }
+
+        socketA.joinChannel(game.id);
+        socketB.joinChannel(game.id);
+        this.games[game.id] = game;
+
+        this.sendGameState(game);
+        this.broadcastGameMessage('newgame', game);
+
+        socketA.send('matchmaking', { status: 'matched', gameId: game.id });
+        socketB.send('matchmaking', { status: 'matched', gameId: game.id });
+
+        logger.info(
+            `Quick Match created ${game.id}: ${a.username} (${a.amber}) vs ${b.username} (${b.amber})`
+        );
+    }
+
     onNewGame(socket, gameDetails) {
+        // Creating a game means leaving any matchmaking queue.
+        this.matchmaking?.dequeue(socket.user.username);
+
         if (!socket.user.permissions.canManageTournaments || !gameDetails.tournament) {
             let existingGame = this.findGameForUser(socket.user.username);
             if (existingGame) {
@@ -594,6 +765,9 @@ class Lobby {
     }
 
     onJoinGame(socket, gameId, password) {
+        // Joining a game means leaving any matchmaking queue.
+        this.matchmaking?.dequeue(socket.user.username);
+
         let existingGame = this.findGameForUser(socket.user.username);
         if (existingGame) {
             return;

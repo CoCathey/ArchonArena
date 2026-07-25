@@ -41,7 +41,8 @@ const lobbyMessages = [
     'banner',
     'motd',
     'cleargamestate',
-    'gameerror'
+    'gameerror',
+    'matchmaking'
 ];
 
 export const socketMiddleware = (store) => (next) => (action) => {
