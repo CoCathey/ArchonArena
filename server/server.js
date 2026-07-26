@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 // ARCHON: cookies carry transient OIDC login state (see server/api/oidc.js)
 const cookieParser = require('cookie-parser');
 const ConfigService = require('./services/ConfigService');
+const helmet = require('helmet');
 const passport = require('passport');
 const logger = require('./log.js');
 const api = require('./api');
@@ -58,6 +59,32 @@ class Server {
                     });
             })
         );
+        // ARCHON: trust exactly one proxy hop in production, none in development.
+        //
+        // This is what makes req.ip the real client address rather than the
+        // proxy's, and req.ip is what the rate limiter keys anonymous callers on
+        // (server/api/rateLimit.js). Trusting one hop is only sound because the
+        // app cannot be reached any other way: in docker-compose.prod.yml only
+        // the caddy service publishes ports (80/443) - lobby, node-0, postgres
+        // and redis publish none - so every request the app sees has passed
+        // through Caddy exactly once. If a future deployment ever exposes the
+        // lobby port directly, this must be revisited: a client that can reach
+        // the app without the proxy can forge X-Forwarded-For.
+        app.set('trust proxy', this.isDeveloping ? false : 1);
+
+        // ARCHON: security response headers. `helmet` has been a dependency since
+        // the upstream fork but was never actually mounted, so the site shipped
+        // with none of them. helmet@3's defaults (noSniff, frameguard, hsts,
+        // hidePoweredBy, xssFilter, dnsPrefetchControl, ieNoOpen) are safe for a
+        // SPA - they add no Content-Security-Policy, so nothing the client
+        // already loads can break. HSTS only where TLS actually terminates.
+        app.use(
+            helmet({
+                hsts: this.isDeveloping ? false : undefined
+            })
+        );
+        app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }));
+
         app.use(passport.initialize());
 
         app.use(bodyParser.json({ limit: '5mb' }));

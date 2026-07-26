@@ -74,28 +74,19 @@ INSERT INTO public."Roles" ("Id", "Name") VALUES (16, 'KeepSupporterStatus');
 
 SELECT pg_catalog.setval('public."Roles_Id_seq"', 12, true);
 
--- Add default admin user (NOT FOR PRODUCTION)
-
-INSERT INTO public."Users" ("Id", "Password", "Registered", "Username", "Email", "Settings_Background", "Settings_CardSize",
-    "Settings_OrderAbilities", "Settings_ConfirmOneClick", "Settings_UseHalfSizedCards", "Verified", "Disabled", "RegisterIp") VALUES
-    (1, '$2b$10$T7eqHoi26C3ADmTDbGOYseTbsrPdCoNFkMKmgh21T4Y6i9NVylgxG', NOW(), 'admin', 'admin@example.com', 'Brobnar', 'normal', False, True, False, True,
-     False, '127.0.0.1');
-
--- Add default test users (NOT FOR PRODUCTION)
-
-INSERT INTO public."Users" ("Id", "Password", "Registered", "Username", "Email", "Settings_Background", "Settings_CardSize",
-    "Settings_OrderAbilities", "Settings_ConfirmOneClick", "Settings_UseHalfSizedCards", "Verified", "Disabled", "RegisterIp") VALUES
-    (2, '$2b$10$T7eqHoi26C3ADmTDbGOYseTbsrPdCoNFkMKmgh21T4Y6i9NVylgxG', NOW(), 'test0', 'test0@example.com', 'none', 'normal', True, True, False, True,
-     False, '127.0.0.1');
-INSERT INTO public."Users" ("Id", "Password", "Registered", "Username", "Email", "Settings_Background", "Settings_CardSize",
-    "Settings_OrderAbilities", "Settings_ConfirmOneClick", "Settings_UseHalfSizedCards", "Verified", "Disabled", "RegisterIp") VALUES
-    (3, '$2b$10$T7eqHoi26C3ADmTDbGOYseTbsrPdCoNFkMKmgh21T4Y6i9NVylgxG', NOW(), 'test1', 'test1@example.com', 'Dis', 'normal', True, True, False, True,
-     False, '127.0.0.1');
-
+-- ARCHON: the demo accounts (admin / test0 / test1, all with the password
+-- 'password') used to live here. This file is reference data and IS mounted
+-- into the PRODUCTION database's docker-entrypoint-initdb.d, so seeding them
+-- here handed anyone who tried admin/password a full-permission account on a
+-- freshly deployed site.
+--
+-- They now live in server/db/dev-seed/, which only docker-compose.yml (local
+-- development) mounts. Production bootstraps its first admin instead with:
+--     npm run grant-admin -- <username>
+-- against an account that registered through the site normally.
+--
+-- The sequence is still advanced past the historical demo ids so account ids
+-- line up with existing databases.
 SELECT pg_catalog.setval('public."Users_Id_seq"', 11, true);
-
-INSERT INTO public."UserRoles" ("UserId", "RoleId") VALUES (1, 1);
-INSERT INTO public."UserRoles" ("UserId", "RoleId") VALUES (1, 6);
-INSERT INTO public."UserRoles" ("UserId", "RoleId") VALUES (1, 10);
 
 ALTER TABLE "DeckCards" ADD COLUMN "ProphecyId" INTEGER;

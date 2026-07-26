@@ -21,13 +21,21 @@ const store = new Map();
 const MAX_AGE_MS = 60 * 60 * 1000;
 let lastSweepAt = 0;
 
+/**
+ * The client address to key an anonymous caller on.
+ *
+ * ARCHON: this used to read `x-real-ip` / `x-forwarded-for` straight off the
+ * request. Those are attacker-controlled on any request that reaches the app,
+ * so a caller could send a different `X-Real-IP` every time and get a fresh
+ * bucket on each one - the limiter counted, but never actually limited.
+ *
+ * `req.ip` is derived by Express from the `trust proxy` setting (server.js
+ * trusts exactly the one Caddy hop in production, nothing in development), so
+ * forwarding headers are honoured only when they came from our own proxy and
+ * are ignored otherwise.
+ */
 function clientIp(req) {
-    return (
-        (req.get && req.get('x-real-ip')) ||
-        (req.headers && req.headers['x-forwarded-for']) ||
-        (req.connection && req.connection.remoteAddress) ||
-        'unknown'
-    );
+    return req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
 }
 
 function sweep(now) {

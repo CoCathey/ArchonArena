@@ -205,6 +205,37 @@ moment it matters most. Players finish a rated game with no feedback that anythi
 -   An unrated or abandoned game shows an explicit "not rated" state instead of a blank panel.
 -   Deltas shown always match `RatingHistory` for that game.
 
+#### I0 — Launch-blocking defects found by review _(done)_
+
+**Why:** three defects that would each have been discovered only after the site was public,
+found by auditing the launch path rather than the feature list. All three are fixed.
+
+-   [x] **Transactional email was dead in every environment.** `EmailService` read
+        `lobby.emailFrom`; no config file defines that key (both define `emailFromAddress`), so
+        the sender was always undefined and every send hit the not-configured guard and returned.
+        Account activation and password reset silently did nothing — a player who forgot their
+        password had no route back into their account, and the only trace was an info-level log
+        line. Fixed the key, added the missing `EMAIL_*` / `AWS_*` env mappings and
+        `.env.production.example` entries, made the drop log at warn, made `sendEmail` report
+        success, and made `healthcheck.sh` FAIL when no sender is configured.
+-   [x] **Production seeded a known-password superuser.** `docker-compose.prod.yml` mounts the
+        whole of `server/db/schema/` into `docker-entrypoint-initdb.d`, and
+        `99 - Data.sql` — marked "NOT FOR PRODUCTION" in its own comment — inserted `admin`,
+        `test0` and `test1` with the password `password`, granting `admin` the Admin role
+        (a superuser implying every management permission). Any deployed database was one
+        guess from full takeover. Demo accounts moved to `server/db/dev-seed/`, mounted only by
+        the local `docker-compose.yml`; added `npm run grant-admin -- <username>` to bootstrap a
+        real admin from a normally-registered account; `healthcheck.sh` now FAILs while any demo
+        account exists.
+-   [x] **The rate limiter could not limit anyone.** It keyed anonymous callers on the
+        `x-real-ip` / `x-forwarded-for` request headers, which the caller controls, so varying
+        the header per request minted a fresh bucket every time. Now keys on `req.ip` with
+        `trust proxy` set to exactly the one Caddy hop in production (sound because only Caddy
+        publishes ports) and nothing in development. Regression test included.
+-   [x] **Security headers were never actually on.** `helmet` has been a dependency since the
+        fork but was never mounted. Enabled with helmet@3 defaults plus a referrer policy —
+        deliberately no CSP, so nothing the SPA already loads can break.
+
 #### I5 — Pre-launch security and abuse pass
 
 **Why:** the moment the site is public it is a target, and account/auth endpoints are the
@@ -214,9 +245,10 @@ registration, or password reset.
 **Tasks**
 
 -   Rate-limit and add progressive back-off to login, registration, password reset, and
-    activation; lock out after repeated failures.
--   `npm audit` triage; upgrade `helmet` (pinned at v3, several majors behind) and review its
-    CSP/headers against the live site.
+    activation; lock out after repeated failures. (The limiter itself now works — **I0** — but
+    it is still not applied to any auth endpoint.)
+-   `npm audit` triage; upgrade `helmet` (pinned at v3, now mounted — **I0**) and decide on a
+    Content-Security-Policy, which the current configuration deliberately omits.
 -   Review every endpoint for authorisation (especially the admin and tournament-organizer
     routes) and for user-supplied content rendered without escaping.
 -   Secrets audit: confirm nothing sensitive is settings-service-editable or logged.
@@ -1138,7 +1170,8 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
 -   [ ] **Third-party font loading**: `client/styles/tailwind.css` pulls Noto Sans and Orbitron
         from `fonts.googleapis.com`, while the privacy page states the site uses no third-party
         trackers. Self-host both (there is already a `client/assets/fonts/` directory).
--   [ ] **`helmet` pinned at v3**, several majors behind. Upgrade with **I5**.
+-   [ ] **`helmet` pinned at v3**, several majors behind. Now mounted (**I0**); upgrading the
+        major version and adding a CSP stays with **I5**.
 -   [ ] **Silent replay drop**: `GameService.saveReplay` skips captures over 2 MB with only a
         log line. Fold into the retention policy in **N1** so the behaviour is explicit and
         visible.

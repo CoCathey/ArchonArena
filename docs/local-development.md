@@ -90,6 +90,12 @@ Docker is the recommended approach for local development.
 -   Browse to [http://localhost:4000](http://localhost:4000)
 -   Default users: `admin`, `test0`, `test1` (password: `password`)
 
+    These are seeded from `server/db/dev-seed/01 - DevAccounts.sql`, which **only**
+    `docker-compose.yml` mounts. They are deliberately kept out of `server/db/schema/`,
+    because the production stack mounts that whole directory into the database's init path —
+    seeding them there gave any deployed site a guessable full-permission admin account.
+    Production bootstraps its first admin with `npm run grant-admin -- <username>` instead.
+
 ## Hybrid Setup (Docker + Local Node)
 
 For hot reloading and React DevTools, run Node locally while using Docker for databases:

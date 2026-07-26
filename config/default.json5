@@ -33,7 +33,7 @@
          *  - hmacSecret
          *  - captchaKey (hCaptcha secret key)
          *  - awsSesRegion, awsAccessKeyId, awsSecretAccessKey (AWS SES credentials)
-         *  - emailFrom, emailReplyTo (email sender addresses)
+         *  - emailReplyTo (reply-to address; emailFromAddress above is the sender)
          */
     },
 

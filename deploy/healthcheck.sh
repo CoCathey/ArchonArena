@@ -172,6 +172,18 @@ fi
 users="$(psql_q 'SELECT COUNT(*) FROM "Users"')"
 ok "user accounts: ${users:-?}"
 
+# The demo logins (admin/test0/test1, password 'password') must never exist on a
+# production database. They used to be seeded by 'server/db/schema/99 - Data.sql',
+# which this stack mounts into docker-entrypoint-initdb.d, so any database
+# initialised before that fix has a full-permission account with a guessable
+# password. Databases created since are clean - this check proves it.
+demo="$(psql_q $'SELECT COUNT(*) FROM "Users" WHERE lower("Username") IN (\'admin\',\'test0\',\'test1\')')"
+if [ "${demo:-0}" -eq 0 ] 2>/dev/null; then
+    ok "no seeded demo accounts (admin/test0/test1)"
+else
+    bad "SECURITY: ${demo} seeded demo account(s) present - 'admin' has full permissions and the password 'password'" "rename or delete them now, then bootstrap a real admin: $DC exec lobby npm run grant-admin -- <username>"
+fi
+
 echo "== Environment (.env.production) =="
 for var in SECRET HMAC_SECRET DB_USER DB_PASSWORD; do
     if grep -qE "^$var=.+" .env.production 2>/dev/null; then
@@ -180,6 +192,20 @@ for var in SECRET HMAC_SECRET DB_USER DB_PASSWORD; do
         bad "$var is empty or missing" "edit /opt/archonarena/.env.production, then: $DC up -d lobby node-0"
     fi
 done
+# Transactional email. Without a sender address the app silently drops every
+# activation and password-reset mail, so a player who forgets their password is
+# locked out permanently. This is a FAIL on a public site, not a warning.
+if grep -qE "^EMAIL_FROM_ADDRESS=.+" .env.production 2>/dev/null; then
+    ok "EMAIL_FROM_ADDRESS set (activation + password reset can send)"
+    if grep -qE "^AWS_SES_REGION=.+" .env.production 2>/dev/null; then
+        ok "AWS_SES_REGION set"
+    else
+        warn "AWS_SES_REGION empty - SES falls back to the SDK default region" "set AWS_SES_REGION in /opt/archonarena/.env.production"
+    fi
+else
+    bad "EMAIL_FROM_ADDRESS empty or missing - NO password reset or activation email can be sent" "set EMAIL_FROM_ADDRESS (a verified SES identity) in /opt/archonarena/.env.production, then: $DC up -d lobby"
+fi
+
 if grep -qE "^DOK_API_KEY=.+" .env.production 2>/dev/null; then
     ok "DOK_API_KEY set (SAS + bulk deck import enabled)"
     # Probe DoK from inside the lobby container: proves outbound network

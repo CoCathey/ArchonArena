@@ -59,6 +59,11 @@ services:
         volumes:
             - postgres:/data/postgres
             - ./server/db/schema:/docker-entrypoint-initdb.d
+            # Local-only demo accounts (admin / test0 / test1, password
+            # 'password'). Deliberately a separate file so the production stack,
+            # which mounts server/db/schema wholesale, can never seed them.
+            # Named to sort after '99 - Data.sql' so the roles it inserts exist.
+            - './server/db/dev-seed/01 - DevAccounts.sql:/docker-entrypoint-initdb.d/zz-dev-accounts.sql'
         restart: unless-stopped
     redis:
         image: 'redis:alpine'

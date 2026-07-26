@@ -69,6 +69,26 @@ silently wiped by every `up -d`.
 
 Visit `https://archonarena.com` — you should see the Archon Arena lobby.
 
+### Bootstrapping the first admin
+
+A production database is seeded with **no accounts at all**. The demo logins
+(`admin` / `test0` / `test1`, password `password`) live in `server/db/dev-seed/`, which only
+the local `docker-compose.yml` mounts — production must never create them, since `admin`
+carries every management permission.
+
+Register your account through the site as a normal player, then promote it:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production \
+  exec lobby npm run grant-admin -- <your-username>
+```
+
+Sign out and back in for the permissions to take effect. The command is idempotent.
+
+> If you deployed before this change, your database already contains those accounts.
+> `deploy/healthcheck.sh` now FAILs while they exist — delete or rename them, and treat the
+> site as compromised if it was publicly reachable with `admin` intact.
+
 ## 4. Deploying updates
 
 ```bash

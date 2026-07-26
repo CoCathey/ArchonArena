@@ -16,7 +16,15 @@
     lobby: {
         port: 'PORT',
         hmacSecret: 'HMAC_SECRET',
-        emailKey: 'EMAIL_KEY'
+        emailKey: 'EMAIL_KEY',
+        // Transactional email (activation, password reset) over AWS SES.
+        // Without emailFromAddress the site silently cannot send any mail, so a
+        // player who forgets their password cannot recover their account.
+        emailFromAddress: 'EMAIL_FROM_ADDRESS',
+        emailReplyTo: 'EMAIL_REPLY_TO',
+        awsSesRegion: 'AWS_SES_REGION',
+        awsAccessKeyId: 'AWS_ACCESS_KEY_ID',
+        awsSecretAccessKey: 'AWS_SECRET_ACCESS_KEY'
     },
 
     dok: {
