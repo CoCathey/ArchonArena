@@ -5,6 +5,7 @@ import { Button as HeroButton, Input } from '@heroui/react';
 import moment from 'moment';
 
 import Panel from '../Components/Site/Panel';
+import Link from '../Components/Navigation/Link';
 import AmberValue from '../Components/Site/AmberValue';
 import { COUNTRIES, countryName } from '../geo';
 import { useGetMembersQuery } from '../redux/api';
@@ -111,7 +112,12 @@ const Members = () => {
                             {members.map((member) => (
                                 <tr key={member.username} className='border-b border-border/40'>
                                     <td className='px-2 py-2 font-semibold text-foreground'>
-                                        {member.username}
+                                        <Link
+                                            href={`/players/${encodeURIComponent(member.username)}`}
+                                            className='hover:text-amber-300 hover:underline'
+                                        >
+                                            {member.username}
+                                        </Link>
                                     </td>
                                     <td className='px-2 py-2 text-muted'>
                                         {[

@@ -159,7 +159,14 @@ const Leaderboards = () => {
                                                 {entry.rank}
                                             </td>
                                             <td className='px-2 py-2 font-semibold text-foreground'>
-                                                {entry.username}
+                                                <Link
+                                                    href={`/players/${encodeURIComponent(
+                                                        entry.username
+                                                    )}`}
+                                                    className='hover:text-amber-300 hover:underline'
+                                                >
+                                                    {entry.username}
+                                                </Link>
                                                 {entry.provisional && (
                                                     <span
                                                         className='ml-1 text-xs text-muted'

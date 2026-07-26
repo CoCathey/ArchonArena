@@ -298,6 +298,11 @@ export const api = createApi({
         getPlayerStats: builder.query({
             query: (username) => `/stats/player/${encodeURIComponent(username)}`
         }),
+        // ARCHON: public player profile header, clubs and recent games. Amber,
+        // stats and trophies come from their own public endpoints above.
+        getPlayerProfile: builder.query({
+            query: (username) => `/players/${encodeURIComponent(username)}`
+        }),
         // ARCHON: native tournament engine (in-platform events)
         listEvents: builder.query({
             query: (params) => ({ url: '/tournaments', params }),
@@ -684,6 +689,10 @@ export const api = createApi({
         getGameReplay: builder.query({
             query: (gameId) => `/games/${encodeURIComponent(gameId)}/replay`
         }),
+        // ARCHON: Amber change for a finished game (post-game result screen).
+        getGameRating: builder.query({
+            query: (gameId) => `/games/${encodeURIComponent(gameId)}/rating`
+        }),
         removeLobbyMessage: builder.mutation({
             query: (messageId) => ({
                 url: `/messages/${messageId}`,
@@ -723,6 +732,7 @@ export const {
     useGetRatingsQuery,
     useGetMetaStatsQuery,
     useGetPlayerStatsQuery,
+    useGetPlayerProfileQuery,
     useGetAdminSettingsQuery,
     useSaveAdminSettingsMutation,
     useResetAdminSettingsMutation,
@@ -778,6 +788,7 @@ export const {
     useDeleteBanlistMutation,
     useGetUserGamesQuery,
     useGetGameReplayQuery,
+    useGetGameRatingQuery,
     useRemoveLobbyMessageMutation
 } = api;
 

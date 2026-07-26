@@ -627,6 +627,71 @@ class RatingService {
     }
 
     /**
+     * ARCHON: what a finished game did to both players' Amber, for the
+     * post-game result screen.
+     *
+     * Everything here was already persisted by processGame - RatingHistory
+     * stores the before/after, the SAS on both sides, the key differential and
+     * the result type per player per game. This just reads it back keyed by the
+     * game's external uuid and joins the usernames on, so the client can show a
+     * player what their game was worth without recomputing anything.
+     *
+     * Returns null when the game was never rated (unrated game type, a bot or
+     * tournament-unrated event, or the rating hook not having run), which the
+     * UI shows as an explicit "not rated" state rather than a blank panel.
+     */
+    async getGameResult(gameUuid) {
+        if (!gameUuid) {
+            return null;
+        }
+
+        const rows = await this.db.query(
+            'SELECT u."Username", o."Username" AS "OpponentUsername", h."Pool", h."Won", ' +
+                'h."RatingBefore", h."RatingAfter", h."OwnSas", h."OpponentSas", ' +
+                'h."KeyDiff", h."ResultType", r."GamesPlayed" ' +
+                'FROM "RatingHistory" h ' +
+                'JOIN "Games" g ON g."Id" = h."GameId" ' +
+                'JOIN "Users" u ON u."Id" = h."UserId" ' +
+                'LEFT JOIN "Users" o ON o."Id" = h."OpponentId" ' +
+                'LEFT JOIN "Ratings" r ON r."UserId" = h."UserId" AND r."Pool" = h."Pool" ' +
+                'WHERE g."GameId" = $1 ORDER BY h."Won" DESC',
+            [gameUuid]
+        );
+
+        if (!rows || rows.length === 0) {
+            return null;
+        }
+
+        const eloConfig = normalizeConfig(this.getConfig().elo);
+
+        return {
+            pool: rows[0].Pool,
+            players: rows.map((row) => {
+                const gamesPlayed = row.GamesPlayed == null ? null : Number(row.GamesPlayed);
+
+                return {
+                    username: row.Username,
+                    opponent: row.OpponentUsername,
+                    won: row.Won,
+                    ratingBefore: row.RatingBefore,
+                    ratingAfter: row.RatingAfter,
+                    change: row.RatingAfter - row.RatingBefore,
+                    ownSas: row.OwnSas,
+                    opponentSas: row.OpponentSas,
+                    keyDiff: row.KeyDiff,
+                    resultType: row.ResultType,
+                    gamesPlayed,
+                    // Placement progress: how many rated games until the rating
+                    // stops being provisional, so a new player can see the
+                    // countdown rather than just a badge.
+                    provisional: gamesPlayed != null && gamesPlayed < eloConfig.provisionalGames,
+                    provisionalGames: eloConfig.provisionalGames
+                };
+            })
+        };
+    }
+
+    /**
      * Player location (rankings scope). State is free-form except for
      * countries where the client offers a fixed list; both are stored
      * uppercase-code (country) and trimmed (state).

@@ -30,6 +30,7 @@ import ClubDetail from './pages/ClubDetail';
 import Onboarding from './pages/Onboarding';
 import TopPlayers from './pages/TopPlayers';
 import Ratings from './pages/Ratings';
+import PlayerProfile from './pages/PlayerProfile';
 import PlayIrl from './pages/PlayIrl';
 import MotdAdmin from './pages/MotdAdmin';
 import NewsAdmin from './pages/NewsAdmin';
@@ -115,6 +116,8 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/patreon' element={<Patreon code={getParam('code')} />} />
             {/* ARCHON: game history + community news are live features */}
             <Route path='/matches' element={<Matches />} />
+            {/* ARCHON: public player profile - every username on the site links here */}
+            <Route path='/players/:username' element={<PlayerProfile />} />
             <Route path='/replay/:gameId' element={<Replay />} />
             <Route
                 path='/community/news'

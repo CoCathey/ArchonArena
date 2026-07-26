@@ -7,6 +7,8 @@ import { useNavigate } from 'react-router-dom';
 import { gameSendMessage } from '../../redux/socketActions';
 import CardBack from '../Decks/CardBack';
 import ActivePlayerPrompt from './ActivePlayerPrompt';
+// ARCHON: post-game Amber result
+import GameResultPanel from './GameResultPanel';
 import CardZoom from './CardZoom';
 import { canShowDeckName, getMatchRecord, isSpectating, normalizePlayer } from './gameboardUtils';
 import GameChat from './GameChat';
@@ -412,6 +414,17 @@ export const GameBoard = () => {
                             spectating={spectating}
                         />
                         <div className='inset-pane'>
+                            {/* ARCHON: post-game Amber change, shown above the
+                                rematch prompt once the game is decided. Purely
+                                a read of persisted RatingHistory - it never
+                                blocks or delays leaving the game. */}
+                            {!spectating && currentGame.winner && (
+                                <GameResultPanel
+                                    gameId={currentGame.id}
+                                    username={user?.username}
+                                    winner={currentGame.winner}
+                                />
+                            )}
                             {spectating ? (
                                 <div />
                             ) : (

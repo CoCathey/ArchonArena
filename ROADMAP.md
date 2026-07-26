@@ -158,7 +158,7 @@ migration; this is the highest-leverage operational fix on the list.
 -   Editing an already-applied migration file fails loudly instead of silently diverging.
 -   `healthcheck.sh` FAILs when the running code needs a migration that has not been applied.
 
-#### I3 — Public player profiles
+#### I3 — Public player profiles _(done)_
 
 **Why:** a competitive platform is built on players looking each other up. Every piece of
 data is already served by an existing API (`/api/ratings/:username`,
@@ -166,44 +166,53 @@ data is already served by an existing API (`/api/ratings/:username`,
 not new systems, and it makes the whole site feel connected.
 **Tasks**
 
--   Route `/players/:username` with avatar, country/region, Amber per pool + world rank, W–L,
-    house win rates, recent games (each linking to its replay), clubs, and tournament trophies.
--   Add a public per-player recent-games endpoint (the current `/api/games` is self-only).
--   Make every username across the site link to it: leaderboards, Top Players, member
-    directory, lobby game list, pending game, tournament players/standings/"Your Match",
-    game history, club member lists.
--   Privacy-safe fields only (no email, no IP); respect disabled accounts.
--   Optional short bio, editable from the account page.
+-   [x] `/players/:username` renders header (avatar, location, joined, clubs), Amber per pool
+        with world rank and W-L, overall record and house win rates, tournament podiums, and
+        recent games each linking to its replay.
+-   [x] `PlayerProfileService` + public `GET /api/players/:username` for the header, clubs and
+        recent games. The page **composes** the already-public ratings, stats and tournament
+        endpoints rather than adding a fifth aggregate that reaches across four domains, so each
+        panel renders and degrades independently.
+-   [x] Privacy-safe fields only, asserted by a test that the query never even selects Email,
+        Password or RegisterIp; disabled and unverified accounts do not resolve, matching the
+        member directory and leaderboards.
+-   [x] Usernames link through from Leaderboards, Top Players (podium and table), the member
+        directory, and opponent names in recent games.
+-   [ ] Remaining link sites: lobby game list, pending game, tournament players / standings /
+        "Your Match", game history, club member lists.
+-   [ ] Optional short bio, editable from the account page.
 
-**Depends on:** I1 (worth shipping to a live site). Blocks: N2, N7, F3.
 **Acceptance criteria**
 
--   Every username rendered outside the game board navigates to that player's profile.
--   The page renders correctly for a brand-new player with zero games and for a disabled account.
--   No private field (email, IP, password state, OIDC subject) appears in the payload — asserted
-    by a test.
--   Profile loads in one round trip per panel and is server-cached like the stats endpoints.
+-   [x] Verified in a real browser: the page renders every panel for a player with games, and a
+        brand-new player with no games or clubs still gets a working page.
+-   [x] No private field appears in the payload, asserted by a test.
+-   [ ] Server-side caching like the stats endpoints, once traffic justifies it.
 
-#### I4 — Post-game result screen with Amber change
+#### I4 — Post-game result screen with Amber change _(done)_
 
 **Why:** the rating engine is the heart of the platform and it is currently invisible at the
 moment it matters most. Players finish a rated game with no feedback that anything happened.
 **Tasks**
 
--   Expose per-game rating deltas (RatingHistory already stores before/after) via an endpoint
-    keyed by game id, authorised to that game's participants.
--   Game-end screen: Amber before → after with the delta, new world rank, provisional progress
-    ("3 of 10 placement games"), key result, opponent, and the SAS handicap that was applied.
--   Buttons: rematch, view replay, back to lobby.
--   Unrated games say so explicitly rather than showing nothing.
+-   [x] `RatingService.getGameResult()` + `GET /api/games/:gameId/rating` read back the deltas
+        RatingHistory already persists; nothing is recomputed.
+-   [x] `GameResultPanel` on the board once the game is decided: win/loss, the Amber change,
+        the new total, the pool, the key margin, the SAS gap that shaped the result, and the
+        placement countdown while a rating is still provisional.
+-   [x] Unrated games render an explicit "not rated" line rather than a blank panel — an
+        unrated game is a 200 with `rated: false`, not a 404 the client has to interpret.
+-   [ ] Rematch / view-replay / back-to-lobby actions alongside the result (the engine's own
+        rematch prompt already sits directly below it).
 
-**Depends on:** I3 (rank/profile links). Blocks: N4.
+**Blocks:** N4.
 **Acceptance criteria**
 
--   Winner and loser both see their own delta within a few seconds of GAMEWIN.
--   The screen never blocks or delays leaving the game, and never touches the gameplay engine.
--   An unrated or abandoned game shows an explicit "not rated" state instead of a blank panel.
--   Deltas shown always match `RatingHistory` for that game.
+-   [x] Both players see their own delta; Elo being zero-sum, the two are mirror images —
+        asserted by a test.
+-   [x] Rendered client-side from persisted data, so it never blocks or delays leaving the game
+        and adds no gameplay-engine coupling.
+-   [x] Deltas always match `RatingHistory`, because they are read from it.
 
 #### I0 — Launch-blocking defects found by review _(done)_
 

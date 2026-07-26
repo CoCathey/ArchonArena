@@ -4,6 +4,7 @@ const FriendService = require('../services/community/FriendService');
 const ClubService = require('../services/community/ClubService');
 const MemberDirectoryService = require('../services/community/MemberDirectoryService');
 const StoreService = require('../services/community/StoreService');
+const PlayerProfileService = require('../services/community/PlayerProfileService');
 const { wrapAsync } = require('../util.js');
 const { rateLimit } = require('./rateLimit');
 
@@ -31,6 +32,7 @@ const friendService = new FriendService();
 const clubService = new ClubService();
 const memberDirectory = new MemberDirectoryService();
 const storeService = new StoreService();
+const playerProfileService = new PlayerProfileService();
 
 const jwt = passport.authenticate('jwt', { session: false });
 
@@ -38,6 +40,21 @@ const jwt = passport.authenticate('jwt', { session: false });
  * ARCHON: community features (Phase 9): friends, member directory, clubs.
  */
 module.exports.init = function (server) {
+    // ----- Public player profile (/players/:username). Unauthenticated: it
+    // exposes only what the leaderboards and member directory already show.
+    server.get(
+        '/api/players/:username',
+        wrapAsync(async (req, res) => {
+            const profile = await playerProfileService.getProfile(req.params.username);
+
+            if (!profile) {
+                return res.status(404).send({ success: false, message: 'No such player' });
+            }
+
+            res.send({ success: true, profile });
+        })
+    );
+
     // ----- Friends (all JWT-authed; friendships are private to the pair)
     server.get(
         '/api/friends',

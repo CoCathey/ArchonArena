@@ -330,6 +330,91 @@ describe('RatingService', function () {
         });
     });
 
+    describe('getGameResult', function () {
+        const historyRow = (overrides = {}) => ({
+            Username: 'Winner',
+            OpponentUsername: 'Loser',
+            Pool: 'archon',
+            Won: true,
+            RatingBefore: 1200,
+            RatingAfter: 1216,
+            OwnSas: 68,
+            OpponentSas: 75,
+            KeyDiff: 2,
+            ResultType: 'keys',
+            GamesPlayed: 40,
+            ...overrides
+        });
+
+        it('returns both players with their Amber change', async function () {
+            db.query.mockResolvedValue([
+                historyRow(),
+                historyRow({
+                    Username: 'Loser',
+                    OpponentUsername: 'Winner',
+                    Won: false,
+                    RatingBefore: 1300,
+                    RatingAfter: 1284,
+                    OwnSas: 75,
+                    OpponentSas: 68
+                })
+            ]);
+
+            const result = await service.getGameResult(GAME_UUID);
+
+            expect(result.rated).toBeUndefined();
+            expect(result.pool).toBe('archon');
+            expect(result.players).toHaveLength(2);
+
+            const [winner, loser] = result.players;
+            expect(winner.username).toBe('Winner');
+            expect(winner.won).toBe(true);
+            expect(winner.change).toBe(16);
+            expect(winner.ratingAfter).toBe(1216);
+            expect(winner.keyDiff).toBe(2);
+            expect(winner.ownSas).toBe(68);
+            expect(winner.opponentSas).toBe(75);
+
+            expect(loser.username).toBe('Loser');
+            expect(loser.won).toBe(false);
+            // Elo is zero-sum: what one gains the other loses.
+            expect(loser.change).toBe(-16);
+        });
+
+        it('flags a provisional player and reports the placement target', async function () {
+            db.query.mockResolvedValue([historyRow({ GamesPlayed: 3 })]);
+
+            const result = await service.getGameResult(GAME_UUID);
+
+            expect(result.players[0].provisional).toBe(true);
+            expect(result.players[0].gamesPlayed).toBe(3);
+            expect(result.players[0].provisionalGames).toBeGreaterThan(3);
+        });
+
+        it('does not flag an established player as provisional', async function () {
+            db.query.mockResolvedValue([historyRow({ GamesPlayed: 40 })]);
+
+            const result = await service.getGameResult(GAME_UUID);
+
+            expect(result.players[0].provisional).toBe(false);
+        });
+
+        // An unrated game has no RatingHistory rows at all; the caller turns
+        // this into an explicit "not rated" state rather than an error.
+        it('returns null for a game that was never rated', async function () {
+            db.query.mockResolvedValue([]);
+
+            expect(await service.getGameResult(GAME_UUID)).toBeNull();
+        });
+
+        it('returns null without querying when no game id is given', async function () {
+            db.query.mockClear();
+
+            expect(await service.getGameResult(undefined)).toBeNull();
+            expect(db.query).not.toHaveBeenCalled();
+        });
+    });
+
     describe('admin rating tools', function () {
         const primeUserLookup = (id) => {
             db.query.mockImplementation(async (sql) => {
