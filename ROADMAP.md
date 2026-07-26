@@ -89,8 +89,13 @@ notifications) do not exist yet.
 -   **Notifications** of any kind — in-app, email, or push.
 -   **Moderation tooling** beyond the inherited block list / ban list: no reports, mutes,
     timeouts, or moderation queue.
+-   **Any way to learn the game on the platform.** No tutorial, and onboarding never asks how
+    much a new account already knows — the `/learn` route is a placeholder.
+-   **A funding path.** The inherited Patreon integration has no campaign, credentials, or perks.
+-   **In-person game tracking.** Paper games can only be recorded through a tournament.
+-   **A reason to visit an empty site.** Nothing to watch when nobody happens to be playing.
 -   **Teams**, **versioned public API**, **Discord**, **coaching/AI**, **streaming tools**,
-    **organized-play program**, **Learn hub** (the `/learn` route is a placeholder).
+    **organized-play program**.
 -   **Schema migration ledger.** Migrations are applied by hand with no record of what ran.
 
 **Not yet verified in production:** DNS, live WebSocket pass-through, Keycloak client
@@ -452,6 +457,127 @@ keyteki card fixes need a routine path in.
 -   An upstream merge lands with the full card suite green and a recorded diff of gameplay changes.
 -   The documented per-node concurrent-game ceiling is backed by a load test.
 
+#### N11 — Guided tutorial and experience-based onboarding
+
+**Why:** KeyForge is a complex game and Archon Arena is a complex platform. Today a brand-new
+player lands in a lobby with no idea what to do, and `/learn` is a placeholder. Asking one
+question at sign-up lets the platform teach exactly what each player is missing and skip what
+they already know.
+**Tasks**
+
+-   Onboarding step: "How well do you know KeyForge?" (new to it / played before). Players who
+    know the game get a follow-up: "How well do you know Archon Arena?"
+-   **New to the game** → walk the rules inside a real game on the platform: houses, æmber,
+    forging, reap/fight/use/action, keys and the end condition — then the platform basics.
+-   **Knows the game, new to the platform** → skip the rules entirely; show importing decks,
+    starting a game, Quick Match, what Amber is, and where tournaments live.
+-   **Knows both** → straight through the existing wizard to a first game.
+-   Build the Learn hub (`/learn`) on the same tutorial engine so any lesson can be replayed
+    later, not only at sign-up.
+-   Store the answers on the account so the tutorial can be resumed and re-offered.
+
+**Depends on:** the existing onboarding wizard (`/welcome`) and the game engine. Feeds **F6**;
+pairs well with **F9** (a bot as the tutorial's sparring partner).
+**Acceptance criteria**
+
+-   A player who has never played KeyForge finishes the tutorial and their first real game in one
+    sitting, without leaving the site to look up rules.
+-   A player who knows the game but not the platform is never shown rules content.
+-   Every step is skippable, and the whole tutorial is replayable from `/learn`.
+-   The tutorial runs on the real engine — no second rules implementation that can drift from it.
+
+#### N12 — Patreon supporter program
+
+**Why:** hosting, the DoK API tier, and the domain cost money, and the platform has no funding
+path. TCO's Patreon integration is inherited but dormant (`PatreonService`, the `/patreon` page,
+`/api/account/linkPatreon`, the `keepsSupporterWithNoPatreon` permission) — it needs credentials,
+tiers, and perks that cannot touch competitive fairness.
+**Tasks**
+
+-   Owner: create the Patreon campaign and tiers; set `patreonClientId`, `patreonSecret` and
+    `patreonCallbackUrl`.
+-   Verify the inherited link/unlink and pledge-status refresh against the live campaign.
+-   Define supporter perks — cosmetic and convenience only: custom backgrounds and card backs,
+    avatar frames, a supporter badge, longer replay retention, larger deck-import batches.
+    **(admin-config)** which tier unlocks which perk.
+-   A "Support Archon Arena" page saying plainly where the money goes, with an opt-in supporter
+    list.
+
+**Depends on:** I1 (live site) and owner Patreon setup.
+**Acceptance criteria**
+
+-   Linking a Patreon account grants the supporter role within one refresh cycle; unlinking or a
+    lapsed pledge removes it.
+-   No perk affects Amber, matchmaking, tournament eligibility, or any other competitive outcome —
+    and the support page says so.
+-   Perks are editable from admin settings without a redeploy.
+
+#### N13 — In-person game tracking
+
+**Why:** most KeyForge is still played across a table. The platform already knows decks, Amber
+and clubs; letting two players record a paper game keeps local scenes on the same ladder and
+gives the Play IRL hub something to do between tournaments.
+**Tasks**
+
+-   Start an in-person game: one player opens it and names the opponent; the opponent confirms.
+-   Both players report the result independently. Matching reports commit; a mismatch is flagged
+    back to both players (and to a club officer or TO when the game belongs to an event).
+-   Optionally attach each player's deck (Master Vault id or from their library) so SAS, house
+    stats and deck records include paper play.
+-   Decide and document whether IRL games are rated **(admin-config)**: the key differential and
+    both decks' SAS are inputs the Elo engine needs, so they must be reported, never inferred.
+-   Surface these games in Game History, player stats, and on the club page.
+
+**Depends on:** I3 (profiles), N5 (disputes reuse the moderation queue). Related: **N9** hybrid
+events, which feed one tournament standing rather than the open ladder.
+**Acceptance criteria**
+
+-   A paper game confirmed by both players appears in both histories with the right result, and in
+    deck/house stats when decks were attached.
+-   A one-sided or contradictory report never silently moves anyone's Amber.
+-   Whether IRL games count toward Amber is an admin setting, and players can see the answer
+    before they report.
+
+#### N14 — App distribution: Android beta and iOS TestFlight requests
+
+**Why:** `/mobile/ios` and `/mobile/android` are placeholder pages while a working Expo build and
+a TestFlight runbook (`mobile/TESTFLIGHT.md`) already exist. Testers have no way in today.
+**Tasks**
+
+-   `/mobile/android`: link straight to the Google Play beta track (or a signed APK) with install
+    instructions.
+-   `/mobile/ios`: a form that requests a TestFlight invite — the requester's account and the
+    Apple ID email — plus an admin view of pending requests to work through.
+-   Show the current beta build number and what changed in it, so a tester knows if they are behind.
+
+**Depends on:** I6 (email template) for the invite request; folds into N2 once notifications exist.
+**Acceptance criteria**
+
+-   A signed-in player can request an iOS beta invite in one action and gets a confirmation.
+-   An admin can see and clear pending invite requests.
+-   The Android page links to an install that works on a clean device.
+
+#### N15 — Move-by-move clarity in the apps
+
+**Why:** the Expo app keeps the play-by-play behind a slide-up sheet (`LogSheet`), so on a phone
+it is easy to miss what the opponent just did. And on both clients a prompt often asks for a
+choice without saying which card is asking — the engine knows the source card, the UI does not
+show it.
+**Tasks**
+
+-   Expo app: surface each move as it happens — a persistent recent-moves strip or a per-action
+    inline notice — with the full log still available in the sheet.
+-   Both clients: name the card and ability behind every prompt ("Choose a creature to destroy —
+    because of Gateway to Dis"), taken from the ability's source card rather than re-derived.
+-   Same treatment for triggered and passive effects that change the board without prompting.
+
+**Depends on:** nothing hard — the engine already tracks each ability's source card.
+**Acceptance criteria**
+
+-   On a phone, a player can follow the opponent's whole turn without opening the log sheet.
+-   Every prompt that originates from a card names that card.
+-   Nothing about what the engine resolves changes — this is presentation only.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
@@ -498,11 +624,11 @@ produces a qualification report without manual spreadsheets.
 
 #### F6 — Learn hub
 
-Replace the `/learn` placeholder: interactive tutorial against the real engine, puzzles
-("forge this turn"), a strategy library, and a first-game funnel that hands new players
-straight into Quick Match.
-**Depends on:** N6. **Acceptance:** a player who has never played KeyForge completes the
-tutorial and their first real game in one session.
+The rest of `/learn` once **N11** has built the tutorial: puzzles ("forge this turn"), a
+strategy library, deck-reading guides, and a first-game funnel that hands new players straight
+into Quick Match.
+**Depends on:** N11 (the tutorial engine), N6. **Acceptance:** a player can find and finish a
+lesson on something specific — a keyword, a house, reading SAS — without playing a whole game.
 
 #### F7 — Mobile general availability
 
@@ -518,6 +644,31 @@ deployments, multi-lobby settings invalidation, revisit Kubernetes (charts retai
 `infrastructure/`) if VPS scaling stops being enough.
 **Depends on:** N10 load testing telling us which ceiling is hit first.
 **Acceptance:** a documented scaling step exists for each ceiling the load test finds.
+
+#### F9 — Bot showcase: two AI players in a permanent watchable game
+
+**Why:** an empty lobby is the hardest problem a new platform has. Two bots playing each other
+around the clock give the Watch hub content from day one, let a visitor see the game before they
+commit to it, and run the engine as a continuous soak test.
+**Tasks**
+
+-   An AI player driving the engine through the ordinary player interface (house choice, play /
+    use / reap / fight, key timing). Strength can start crude — never stalling matters more.
+-   A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends, and
+    publishes it to the Watch hub as spectatable.
+-   Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics aggregate.
+-   **(admin-config)**: how many bot tables run, how their decks are chosen, and whether the
+    showcase is on at all.
+-   Later: bots as practice opponents, as the tutorial's sparring partner (**N11**), and as the
+    base for AI analysis (**F3**).
+
+**Depends on:** N1 (Watch hub). Feeds F3 and N11.
+**Acceptance criteria**
+
+-   A logged-out visitor can watch a live game within seconds of landing on the site.
+-   A bot game reaches a legitimate conclusion (three keys or deck-out) without stalling, looping,
+    or throwing; a wedged table is detected and replaced.
+-   No bot game appears in any leaderboard, player stat, or meta aggregate — asserted by a test.
 
 ---
 
@@ -765,6 +916,10 @@ much stronger deck pays less.
         UI carries the most gameplay risk) → **N6**.
 -   [ ] Responsive layouts (desktop-first, tablet functional, mobile readable) → **N6**.
 -   [ ] Accessibility pass (keyboard nav, contrast, screen-reader landmarks) → **N6**.
+-   [ ] Replace the `/learn` placeholder with a tutorial that teaches inside a real game →
+        **N11**, then the wider Learn hub → **F6**.
+-   [ ] Name the card and ability responsible in every prompt ("…because of Gateway to Dis")
+        → **N15**.
 
 ## Phase 9 — Player identity & community
 
@@ -791,6 +946,10 @@ much stronger deck pays less.
 -   [ ] Moderation tools: reports, mutes, bans, audit log **(admin-config policies)** → **N5**.
 -   [ ] Friend activity feed, DMs (moderated), block-list integration → **N5**/**N7**.
 -   [ ] Store follow-ups: map view, store-hosted event listings, verified/official badges → **N7**.
+-   [ ] Onboarding asks each new account how well they know KeyForge, and (if they do) how well
+        they know the platform, then teaches only what is missing → **N11**.
+-   [ ] **Track in-person games**: both players start it, both report the score, decks optional
+        → **N13**.
 
 ## Phase 10 — Match history, replays & spectating
 
@@ -809,6 +968,8 @@ much stronger deck pays less.
         **(admin-config)**, verified hidden-information redaction → **N1**.
 -   [ ] Share links for replays/matches → **N1**.
 -   [ ] Match history filters by deck, opponent, format, result → **N1**.
+-   [ ] Two bots playing each other continuously, watchable by anyone — permanent content for the
+        Watch hub and a continuous engine soak test → **F9**.
 
 ## Phase 11 — Statistics & analytics
 
@@ -836,6 +997,8 @@ much stronger deck pays less.
 -   [ ] AI game analysis: blunder detection, alternative-line suggestions, win-probability
         graph per turn (model over the replay event stream) → **F3**.
 -   [ ] AI deck insights: strengths/weaknesses vs. meta, SAS-context commentary → **F3**.
+-   [ ] An AI player able to drive the engine — first as the bot showcase and a practice
+        opponent (**F9**), then as the model behind analysis (**F3**).
 
 ## Phase 14 — Mobile support
 
@@ -848,6 +1011,10 @@ much stronger deck pays less.
         mobile network resilience (timeouts, reconnect).
 -   [ ] Mobile-responsive web as the baseline → **N6**.
 -   [ ] PWA: installable, push notifications for round pairings/turn timers → **N6**/**N2**.
+-   [ ] Show each move as it happens in the Expo app, rather than only inside the slide-up log
+        sheet → **N15**.
+-   [ ] Turn the `/mobile/android` placeholder into a real link to the beta build, and
+        `/mobile/ios` into a TestFlight invite request → **N14**.
 -   [ ] App Store release, Android build, platform feature parity (tournaments, community,
         profiles) → **F7**.
 
@@ -895,6 +1062,21 @@ turns a feature-complete site into a habit.
 -   [ ] Queue health telemetry (depth, wait time, match quality) → **N8**.
 -   [ ] Rematch and rated-rematch flow from the result screen → **I4**.
 
+## Phase 19 — Sustainability & supporter program
+
+Running the platform costs money — a host, the DoK API tier, the domain, eventually object
+storage for backups and replays. This phase is about paying for that without ever selling a
+competitive advantage.
+
+-   [x] Patreon OAuth linking, pledge-status refresh, and a supporter role inherited from TCO
+        (`PatreonService`, `/patreon`, `/api/account/linkPatreon`) — dormant: no campaign, no
+        credentials, no defined perks.
+-   [ ] **Patreon supporter program**: campaign + tiers, verified link/unlink flow, perks that
+        are cosmetic and convenience only, and a page saying where the money goes → **N12**.
+-   [ ] Publish running costs and what supporters cover, so the ask is concrete.
+-   [ ] Revisit only if Patreon proves insufficient: one-off donations, or store/organizer
+        sponsorship of events. Never anything that touches Amber, matchmaking, or eligibility.
+
 ---
 
 ## Cross-cutting: Site administration _(build alongside every phase)_
@@ -913,6 +1095,13 @@ turns a feature-complete site into a habit.
 -   [ ] Full audit-log table (currently last-editor only) → **N5**.
 -   [ ] Feature flags section for gradual rollout of new systems → **N8**.
 -   [ ] Admin panel coverage for tournaments, moderation, and analytics → **N5**/**N8**.
+-   [ ] **Reset all statistics** (isAdmin): one site-wide reset for clearing beta and playtest
+        data before launch. Today the only reset is per-player, per-pool (`adminResetRatings`).
+        Scope it explicitly — ratings, rating history, game records, replays, the statistics
+        cache — with per-category checkboxes rather than one opaque button. Acceptance: a dry
+        run reports exactly what would be deleted; the destructive run needs a typed
+        confirmation, writes an audit-log entry, and leaves accounts, decks, clubs and
+        tournaments untouched.
 
 ## Cross-cutting: Quality & operations
 
@@ -953,4 +1142,11 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
 -   [ ] **Silent replay drop**: `GameService.saveReplay` skips captures over 2 MB with only a
         log line. Fold into the retention policy in **N1** so the behaviour is explicit and
         visible.
+-   [ ] **"Rematch: Swap Decks" reads as the wrong thing**
+        (`server/game/gamesteps/GameWonPrompt.js`): it sounds like "pick different decks", but it
+        means "trade decks with your opponent — you play theirs, they play yours". The option
+        that picks new decks is the one below it, "Rematch: Change Decks". Reword both so the
+        difference is obvious (e.g. "Rematch: Trade Decks" / "Rematch: Pick New Decks"), add the
+        new locale keys, and update `test/server/prompts/GameWonPrompt.spec.js`, which asserts
+        the current button text.
 -   [ ] **`docs/DEVELOPMENT.md` missing** — Phase 0's last open item.
