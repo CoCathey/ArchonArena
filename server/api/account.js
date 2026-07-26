@@ -16,6 +16,65 @@ const ConfigService = require('../services/ConfigService');
 const BanlistService = require('../services/BanlistService');
 const PatreonService = require('../services/PatreonService');
 const util = require('../util.js');
+const { rateLimit, createFailureThrottle, clientIp } = require('./rateLimit');
+
+// ARCHON: abuse limits on the authentication surface. These endpoints are
+// unauthenticated and are the first thing any credential-stuffing or
+// account-enumeration script goes at, so they are bounded two ways:
+//
+//  - a request-volume limit per IP, generous enough that no human notices;
+//  - for login specifically, a throttle counting only FAILED attempts, which
+//    can be strict because a successful login clears it (see rateLimit.js).
+const loginRateLimit = rateLimit({
+    name: 'login',
+    windowMs: 60 * 1000,
+    max: 20,
+    message: 'Too many login attempts. Please wait a moment and try again.'
+});
+const registerRateLimit = rateLimit({
+    name: 'register',
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    message: 'Too many accounts created from here recently. Please try again later.'
+});
+const passwordResetRateLimit = rateLimit({
+    name: 'password-reset',
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    message: 'Too many password reset requests. Please try again later.'
+});
+const activationRateLimit = rateLimit({
+    name: 'activation',
+    windowMs: 60 * 60 * 1000,
+    max: 30,
+    message: 'Too many activation attempts. Please try again later.'
+});
+const tokenRateLimit = rateLimit({
+    name: 'token-refresh',
+    windowMs: 60 * 1000,
+    max: 30,
+    message: 'Too many token refresh attempts. Please try again later.'
+});
+const usernameCheckRateLimit = rateLimit({
+    name: 'check-username',
+    windowMs: 60 * 1000,
+    max: 60,
+    message: 'Too many requests. Please slow down.'
+});
+
+// 10 failures in 15 minutes locks that address (or that account) out for 15
+// minutes. Tracked per-IP and per-username: per-IP stops one host working
+// through many accounts, per-username stops many hosts working on one account.
+const loginFailures = createFailureThrottle({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    blockMs: 15 * 60 * 1000
+});
+
+const loginKeys = (req) => [
+    `ip:${clientIp(req)}`,
+    ...(req.body && req.body.username ? [`user:${String(req.body.username).toLowerCase()}`] : [])
+];
 
 let configService = new ConfigService();
 let emailService = new EmailService(configService);
@@ -231,6 +290,7 @@ module.exports.init = function (server, options) {
 
     server.post(
         '/api/account/register',
+        registerRateLimit,
         wrapAsync(async (req, res) => {
             let message = validateUserName(req.body.username);
             if (message) {
@@ -394,6 +454,7 @@ module.exports.init = function (server, options) {
 
     server.post(
         '/api/account/activate',
+        activationRateLimit,
         wrapAsync(async (req, res) => {
             if (!req.body.id || !req.body.token) {
                 return res.send({ success: false, message: 'Invalid parameters' });
@@ -468,6 +529,7 @@ module.exports.init = function (server, options) {
 
     server.post(
         '/api/account/check-username',
+        usernameCheckRateLimit,
         wrapAsync(async (req, res) => {
             let user = await userService.doesUserExist(req.body.username);
             if (user) {
@@ -544,6 +606,7 @@ module.exports.init = function (server, options) {
 
     server.post(
         '/api/account/login',
+        loginRateLimit,
         wrapAsync(async (req, res) => {
             if (!req.body.username) {
                 return res.send({ success: false, message: 'Username must be specified' });
@@ -553,12 +616,35 @@ module.exports.init = function (server, options) {
                 return res.send({ success: false, message: 'Password must be specified' });
             }
 
+            // ARCHON: refuse while this address or account is locked out, and
+            // count every credential failure below toward that lockout. The
+            // message is deliberately the same regardless of which key tripped,
+            // so it reveals nothing about whether the account exists.
+            const keys = loginKeys(req);
+            const lockedFor = Math.max(...keys.map((key) => loginFailures.blockedFor(key)));
+
+            if (lockedFor > 0) {
+                res.set('Retry-After', String(lockedFor));
+
+                return res.status(429).send({
+                    success: false,
+                    message:
+                        'Too many failed login attempts. Please wait a few minutes and try again.'
+                });
+            }
+
+            const recordFailedLogin = () => keys.forEach((key) => loginFailures.recordFailure(key));
+
             let user = await userService.getFullUserByUsername(req.body.username);
             if (!user) {
+                recordFailedLogin();
+
                 return res.send({ success: false, message: 'Invalid username/password' });
             }
 
             if (user.disabled) {
+                recordFailedLogin();
+
                 return res.send({ success: false, message: 'Invalid username/password' });
             }
 
@@ -576,6 +662,8 @@ module.exports.init = function (server, options) {
             }
 
             if (!isValidPassword) {
+                recordFailedLogin();
+
                 return res.send({ success: false, message: 'Invalid username/password' });
             }
 
@@ -586,17 +674,20 @@ module.exports.init = function (server, options) {
                 });
             }
 
+            // Correct credentials: clear the lockout counters so a legitimate
+            // user is never penalised for earlier typos.
+            keys.forEach((key) => loginFailures.reset(key));
+
             let userObj = user.getWireSafeDetails();
 
             let authToken = jwt.sign(userObj, configService.getValue('secret'), {
                 expiresIn: '5m'
             });
-            let ip = req.get('x-real-ip');
-            if (!ip) {
-                ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-            }
-
-            let refreshToken = await userService.addRefreshToken(user, authToken, ip);
+            // ARCHON: req.ip (via the `trust proxy` setting in server.js) rather
+            // than raw forwarding headers, which the caller controls - a forged
+            // value here writes a bogus address into the session list the player
+            // is shown and relies on to spot unfamiliar logins.
+            let refreshToken = await userService.addRefreshToken(user, authToken, clientIp(req));
             if (!refreshToken) {
                 return res.send({
                     success: false,
@@ -616,6 +707,7 @@ module.exports.init = function (server, options) {
 
     server.post(
         '/api/account/token',
+        tokenRateLimit,
         wrapAsync(async (req, res) => {
             if (!req.body.token) {
                 return res.send({ success: false, message: 'Refresh token must be specified' });
@@ -669,6 +761,7 @@ module.exports.init = function (server, options) {
 
     server.post(
         '/api/account/password-reset-finish',
+        passwordResetRateLimit,
         wrapAsync(async (req, res) => {
             let resetUser;
 
@@ -745,6 +838,7 @@ module.exports.init = function (server, options) {
 
     server.post(
         '/api/account/password-reset',
+        passwordResetRateLimit,
         wrapAsync(async (req, res) => {
             let resetToken;
 

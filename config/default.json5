@@ -21,6 +21,11 @@
         emailFromAddress: 'noreply@archonarena.com',
         blockDisposableEmail: false,
         requireActivation: false,
+        // Content-Security-Policy mode: 'enforce' | 'report-only' | 'off'.
+        // Directives live in server/csp.js. Turn this down to 'report-only' if a
+        // deployment needs an origin the policy does not yet allow - violations
+        // then appear in the browser console instead of breaking the page.
+        cspMode: 'enforce',
         hmacSecret: 'somethingevenmoresecret',
         lowerDeckThreshold: 1,
         middleDeckThreshold: 2,

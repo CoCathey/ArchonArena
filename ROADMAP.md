@@ -233,8 +233,23 @@ found by auditing the launch path rather than the feature list. All three are fi
         `trust proxy` set to exactly the one Caddy hop in production (sound because only Caddy
         publishes ports) and nothing in development. Regression test included.
 -   [x] **Security headers were never actually on.** `helmet` has been a dependency since the
-        fork but was never mounted. Enabled with helmet@3 defaults plus a referrer policy —
-        deliberately no CSP, so nothing the SPA already loads can break.
+        fork but was never mounted. Enabled with helmet@3 defaults plus a referrer policy.
+-   [x] **Auth endpoints were unthrottled.** The limiter existed but was applied only to
+        friend requests, club/store/tournament creation and DoK import — never to login,
+        registration, password reset, activation, token refresh or username lookup. All six
+        are now limited, and login additionally carries a failure throttle
+        (`createFailureThrottle`) keyed per-IP and per-username: 10 failures in 15 minutes
+        locks that key out for 15 minutes, and a successful login clears it, so counting
+        failures rather than requests can be strict without penalising honest users. The
+        session record also stopped trusting spoofable forwarding headers for the login IP.
+-   [x] **Content-Security-Policy** (`server/csp.js`): production allows no inline or eval'd
+        script, plus `object-src 'none'`, `base-uri`, `form-action` and `frame-ancestors`
+        locked to self. Allowances are limited to what the client genuinely loads — Google
+        Fonts, hCaptcha, `data:`/`blob:` images, `wss:` for gameplay, and the Sentry ingest
+        origin derived from the configured DSN. Verified by loading the real production
+        bundle in Chromium under the enforcing header: zero violations, with a negative
+        control confirming violations are detected when the policy is wrong. `CSP_MODE`
+        (`enforce` / `report-only` / `off`) can turn it down without a redeploy.
 
 #### I5 — Pre-launch security and abuse pass
 
@@ -244,11 +259,11 @@ reports, community actions, deck DoK prepare, and tournament creation — not to
 registration, or password reset.
 **Tasks**
 
--   Rate-limit and add progressive back-off to login, registration, password reset, and
-    activation; lock out after repeated failures. (The limiter itself now works — **I0** — but
-    it is still not applied to any auth endpoint.)
--   `npm audit` triage; upgrade `helmet` (pinned at v3, now mounted — **I0**) and decide on a
-    Content-Security-Policy, which the current configuration deliberately omits.
+-   `npm audit` triage; upgrade `helmet` off v3 (now mounted, with a CSP — **I0**).
+-   Move the rate limiter and login failure throttle to Redis so limits hold across processes;
+    both are per-process today (**I0**), which a multi-lobby deployment would dilute.
+-   Tighten `style-src` off `'unsafe-inline'` with nonces or hashes, and narrow `connect-src`
+    from `wss:` to the actual game-node origins once the node topology is settled.
 -   Review every endpoint for authorisation (especially the admin and tournament-organizer
     routes) and for user-supplied content rendered without escaping.
 -   Secrets audit: confirm nothing sensitive is settings-service-editable or logged.
@@ -1170,8 +1185,8 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
 -   [ ] **Third-party font loading**: `client/styles/tailwind.css` pulls Noto Sans and Orbitron
         from `fonts.googleapis.com`, while the privacy page states the site uses no third-party
         trackers. Self-host both (there is already a `client/assets/fonts/` directory).
--   [ ] **`helmet` pinned at v3**, several majors behind. Now mounted (**I0**); upgrading the
-        major version and adding a CSP stays with **I5**.
+-   [ ] **`helmet` pinned at v3**, several majors behind. Now mounted with a CSP (**I0**);
+        the major-version upgrade stays with **I5**.
 -   [ ] **Silent replay drop**: `GameService.saveReplay` skips captures over 2 MB with only a
         log line. Fold into the retention policy in **N1** so the behaviour is explicit and
         visible.

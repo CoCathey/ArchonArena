@@ -16,6 +16,7 @@
     lobby: {
         port: 'PORT',
         hmacSecret: 'HMAC_SECRET',
+        cspMode: 'CSP_MODE',
         emailKey: 'EMAIL_KEY',
         // Transactional email (activation, password reset) over AWS SES.
         // Without emailFromAddress the site silently cannot send any mail, so a

@@ -5,6 +5,7 @@ const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const ConfigService = require('./services/ConfigService');
 const helmet = require('helmet');
+const { buildDirectives, normalizeMode } = require('./csp');
 const passport = require('passport');
 const logger = require('./log.js');
 const api = require('./api');
@@ -74,16 +75,34 @@ class Server {
 
         // ARCHON: security response headers. `helmet` has been a dependency since
         // the upstream fork but was never actually mounted, so the site shipped
-        // with none of them. helmet@3's defaults (noSniff, frameguard, hsts,
-        // hidePoweredBy, xssFilter, dnsPrefetchControl, ieNoOpen) are safe for a
-        // SPA - they add no Content-Security-Policy, so nothing the client
-        // already loads can break. HSTS only where TLS actually terminates.
+        // with none of them. helmet@3's defaults cover noSniff, frameguard,
+        // hidePoweredBy, xssFilter, dnsPrefetchControl and ieNoOpen; HSTS only
+        // where TLS actually terminates.
         app.use(
             helmet({
                 hsts: this.isDeveloping ? false : undefined
             })
         );
         app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }));
+
+        // ARCHON: Content-Security-Policy (server/csp.js documents each
+        // directive). CSP_MODE can turn it down to report-only, or off, without
+        // a redeploy if the live site turns out to need an origin we missed.
+        const cspMode = normalizeMode(this.configService.getValueForSection('lobby', 'cspMode'));
+
+        if (cspMode !== 'off') {
+            app.use(
+                helmet.contentSecurityPolicy({
+                    directives: buildDirectives({
+                        isDeveloping: this.isDeveloping,
+                        sentryDsn: this.configService.getValue('sentryDsn')
+                    }),
+                    reportOnly: cspMode === 'report-only'
+                })
+            );
+        }
+
+        logger.info(`Content-Security-Policy: ${cspMode}`);
 
         app.use(passport.initialize());
 

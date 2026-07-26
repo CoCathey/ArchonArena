@@ -1,4 +1,4 @@
-const { rateLimit, _reset } = require('../../../server/api/rateLimit');
+const { rateLimit, createFailureThrottle, _reset } = require('../../../server/api/rateLimit');
 
 function makeReqRes(userId) {
     const req = { user: userId ? { id: userId } : undefined, get: () => undefined, headers: {} };
@@ -132,5 +132,67 @@ describe('rateLimit middleware', function () {
 
         expect(allowed).toBe(1);
         expect(blocked.statusCode).toBe(429);
+    });
+});
+
+describe('createFailureThrottle', function () {
+    const options = { windowMs: 60000, max: 3, blockMs: 30000 };
+
+    it('does not block before the failure limit is reached', function () {
+        const throttle = createFailureThrottle(options);
+
+        throttle.recordFailure('ip:1.1.1.1');
+        throttle.recordFailure('ip:1.1.1.1');
+
+        expect(throttle.blockedFor('ip:1.1.1.1')).toBe(0);
+    });
+
+    it('blocks once the failure limit is reached, and reports Retry-After seconds', function () {
+        const throttle = createFailureThrottle(options);
+        const now = 1000000;
+
+        for (let i = 0; i < 3; i++) {
+            throttle.recordFailure('ip:1.1.1.1', now);
+        }
+
+        expect(throttle.blockedFor('ip:1.1.1.1', now)).toBe(30);
+        // Lockout expires on its own.
+        expect(throttle.blockedFor('ip:1.1.1.1', now + 30001)).toBe(0);
+    });
+
+    it('keeps keys independent so one account cannot lock out another', function () {
+        const throttle = createFailureThrottle(options);
+
+        for (let i = 0; i < 3; i++) {
+            throttle.recordFailure('user:victim');
+        }
+
+        expect(throttle.blockedFor('user:victim')).toBeGreaterThan(0);
+        expect(throttle.blockedFor('user:someone-else')).toBe(0);
+    });
+
+    // A successful login must wipe the slate: a legitimate user who mistypes
+    // their password a few times should never be locked out afterwards.
+    it('reset clears accumulated failures', function () {
+        const throttle = createFailureThrottle(options);
+
+        throttle.recordFailure('ip:1.1.1.1');
+        throttle.recordFailure('ip:1.1.1.1');
+        throttle.reset('ip:1.1.1.1');
+        throttle.recordFailure('ip:1.1.1.1');
+
+        expect(throttle.blockedFor('ip:1.1.1.1')).toBe(0);
+    });
+
+    it('forgets failures that fall outside the window', function () {
+        const throttle = createFailureThrottle(options);
+        const now = 1000000;
+
+        throttle.recordFailure('ip:1.1.1.1', now);
+        throttle.recordFailure('ip:1.1.1.1', now);
+        // Third failure arrives after the first two have aged out.
+        throttle.recordFailure('ip:1.1.1.1', now + 60001);
+
+        expect(throttle.blockedFor('ip:1.1.1.1', now + 60001)).toBe(0);
     });
 });
