@@ -6,6 +6,7 @@ export interface CardSummary {
     id?: string;
     image?: string;
     name?: string;
+    label?: string;
     type?: string;
     printedHouse?: string;
     maverick?: string;
@@ -52,20 +53,25 @@ export interface CardMenuItem {
 
 export interface PromptButton {
     command?: string;
-    text?: string;
+    text?: string | { text?: string; values?: Record<string, unknown> };
     arg?: unknown;
     uuid?: string;
     method?: string;
     disabled?: boolean;
     icon?: string;
+    /** Serialized short summary of the card this button plays/uses. */
     card?: CardSummary;
+    /** i18n interpolation values for `{{key}}` placeholders in `text`. */
+    values?: Record<string, unknown>;
     [key: string]: unknown;
 }
 
 export interface PromptControl {
     type: string;
-    source?: unknown;
-    targets?: unknown;
+    /** Short summary of the card whose effect is being resolved. */
+    source?: CardSummary;
+    /** Short summaries of the cards the effect is aimed at. */
+    targets?: CardSummary[];
     [key: string]: unknown;
 }
 

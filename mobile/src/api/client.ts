@@ -3,8 +3,14 @@ import { useSettingsStore } from '../stores/settingsStore';
 import type {
     ApiResponse,
     Deck,
+    GameRatingResult,
+    LeaderboardResult,
     LoginResponse,
+    MatchHistoryResult,
+    PlayerRatingsResult,
+    PlayerStatsResult,
     RefreshToken,
+    ShortCard,
     UserDetails
 } from './types';
 
@@ -237,4 +243,59 @@ export function parseDeckUuid(input: string): string | undefined {
     const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
     const match = trimmed.match(uuidPattern);
     return match ? match[0].toLowerCase() : undefined;
+}
+
+export interface DeckDetailResult extends ApiResponse {
+    deck?: Deck;
+    aerc?: unknown;
+}
+
+/** Full deck (with card list) — only works for the caller's own decks. */
+export async function fetchDeck(id: Deck['id']) {
+    return apiFetch<DeckDetailResult>(`/api/decks/${id}`);
+}
+
+// ---- Cards ----
+
+export interface CardsResult extends ApiResponse {
+    cards?: Record<string, ShortCard>;
+}
+
+/**
+ * The full card dictionary (short form), used to resolve deck-card ids to
+ * names/types. Public endpoint; the payload is sizeable so callers cache it
+ * (see stores/cardsStore).
+ */
+export async function fetchAllCards() {
+    return rawFetch<CardsResult>('/api/cards');
+}
+
+// ---- Rankings / stats / match history ----
+
+export async function fetchLeaderboard(
+    options: { pool?: string; scope?: string; limit?: number; offset?: number } = {}
+) {
+    const params = new URLSearchParams();
+    params.set('pool', options.pool ?? 'archon');
+    params.set('scope', options.scope ?? 'world');
+    params.set('limit', String(options.limit ?? 50));
+    params.set('offset', String(options.offset ?? 0));
+    return rawFetch<LeaderboardResult>(`/api/ratings/leaderboard?${params.toString()}`);
+}
+
+export async function fetchPlayerRatings(username: string) {
+    return rawFetch<PlayerRatingsResult>(`/api/ratings/${encodeURIComponent(username)}`);
+}
+
+export async function fetchPlayerStats(username: string) {
+    return rawFetch<PlayerStatsResult>(`/api/stats/player/${encodeURIComponent(username)}`);
+}
+
+/** The caller's own finished games (server caps this at the latest 30). */
+export async function fetchMatchHistory() {
+    return apiFetch<MatchHistoryResult>('/api/games');
+}
+
+export async function fetchGameRating(gameId: string) {
+    return apiFetch<GameRatingResult>(`/api/games/${encodeURIComponent(gameId)}/rating`);
 }
