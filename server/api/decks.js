@@ -69,7 +69,12 @@ module.exports.init = function (server) {
             // ARCHON: attach cached SAS stats (best effort, non-blocking refresh)
             await dokService.attachStats([deck]);
 
-            res.send({ success: true, deck: deck });
+            // ARCHON: the AERC component breakdown behind the SAS number. Comes
+            // from the DoK payload already stored on the deck, so it costs one
+            // local read and never an outbound call.
+            const aerc = await dokService.getAercBreakdown(deck.uuid);
+
+            res.send({ success: true, deck: deck, aerc: aerc });
         })
     );
 

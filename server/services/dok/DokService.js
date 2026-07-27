@@ -40,6 +40,21 @@ function reserveOutboundSlot(limit) {
  *    come from config so the admin settings service can drive them.
  *  - The db adapter is injected to keep the service unit-testable.
  */
+// The AERC components DoK reports, in the order it presents them. Kept here so
+// the labels and the field names cannot drift apart.
+const AERC_COMPONENTS = [
+    { key: 'amberControl', label: 'Amber Control' },
+    { key: 'expectedAmber', label: 'Expected Amber' },
+    { key: 'artifactControl', label: 'Artifact Control' },
+    { key: 'creatureControl', label: 'Creature Control' },
+    { key: 'efficiency', label: 'Efficiency' },
+    { key: 'recursion', label: 'Recursion' },
+    { key: 'disruption', label: 'Disruption' },
+    { key: 'effectivePower', label: 'Effective Power' },
+    { key: 'creatureProtection', label: 'Creature Protection' },
+    { key: 'other', label: 'Other' }
+];
+
 class DokService {
     // Test hook: clear the shared rate-limit window between cases.
     static _resetRateLimiter() {
@@ -455,6 +470,55 @@ class DokService {
      * property), and kick off background refreshes for missing/stale
      * entries (bounded per call, fire-and-forget).
      */
+    /**
+     * ARCHON: the AERC component breakdown for one deck, from the DoK payload
+     * already stored in DeckSas.RawData.
+     *
+     * SAS is a single number; AERC is what it is made of - how much amber
+     * control, creature control, efficiency and so on the deck has. The whole
+     * payload has been persisted since SAS enrichment landed but was never read
+     * back, so players saw the score without any of the reasoning behind it.
+     *
+     * Returns null when the deck has no stored stats, and skips any component
+     * DoK did not supply rather than reporting a misleading zero.
+     */
+    async getAercBreakdown(uuid) {
+        if (!uuid) {
+            return null;
+        }
+
+        const rows = await this.db.query(
+            'SELECT "SasRating", "AercScore", "AercVersion", "RawData", "FetchedAt" ' +
+                'FROM "DeckSas" WHERE "Uuid" = $1',
+            [uuid]
+        );
+        const row = rows && rows[0];
+
+        if (!row || !row.RawData) {
+            return null;
+        }
+
+        const raw = typeof row.RawData === 'string' ? JSON.parse(row.RawData) : row.RawData;
+        const components = AERC_COMPONENTS.map((component) => ({
+            key: component.key,
+            label: component.label,
+            value: typeof raw[component.key] === 'number' ? raw[component.key] : null
+        })).filter((component) => component.value !== null);
+
+        return {
+            sasRating: row.SasRating,
+            aercScore: row.AercScore,
+            aercVersion: row.AercVersion,
+            fetchedAt: row.FetchedAt,
+            components,
+            // Useful context DoK returns alongside the components.
+            sasPercentile: typeof raw.sasPercentile === 'number' ? raw.sasPercentile : null,
+            synergyRating: typeof raw.synergyRating === 'number' ? raw.synergyRating : null,
+            antisynergyRating:
+                typeof raw.antisynergyRating === 'number' ? raw.antisynergyRating : null
+        };
+    }
+
     async attachStats(decks, { maxBackgroundFetches = 5 } = {}) {
         const withUuids = (decks || []).filter((deck) => deck && deck.uuid);
 
@@ -492,3 +556,4 @@ class DokService {
 }
 
 module.exports = DokService;
+module.exports.AERC_COMPONENTS = AERC_COMPONENTS;

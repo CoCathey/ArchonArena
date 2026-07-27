@@ -122,6 +122,14 @@ const Register = () => {
                         attention to the section on avatars.
                     </p>
                 </Trans>
+                {/* ARCHON: taking sign-ups needs the terms stated at the point
+                    of sign-up, not buried in a footer. */}
+                <p className='text-sm text-muted'>
+                    <Trans i18nKey='register.terms'>
+                        By creating an account you agree to the{' '}
+                        <Link href='/terms'>Terms of Service</Link>.
+                    </Trans>
+                </p>
                 <Formik validationSchema={schema} onSubmit={onSubmit} initialValues={initialValues}>
                     {(formProps) => (
                         <form onSubmit={formProps.handleSubmit} className='space-y-3'>

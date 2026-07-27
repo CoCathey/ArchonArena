@@ -38,6 +38,7 @@ import NodesAdmin from './pages/NodesAdmin';
 import NotFound from './pages/NotFound';
 import Patreon from './pages/Patreon';
 import Privacy from './pages/Privacy';
+import Terms from './pages/Terms';
 import Profile from './pages/Profile';
 import Register from './pages/Register';
 import ResetPassword from './pages/ResetPassword';
@@ -96,6 +97,7 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/users' element={requirePermission('canManageUsers', <UserAdmin />)} />
             <Route path='/nodes' element={requirePermission('canManageNodes', <NodesAdmin />)} />
             <Route path='/privacy' element={<Privacy />} />
+            <Route path='/terms' element={<Terms />} />
             <Route
                 path='/banlist'
                 element={requirePermission(

@@ -73,17 +73,30 @@ class Server {
         // the app without the proxy can forge X-Forwarded-For.
         app.set('trust proxy', this.isDeveloping ? false : 1);
 
-        // ARCHON: security response headers. `helmet` has been a dependency since
+        // ARCHON: security response headers. `helmet` had been a dependency since
         // the upstream fork but was never actually mounted, so the site shipped
-        // with none of them. helmet@3's defaults cover noSniff, frameguard,
-        // hidePoweredBy, xssFilter, dnsPrefetchControl and ieNoOpen; HSTS only
-        // where TLS actually terminates.
+        // with none of them.
+        //
+        // Two of helmet 8's defaults are deliberately overridden:
+        //
+        //  - contentSecurityPolicy: helmet 4+ ships a default policy (helmet 3
+        //    shipped none). That default knows nothing about hCaptcha, gameplay
+        //    websockets or the Sentry ingest host, so leaving it on would both
+        //    break the site and emit a second, conflicting CSP header alongside
+        //    ours. Our policy is built in server/csp.js and applied below.
+        //  - crossOriginOpenerPolicy: 'same-origin' severs window.opener. The
+        //    tournament print-pairings view opens an about:blank popup and writes
+        //    into it (client/Components/Tournaments/printPairings.js), so this is
+        //    relaxed to same-origin-allow-popups, which still blocks cross-origin
+        //    popups from reaching back into the page.
         app.use(
             helmet({
+                contentSecurityPolicy: false,
+                crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+                referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
                 hsts: this.isDeveloping ? false : undefined
             })
         );
-        app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }));
 
         // ARCHON: Content-Security-Policy (server/csp.js documents each
         // directive). CSP_MODE can turn it down to report-only, or off, without

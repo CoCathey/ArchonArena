@@ -78,7 +78,11 @@ function buildDirectives({ isDeveloping = false, sentryDsn } = {}) {
         // hCaptcha renders its challenge in an iframe.
         frameSrc: HCAPTCHA,
         workerSrc: ["'self'", 'blob:'],
-        manifestSrc: ["'self'"]
+        manifestSrc: ["'self'"],
+        // Safety net for any http:// subresource that slips into a page: the
+        // browser retries it over https rather than firing mixed-content. Only
+        // in production - on a plain-http dev server it has nothing to upgrade.
+        ...(isDeveloping ? {} : { upgradeInsecureRequests: [] })
     };
 }
 

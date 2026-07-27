@@ -43,7 +43,12 @@ class EmailService {
         return !!this.fromAddress;
     }
 
-    async sendEmail(address, subject, text) {
+    /**
+     * Send a message with both an HTML and a plain-text body. `html` is
+     * optional - without it this behaves exactly as the text-only send always
+     * did, so existing callers are unaffected.
+     */
+    async sendEmail(address, subject, text, html) {
         if (!this.fromAddress) {
             // warn, not info: dropping an activation or reset mail locks a real
             // player out of their account, so it must stand out in the logs.
@@ -64,7 +69,12 @@ class EmailService {
                     Content: {
                         Simple: {
                             Subject: { Data: subject },
-                            Body: { Text: { Data: text } }
+                            // Both bodies when HTML is supplied: SES sends a
+                            // multipart/alternative and the client picks, so a
+                            // text-only reader still gets a readable message.
+                            Body: html
+                                ? { Text: { Data: text }, Html: { Data: html } }
+                                : { Text: { Data: text } }
                         }
                     }
                 })

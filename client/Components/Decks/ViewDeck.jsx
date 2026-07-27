@@ -6,8 +6,13 @@ import Icon from '../Icon';
 import { faSync } from '@fortawesome/free-solid-svg-icons';
 
 import DeckSummary from './DeckSummary';
+import AercBreakdown from './AercBreakdown';
 import Panel from '../Site/Panel';
-import { useDeleteDeckMutation, useRefreshAccoladesMutation } from '../../redux/api';
+import {
+    useDeleteDeckMutation,
+    useGetDeckQuery,
+    useRefreshAccoladesMutation
+} from '../../redux/api';
 
 /**
  * @typedef ViewDeckProps
@@ -19,6 +24,10 @@ import { useDeleteDeckMutation, useRefreshAccoladesMutation } from '../../redux/
  */
 const ViewDeck = ({ deck }) => {
     const [deleteDeck] = useDeleteDeckMutation();
+    // ARCHON: the AERC breakdown lives on the deck detail endpoint; the deck in
+    // redux comes from the list, which does not carry it. Skipped for
+    // standalone decks, which have no Master Vault uuid to look up.
+    const { data: deckDetail } = useGetDeckQuery(deck?.id, { skip: !deck?.id });
     const [refreshAccolades] = useRefreshAccoladesMutation();
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -69,6 +78,11 @@ const ViewDeck = ({ deck }) => {
             </div>
             <div className='min-h-0 flex-1 overflow-auto pe-1'>
                 <DeckSummary deck={deck} />
+                {deckDetail?.aerc && (
+                    <div className='mt-3 border-t border-border/50 pt-3'>
+                        <AercBreakdown aerc={deckDetail.aerc} />
+                    </div>
+                )}
             </div>
             <HeroModal.Backdrop isOpen={isDeleteModalOpen} onOpenChange={setIsDeleteModalOpen}>
                 <HeroModal.Container placement='center'>

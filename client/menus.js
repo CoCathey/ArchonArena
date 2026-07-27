@@ -114,6 +114,7 @@ export const SidebarMenu = [
             { path: '/how-to-play', title: 'How To Play' },
             { path: '/about', title: 'About' },
             { path: '/privacy', title: 'Privacy Policy' },
+            { path: '/terms', title: 'Terms of Service' },
             { path: '/admin/settings', title: 'Site Settings', permission: 'isAdmin' },
             { path: '/admin/bug-reports', title: 'Bug Reports', permission: 'isAdmin' },
             { path: '/news', title: 'News Admin', permission: 'canEditNews' },

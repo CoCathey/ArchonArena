@@ -197,6 +197,30 @@ const DeckList = ({
                 meta: { className: 'text-center', colWidth: '64px' }
             },
             {
+                // ARCHON: SAS is fetched and cached for every deck (the list
+                // endpoint already calls DokService.attachStats), but until now
+                // it was only visible on a single deck's own page - so the one
+                // number players actually sort their collection by was missing
+                // from the collection view.
+                accessorKey: 'sasRating',
+                header: t('SAS'),
+                cell: ({ row }) =>
+                    row.original.sasRating != null ? (
+                        <span className='text-center font-bold text-foreground'>
+                            {row.original.sasRating}
+                        </span>
+                    ) : (
+                        // Absent SAS is normal: DoK may be unconfigured, over
+                        // its rate budget, or simply not know this deck yet.
+                        <span className='text-center text-muted' title={t('SAS not available')}>
+                            -
+                        </span>
+                    ),
+                sortingFn: (a, b) => (a.original.sasRating ?? -1) - (b.original.sasRating ?? -1),
+                enableColumnFilter: false,
+                meta: { className: 'text-center', colWidth: '64px' }
+            },
+            {
                 accessorKey: 'lastUpdated',
                 header: t('Added'),
                 cell: ({ row }) => (

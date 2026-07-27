@@ -17,6 +17,7 @@ const BanlistService = require('../services/BanlistService');
 const PatreonService = require('../services/PatreonService');
 const util = require('../util.js');
 const { rateLimit, createFailureThrottle, clientIp } = require('./rateLimit');
+const { renderHtmlEmail, renderTextEmail } = require('../services/emailTemplate');
 
 // ARCHON: abuse limits on the authentication surface. These endpoints are
 // unauthenticated and are the first thing any credential-stuffing or
@@ -425,20 +426,22 @@ module.exports.init = function (server, options) {
                 let url = `${req.protocol}://${req.get('host')}/activation?id=${user.id}&token=${
                     newUser.activationToken
                 }`;
-                let emailText =
-                    `Hi,\n\nSomeone, hopefully you, has requested an account named ${
-                        newUser.username
-                    } to be created on ${appName} (${req.protocol}://${req.get(
-                        'host'
-                    )}).  If this was you, click this link ${url} to complete the process.\n\n` +
-                    'If you did not request this please disregard this email.\n' +
-                    'Kind regards,\n\n' +
-                    `${appName} team`;
+                const activation = {
+                    appName,
+                    title: 'Confirm your account',
+                    paragraphs: [
+                        `Someone, hopefully you, asked for an account named ${newUser.username} on ${appName}.`,
+                        'Confirm it to finish signing up and start playing.'
+                    ],
+                    action: { label: 'Confirm my account', url },
+                    footer: 'If you did not request this, you can safely ignore this email.'
+                };
 
                 await emailService.sendEmail(
                     user.email,
                     `${appName} - Account activation`,
-                    emailText
+                    renderTextEmail(activation),
+                    renderHtmlEmail(activation)
                 );
             }
 
@@ -895,17 +898,25 @@ module.exports.init = function (server, options) {
             let url = `${req.protocol}://${req.get('host')}/reset-password?id=${
                 user.id
             }&token=${resetToken}`;
-            let emailText =
-                `Hi,\n\nSomeone, hopefully you, has requested the password for ${
-                    user.username
-                } on ${appName} (${req.protocol}://${req.get(
-                    'host'
-                )}) to be reset.  If this was you, click this link ${url} to complete the process.\n\n` +
-                'If you did not request this reset, do not worry, your account has not been affected and your password has not been changed, just ignore this email.\n' +
-                'Kind regards,\n\n' +
-                `${appName} team`;
+            const reset = {
+                appName,
+                title: 'Reset your password',
+                paragraphs: [
+                    `Someone, hopefully you, asked to reset the password for ${user.username} on ${appName}.`,
+                    'This link expires in 4 hours.'
+                ],
+                action: { label: 'Reset my password', url },
+                footer:
+                    'If you did not ask for this, ignore this email — your account has not been ' +
+                    'affected and your password has not been changed.'
+            };
 
-            await emailService.sendEmail(user.email, `${appName} - Password reset`, emailText);
+            await emailService.sendEmail(
+                user.email,
+                `${appName} - Password reset`,
+                renderTextEmail(reset),
+                renderHtmlEmail(reset)
+            );
         })
     );
 

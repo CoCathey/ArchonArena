@@ -133,7 +133,7 @@ the single highest-value item on the roadmap.
 -   `deploy/healthcheck.sh` reports zero FAILs; a deliberately triggered error appears in Sentry.
 -   Uptime monitor green for 24 continuous hours.
 
-#### I2 — Schema migration ledger and runner
+#### I2 — Schema migration ledger and runner _(done)_
 
 **Why:** production schema state is currently untracked. Migrations are applied file-by-file
 by hand (docs/DEPLOYMENT.md §4), nothing records what ran, and the schema directory already
@@ -142,13 +142,22 @@ contains two duplicate ordinals (`40 - Seasons.sql` / `40 - TournamentMatchGames
 migration; this is the highest-leverage operational fix on the list.
 **Tasks**
 
--   Add a `SchemaMigrations` ledger table (filename, checksum, applied-at, applied-by).
--   `npm run migrate`: applies pending files in order inside a transaction, idempotent,
-    refuses to run when a previously-applied file's checksum has changed.
--   Renumber the duplicate ordinals; document the "one numbered migration per schema change"
-    rule in CONTRIBUTING.md.
--   Wire the runner into the deploy path and add a pending-migration assertion to
-    `deploy/healthcheck.sh`.
+-   [x] `SchemaMigrations` ledger (filename, sha256 checksum, applied-at, applied-by), in
+        both the schema tree and as a migration.
+-   [x] `npm run migrate`, with `--status` / `--dry-run` / `--baseline`. Each file applies in
+        its own transaction alongside its ledger row, so the ledger can never claim a
+        migration that half-applied.
+-   [x] Refuses to run when an already-applied file has since been edited — the one case
+        where two databases diverge silently and forever.
+-   [x] A `--baseline` step, because a database built from `server/db/schema` already contains
+        every migration's effect and replaying upstream migrations 01-21 at it would error.
+        The runner refuses to guess: an untracked database with pending files exits non-zero
+        with instructions rather than blindly applying history.
+-   [x] Duplicate ordinals renumbered (done in the housekeeping sweep); `deploy/healthcheck.sh`
+        now FAILs on a missing ledger or pending migrations; DEPLOYMENT.md rewritten.
+-   [x] **Verified against a real PostgreSQL 16**: all 46 schema files apply cleanly in
+        alphabetical order, baseline seeds 38 rows, a genuinely new multi-statement migration
+        applies, an edited migration is refused, and every exit code is correct for CI.
 
 **Depends on:** nothing. Blocks: safe iteration on every schema-touching item below.
 **Acceptance criteria**
@@ -270,15 +279,28 @@ reports, community actions, deck DoK prepare, and tournament creation — not to
 registration, or password reset.
 **Tasks**
 
--   `npm audit` triage; upgrade `helmet` off v3 (now mounted, with a CSP — **I0**).
--   Move the rate limiter and login failure throttle to Redis so limits hold across processes;
-    both are per-process today (**I0**), which a multi-lobby deployment would dilute.
--   Tighten `style-src` off `'unsafe-inline'` with nonces or hashes, and narrow `connect-src`
-    from `wss:` to the actual game-node origins once the node topology is settled.
--   Review every endpoint for authorisation (especially the admin and tournament-organizer
-    routes) and for user-supplied content rendered without escaping.
--   Secrets audit: confirm nothing sensitive is settings-service-editable or logged.
--   Write the findings and the standing checklist to `docs/SECURITY.md`.
+-   [x] `helmet` upgraded v3 → v8. Its default CSP is disabled (it would break the site and
+        emit a second header) and COOP relaxed to `same-origin-allow-popups` for the
+        print-pairings popup — both verified in a browser.
+-   [x] `npm audit` triaged. Everything non-breaking applied, including the **`ws`
+        memory-exhaustion DoS that sat in the gameplay socket path**. Lint tooling moved to
+        `devDependencies`, removing the whole eslint chain from the production graph.
+-   [x] Authorization enumerated: every `/api/admin/*` route checks a permission and not just
+        a JWT, and all thirteen tournament-organizer operations authorize in the service
+        layer where the check cannot be bypassed.
+-   [x] Secrets audit: nothing sensitive is settings-registry-editable, and reset tokens are
+        never logged. SQL confirmed exclusively parameterised.
+-   [x] `docs/SECURITY.md` written — controls, dependency triage with reasoning, two
+        documented accepted risks, and a standing re-review checklist.
+-   [ ] **`fabric` v5 → v7** — the last critical/high advisories all trace to it. A rewrite
+        (ESM-only, promise-based, ~1,000 lines of usage across the archon maker, game board
+        and fetchdata pipeline), so it is its own project. Exposure documented as low: no SVG
+        path exists and uploads are magic-byte-gated.
+-   [ ] Replace the unmaintained `patreon` package with direct `fetch` (folds into **N12**).
+-   [ ] Move the rate limiter and login failure throttle to Redis so limits hold across
+        processes; both are per-process today.
+-   [ ] Tighten `style-src` off `'unsafe-inline'` with nonces or hashes, and narrow
+        `connect-src` from `wss:` to the actual game-node origins.
 
 **Depends on:** nothing. Blocks: public announcement of the site.
 **Acceptance criteria**
@@ -287,16 +309,23 @@ registration, or password reset.
 -   No high or critical advisory outstanding in `npm audit`, or each is documented with a reason.
 -   `docs/SECURITY.md` exists with the checklist, the date it was last run, and the results.
 
-#### I6 — Terms of Service and transactional email polish
+#### I6 — Terms of Service and transactional email polish _(mostly done)_
 
 **Why:** taking public sign-ups needs terms, and the activation/reset emails are plain text
 that inherit only the site name from config.
 **Tasks**
 
--   `/terms` page, admin-editable through Site Settings > Site Content alongside About/Privacy.
--   Registration and onboarding reference the terms; record acceptance against the account.
--   Branded HTML email template (header, mark, footer, plain-text fallback) for activation,
-    password reset, and future notification mail.
+-   [x] `/terms` page — plain-language terms covering accounts, fair play (collusion,
+        multi-accounting, exploiting bugs), conduct, liability, IP and user content.
+        Admin-editable through Site Settings > Site Content alongside About/Privacy, and
+        linked from the sidebar.
+-   [x] Registration states the terms at the point of sign-up rather than burying them.
+-   [x] Branded HTML email template (`server/services/emailTemplate.js`) with a plain-text
+        alternative; both activation and password reset now use it. No images, so nothing
+        breaks under blocked remote content and no open-tracking signal leaks.
+-   [ ] Record terms acceptance against the account (currently stated, not stored).
+-   [ ] **Owner action:** AWS SES setup — verified sender identity and production access —
+        before any of this mail can actually be delivered.
 
 **Depends on:** nothing. Blocks: I1's public announcement.
 **Acceptance criteria**
@@ -374,10 +403,15 @@ things happened. Round pairings in particular are unusable without a ping.
 under-displayed — the SAS the platform already stores appears on one screen.
 **Tasks**
 
--   Show SAS on deck lists, lobby games, and the pre-game screen (Phase 4 leftovers).
--   AERC component breakdown from the stored `DeckSas.RawData`.
--   Per-deck stats: W/L, SAS-vs-performance delta, best/worst matchups, "your best deck".
--   Periodic background SAS refresh sweep (today refresh is access-triggered only).
+-   [x] SAS column on the deck list, sortable. The data was already fetched and cached on
+        that endpoint — it was simply never rendered, so the number players sort their
+        collection by was missing from the collection view.
+-   [x] AERC component breakdown on the deck view, from the DoK payload already stored in
+        `DeckSas.RawData` and never read back until now. Components DoK did not supply are
+        omitted rather than shown as zero, which would be a different claim.
+-   [ ] SAS on lobby games and the pre-game screen.
+-   [ ] Per-deck stats: W/L, SAS-vs-performance delta, best/worst matchups, "your best deck".
+-   [ ] Periodic background SAS refresh sweep (today refresh is access-triggered only).
 
 **Depends on:** I2 (any stats migration).
 **Acceptance criteria**
@@ -1153,13 +1187,12 @@ competitive advantage.
 -   [ ] Full audit-log table (currently last-editor only) → **N5**.
 -   [ ] Feature flags section for gradual rollout of new systems → **N8**.
 -   [ ] Admin panel coverage for tournaments, moderation, and analytics → **N5**/**N8**.
--   [ ] **Reset all statistics** (isAdmin): one site-wide reset for clearing beta and playtest
-        data before launch. Today the only reset is per-player, per-pool (`adminResetRatings`).
-        Scope it explicitly — ratings, rating history, game records, replays, the statistics
-        cache — with per-category checkboxes rather than one opaque button. Acceptance: a dry
-        run reports exactly what would be deleted; the destructive run needs a typed
-        confirmation, writes an audit-log entry, and leaves accounts, decks, clubs and
-        tournaments untouched.
+-   [x] **Reset all statistics** (isAdmin, `AdminResetService`): site-wide reset scoped by
+        category — ratings, replays, game records, seasons — rather than one opaque button.
+        Every call is a dry run unless explicitly confirmed, so the caller can always show
+        what is about to be destroyed; the real run is one transaction, clears the statistics
+        cache, and logs loudly and attributably. Accounts, decks, clubs, stores and
+        tournaments are never touched, asserted by test.
 
 ## Cross-cutting: Quality & operations
 

@@ -1,7 +1,11 @@
 module.exports = {
     root: true,
     env: {
-        node: true
+        node: true,
+        // parserOptions already accepts ES2020 syntax, but without this the
+        // matching globals (Map, Set, Promise, globalThis...) are undeclared, so
+        // using any of them in a test trips no-undef.
+        es2020: true
     },
     parserOptions: {
         ecmaVersion: 11,

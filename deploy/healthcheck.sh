@@ -169,6 +169,21 @@ else
     bad "card art missing (${imgs:-0} images) - boards show blank cards" "$DC exec lobby npm run fetchdata   (downloads ~6k images; resumable, skips existing)"
 fi
 
+# Pending migrations mean the running code expects a schema the database does
+# not have yet. The ledger makes that answerable instead of a guess.
+ledger="$(psql_q $'SELECT COUNT(*) FROM information_schema.tables WHERE table_name=\'SchemaMigrations\'')"
+if [ "${ledger:-0}" -eq 0 ] 2>/dev/null; then
+    bad "no migration ledger - schema state is untracked" "$DC exec lobby npm run migrate -- --baseline"
+else
+    applied="$(psql_q 'SELECT COUNT(*) FROM "SchemaMigrations"')"
+    onDisk="$(ls -1 server/db/schema/migrations/*.sql 2>/dev/null | wc -l | tr -d '[:space:]')"
+    if [ "${applied:-0}" -ge "${onDisk:-0}" ] 2>/dev/null; then
+        ok "migrations up to date (${applied}/${onDisk} applied)"
+    else
+        bad "${applied}/${onDisk} migrations applied - the database is behind the code" "$DC exec lobby npm run migrate"
+    fi
+fi
+
 users="$(psql_q 'SELECT COUNT(*) FROM "Users"')"
 ok "user accounts: ${users:-?}"
 

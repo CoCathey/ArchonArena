@@ -102,13 +102,26 @@ Compose replaces containers with the new image; Caddy keeps serving during the s
 For zero-disruption game-node updates, drain first (roadmap: deploy script) — restarting
 `node-0` ends in-progress games on it.
 
-Database schema changes: apply files from `server/db/schema/migrations/` manually (they
-are numbered) before starting the new code:
+Database schema changes are applied by the migration runner, which tracks what has run in
+a `SchemaMigrations` ledger:
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production \
-  exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" < "server/db/schema/migrations/<N> - <name>.sql"
+  exec lobby npm run migrate
 ```
+
+**Once per database**, seed the ledger before the first tracked deploy — a database built
+from `server/db/schema` already contains every migration's effect, so replaying them would
+error:
+
+```bash
+docker compose ... exec lobby npm run migrate -- --baseline
+```
+
+Inspect without changing anything with `npm run migrate -- --status`. The runner applies
+each file in its own transaction (so a failure leaves nothing half-applied), and refuses to
+run at all if a migration that was already applied has since been edited.
+`deploy/healthcheck.sh` FAILs when migrations are pending.
 
 ## 5. Backups
 

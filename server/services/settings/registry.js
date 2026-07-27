@@ -270,7 +270,7 @@ const REGISTRY = {
     content: {
         title: 'Site Content',
         description:
-            'Replace the built-in About and Privacy pages with your own content (Markdown: # headings, **bold**, [links](url), - lists). Leave a field empty to keep the built-in page.',
+            'Replace the built-in About, Privacy and Terms pages with your own content (Markdown: # headings, **bold**, [links](url), - lists). Leave a field empty to keep the built-in page.',
         fields: {
             aboutMarkdown: {
                 type: 'text',
@@ -281,6 +281,12 @@ const REGISTRY = {
             privacyMarkdown: {
                 type: 'text',
                 label: 'Privacy page (Markdown; empty = built-in page)',
+                maxLength: 50000,
+                default: ''
+            },
+            termsMarkdown: {
+                type: 'text',
+                label: 'Terms of Service page (Markdown; empty = built-in page)',
                 maxLength: 50000,
                 default: ''
             }

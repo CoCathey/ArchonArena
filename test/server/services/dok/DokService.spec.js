@@ -373,3 +373,94 @@ describe('DokService', function () {
         });
     });
 });
+
+describe('DokService.getAercBreakdown', function () {
+    const RAW = {
+        amberControl: 8.4,
+        expectedAmber: 9.1,
+        artifactControl: 1.2,
+        creatureControl: 6.7,
+        efficiency: 4.3,
+        recursion: 0.5,
+        disruption: 2.1,
+        effectivePower: 55,
+        creatureProtection: 1.1,
+        other: 0.3,
+        sasPercentile: 72.4,
+        synergyRating: 12,
+        antisynergyRating: 3
+    };
+
+    const serviceWith = (rows) =>
+        new DokService(
+            { getValue: () => ({ enabled: false }) },
+            { query: vi.fn(async () => rows) }
+        );
+
+    it('returns the components DoK supplied, in order', async function () {
+        const service = serviceWith([
+            { SasRating: 78, AercScore: 88, AercVersion: 24, RawData: RAW, FetchedAt: new Date() }
+        ]);
+
+        const aerc = await service.getAercBreakdown('deck-uuid');
+
+        expect(aerc.sasRating).toBe(78);
+        expect(aerc.aercScore).toBe(88);
+        expect(aerc.components[0]).toEqual({
+            key: 'amberControl',
+            label: 'Amber Control',
+            value: 8.4
+        });
+        expect(aerc.components).toHaveLength(10);
+        expect(aerc.sasPercentile).toBe(72.4);
+    });
+
+    it('parses RawData when the driver hands back a JSON string', async function () {
+        const service = serviceWith([
+            {
+                SasRating: 78,
+                AercScore: 88,
+                AercVersion: 24,
+                RawData: JSON.stringify(RAW),
+                FetchedAt: new Date()
+            }
+        ]);
+
+        const aerc = await service.getAercBreakdown('deck-uuid');
+
+        expect(aerc.components).toHaveLength(10);
+    });
+
+    // A missing component means DoK did not report it; showing 0 would claim
+    // the deck has none of that quality, which is a different statement.
+    it('omits components DoK did not supply rather than reporting zero', async function () {
+        const service = serviceWith([
+            {
+                SasRating: 60,
+                AercScore: 70,
+                AercVersion: 24,
+                RawData: { amberControl: 5, efficiency: 2 },
+                FetchedAt: new Date()
+            }
+        ]);
+
+        const aerc = await service.getAercBreakdown('deck-uuid');
+
+        expect(aerc.components.map((c) => c.key)).toEqual(['amberControl', 'efficiency']);
+        expect(aerc.sasPercentile).toBeNull();
+    });
+
+    it('returns null for a deck with no stored stats', async function () {
+        expect(await serviceWith([]).getAercBreakdown('deck-uuid')).toBeNull();
+    });
+
+    it('returns null for a row with no RawData', async function () {
+        const service = serviceWith([{ SasRating: 60, AercScore: 70, RawData: null }]);
+
+        expect(await service.getAercBreakdown('deck-uuid')).toBeNull();
+    });
+
+    it('returns null without querying when no uuid is given', async function () {
+        expect(await serviceWith([]).getAercBreakdown(undefined)).toBeNull();
+    });
+});

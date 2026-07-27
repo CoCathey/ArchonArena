@@ -55,6 +55,13 @@ describe('Content-Security-Policy', function () {
             }
         });
 
+        // Only in production: on a plain-http dev server there is nothing to
+        // upgrade, and the directive would fight the Vite dev server.
+        it('upgrades insecure requests in production only', function () {
+            expect(prod.upgradeInsecureRequests).toEqual([]);
+            expect(buildDirectives({ isDeveloping: true }).upgradeInsecureRequests).toBeUndefined();
+        });
+
         it('allows secure websockets for gameplay, and plain ws only in development', function () {
             expect(prod.connectSrc).toContain('wss:');
             expect(prod.connectSrc).not.toContain('ws:');
