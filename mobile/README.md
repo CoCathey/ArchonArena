@@ -11,15 +11,25 @@ engine the website uses, with a UI built for one-handed portrait play.
 - **Play tab** — live game list over the lobby socket, create game (type/format,
   password, spectators, open hands, time limit), quick join, join/watch with password
 - **Decks tab** — your deck library with house icons + SAS, Master Vault import by
-  link or id, standalone decks for instant play
+  link or id, standalone decks for instant play, deck detail view (full card list
+  by house with card zoom)
+- **Stats tab** — world leaderboard per rating pool, your ratings/rank, win-rate
+  breakdowns by house and format, and match history
 - **Pending game** — pick a deck (yours or standalone), chat, start when both ready
 - **Game board** — full live gameplay:
   - opponent + player HUDs (æmber, keys, key cost, chains, houses, pile counts)
   - battlelines and artifact rows, card tokens (damage/power/æmber/ward), stun,
     exhaust, selection highlights
   - server-driven prompt panel (mulligans, house choice, ability targeting, Fight/Reap
-    menus, end-of-game rematch) including house-icon prompts
+    menus, end-of-game rematch) including house-icon prompts, with card names
+    interpolated into buttons/titles and a "because of <card>" source-card context
+    for effect resolution
+  - live play-by-play: while the opponent acts, the latest log lines appear in the
+    waiting panel with a tap-through to the full log
   - tap to play/use a card, long-press to zoom, card menus for in-play cards
+  - drag and drop: pull a card up to the battleline to play it (or to the discard
+    chip for the house action); manual mode unlocks moves between all your zones,
+    mirroring the web client
   - discard/archives/purged pile viewers, game log + chat sheet
   - spectator mode, reconnect handling, concede/leave, manual-mode toggle
 
@@ -93,6 +103,6 @@ AA_SERVER=... AA_GAME_NODE=...  # to override
 
 ## Not yet implemented
 
-Sealed/alliance formats, drag-drop manual-mode gestures, tournaments, lobby chat,
-spectator lists, deck detail view, card-name/trait typeahead prompts (regular prompt
-buttons cover the common cases), push notifications.
+Sealed/alliance formats, tournaments, lobby chat, spectator lists,
+card-name/trait typeahead prompts (regular prompt buttons cover the common
+cases), push notifications.
