@@ -232,3 +232,111 @@ describe('StatisticsService TTL cache', function () {
         expect(db.query.mock.calls.length).toBe(total);
     });
 });
+
+describe('StatisticsService.getDeckStats', function () {
+    const StatisticsService = require('../../../server/services/StatisticsService');
+
+    const serviceWith = (deckRows, bandRows, user = { Id: 7, Username: 'Player1' }) => {
+        const db = {
+            query: vi.fn(async (sql) => {
+                if (sql.includes('FROM "Users"')) {
+                    return user ? [user] : [];
+                }
+                if (sql.includes('GROUP BY d."Id"')) {
+                    return deckRows;
+                }
+                if (sql.includes('GROUP BY "band"')) {
+                    return bandRows;
+                }
+                return [];
+            })
+        };
+
+        return new StatisticsService(db, { ttlMs: 0 });
+    };
+
+    it('reports each deck record and its delta against its SAS band', async function () {
+        const service = serviceWith(
+            [
+                {
+                    Id: 1,
+                    Name: 'Overperformer',
+                    Identity: 'a',
+                    SasRating: 75,
+                    games: '10',
+                    wins: '8',
+                    lastPlayed: new Date()
+                },
+                {
+                    Id: 2,
+                    Name: 'Underperformer',
+                    Identity: 'b',
+                    SasRating: 75,
+                    games: '10',
+                    wins: '2',
+                    lastPlayed: new Date()
+                }
+            ],
+            // Decks in the 70-79 band win 50% of the time site-wide.
+            [{ band: '70-79', games: '100', wins: '50' }]
+        );
+
+        const stats = await service.getDeckStats('player1');
+
+        expect(stats.username).toBe('Player1');
+        expect(stats.decks[0]).toMatchObject({
+            name: 'Overperformer',
+            games: 10,
+            wins: 8,
+            losses: 2,
+            winRate: 80,
+            sasBand: '70-79',
+            expectedWinRate: 50,
+            sasDelta: 30
+        });
+        expect(stats.decks[1].sasDelta).toBe(-30);
+    });
+
+    // An unrated deck has no band, so there is nothing to compare it against —
+    // better to say so than to invent an expectation.
+    it('leaves the delta null for a deck with no SAS', async function () {
+        const service = serviceWith(
+            [
+                {
+                    Id: 3,
+                    Name: 'Unrated',
+                    Identity: 'c',
+                    SasRating: null,
+                    games: '4',
+                    wins: '2',
+                    lastPlayed: null
+                }
+            ],
+            []
+        );
+
+        const stats = await service.getDeckStats('player1');
+
+        expect(stats.decks[0].winRate).toBe(50);
+        expect(stats.decks[0].sasBand).toBeNull();
+        expect(stats.decks[0].expectedWinRate).toBeNull();
+        expect(stats.decks[0].sasDelta).toBeNull();
+    });
+
+    it('returns null for an unknown player', async function () {
+        expect(await serviceWith([], [], null).getDeckStats('nobody')).toBeNull();
+    });
+
+    it('returns null without querying when no username is given', async function () {
+        const service = serviceWith([], []);
+
+        expect(await service.getDeckStats('')).toBeNull();
+        expect(service.db.query).not.toHaveBeenCalled();
+    });
+
+    it('returns an empty list for a player who has never finished a game', async function () {
+        const stats = await serviceWith([], []).getDeckStats('player1');
+
+        expect(stats.decks).toEqual([]);
+    });
+});

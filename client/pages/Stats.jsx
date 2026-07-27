@@ -5,7 +5,7 @@ import { Button as HeroButton, Input } from '@heroui/react';
 
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
-import { useGetMetaStatsQuery, useGetPlayerStatsQuery } from '../redux/api';
+import { useGetDeckStatsQuery, useGetMetaStatsQuery, useGetPlayerStatsQuery } from '../redux/api';
 
 const pct = (value) => (value == null ? '—' : `${value.toFixed(1)}%`);
 
@@ -332,6 +332,99 @@ const PlayerStats = () => {
 PlayerStats.displayName = 'PlayerStats';
 
 /**
+ * ARCHON: how each of your decks actually performs, next to what its SAS
+ * predicted. SAS says how strong a deck is on paper; the delta says whether it
+ * wins for you — a deck well above its band is one you pilot well, and one well
+ * below it is worth reconsidering however high it scores.
+ */
+const DeckStats = () => {
+    const { t } = useTranslation();
+    const user = useSelector((state) => state.account.user);
+    const { data, isFetching } = useGetDeckStatsQuery(user?.username, { skip: !user });
+    const decks = data?.stats?.decks || [];
+
+    if (!user) {
+        return (
+            <Panel title={t('Your Decks')}>
+                <p className='text-sm text-muted'>{t('Log in to see how your decks perform.')}</p>
+            </Panel>
+        );
+    }
+
+    if (isFetching) {
+        return <div className='py-8 text-center text-muted'>{t('Loading…')}</div>;
+    }
+
+    if (decks.length === 0) {
+        return (
+            <Panel title={t('Your Decks')}>
+                <p className='text-sm text-muted'>
+                    {t('No finished games yet. Play a few and your decks will show up here.')}
+                </p>
+            </Panel>
+        );
+    }
+
+    return (
+        <Panel title={t('Your Decks')}>
+            <p className='mb-3 text-xs text-muted'>
+                {t(
+                    'Delta compares each deck to what decks of its SAS band actually win here. Positive means it beats its paper strength.'
+                )}
+            </p>
+            <div className='overflow-x-auto'>
+                <table className='w-full text-sm'>
+                    <thead>
+                        <tr className='text-left text-xs uppercase tracking-wide text-muted'>
+                            <th className='px-2 py-1'>{t('Deck')}</th>
+                            <th className='px-2 py-1 text-center'>{t('SAS')}</th>
+                            <th className='px-2 py-1 text-center'>{t('W-L')}</th>
+                            <th className='px-2 py-1 text-center'>{t('Win %')}</th>
+                            <th className='px-2 py-1 text-center'>{t('Delta')}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {decks.map((deck) => (
+                            <tr key={deck.deckId} className='border-b border-border/40'>
+                                <td className='max-w-0 truncate px-2 py-1.5 text-foreground'>
+                                    {deck.name}
+                                </td>
+                                <td className='px-2 py-1.5 text-center text-muted'>
+                                    {deck.sasRating ?? '-'}
+                                </td>
+                                <td className='px-2 py-1.5 text-center text-muted'>
+                                    {deck.wins}-{deck.losses}
+                                </td>
+                                <td className='px-2 py-1.5 text-center font-semibold text-foreground'>
+                                    {deck.winRate}%
+                                </td>
+                                <td
+                                    className={`px-2 py-1.5 text-center font-semibold ${
+                                        deck.sasDelta == null
+                                            ? 'text-muted'
+                                            : deck.sasDelta > 0
+                                            ? 'text-emerald-300'
+                                            : deck.sasDelta < 0
+                                            ? 'text-rose-300'
+                                            : 'text-muted'
+                                    }`}
+                                >
+                                    {deck.sasDelta == null
+                                        ? '-'
+                                        : `${deck.sasDelta > 0 ? '+' : ''}${deck.sasDelta}`}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </Panel>
+    );
+};
+
+DeckStats.displayName = 'DeckStats';
+
+/**
  * ARCHON: statistics & analytics. A public meta dashboard (house / SAS win
  * rates, format popularity, headline totals) plus per-player breakdowns,
  * replacing the old Stats placeholder.
@@ -357,9 +450,16 @@ const Stats = () => {
                 >
                     {t('Player Stats')}
                 </HeroButton>
+                <HeroButton
+                    size='sm'
+                    variant={tab === 'decks' ? 'primary' : 'tertiary'}
+                    onPress={() => setTab('decks')}
+                >
+                    {t('Your Decks')}
+                </HeroButton>
             </div>
 
-            {tab === 'meta' ? <MetaStats /> : <PlayerStats />}
+            {tab === 'meta' ? <MetaStats /> : tab === 'decks' ? <DeckStats /> : <PlayerStats />}
         </div>
     );
 };

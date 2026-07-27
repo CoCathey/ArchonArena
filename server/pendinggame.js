@@ -320,14 +320,27 @@ class PendingGame {
         _.each(playersInGame, (player) => {
             let deck;
 
+            // ARCHON: deck POWER (SAS) is not deck contents. Both players
+            // seeing it before they commit is the point - it is the same number
+            // the rating engine already handicaps with, and tournaments already
+            // gate entry on it. Suppressed when the game hides decklists, so the
+            // existing privacy control still governs.
+            const sasRating =
+                this.hideDeckLists && activePlayer !== player.name
+                    ? undefined
+                    : player.deck && player.deck.sasRating != null
+                    ? player.deck.sasRating
+                    : undefined;
+
             if (activePlayer === player.name && player.deck && this.gameFormat !== 'sealed') {
                 deck = {
                     name: player.deck.name,
                     selected: player.deck.selected,
-                    status: player.deck.status
+                    status: player.deck.status,
+                    sasRating
                 };
             } else if (player.deck) {
-                deck = { selected: player.deck.selected, status: player.deck.status };
+                deck = { selected: player.deck.selected, status: player.deck.status, sasRating };
             } else {
                 deck = {};
             }

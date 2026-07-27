@@ -298,6 +298,10 @@ export const api = createApi({
         getPlayerStats: builder.query({
             query: (username) => `/stats/player/${encodeURIComponent(username)}`
         }),
+        // ARCHON: per-deck record with SAS-vs-performance delta.
+        getDeckStats: builder.query({
+            query: (username) => `/stats/decks/${encodeURIComponent(username)}`
+        }),
         // ARCHON: public player profile header, clubs and recent games. Amber,
         // stats and trophies come from their own public endpoints above.
         getPlayerProfile: builder.query({
@@ -732,6 +736,7 @@ export const {
     useGetRatingsQuery,
     useGetMetaStatsQuery,
     useGetPlayerStatsQuery,
+    useGetDeckStatsQuery,
     useGetPlayerProfileQuery,
     useGetAdminSettingsQuery,
     useSaveAdminSettingsMutation,

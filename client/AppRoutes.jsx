@@ -39,6 +39,7 @@ import NotFound from './pages/NotFound';
 import Patreon from './pages/Patreon';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
+import Watch from './pages/Watch';
 import Profile from './pages/Profile';
 import Register from './pages/Register';
 import ResetPassword from './pages/ResetPassword';
@@ -161,15 +162,7 @@ const AppRoutes = ({ currentGame, user }) => {
                     />
                 }
             />
-            <Route
-                path='/watch'
-                element={
-                    <Placeholder
-                        title='Watch'
-                        description='Spectating live games, featured matches, and replays are coming with the replay system.'
-                    />
-                }
-            />
+            <Route path='/watch' element={<Watch />} />
             <Route path='/welcome' element={<Onboarding />} />
             <Route path='/community/friends' element={<Friends />} />
             <Route path='/community/clubs' element={<Clubs />} />

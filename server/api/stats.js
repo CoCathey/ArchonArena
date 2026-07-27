@@ -18,6 +18,21 @@ module.exports.init = function (server) {
         })
     );
 
+    // ARCHON: per-deck record, with each deck's win rate against what decks of
+    // its SAS band actually achieve site-wide.
+    server.get(
+        '/api/stats/decks/:username',
+        wrapAsync(async function (req, res) {
+            const stats = await statisticsService.getDeckStats(req.params.username);
+
+            if (!stats) {
+                return res.status(404).send({ success: false, message: 'No such player' });
+            }
+
+            res.send({ success: true, stats: stats });
+        })
+    );
+
     server.get(
         '/api/stats/player/:username',
         wrapAsync(async function (req, res) {

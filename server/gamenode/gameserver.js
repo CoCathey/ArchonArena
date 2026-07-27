@@ -298,6 +298,16 @@ class GameServer {
      * @param {import("../game/game")} game
      */
     sendGameState(game) {
+        // ARCHON: record the board for the replay viewer at the same moment the
+        // live clients are updated - the one point where the state is known to
+        // be settled. The call self-throttles to log advances and is wrapped so
+        // a recording failure can never interrupt a live game.
+        try {
+            game.recordBoardSnapshot();
+        } catch {
+            // Deliberately swallowed; the recording is best-effort.
+        }
+
         for (const player of Object.values(game.getPlayersAndSpectators())) {
             if (player.left || player.disconnectedAt || !player.socket) {
                 continue;

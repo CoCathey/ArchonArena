@@ -208,6 +208,105 @@ class StatisticsService {
     }
 
     /**
+     * ARCHON: how each of a player's decks has actually performed, and how that
+     * compares to what its SAS predicted.
+     *
+     * SAS says how strong a deck is on paper. This is the other half: whether it
+     * wins for *you*. The delta column is the interesting one - a deck well above
+     * its band's average win rate is one you pilot well, and a deck well below it
+     * is one to reconsider regardless of its score.
+     *
+     * Cached like every other answer here; never computed in the game path.
+     */
+    async getDeckStats(username) {
+        if (!username) {
+            return null;
+        }
+
+        return this.cached(`decks:${String(username).toLowerCase()}`, () =>
+            this.computeDeckStats(username)
+        );
+    }
+
+    async computeDeckStats(username) {
+        const userRows = await this.db.query(
+            'SELECT "Id", "Username" FROM "Users" WHERE lower("Username") = lower($1)',
+            [username]
+        );
+        const user = userRows && userRows[0];
+
+        if (!user) {
+            return null;
+        }
+
+        const [deckRows, bandRows] = await Promise.all([
+            this.db.query(
+                'SELECT d."Id", d."Name", d."Identity", ds."SasRating", ' +
+                    'COUNT(*) AS "games", ' +
+                    'COUNT(*) FILTER (WHERE gp."PlayerId" = g."WinnerId") AS "wins", ' +
+                    'MAX(g."FinishedAt") AS "lastPlayed" ' +
+                    'FROM "Games" g ' +
+                    'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" AND gp."PlayerId" = $1 ' +
+                    'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                    'GROUP BY d."Id", d."Name", d."Identity", ds."SasRating" ' +
+                    'ORDER BY COUNT(*) DESC',
+                [user.Id]
+            ),
+            // Site-wide win rate per SAS band, so "expected" is what decks of
+            // this power actually achieve here rather than a guess.
+            this.db.query(
+                'SELECT ' +
+                    sasBandCaseSql('ds."SasRating"') +
+                    ' AS "band", COUNT(*) AS "games", ' +
+                    'COUNT(*) FILTER (WHERE gp."PlayerId" = g."WinnerId") AS "wins" ' +
+                    'FROM "Games" g ' +
+                    'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                    'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                    'JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                    'AND ds."SasRating" IS NOT NULL GROUP BY "band"'
+            )
+        ]);
+
+        const bandWinRate = {};
+        for (const row of bandRows || []) {
+            bandWinRate[row.band] = winRate(row.wins, row.games);
+        }
+
+        return {
+            username: user.Username,
+            decks: (deckRows || []).map((row) => {
+                const games = Number(row.games) || 0;
+                const wins = Number(row.wins) || 0;
+                const rate = winRate(wins, games);
+                const band = sasBandLabel(row.SasRating);
+                const expected = band ? bandWinRate[band] : null;
+
+                return {
+                    deckId: row.Id,
+                    name: row.Name,
+                    identity: row.Identity,
+                    sasRating: row.SasRating,
+                    sasBand: band,
+                    games,
+                    wins,
+                    losses: Math.max(0, games - wins),
+                    winRate: rate,
+                    expectedWinRate: expected,
+                    // Positive: this deck beats what its power predicts.
+                    sasDelta:
+                        rate != null && expected != null
+                            ? Math.round((rate - expected) * 10) / 10
+                            : null,
+                    lastPlayed: row.lastPlayed
+                };
+            })
+        };
+    }
+
+    /**
      * Per-player breakdown by username (case-insensitive). Cached per player.
      * Returns null when the username does not exist.
      */

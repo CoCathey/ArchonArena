@@ -7,6 +7,7 @@ import moment from 'moment';
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
 import Messages from '../Components/GameBoard/Messages';
+import ReplayBoard from '../Components/GameBoard/ReplayBoard';
 import { useGetGameReplayQuery } from '../redux/api';
 
 const noop = () => {};
@@ -51,6 +52,14 @@ const Replay = () => {
 
     const clamp = (value) => Math.max(0, Math.min(total, value));
     const shown = messages.slice(0, step);
+    // The board as it stood at this point: the last snapshot recorded at or
+    // before the current log position. Older recordings (version 1) have no
+    // snapshots at all, and the viewer degrades to the log alone.
+    const snapshots = replay.snapshots || [];
+    const currentBoard = snapshots.reduce(
+        (best, snapshot) => (snapshot.messageIndex <= step ? snapshot : best),
+        snapshots[0]
+    )?.board;
     const players = replay.players || [];
     const finished = replay.finishedAt ? moment(replay.finishedAt).format('YYYY-MM-DD HH:mm') : '';
 
@@ -120,7 +129,7 @@ const Replay = () => {
                         {t('Step {{step}} / {{total}}', { step, total })}
                     </span>
                 </div>
-                <div className='max-h-[60vh] overflow-y-auto rounded-md border border-border/55 bg-surface-secondary/35 px-3 py-2 text-sm'>
+                <div className='max-h-[45vh] overflow-y-auto rounded-md border border-border/55 bg-surface-secondary/35 px-3 py-2 text-sm'>
                     {total === 0 ? (
                         <p className='text-muted'>{t('This replay has no recorded log.')}</p>
                     ) : (
@@ -128,6 +137,19 @@ const Replay = () => {
                     )}
                 </div>
             </Panel>
+
+            {snapshots.length > 0 && (
+                <Panel title={t('Board')}>
+                    {replay.truncated && (
+                        <p className='mb-2 text-xs text-amber-300'>
+                            {t(
+                                'This game ran long enough that board recording stopped part-way; later positions are not available.'
+                            )}
+                        </p>
+                    )}
+                    <ReplayBoard board={currentBoard} />
+                </Panel>
+            )}
         </div>
     );
 };

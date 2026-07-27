@@ -163,6 +163,18 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck }) => {
                                     <span className='block min-w-0 flex-1 truncate text-foreground/90'>
                                         {deckName}
                                     </span>
+                                    {/* ARCHON: deck power at the moment you
+                                        decide whether to play this match. Absent
+                                        when SAS is unknown or the game hides
+                                        decklists. */}
+                                    {player.deck?.sasRating != null && (
+                                        <span
+                                            className='shrink-0 whitespace-nowrap rounded bg-surface-secondary/70 px-1.5 py-0 text-xs font-bold leading-4 text-foreground'
+                                            title={t('Deck power (SAS) from Decks of KeyForge')}
+                                        >
+                                            {t('SAS')} {player.deck.sasRating}
+                                        </span>
+                                    )}
                                     {playerIsMe && !isSealed && (
                                         <Button
                                             className='shrink-0'

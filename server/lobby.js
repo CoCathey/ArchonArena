@@ -8,6 +8,7 @@ const PendingGame = require('./pendinggame');
 const GameRouter = require('./gamerouter');
 const ServiceFactory = require('./services/ServiceFactory');
 const DeckService = require('./services/DeckService');
+const DokService = require('./services/dok/DokService');
 const UserService = require('./services/UserService');
 const ConfigService = require('./services/ConfigService');
 // ARCHON: native tournaments create/report lobby games automatically
@@ -41,6 +42,9 @@ class Lobby {
         this.userService = options.userService || new UserService(options.configService);
         this.deckService =
             options.deckService || new DeckService(this.configService, this.cardService);
+        // ARCHON: SAS lookup for the pre-game screen. Cached reads only - the
+        // deck-selection path must never wait on an outbound DoK call.
+        this.dokService = options.dokService || new DokService(this.configService);
         this.router = options.router || new GameRouter(this.configService);
 
         this.router.on('onGameClosed', this.onGameClosed.bind(this));
@@ -1173,8 +1177,16 @@ class Lobby {
             }
 
             game.selectDeck(username, deck);
-
             this.sendGameState(game);
+
+            // ARCHON: attach SAS after the deck is already selected and the
+            // state sent, so a slow or missing DeckSas row can never delay
+            // someone picking their deck. When it resolves, the pre-game
+            // screen simply updates.
+            return this.dokService
+                .attachStats([deck])
+                .then(() => this.sendGameState(game))
+                .catch(() => {});
         });
     }
 

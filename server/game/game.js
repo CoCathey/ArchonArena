@@ -1749,12 +1749,94 @@ class Game extends EventEmitter {
     }
 
     /**
+     * ARCHON: a compact, spectator-safe picture of the board right now, for the
+     * replay viewer.
+     *
+     * Deliberately not `getState()`: that carries the whole chat log, prompt
+     * state and per-player settings, none of which a replay needs and all of
+     * which would be duplicated into every snapshot. This is only what is
+     * required to draw the board.
+     *
+     * Every card list is rendered from an AnonymousSpectator's perspective, so
+     * hidden information (hands, deck order) is redacted by the same code path
+     * that protects live spectators - a replay can never reveal more than
+     * watching the game would have.
+     */
+    getBoardSnapshot() {
+        const spectator = new AnonymousSpectator();
+
+        return {
+            round: this.round,
+            phase: this.currentPhase,
+            activePlayer: this.activePlayer ? this.activePlayer.name : undefined,
+            players: this.getPlayers().map((player) => ({
+                name: player.name,
+                activeHouse: player.activeHouse,
+                houses: player.houses,
+                stats: player.getStats(),
+                numDeckCards: player.deck.length,
+                numHandCards: player.hand.length,
+                cardPiles: {
+                    cardsInPlay: player.getSummaryForCardList(player.cardsInPlay, spectator),
+                    discard: player.getSummaryForCardList(player.discard, spectator),
+                    purged: player.getSummaryForCardList(player.purged, spectator),
+                    archives: player.getSummaryForCardList(player.archives, spectator)
+                }
+            }))
+        };
+    }
+
+    /**
+     * ARCHON: append a board snapshot to the in-memory recording, keyed to how
+     * far the message log had got, so the viewer can show the board as it stood
+     * at any point in the play-by-play.
+     *
+     * Only records when the log has actually advanced - the game state is
+     * broadcast far more often than anything visible changes - and stops at a
+     * hard cap, flagging that it did rather than silently truncating.
+     */
+    recordBoardSnapshot() {
+        if (!this.started || this.finishedAt) {
+            return;
+        }
+
+        if (!this.replaySnapshots) {
+            this.replaySnapshots = [];
+            this.replayTruncated = false;
+        }
+
+        const messageIndex = this.gameChat ? this.gameChat.messages.length : 0;
+        const last = this.replaySnapshots[this.replaySnapshots.length - 1];
+
+        if (last && last.messageIndex === messageIndex) {
+            return;
+        }
+
+        if (this.replaySnapshots.length >= Game.MAX_REPLAY_SNAPSHOTS) {
+            this.replayTruncated = true;
+
+            return;
+        }
+
+        try {
+            this.replaySnapshots.push({ messageIndex, board: this.getBoardSnapshot() });
+        } catch {
+            // A replay is never worth risking a live game over. The flag is
+            // returned with the recording and surfaced in the viewer, so a
+            // failed capture is visible rather than silently missing.
+            this.replayTruncated = true;
+        }
+    }
+
+    /**
      * ARCHON: a self-contained recording of the finished game for the replay
-     * viewer - the structured play-by-play log plus enough header to render it
-     * standalone. Captured at game end (read-only; no gameplay-engine coupling).
+     * viewer - the structured play-by-play log, the board as it stood at each
+     * step, plus enough header to render it standalone. Read-only; the capture
+     * itself never influences gameplay.
      */
     getReplay() {
         return {
+            version: 2,
             gameId: this.id,
             gameFormat: this.gameFormat,
             startedAt: this.startedAt,
@@ -1765,7 +1847,9 @@ class Game extends EventEmitter {
                 name: player.name,
                 deck: player.deckData ? player.deckData.identity : undefined
             })),
-            messages: this.gameChat ? this.gameChat.messages : []
+            messages: this.gameChat ? this.gameChat.messages : [],
+            snapshots: this.replaySnapshots || [],
+            truncated: !!this.replayTruncated
         };
     }
 
@@ -1879,5 +1963,10 @@ class Game extends EventEmitter {
         };
     }
 }
+
+// ARCHON: hard cap on recorded board snapshots. A KeyForge game produces a few
+// hundred log entries; this is generous for a normal game and bounds the stored
+// size of a pathological one. Hitting it sets `truncated` on the recording.
+Game.MAX_REPLAY_SNAPSHOTS = 600;
 
 module.exports = Game;

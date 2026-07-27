@@ -138,8 +138,12 @@ class UserService extends EventEmitter {
     async addUser(user) {
         let ret = await db.query(
             'INSERT INTO "Users" ' +
-                '("Username", "Password", "Email", "Registered", "RegisterIp", "Settings_Avatar", "Verified", "ActivationToken", "ActivationTokenExpiry") VALUES ' +
-                '($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING "Id"',
+                '("Username", "Password", "Email", "Registered", "RegisterIp", "Settings_Avatar", ' +
+                // ARCHON: TermsAcceptedAt records that this account agreed to
+                // the Terms of Service at sign-up. Stamped here rather than
+                // trusting a client-supplied flag.
+                '"Verified", "ActivationToken", "ActivationTokenExpiry", "TermsAcceptedAt") VALUES ' +
+                '($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING "Id"',
             [
                 user.username,
                 user.password,
@@ -149,7 +153,8 @@ class UserService extends EventEmitter {
                 user.avatar,
                 user.verified,
                 user.activationToken,
-                user.activationTokenExpiry
+                user.activationTokenExpiry,
+                user.termsAcceptedAt || user.registered
             ]
         );
 

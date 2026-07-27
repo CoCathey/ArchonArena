@@ -323,7 +323,10 @@ that inherit only the site name from config.
 -   [x] Branded HTML email template (`server/services/emailTemplate.js`) with a plain-text
         alternative; both activation and password reset now use it. No images, so nothing
         breaks under blocked remote content and no open-tracking signal leaks.
--   [ ] Record terms acceptance against the account (currently stated, not stored).
+-   [x] Terms acceptance recorded against the account (`Users.TermsAcceptedAt`, migration 40),
+        stamped server-side at account creation rather than trusting a client flag. Covers SSO
+        sign-ups too, since both paths go through `addUser`. Nullable, because accounts that
+        predate the terms have no acceptance and backfilling one would be a false claim.
 -   [ ] **Owner action:** AWS SES setup — verified sender identity and production access —
         before any of this mail can actually be delivered.
 
@@ -357,20 +360,34 @@ Ratings, tournament history, and replays are unrecoverable if the VPS is lost.
 _Goal: reasons to come back tomorrow. Sequenced after players exist, because each of these is
 tuned by what live usage shows._
 
-#### N1 — Full replays, share links, and the Watch hub
+#### N1 — Full replays, share links, and the Watch hub _(mostly done)_
 
 **Why:** replays currently capture the message log only, and `/watch` is a placeholder.
 Replays are also the substrate for coaching, AI analysis, and streaming tools later.
 **Tasks**
 
--   Capture board-state snapshots alongside the message stream at the message layer (never
-    inside gameplay resolution); version the recording format.
--   Replay viewer: board rendering, jump to key forges, turn scrubber, per-player perspective.
--   Retention budget and policy **(admin-config)**; the current 2 MB oversized-capture skip
-    becomes an explicit, surfaced policy.
--   Share links for replays and matches (public, no auth).
--   Watch hub: live games list, featured match, spectator counts, optional broadcast delay
-    **(admin-config)**; verify hidden-information redaction for spectators.
+-   [x] Board-state snapshots captured alongside the message stream, keyed to the log
+        position so the viewer can show the board at any point in the play-by-play. Recorded
+        at the state-broadcast layer, never inside gameplay resolution, wrapped so a recording
+        failure cannot interrupt a live game. Recording format versioned (`version: 2`).
+-   [x] Snapshots are compact and **spectator-safe by construction**: rendered through the
+        same `AnonymousSpectator` path that protects live spectators, so a replay can never
+        reveal more than watching would have. Asserted by test — neither hand's contents
+        appear anywhere in a snapshot.
+-   [x] Capture self-throttles to log advances (the state is broadcast far more often than
+        anything visible changes) and stops at a hard cap, setting a `truncated` flag that
+        the viewer surfaces rather than silently losing the tail.
+-   [x] Replay viewer renders the board beside the log: turn, active player, both players'
+        amber/keys/chains/houses, and every visible pile.
+-   [x] **Watch hub** (`/watch`): live, spectatable, non-private games, as a filtered view
+        over the same lobby state so spectating, passwords and permissions behave exactly as
+        they do in the lobby.
+-   [ ] Retention budget and policy **(admin-config)**; the 2 MB oversized-capture skip is
+        still implicit.
+-   [ ] Share links for replays and matches (public, no auth) — replays are still
+        authenticated.
+-   [ ] Featured match, spectator counts, and an optional broadcast delay **(admin-config)**.
+-   [ ] Jump-to-key-forge and per-player perspective in the viewer.
 
 **Depends on:** I2 (retention migration), I3 (profile links from replays).
 **Acceptance criteria**
@@ -397,7 +414,7 @@ things happened. Round pairings in particular are unusable without a ping.
 -   Every category can be turned off per player, and opt-out is honoured (tested).
 -   No notification path can block or slow a gameplay or tournament operation.
 
-#### N3 — Deck intelligence
+#### N3 — Deck intelligence _(mostly done)_
 
 **Why:** SAS is the platform's differentiator against a generic ladder, and it is currently
 under-displayed — the SAS the platform already stores appears on one screen.
@@ -409,8 +426,18 @@ under-displayed — the SAS the platform already stores appears on one screen.
 -   [x] AERC component breakdown on the deck view, from the DoK payload already stored in
         `DeckSas.RawData` and never read back until now. Components DoK did not supply are
         omitted rather than shown as zero, which would be a different claim.
--   [ ] SAS on lobby games and the pre-game screen.
--   [ ] Per-deck stats: W/L, SAS-vs-performance delta, best/worst matchups, "your best deck".
+-   [x] SAS on the pre-game screen, for both players. Deck _power_ is not deck contents — it
+        is the number the rating engine already handicaps with — but it is suppressed for the
+        opponent when the game hides decklists, so the existing privacy control still governs.
+        Attached after the deck is selected and the state sent, so a slow DeckSas read can
+        never delay someone picking a deck.
+-   [x] Per-deck stats (Stats > Your Decks): W-L, win rate, and the delta against what decks
+        of the same SAS band actually win site-wide — the column that says whether a deck
+        wins _for you_ rather than on paper. Unrated decks report a null delta rather than an
+        invented expectation.
+-   [ ] Lobby game list: decks are not chosen for open games, so there is nothing to show
+        there yet — deliberately skipped rather than rendering mostly-empty cells.
+-   [ ] Best/worst matchups and "your best deck" callouts.
 -   [ ] Periodic background SAS refresh sweep (today refresh is access-triggered only).
 
 **Depends on:** I2 (any stats migration).
@@ -998,8 +1025,9 @@ much stronger deck pays less.
         keeps the slim top bar so the board keeps full width.
 -   [x] Home page rebuilt as a landing hero (news → Community > News; lobby chat and
         promo banners removed; admin MOTD/banner notices retained).
--   [x] Placeholder pages routed for Learn, Watch, and Community subpages so navigation is
-        complete ahead of the features; Stats, Tournaments, and Play IRL have since shipped.
+-   [x] Placeholder pages routed for Learn and the Community subpages so navigation is
+        complete ahead of the features; Stats, Tournaments, Play IRL and Watch have since
+        shipped.
 -   [x] Design tokens: light/dark palettes, brand amber, typography, table/chat/nav tokens
         (`client/styles/tailwind.css`).
 -   [ ] UI audit of the client (component inventory, duplication, modernization order) → **N6**.
@@ -1054,10 +1082,12 @@ much stronger deck pays less.
         PostgreSQL.
 -   [x] Spectating from the lobby game list, with spectator lists and mute-spectators support
         inherited from the engine.
--   [ ] Board-state snapshots in the recording + a board replay viewer → **N1**.
+-   [x] **Board-state snapshots + board replay viewer** — the recording now carries the board
+        at each log position, rendered beside the play-by-play, and is spectator-safe by
+        construction (**N1**).
+-   [x] **Watch hub** (`/watch`): live spectatable games (**N1**).
 -   [ ] Storage-budgeted retention **(admin-config)** → **N1**.
--   [ ] Watch hub: live games, featured match, spectator counts, optional delay
-        **(admin-config)**, verified hidden-information redaction → **N1**.
+-   [ ] Featured match, spectator counts, optional broadcast delay → **N1**.
 -   [ ] Share links for replays/matches → **N1**.
 -   [ ] Match history filters by deck, opponent, format, result → **N1**.
 -   [ ] Two bots playing each other continuously, watchable by anyone — permanent content for the
