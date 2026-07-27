@@ -413,6 +413,11 @@ function MatchesSection(props: { username?: string }) {
             renderItem={({ item }) => {
                 const mine = item.players[0];
                 const theirs = item.players[1];
+                // players[].deck is the deck identity slug; the aligned decks[]
+                // rows carry the display name (null when the deck was deleted
+                // or is a standalone deck).
+                const myDeck = item.decks?.[0]?.name ?? mine?.deck;
+                const theirDeck = item.decks?.[1]?.name ?? theirs?.deck;
                 const won = !!item.winner && item.winner === props.username;
                 const myKeys = keyCount(mine?.keys);
                 const oppKeys = keyCount(theirs?.keys);
@@ -447,9 +452,9 @@ function MatchesSection(props: { username?: string }) {
                             <Text style={styles.matchOpponent} numberOfLines={1}>
                                 vs {theirs?.name ?? 'unknown'}
                             </Text>
-                            {mine?.deck || theirs?.deck ? (
+                            {myDeck || theirDeck ? (
                                 <Text style={styles.matchDecks} numberOfLines={2}>
-                                    {mine?.deck ?? 'unknown deck'} · {theirs?.deck ?? 'unknown deck'}
+                                    {myDeck ?? 'unknown deck'} · {theirDeck ?? 'unknown deck'}
                                 </Text>
                             ) : null}
                             <Text style={styles.matchMeta}>
