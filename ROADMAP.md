@@ -178,12 +178,14 @@ not new systems, and it makes the whole site feel connected.
         member directory and leaderboards.
 -   [x] Usernames link through from Leaderboards, Top Players (podium and table), the member
         directory, and opponent names in recent games.
--   [ ] Remaining link sites: lobby game list, pending game, tournament players / standings /
-        "Your Match", game history, club member lists.
+-   [x] Remaining link sites done: lobby game list, pending game, tournament players /
+        standings / "Your Match", game history, club member lists. Every username outside the
+        game board now links to its profile.
 -   [ ] Optional short bio, editable from the account page.
 
 **Acceptance criteria**
 
+-   [x] Every username rendered outside the game board navigates to that player's profile.
 -   [x] Verified in a real browser: the page renders every panel for a player with games, and a
         brand-new player with no games or clubs still gets a working page.
 -   [x] No private field appears in the payload, asserted by a test.
@@ -744,9 +746,9 @@ in a `→` note points to where an unfinished item is scheduled.
 -   [x] CI pipeline (GitHub Actions): `.github/workflows/ci.yml` runs typecheck, lint, build
         and the full test suite on every push and PR; CodeQL runs weekly. TCO deploy jobs pruned.
 -   [x] Dockerfile + docker-compose for one-command local stack (PostgreSQL + Redis).
--   [ ] Document dev environment setup in `docs/DEVELOPMENT.md` (upstream
-        `docs/local-development.md` plus `AGENTS.md` cover most of it; needs an Archon Arena pass
-        that includes the platform services, migrations, and seeding).
+-   [x] Document dev environment setup in `docs/DEVELOPMENT.md` — the Archon Arena pass over
+        the platform layer (services, schema vs migrations, settings, seeding, verification),
+        with `local-development.md` still covering the engine/stack basics.
 
 **Why first:** nothing else can be verified stable without a reproducible build/test baseline.
 
@@ -1180,30 +1182,25 @@ competitive advantage.
 
 Small, real, and worth clearing while touching the surrounding code. None is urgent on its own.
 
--   [ ] **Duplicate schema ordinals**: `server/db/schema/` contains `40 - Seasons.sql` and
-        `40 - TournamentMatchGames.sql`, plus `41 - GameReplays.sql` and
-        `41 - TournamentPlayerDecks.sql`. Ordering is still deterministic (alphabetical) and
-        the files are independent, but the numbering no longer means anything. Fix with **I2**.
--   [ ] **Dead legacy router**: `client/routes.jsx` (re-exported by `client/routes.js`) is
-        unreferenced — `client/AppRoutes.jsx` is the live router. The dead file lists a stale,
-        much smaller route set and misleads anyone reading it. Delete both.
--   [ ] **Dead MongoDB code**: `server/stats.js` and `server/scripts/addsealed.js` are
-        standalone scripts still importing `monk`; neither is loaded by the application
-        (`server/api/index.js` requires `./stats`, which is `server/api/stats.js`). Port or
-        delete them, then drop the `monk` dependency.
--   [ ] **Third-party font loading**: `client/styles/tailwind.css` pulls Noto Sans and Orbitron
-        from `fonts.googleapis.com`, while the privacy page states the site uses no third-party
-        trackers. Self-host both (there is already a `client/assets/fonts/` directory).
+-   [x] **Duplicate schema ordinals** — renumbered to 40-44, preserving the exact
+        alphabetical execution order the initdb mount depends on.
+-   [x] **Dead legacy router** — `client/routes.jsx` and `client/routes.js` deleted;
+        `client/AppRoutes.jsx` was and is the live router.
+-   [x] **Dead MongoDB code** — `server/stats.js` and `server/scripts/addsealed.js` deleted
+        (both superseded: `StatisticsService` and `importstandalonedecks.js`), and the `monk`
+        dependency plus the `mongod` npm script removed. No MongoDB remains anywhere.
+-   [x] **Third-party font loading** — Noto Sans and Orbitron self-hosted in
+        `client/assets/fonts/` (~210 KB: Noto Sans is a variable font, so one file per subset
+        covers 400/500/600). OFL licences bundled. Two origins dropped from the CSP.
 -   [ ] **`helmet` pinned at v3**, several majors behind. Now mounted with a CSP (**I0**);
         the major-version upgrade stays with **I5**.
 -   [ ] **Silent replay drop**: `GameService.saveReplay` skips captures over 2 MB with only a
         log line. Fold into the retention policy in **N1** so the behaviour is explicit and
         visible.
--   [ ] **"Rematch: Swap Decks" reads as the wrong thing**
-        (`server/game/gamesteps/GameWonPrompt.js`): it sounds like "pick different decks", but it
-        means "trade decks with your opponent — you play theirs, they play yours". The option
-        that picks new decks is the one below it, "Rematch: Change Decks". Reword both so the
-        difference is obvious (e.g. "Rematch: Trade Decks" / "Rematch: Pick New Decks"), add the
-        new locale keys, and update `test/server/prompts/GameWonPrompt.spec.js`, which asserts
-        the current button text.
--   [ ] **`docs/DEVELOPMENT.md` missing** — Phase 0's last open item.
+-   [x] **"Rematch: Swap Decks" read as the wrong thing** — now "Rematch: Trade Decks" and
+        "Rematch: Pick New Decks", so the difference is stated rather than implied.
+        `GameWonPrompt.spec.js` updated; no locale entries existed for these labels.
+-   [x] **`docs/DEVELOPMENT.md`** — the Archon Arena developer guide: prime directive,
+        layout, the schema-vs-migrations split, service and settings conventions, the
+        verification loop, and which features need third-party provisioning. Complements
+        `local-development.md` rather than repeating it.

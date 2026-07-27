@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from '../Components/Navigation/Link';
 import { useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton, toast } from '@heroui/react';
@@ -140,7 +141,12 @@ const ClubDetail = () => {
                             key={member.userId}
                             className='flex items-center gap-2 rounded bg-surface-secondary/50 px-2 py-1.5 text-sm'
                         >
-                            <span className='font-semibold text-foreground'>{member.username}</span>
+                            <Link
+                                href={`/players/${encodeURIComponent(member.username)}`}
+                                className='font-semibold text-foreground hover:text-amber-300 hover:underline'
+                            >
+                                {member.username}
+                            </Link>
                             {member.role === 'owner' && (
                                 <span className='rounded bg-accent/20 px-1.5 text-xs text-amber-300'>
                                     {t('Owner')}

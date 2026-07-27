@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from '../Navigation/Link';
 import { useTranslation, Trans } from 'react-i18next';
 import { Button } from '@heroui/react';
 
@@ -136,7 +137,12 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck }) => {
                         >
                             <div className='flex min-w-0 items-center gap-2'>
                                 <Avatar imgPath={player.avatar} />
-                                <span className={userClass}>{player.name}</span>
+                                <Link
+                                    href={`/players/${encodeURIComponent(player.name)}`}
+                                    className={`${userClass} hover:underline`}
+                                >
+                                    {player.name}
+                                </Link>
                                 <PlayerAmber
                                     username={player.name}
                                     format={currentGame.gameFormat}

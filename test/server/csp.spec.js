@@ -27,14 +27,20 @@ describe('Content-Security-Policy', function () {
         });
 
         // Verified against the real built client in a browser: without these the
-        // stylesheet, the inline styles React emits, and data: images are all
-        // blocked and the page renders unstyled.
+        // inline styles React emits and data: images are blocked and the page
+        // renders unstyled.
         it('allows what the client actually loads', function () {
-            expect(prod.styleSrc).toContain('https://fonts.googleapis.com');
             expect(prod.styleSrc).toContain("'unsafe-inline'");
-            expect(prod.fontSrc).toContain('https://fonts.gstatic.com');
             expect(prod.imgSrc).toContain('data:');
             expect(prod.imgSrc).toContain('blob:');
+        });
+
+        // Fonts are self-hosted, so the policy must not need a third-party font
+        // origin - that was the point of bundling them.
+        it('needs no third-party font or stylesheet origin', function () {
+            expect(prod.fontSrc).toEqual(["'self'", 'data:']);
+            expect(prod.styleSrc).not.toContain('https://fonts.googleapis.com');
+            expect(prod.styleSrc.join(' ')).not.toContain('gstatic');
         });
 
         it('allows hCaptcha to load, connect and frame', function () {

@@ -67,9 +67,10 @@ function buildDirectives({ isDeveloping = false, sentryDsn } = {}) {
         // Stops an injected form from posting credentials off-site.
         formAction: ["'self'"],
         scriptSrc: ["'self'", ...devScript, ...HCAPTCHA],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', ...HCAPTCHA],
-        // Google Fonts serves the files from gstatic; data: covers inlined faces.
-        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+        styleSrc: ["'self'", "'unsafe-inline'", ...HCAPTCHA],
+        // Fonts are self-hosted (client/assets/fonts), so no third-party font
+        // origin is needed; data: covers any inlined face.
+        fontSrc: ["'self'", 'data:'],
         // Card art, avatars and backgrounds are all same-origin; data:/blob:
         // cover generated and canvas-produced images.
         imgSrc: ["'self'", 'data:', 'blob:'],

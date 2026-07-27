@@ -18,8 +18,8 @@ describe('GameWonPrompt', function () {
         const buttons = this.player1.currentButtons;
         expect(buttons).toContain('Continue Playing');
         expect(buttons).toContain('Rematch: Same Decks');
-        expect(buttons).toContain('Rematch: Swap Decks');
-        expect(buttons).toContain('Rematch: Change Decks');
+        expect(buttons).toContain('Rematch: Trade Decks');
+        expect(buttons).toContain('Rematch: Pick New Decks');
     });
 
     it('hides the swap-decks button in adaptive-bo1', function () {
@@ -28,8 +28,8 @@ describe('GameWonPrompt', function () {
         this.game.continue();
         const buttons = this.player1.currentButtons;
         expect(buttons).toContain('Rematch: Same Decks');
-        expect(buttons).not.toContain('Rematch: Swap Decks');
-        expect(buttons).toContain('Rematch: Change Decks');
+        expect(buttons).not.toContain('Rematch: Trade Decks');
+        expect(buttons).toContain('Rematch: Pick New Decks');
     });
 
     describe('rematch (same decks)', function () {
@@ -76,7 +76,7 @@ describe('GameWonPrompt', function () {
     describe('rematch (swap decks)', function () {
         it('toggles the swap flag when accepted', function () {
             this.game.swap = false;
-            this.player1.clickPrompt('Rematch: Swap Decks');
+            this.player1.clickPrompt('Rematch: Trade Decks');
             this.player2.clickPrompt('Yes');
             expect(this.game.router.rematch).toHaveBeenCalledWith(this.game);
             expect(this.game.swap).toBe(true);
@@ -84,7 +84,7 @@ describe('GameWonPrompt', function () {
 
         it('toggles the swap flag back when invoked twice in a row', function () {
             this.game.swap = true;
-            this.player1.clickPrompt('Rematch: Swap Decks');
+            this.player1.clickPrompt('Rematch: Trade Decks');
             this.player2.clickPrompt('Yes');
             expect(this.game.swap).toBe(false);
         });
@@ -93,7 +93,7 @@ describe('GameWonPrompt', function () {
     describe('rematch (change decks)', function () {
         it('routes to rematchWithNewDecks and clears swap', function () {
             this.game.swap = true;
-            this.player1.clickPrompt('Rematch: Change Decks');
+            this.player1.clickPrompt('Rematch: Pick New Decks');
             this.player2.clickPrompt('Yes');
             expect(this.game.router.rematchWithNewDecks).toHaveBeenCalledWith(this.game);
             expect(this.game.router.rematch).not.toHaveBeenCalled();

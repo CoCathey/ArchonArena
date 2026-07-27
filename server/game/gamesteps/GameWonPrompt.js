@@ -48,13 +48,13 @@ class GameWonPrompt extends AllPlayerPrompt {
         if (!isAdaptive) {
             buttons.push({
                 arg: 'rematch-swap-decks',
-                text: 'Rematch: Swap Decks',
+                text: 'Rematch: Trade Decks',
                 disabled: opponentLeft
             });
         }
         buttons.push({
             arg: 'rematch-change-decks',
-            text: 'Rematch: Change Decks',
+            text: 'Rematch: Pick New Decks',
             disabled: opponentLeft
         });
 

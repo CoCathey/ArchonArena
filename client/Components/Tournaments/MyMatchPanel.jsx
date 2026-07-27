@@ -5,6 +5,7 @@ import { Button as HeroButton } from '@heroui/react';
 
 import Panel from '../Site/Panel';
 import AmberValue from '../Site/AmberValue';
+import Link from '../Navigation/Link';
 
 /**
  * ARCHON: the signed-in player's view of their current-round pairing -
@@ -87,9 +88,16 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
             <div className='flex flex-wrap items-center gap-x-4 gap-y-2 text-sm'>
                 <div>
                     <span className='text-muted'>{t('Opponent')}: </span>
-                    <span className='font-semibold text-foreground'>
-                        {opponent?.username || t('Unknown')}
-                    </span>
+                    {opponent?.username ? (
+                        <Link
+                            href={`/players/${encodeURIComponent(opponent.username)}`}
+                            className='font-semibold text-foreground hover:text-amber-300 hover:underline'
+                        >
+                            {opponent.username}
+                        </Link>
+                    ) : (
+                        <span className='font-semibold text-foreground'>{t('Unknown')}</span>
+                    )}
                     {opponent?.amber != null && (
                         <AmberValue
                             value={opponent.amber}

@@ -1,7 +1,51 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap');
 @import 'tailwindcss';
 @import '@heroui/styles';
+
+/*
+ * ARCHON: Noto Sans and Orbitron are self-hosted rather than pulled from
+ * fonts.googleapis.com. The privacy policy states the site uses no third-party
+ * trackers, and a webfont request hands the visitor's IP and User-Agent to
+ * another company on every page load - a contradiction worth removing. It also
+ * drops two origins from the Content-Security-Policy and removes a third party
+ * from the critical render path.
+ *
+ * Noto Sans is a variable font, so one file per subset covers 400/500/600 (the
+ * weight range below) - Google serves the identical file for all three. Only the
+ * latin and latin-ext subsets are shipped, which is what the UI's own text
+ * needs; other scripts fall back to system fonts exactly as they already did,
+ * since Noto Sans carries no CJK glyphs. Both faces are SIL Open Font License
+ * (see client/assets/fonts/OFL.txt).
+ */
+@font-face {
+    font-family: 'Noto Sans';
+    src: url('assets/fonts/noto-sans-latin.woff2') format('woff2');
+    font-weight: 400 600;
+    font-style: normal;
+    font-stretch: 100%;
+    font-display: swap;
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+        U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: 'Noto Sans';
+    src: url('assets/fonts/noto-sans-latin-ext.woff2') format('woff2');
+    font-weight: 400 600;
+    font-style: normal;
+    font-stretch: 100%;
+    font-display: swap;
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+        U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+        U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+    font-family: 'Orbitron';
+    src: url('assets/fonts/orbitron-latin.woff2') format('woff2');
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+        U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 @layer base {
     :root {

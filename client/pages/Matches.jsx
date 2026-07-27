@@ -83,7 +83,14 @@ const Matches = () => {
               return (
                   <tr key={game.gameId}>
                       <td>{game.decks[0].name}</td>
-                      <td className='whitespace-nowrap'>{game.players[1].name}</td>
+                      <td className='whitespace-nowrap'>
+                          <Link
+                              href={`/players/${encodeURIComponent(game.players[1].name)}`}
+                              className='hover:text-amber-300 hover:underline'
+                          >
+                              {game.players[1].name}
+                          </Link>
+                      </td>
                       <td>{game.decks[1].name}</td>
                       <td>{computeWinner(game)}</td>
                       <td className='whitespace-nowrap'>{t(game.winReason)}</td>

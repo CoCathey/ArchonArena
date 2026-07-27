@@ -275,7 +275,14 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
                                                     >
                                                         <Avatar imgPath={player.avatar} />
                                                         <span className={userClass}>
-                                                            {player.name}
+                                                            <Link
+                                                                href={`/players/${encodeURIComponent(
+                                                                    player.name
+                                                                )}`}
+                                                                className='hover:text-amber-300 hover:underline'
+                                                            >
+                                                                {player.name}
+                                                            </Link>
                                                         </span>
                                                         <PlayerAmber
                                                             username={player.name}
