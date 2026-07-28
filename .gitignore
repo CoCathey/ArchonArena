@@ -20,6 +20,14 @@ coverage
 # *.json rule above would otherwise exclude them.
 !package.json
 !package-lock.json
+# ARCHON: the Expo app's config must reach the EAS build machine. Both files are
+# tracked, but EAS builds its upload archive by applying these ignore patterns
+# (not git's index), so the *.json rule above silently dropped them: prebuild
+# then fell back to package.json's name and generated an Xcode target called
+# "archonarenamobile" instead of "ArchonArena", failing every iOS build at the
+# "Configure Xcode project" step.
+!mobile/app.json
+!mobile/eas.json
 server/events.txt
 .DS_Store
 config/local*
