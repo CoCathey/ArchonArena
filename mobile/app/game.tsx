@@ -27,6 +27,7 @@ import CardTile from '../src/game/CardTile';
 import PlayerHud from '../src/game/PlayerHud';
 import PromptPanel from '../src/game/PromptPanel';
 import LogSheet from '../src/game/LogSheet';
+import { DragDropProvider, DropZone, type DropZoneName } from '../src/game/DragDrop';
 import { CardMenuModal, CardZoomModal, PileModal } from '../src/game/GameModals';
 import { Button } from '../src/ui/primitives';
 import type { CardMenuItem, CardSummary, PlayerState, PromptButton } from '../src/game/types';
@@ -40,6 +41,8 @@ function CardRow(props: {
     onPress: (card: CardSummary) => void;
     onLongPress: (card: CardSummary) => void;
     emptyLabel?: string;
+    dragSource?: DropZoneName;
+    scrollEnabled?: boolean;
 }) {
     if (props.cards.length === 0) {
         return (
@@ -56,6 +59,7 @@ function CardRow(props: {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.cardRow}
             style={{ minHeight: props.minHeight, flexGrow: 0 }}
+            scrollEnabled={props.scrollEnabled !== false}
         >
             {props.cards.map((card) => (
                 <CardTile
@@ -64,6 +68,7 @@ function CardRow(props: {
                     width={props.width}
                     onPress={props.onPress}
                     onLongPress={props.onLongPress}
+                    dragSource={props.dragSource}
                 />
             ))}
         </ScrollView>
@@ -88,6 +93,8 @@ export default function GameScreen() {
     const [pileView, setPileView] = useState<
         { player: 'me' | 'opponent'; pile: PileName } | undefined
     >();
+    // While a card is being dragged, the scroll views release the gesture.
+    const [dragActive, setDragActive] = useState(false);
     const leftGame = useRef(false);
 
     const players = useMemo(
@@ -224,6 +231,11 @@ export default function GameScreen() {
         setZoomCard(card);
     };
 
+    const onDrop = (card: CardSummary, source: DropZoneName, target: DropZoneName) => {
+        tapFeedback();
+        sendGameMessage('drop', card.uuid, source, target);
+    };
+
     if (!rootState || !perspective) {
         const failed = status === 'failed';
         return (
@@ -290,6 +302,12 @@ export default function GameScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+            <DragDropProvider
+                enabled={!isSpectator}
+                manualMode={!!rootState.manualMode}
+                onDrop={onDrop}
+                onDragActiveChange={setDragActive}
+            >
             {/* Header */}
             <View style={styles.header}>
                 <View style={{ flex: 1 }}>
@@ -333,7 +351,11 @@ export default function GameScreen() {
             ) : null}
 
             {/* Board */}
-            <ScrollView style={styles.board} contentContainerStyle={{ paddingVertical: 4 }}>
+            <ScrollView
+                style={styles.board}
+                contentContainerStyle={{ paddingVertical: 4 }}
+                scrollEnabled={!dragActive}
+            >
                 <CardRow
                     cards={oppArea.artifacts}
                     width={smallCard}
@@ -352,26 +374,42 @@ export default function GameScreen() {
 
                 <View style={{ height: 8 }} />
 
-                <CardRow
-                    cards={myArea.creatures}
-                    width={smallCard}
-                    minHeight={smallCard * 1.4 + 8}
-                    onPress={onPlayAreaCardPress}
-                    onLongPress={setZoomCard}
-                    emptyLabel={isSpectator ? undefined : 'Your battleline is empty'}
-                />
-                <CardRow
-                    cards={myArea.artifacts}
-                    width={smallCard}
-                    minHeight={myArea.artifacts.length ? smallCard * 1.4 + 8 : 20}
-                    onPress={onPlayAreaCardPress}
-                    onLongPress={setZoomCard}
-                />
+                {/* My side of the board accepts card drops (playing from hand,
+                    manual-mode moves). */}
+                <DropZone name='play area'>
+                    <CardRow
+                        cards={myArea.creatures}
+                        width={smallCard}
+                        minHeight={smallCard * 1.4 + 8}
+                        onPress={onPlayAreaCardPress}
+                        onLongPress={setZoomCard}
+                        emptyLabel={isSpectator ? undefined : 'Your battleline is empty'}
+                        dragSource={isSpectator ? undefined : 'play area'}
+                        scrollEnabled={!dragActive}
+                    />
+                    <CardRow
+                        cards={myArea.artifacts}
+                        width={smallCard}
+                        minHeight={myArea.artifacts.length ? smallCard * 1.4 + 8 : 20}
+                        onPress={onPlayAreaCardPress}
+                        onLongPress={setZoomCard}
+                        dragSource={isSpectator ? undefined : 'play area'}
+                        scrollEnabled={!dragActive}
+                    />
+                </DropZone>
             </ScrollView>
 
             {/* Prompt — pinned just above the player so the required action is
                 always visible, never scrolled off with the board. */}
-            {!isSpectator ? <PromptPanel me={me} onButton={onPromptButton} /> : null}
+            {!isSpectator ? (
+                <PromptPanel
+                    me={me}
+                    onButton={onPromptButton}
+                    messages={rootState.messages ?? []}
+                    onOpenLog={() => setLogOpen(true)}
+                    onCardPress={setZoomCard}
+                />
+            ) : null}
 
             {/* Me */}
             <PlayerHud
@@ -382,30 +420,34 @@ export default function GameScreen() {
             />
 
             {/* Hand */}
-            {(perspective.cardPiles?.hand?.length ?? 0) > 0 ? (
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={styles.handStrip}
-                    contentContainerStyle={styles.handContent}
-                >
-                    {perspective.cardPiles.hand.map((card) => (
-                        <CardTile
-                            key={card.uuid}
-                            card={card}
-                            width={handCard}
-                            onPress={onHandCardPress}
-                            onLongPress={setZoomCard}
-                        />
-                    ))}
-                </ScrollView>
-            ) : (
-                <View style={[styles.handStrip, styles.handStripEmpty]}>
-                    <Text style={styles.emptyRowText}>
-                        {isSpectator ? 'Spectator view' : 'No cards in hand'}
-                    </Text>
-                </View>
-            )}
+            <DropZone name='hand'>
+                {(perspective.cardPiles?.hand?.length ?? 0) > 0 ? (
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.handStrip}
+                        contentContainerStyle={styles.handContent}
+                        scrollEnabled={!dragActive}
+                    >
+                        {perspective.cardPiles.hand.map((card) => (
+                            <CardTile
+                                key={card.uuid}
+                                card={card}
+                                width={handCard}
+                                onPress={onHandCardPress}
+                                onLongPress={setZoomCard}
+                                dragSource={isSpectator ? undefined : 'hand'}
+                            />
+                        ))}
+                    </ScrollView>
+                ) : (
+                    <View style={[styles.handStrip, styles.handStripEmpty]}>
+                        <Text style={styles.emptyRowText}>
+                            {isSpectator ? 'Spectator view' : 'No cards in hand'}
+                        </Text>
+                    </View>
+                )}
+            </DropZone>
 
             {/* Modals */}
             <CardZoomModal card={zoomCard} onClose={() => setZoomCard(undefined)} />
@@ -446,6 +488,7 @@ export default function GameScreen() {
                 onSend={(text) => sendGameMessage('chat', text)}
                 onCardPress={onLogCardPress}
             />
+            </DragDropProvider>
         </SafeAreaView>
     );
 }

@@ -1,5 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
+import {
+    ActivityIndicator,
+    FlatList,
+    Pressable,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    View
+} from 'react-native';
 import type { Deck } from '../../src/api/types';
 import { fetchDecks, importDeck, parseDeckUuid } from '../../src/api/client';
 import { colors, spacing } from '../../src/theme';
@@ -113,7 +122,14 @@ export default function DecksScreen() {
             <FlatList
                 data={decks}
                 keyExtractor={(deck) => String(deck.id)}
-                renderItem={({ item }) => <DeckRow deck={item} />}
+                renderItem={({ item }) => (
+                    <Pressable
+                        onPress={() => router.push(`/deck/${item.id}`)}
+                        style={({ pressed }) => pressed && { opacity: 0.7 }}
+                    >
+                        <DeckRow deck={item} />
+                    </Pressable>
+                )}
                 contentContainerStyle={{ padding: spacing.md, paddingBottom: 48 }}
                 refreshControl={
                     <RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.textDim} />

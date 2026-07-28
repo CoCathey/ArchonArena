@@ -106,6 +106,10 @@ export default function RootLayout() {
                     options={{ title: 'Game lobby', headerBackTitle: 'Back' }}
                 />
                 <Stack.Screen
+                    name='deck/[id]'
+                    options={{ title: 'Deck', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
                     name='game'
                     options={{ headerShown: false, gestureEnabled: false }}
                 />
