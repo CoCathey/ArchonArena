@@ -57,6 +57,13 @@ Please include reproduction steps and the affected endpoint or page.
     `X-Real-IP` / `X-Forwarded-For` headers, which the caller controls. Trusting one hop is
     only sound because `docker-compose.prod.yml` publishes ports on the `caddy` service
     alone; if a future deployment ever exposes the lobby directly, this must be revisited.
+-   **Both limiters are Redis-backed and shared across lobby processes**
+    (`server/api/rateLimitStore.js`). They were per-process, which quietly divided every
+    limit by the number of lobbies — "10 login failures" meant 10 _per lobby_. Each
+    decision is a single Lua script so check-and-record is atomic; a read followed by a
+    separate write would let concurrent requests slip past exactly when the limit matters.
+    If Redis is unreachable the store falls back to per-process limits, so an outage
+    degrades enforcement instead of removing it and cannot take login down with it.
 
 ### Authorization
 
@@ -100,10 +107,14 @@ Please include reproduction steps and the affected endpoint or page.
 Run `npm audit --omit=dev` — the production tree is what matters; dev tooling is not
 shipped.
 
-**Status at last review:** 16 advisories in the production tree (1 critical, 10 high,
-5 moderate), _all_ of which trace to exactly two roots: `fabric` and `patreon`. Everything
+**Status at last review:** 13 advisories in the production tree (1 critical, 7 high,
+5 moderate). Every critical and high now traces to a **single** root: `fabric`. Everything
 non-breaking has been applied, and the lint toolchain was moved to `devDependencies` so it
 no longer appears in the production graph at all.
+
+The `patreon` package was the other root and is **gone** — `PatreonService` now uses direct
+`fetch`, which removed its `node-fetch` / `isomorphic-fetch` chain and three high
+advisories with it.
 
 Notably fixed: **`ws` memory-exhaustion DoS** (GHSA-96hv-2xvq-fx4p), which sat directly in
 the gameplay socket path (`socket.io` → `engine.io` → `ws`) and was the one advisory with
@@ -114,10 +125,26 @@ a clear path to a live game server.
 **`fabric@5` — and its `canvas@2` / `@mapbox/node-pre-gyp` / `tar` chain**
 
 -   _Why not fixed:_ fabric 7 is a rewrite (ESM-only, no `fabric.` namespace, promise-based
-    async, changed filter API) and fabric is used across ~1,000 lines — the archon-maker
-    deck image generator, card rendering on the game board, card backs, identity cards and
-    the `fetchdata` image pipeline. Migrating it is its own project with real gameplay-UI
-    risk, tracked on the roadmap rather than bundled into a dependency sweep.
+    async, changed filter API) and fabric is used across ~1,600 lines in 7 files —
+    the archon-maker deck image generator, card rendering on the game board, card backs,
+    identity cards and the `fetchdata` image pipeline. Measured surface: **98 call sites
+    across 10 distinct APIs** (`Image`, `Shadow`, `Text`, `Textbox`, `StaticCanvas`,
+    `Line`, `util.loadImage`, `util.createCanvasElement`, `Image.fromURL`,
+    `Image.filters.Resize`).
+
+    The migration itself is mechanical; the risk is **silent visual regression**. Text
+    metrics and shadow rendering changed between fabric 5 and 6, and the archon maker
+    generates the deck images players actually look at — a shifted baseline would ship
+    subtly wrong deck lists with nothing failing. Doing it safely needs a before/after
+    image-diff harness driving `buildDeckList` / `buildCard` / `buildCardBack`, which does
+    not exist yet. That is why it stays its own project rather than riding along in a
+    dependency sweep.
+
+-   _What v7 would buy:_ fabric 7 declares **no hard dependencies** at all (`canvas` and
+    `jsdom` move to `optionalDependencies`, and `canvas@3` no longer uses
+    `@mapbox/node-pre-gyp`), so the entire `canvas` → `node-pre-gyp` → `tar` chain — and
+    with it the only critical in the tree — disappears. It also keeps a CommonJS entry
+    (`fabric/node`), so the server-side callers do not need to become ESM.
 -   _Why the exposure is low:_
     -   The fabric advisory is **stored XSS via SVG export**. The codebase has no SVG path
         at all — no `toSVG`, `loadSVGFromString` or `loadSVGFromURL` anywhere — and the
@@ -127,38 +154,45 @@ a clear path to a live game server.
         `@mapbox/node-pre-gyp`, which extracts prebuilt binaries **at install time** from a
         trusted source. It is not reachable from user input at runtime.
 
-**`patreon@0.4.1` — and its `node-fetch` / `isomorphic-fetch` chain**
+### Resolved since the last review
 
--   _Why not fixed:_ the package is unmaintained; npm's suggested "fix" is a downgrade to
-    `0.4.1`'s ancestor, which resolves nothing.
--   _Why the exposure is low:_ the Patreon integration is **dormant** — no campaign, no
-    credentials, and `PatreonService` is only reached when a user explicitly links an
-    account. The advisory (node-fetch forwarding secure headers across a cross-host
-    redirect) requires an active Patreon flow to matter.
--   _Planned:_ replacing the package with direct `fetch` calls is part of the Patreon
-    supporter-program work (roadmap N12).
+**`patreon@0.4.1`** — removed. `PatreonService` was three HTTP calls wrapped in an
+unmaintained package; it now uses `fetch` directly against Patreon's v2 API (the package
+spoke the long-deprecated v1). Three high advisories went with it. The integration is still
+dormant — no campaign, no credentials — so N12 still owns verifying it against a live
+campaign, but the dependency is no longer in the tree.
 
 ---
 
 ## Checklist for the next review
 
--   [ ] `npm audit --omit=dev`; re-triage anything new, and re-check the two accepted risks
-        above are still accepted (has fabric been migrated? is Patreon live yet?).
+-   [ ] `npm audit --omit=dev`; re-triage anything new, and re-check the one remaining
+        accepted risk above (has fabric been migrated?).
 -   [ ] Re-run the admin and tournament-organizer authorization enumeration.
 -   [ ] Confirm no secret has drifted into the settings registry.
 -   [ ] Re-run the CSP browser check against the built bundle, including the negative control.
 -   [ ] Confirm `deploy/healthcheck.sh` passes on the live host, including the demo-account
         and `EMAIL_FROM_ADDRESS` assertions.
--   [ ] Verify a credential-stuffing attempt against `/api/account/login` is locked out.
+-   [ ] Verify a credential-stuffing attempt against `/api/account/login` is locked out —
+        and that the lockout is visible from a _second_ lobby process, not just the one that
+        counted the failures.
 
 ## Known gaps
 
 Tracked on the roadmap rather than here:
 
--   Rate limits and the login failure throttle are **per-process**; a multi-lobby
-    deployment would dilute them. They want Redis (roadmap I5).
--   `style-src` still needs `'unsafe-inline'` for React inline styles and HeroUI's runtime
-    style injection. Removing it needs nonces threaded through the component tree.
--   `connect-src` allows `wss:` broadly rather than named game-node origins, so a
-    split-node topology keeps working. Narrow it once the topology is settled.
 -   No moderation tooling beyond the inherited block list and ban list (roadmap N5).
+-   `fabric` is still on v5 — the one remaining accepted risk above.
+
+Closed since the last review:
+
+-   Rate limits and the login failure throttle were **per-process**, which divided every
+    limit by the number of lobbies. They are now Redis-backed and shared, falling back to
+    per-process limits if Redis is unreachable rather than dropping them.
+-   `style-src` no longer carries `'unsafe-inline'`. Font Awesome's runtime CSS injection
+    was turned off in favour of the bundled stylesheet, and React Aria's one remaining
+    injected rule is allowed by hash — with a test that fails if a library upgrade changes
+    the rule out from under the hash.
+-   `connect-src` no longer carries a blanket `wss:` (i.e. a websocket to any host on the
+    internet). Same-origin gameplay is covered by `'self'`; a split-node topology is now
+    opt-in via `GAME_NODE_ORIGINS`.

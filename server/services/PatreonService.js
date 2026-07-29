@@ -1,61 +1,168 @@
-const patreon = require('patreon');
-const patreonAPI = patreon.patreon;
-const patreonOAuth = patreon.oauth;
-const pledgeSchema = require('patreon/dist/schemas/pledge').default;
-
 const logger = require('../log.js');
+
+/**
+ * Patreon account linking and pledge status.
+ *
+ * ARCHON (I5): this used to run on the `patreon` npm package, which has been
+ * unmaintained for years and pulled a transitive dependency tree that kept
+ * showing up in `npm audit`. Everything it did here is three HTTP calls, so it
+ * is now plain `fetch` and the dependency is gone.
+ *
+ * Two things changed with it, both deliberate:
+ *
+ *  - **API v2 instead of v1.** The package spoke Patreon's v1 API, which has
+ *    been deprecated for years; `/current_user` and the pledge schema it used
+ *    are on the way out. v2's identity endpoint is the supported equivalent.
+ *  - **Errors are read as text, not as a stream.** The old code had a helper
+ *    that drained `err.response.body` as a Node stream purely because the HTTP
+ *    library returned one.
+ *
+ * The integration is still dormant - there is no campaign, no credentials and
+ * no defined perks (see **N12**), so nothing here has been exercised against a
+ * live Patreon account. N12 owns that verification; this change is about the
+ * dependency, and it keeps the same public interface so N12 has the same
+ * surface to wire up.
+ */
+
+const TOKEN_URL = 'https://www.patreon.com/api/oauth2/token';
+const IDENTITY_URL =
+    'https://www.patreon.com/api/oauth2/v2/identity' +
+    '?include=memberships&fields%5Bmember%5D=patron_status';
+
+// Patreon is a third party on the network path; never let a hung request hold
+// an account page open indefinitely.
+const REQUEST_TIMEOUT_MS = 10000;
 
 class PatreonService {
     constructor(clientId, secret, userService, callbackUrl) {
         this.userService = userService;
         this.callbackUrl = callbackUrl;
-
-        this.patreonOAuthClient = patreonOAuth(clientId, secret);
+        this.clientId = clientId;
+        this.secret = secret;
     }
 
-    async getPatreonStatusForUser(user) {
+    /**
+     * POST to Patreon's OAuth token endpoint. Shared by the initial code
+     * exchange and the refresh, which differ only in grant type.
+     *
+     * @returns {Promise<object|undefined>} the token payload, or undefined
+     */
+    async requestToken(params) {
         let response;
-        let patreonApiClient = patreonAPI(user.patreon.access_token);
 
         try {
-            response = await patreonApiClient('/current_user', {
-                fields: {
-                    pledge: [
-                        ...pledgeSchema.default_attributes,
-                        pledgeSchema.attributes.declined_since,
-                        pledgeSchema.attributes.created_at
-                    ]
-                }
+            response = await fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    client_id: this.clientId,
+                    client_secret: this.secret,
+                    ...params
+                }),
+                signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
             });
         } catch (err) {
+            logger.error('Error contacting Patreon token endpoint: %s', err.message);
+
+            return undefined;
+        }
+
+        if (!response.ok) {
+            // Body is read as text: an error response is not reliably JSON, and
+            // a parse failure here would mask the status that explains it.
             logger.error(
-                'Error getting patreon status for %s: %s',
+                'Patreon token request failed (%s): %s',
+                response.status,
+                (await response.text().catch(() => '')).slice(0, 500)
+            );
+
+            return undefined;
+        }
+
+        try {
+            return await response.json();
+        } catch (err) {
+            logger.error('Patreon returned an unreadable token response: %s', err.message);
+
+            return undefined;
+        }
+    }
+
+    /**
+     * 'none' (no usable link), 'linked' (linked, not pledging) or 'pledged'.
+     *
+     * The status vocabulary is unchanged from the v1 implementation, so callers
+     * and the stored `patreon` role logic behave the same.
+     */
+    async getPatreonStatusForUser(user) {
+        const accessToken = user && user.patreon && user.patreon.access_token;
+
+        if (!accessToken) {
+            return 'none';
+        }
+
+        let response;
+
+        try {
+            response = await fetch(IDENTITY_URL, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+            });
+        } catch (err) {
+            logger.error('Error getting patreon status for %s: %s', user.username, err.message);
+
+            return 'none';
+        }
+
+        if (!response.ok) {
+            logger.error(
+                'Error getting patreon status for %s (%s): %s',
                 user.username,
-                await this.errorStreamToString(err)
+                response.status,
+                (await response.text().catch(() => '')).slice(0, 500)
             );
 
             return 'none';
         }
 
-        let { id } = response.rawJson.data;
-        let pUser = response.store.find('user', id);
+        let body;
 
-        if (!pUser || !pUser.pledges || pUser.pledges.length === 0) {
-            return 'linked';
+        try {
+            body = await response.json();
+        } catch (err) {
+            logger.error('Patreon returned an unreadable identity response: %s', err.message);
+
+            return 'none';
         }
 
-        return 'pledged';
+        // v2 returns memberships in `included`; an active patron has at least
+        // one member record whose patron_status is active_patron. Anything
+        // else - declined, former, or no memberships at all - is 'linked'.
+        const memberships = Array.isArray(body.included) ? body.included : [];
+        const isActivePatron = memberships.some(
+            (entry) =>
+                entry &&
+                entry.type === 'member' &&
+                entry.attributes &&
+                entry.attributes.patron_status === 'active_patron'
+        );
+
+        return isActivePatron ? 'pledged' : 'linked';
     }
 
     async refreshTokenForUser(user) {
-        let response;
-        try {
-            response = await this.patreonOAuthClient.refreshToken(user.patreon.refresh_token);
-        } catch (err) {
-            logger.error(
-                'Error refreshing patreon account %s',
-                await this.errorStreamToString(err)
-            );
+        const refreshToken = user && user.patreon && user.patreon.refresh_token;
+
+        if (!refreshToken) {
+            return undefined;
+        }
+
+        const response = await this.requestToken({
+            grant_type: 'refresh_token',
+            refresh_token: refreshToken
+        });
+
+        if (!response) {
             return undefined;
         }
 
@@ -67,38 +174,21 @@ class PatreonService {
             await this.userService.update(userDetails);
         } catch (err) {
             logger.error(err);
+
             return undefined;
         }
 
         return response;
     }
 
-    errorStreamToString(err) {
-        const stream = err.response ? err.response.body : err.body;
-
-        return new Promise((resolve, reject) => {
-            let str = '';
-
-            stream.on('data', (chunk) => {
-                str += chunk;
-            });
-
-            stream.on('end', () => {
-                resolve(str);
-            });
-
-            stream.on('error', () => {
-                reject();
-            });
-        });
-    }
-
     async linkAccount(username, code) {
-        let response;
-        try {
-            response = await this.patreonOAuthClient.getTokens(code, this.callbackUrl);
-        } catch (err) {
-            logger.error('Error linking patreon account %s', await this.errorStreamToString(err));
+        const response = await this.requestToken({
+            grant_type: 'authorization_code',
+            code,
+            redirect_uri: this.callbackUrl
+        });
+
+        if (!response) {
             return false;
         }
 
@@ -107,6 +197,7 @@ class PatreonService {
         let user = await this.userService.getUserByUsername(username);
         if (!user) {
             logger.error('Error linking patreon account, user not found');
+
             return false;
         }
 
@@ -121,6 +212,7 @@ class PatreonService {
             user.password = password;
         } catch (err) {
             logger.error(err);
+
             return false;
         }
 
@@ -131,6 +223,7 @@ class PatreonService {
         let user = await this.userService.getUserByUsername(username);
         if (!user) {
             logger.error('Error unlinking patreon account, user not found');
+
             return false;
         }
 
@@ -140,6 +233,7 @@ class PatreonService {
             await this.userService.update(user);
         } catch (err) {
             logger.error(err);
+
             return false;
         }
 

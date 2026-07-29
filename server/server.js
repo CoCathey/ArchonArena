@@ -20,6 +20,9 @@ const JwtStrategy = passportJwt.Strategy;
 const ExtractJwt = passportJwt.ExtractJwt;
 
 const UserService = require('./services/UserService.js');
+// ARCHON (I5): shared (cross-process) rate limiting
+const RedisClientFactory = require('./services/RedisClientFactory');
+const { setRedisStore } = require('./api/rateLimit');
 
 class Server {
     constructor(isDeveloping) {
@@ -108,7 +111,10 @@ class Server {
                 helmet.contentSecurityPolicy({
                     directives: buildDirectives({
                         isDeveloping: this.isDeveloping,
-                        sentryDsn: this.configService.getValue('sentryDsn')
+                        sentryDsn: this.configService.getValue('sentryDsn'),
+                        // Only needed when game nodes live on their own hosts;
+                        // the documented topology is same-origin behind Caddy.
+                        gameNodeOrigins: this.configService.getValue('gameNodeOrigins')
                     }),
                     reportOnly: cspMode === 'report-only'
                 })
@@ -125,6 +131,12 @@ class Server {
         app.use(cookieParser());
         // ARCHON: load runtime admin settings snapshot + periodic refresh
         require('./services/settings').start();
+
+        // ARCHON (I5): share rate-limit and login-throttle state across lobby
+        // processes. Best-effort on purpose - if Redis cannot be reached the
+        // limiters stay per-process, which is exactly how they behaved before,
+        // rather than the site failing to start over a cache.
+        await this.connectRateLimitStore();
 
         api.init(app, options);
 
@@ -174,6 +186,33 @@ class Server {
         });
 
         return this.server;
+    }
+
+    /**
+     * ARCHON (I5): back the rate limiter and login failure throttle with Redis
+     * so limits hold across lobby processes.
+     *
+     * Deliberately non-fatal. A limiter is a safeguard, and refusing to boot
+     * because a cache is down would turn a degraded state into an outage; the
+     * store falls back to per-process limits, which is what shipped before.
+     */
+    async connectRateLimitStore() {
+        try {
+            const factory = new RedisClientFactory(this.configService);
+            const client = factory.createClient();
+
+            // Without a handler node-redis emits 'error' as an unhandled event
+            // and takes the process down with it.
+            client.on('error', (err) => logger.warn(`Rate limit Redis error: ${err.message}`));
+
+            await client.connect();
+            setRedisStore(client, factory.prefix);
+        } catch (err) {
+            logger.warn(
+                `Rate limiting could not reach Redis (${err.message}); ` +
+                    'limits will apply per lobby process only.'
+            );
+        }
     }
 
     run() {

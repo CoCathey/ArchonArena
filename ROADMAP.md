@@ -277,9 +277,10 @@ found by auditing the launch path rather than the feature list. All three are fi
 #### I5 — Pre-launch security and abuse pass
 
 **Why:** the moment the site is public it is a target, and account/auth endpoints are the
-softest surface. Rate limiting exists (`server/api/rateLimit.js`) but is applied only to bug
-reports, community actions, deck DoK prepare, and tournament creation — not to login,
-registration, or password reset.
+softest surface. When this item was written, rate limiting existed but was applied only to
+bug reports, community actions, deck DoK prepare and tournament creation — not to login,
+registration or password reset. Every auth endpoint is now limited, and the limits are
+shared across lobby processes; what remains is the `fabric` upgrade.
 **Tasks**
 
 -   [x] `helmet` upgraded v3 → v8. Its default CSP is disabled (it would break the site and
@@ -295,22 +296,66 @@ registration, or password reset.
         never logged. SQL confirmed exclusively parameterised.
 -   [x] `docs/SECURITY.md` written — controls, dependency triage with reasoning, two
         documented accepted risks, and a standing re-review checklist.
--   [ ] **`fabric` v5 → v7** — the last critical/high advisories all trace to it. A rewrite
-        (ESM-only, promise-based, ~1,000 lines of usage across the archon maker, game board
-        and fetchdata pipeline), so it is its own project. Exposure documented as low: no SVG
-        path exists and uploads are magic-byte-gated.
--   [ ] Replace the unmaintained `patreon` package with direct `fetch` (folds into **N12**).
--   [ ] Move the rate limiter and login failure throttle to Redis so limits hold across
-        processes; both are per-process today.
--   [ ] Tighten `style-src` off `'unsafe-inline'` with nonces or hashes, and narrow
-        `connect-src` from `wss:` to the actual game-node origins.
+-   [ ] **`fabric` v5 → v7** — now the **only** root left: every remaining critical and high
+        in the production tree traces to it alone (13 advisories, down from 16). Scoped in
+        detail during this pass:
+    -   **What it buys:** fabric 7 declares no hard dependencies (`canvas`/`jsdom` become
+        optional, and `canvas@3` drops `@mapbox/node-pre-gyp`), so the whole
+        `canvas` → `node-pre-gyp` → `tar` chain — and the only critical in the tree — goes
+        away. It keeps a CommonJS entry (`fabric/node`), so server callers need not become
+        ESM.
+    -   **Real size:** 98 call sites over 10 APIs in 7 files, ~1,600 lines.
+    -   **Why it is still its own project:** the migration is mechanical, but the risk is
+        _silent visual regression_. Text metrics and shadow rendering changed in fabric 6,
+        and the archon maker generates the deck images players look at — a shifted baseline
+        would ship subtly wrong deck lists with nothing failing. `buildDeckList`,
+        `buildCard` and `buildCardBack` are cleanly exported, so a before/after image-diff
+        harness is buildable; that harness is the actual first task, and it does not exist
+        yet.
+    -   Exposure meanwhile stays low: no SVG path exists (the fabric advisory is stored XSS
+        via SVG export) and uploads are magic-byte-gated.
+-   [x] **Replaced the unmaintained `patreon` package with direct `fetch`.** It was three
+        HTTP calls wrapped in a package that has been abandoned for years; it now talks to
+        Patreon's **v2** API, because the package spoke the long-deprecated v1. Three high
+        advisories went with it. The integration is still dormant, so **N12** still owns
+        verifying it against a live campaign — the public interface is unchanged so N12 has
+        the same surface to wire up.
+-   [x] **Rate limiter and login failure throttle moved to Redis.** Being per-process
+        quietly divided every limit by the number of lobbies — "10 login failures in 15
+        minutes" meant 10 _per lobby_, and an attacker who reconnected got a fresh budget.
+        Each decision is one Lua script, so check-and-record is atomic; a read followed by
+        a separate write lets concurrent requests through at exactly the moment the limit
+        matters. **Verified against a real Redis:** exactly 10 of 50 concurrent requests
+        allowed, a lockout raised in one process visible from another, and windows that
+        slide correctly. If Redis is unreachable the store falls back to per-process
+        limits, so an outage degrades enforcement rather than removing it — and cannot take
+        login down with it.
+-   [x] **`style-src` no longer carries `'unsafe-inline'`, and `connect-src` no longer
+        carries a blanket `wss:`.** Both were settled against the real built bundle in
+        Chromium rather than by reasoning about what the app might do at runtime, with a
+        negative control proving the check detects violations at all.
+    -   Font Awesome was injecting ~15 KB of CSS into a runtime `<style>` tag; that is now
+        off (`config.autoAddCss = false`) in favour of the bundled stylesheet — Font
+        Awesome's own documented answer, and one less thing injected at runtime.
+    -   React Aria's `usePress` prepends one 88-byte rule and offers no nonce hook, so it is
+        allowed **by hash**. A hash pins content, which would silently stop applying on a
+        library upgrade and quietly degrade mobile press handling — so a test rebuilds the
+        rule from the installed package and fails CI instead.
+    -   `wss:` permitted a websocket to _any host on the internet_. The documented topology
+        keeps game nodes behind the same Caddy, so `'self'` covers them (verified in a
+        browser — `'self'` matching ws/wss is a CSP3 behaviour, not something to assume).
+        A split-host deployment is now opt-in via `GAME_NODE_ORIGINS`.
 
 **Depends on:** nothing. Blocks: public announcement of the site.
 **Acceptance criteria**
 
--   A scripted credential-stuffing attempt against login is throttled and locked out, with a test.
--   No high or critical advisory outstanding in `npm audit`, or each is documented with a reason.
--   `docs/SECURITY.md` exists with the checklist, the date it was last run, and the results.
+-   [x] A scripted credential-stuffing attempt against login is throttled and locked out,
+        with a test — and the lockout is now visible from a second lobby process, not only
+        the one that counted the failures.
+-   [x] No high or critical advisory outstanding in `npm audit`, or each is documented with a
+        reason. Down to a single documented root (`fabric`) from two.
+-   [x] `docs/SECURITY.md` exists with the checklist, the date it was last run, and the
+        results.
 
 #### I6 — Terms of Service and transactional email polish _(mostly done)_
 

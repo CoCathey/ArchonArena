@@ -9,6 +9,7 @@
     dbDatabase: 'DB_NAME',
     redisUrl: 'REDIS_URL',
     redisKeyPrefix: 'REDIS_KEY_PREFIX',
+    gameNodeOrigins: 'GAME_NODE_ORIGINS',
     secret: 'SECRET',
     domain: 'DOMAIN',
     https: 'false',
