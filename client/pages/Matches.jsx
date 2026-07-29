@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import moment from 'moment';
+import { Button as HeroButton } from '@heroui/react';
 
 import AlertPanel from '../Components/Site/AlertPanel';
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
-import { useGetUserGamesQuery } from '../redux/api';
+import { useGetUserGamesQuery, useGetGameFiltersQuery } from '../redux/api';
 
 import { Trans, useTranslation } from 'react-i18next';
 
@@ -38,14 +39,107 @@ const computeWinner = (game) => {
     }
 };
 
+const EMPTY_FILTERS = { deck: '', opponent: '', format: '', result: '' };
+
 const Matches = () => {
     const { t } = useTranslation();
-    const { data: gamesResponse, isLoading, isError, error } = useGetUserGamesQuery();
+    const [filters, setFilters] = useState(EMPTY_FILTERS);
+
+    // Only send the filters that are set - an empty string would be a filter
+    // for "format is empty string", not "any format".
+    const query = useMemo(
+        () => Object.fromEntries(Object.entries(filters).filter(([, value]) => value)),
+        [filters]
+    );
+
+    const {
+        data: gamesResponse,
+        isLoading,
+        isFetching,
+        isError,
+        error
+    } = useGetUserGamesQuery(query);
+    // ARCHON (N1): the decks, opponents and formats this player has actually
+    // played, so the controls offer real choices rather than the site-wide list
+    // and a free-text box to guess into.
+    const { data: filterOptions } = useGetGameFiltersQuery();
+
     const games =
         gamesResponse?.games?.filter(
             (game) =>
                 game.players && game.players.length === 2 && game.decks && game.decks.length === 2
         ) || [];
+
+    const hasFilters = Object.keys(query).length > 0;
+    const setFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
+
+    const selectClass =
+        'rounded-md border border-border/70 bg-surface px-2 py-1 text-sm text-foreground';
+
+    const filterBar = (
+        <div className='mb-3 flex flex-wrap items-center gap-2'>
+            <select
+                className={selectClass}
+                value={filters.deck}
+                aria-label={t('Filter by deck')}
+                onChange={(event) => setFilter('deck', event.target.value)}
+            >
+                <option value=''>{t('Any deck')}</option>
+                {(filterOptions?.decks || []).map((deck) => (
+                    <option key={deck.identity} value={deck.identity}>
+                        {deck.name} ({deck.games})
+                    </option>
+                ))}
+            </select>
+
+            <select
+                className={selectClass}
+                value={filters.opponent}
+                aria-label={t('Filter by opponent')}
+                onChange={(event) => setFilter('opponent', event.target.value)}
+            >
+                <option value=''>{t('Any opponent')}</option>
+                {(filterOptions?.opponents || []).map((opponent) => (
+                    <option key={opponent.username} value={opponent.username}>
+                        {opponent.username} ({opponent.games})
+                    </option>
+                ))}
+            </select>
+
+            <select
+                className={selectClass}
+                value={filters.format}
+                aria-label={t('Filter by format')}
+                onChange={(event) => setFilter('format', event.target.value)}
+            >
+                <option value=''>{t('Any format')}</option>
+                {(filterOptions?.formats || []).map((format) => (
+                    <option key={format} value={format}>
+                        {t(format)}
+                    </option>
+                ))}
+            </select>
+
+            <select
+                className={selectClass}
+                value={filters.result}
+                aria-label={t('Filter by result')}
+                onChange={(event) => setFilter('result', event.target.value)}
+            >
+                <option value=''>{t('Any result')}</option>
+                <option value='win'>{t('Wins')}</option>
+                <option value='loss'>{t('Losses')}</option>
+            </select>
+
+            {hasFilters && (
+                <HeroButton size='sm' variant='tertiary' onPress={() => setFilters(EMPTY_FILTERS)}>
+                    {t('Clear filters')}
+                </HeroButton>
+            )}
+
+            {isFetching && <span className='text-xs text-muted'>{t('Loading…')}</span>}
+        </div>
+    );
 
     if (isLoading) {
         return (
@@ -119,7 +213,11 @@ const Matches = () => {
 
     const table =
         games && games.length === 0 ? (
-            <div>You have no recorded matches.</div>
+            <div className='text-sm text-muted'>
+                {hasFilters
+                    ? t('No matches fit those filters.')
+                    : t('You have no recorded matches.')}
+            </div>
         ) : (
             <table className='w-full border-collapse text-left text-sm text-zinc-100'>
                 <thead>
@@ -164,7 +262,10 @@ const Matches = () => {
 
     return (
         <div className='profile mx-auto min-h-full w-full max-w-6xl'>
-            <Panel title={t('Matches')}>{table}</Panel>
+            <Panel title={t('Matches')}>
+                {filterBar}
+                {table}
+            </Panel>
         </div>
     );
 };

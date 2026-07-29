@@ -5,8 +5,33 @@
  * Declining or removing deletes the row so it can be re-requested.
  */
 class FriendService {
-    constructor(db = require('../../db')) {
+    // ARCHON: notifications (N2) are injected and optional - a FriendService
+    // built without one behaves exactly as it always did, which keeps every
+    // existing unit test honest.
+    constructor(db = require('../../db'), notificationService = null) {
         this.db = db;
+        this.notificationService = notificationService;
+    }
+
+    /**
+     * Raise a notification without waiting for it. Deliberately not awaited:
+     * accepting a friend request must not sit behind an SES round-trip, and
+     * NotificationService.notify never rejects.
+     */
+    notify(event) {
+        if (!this.notificationService) {
+            return;
+        }
+
+        this.notificationService.notify(event);
+    }
+
+    async getUsername(userId) {
+        const rows = await this.db.query('SELECT "Username" FROM "Users" WHERE "Id" = $1', [
+            userId
+        ]);
+
+        return rows && rows[0] ? rows[0].Username : null;
     }
 
     async findUserIdByUsername(username) {
@@ -60,6 +85,22 @@ class FriendService {
             [actorId, targetId]
         );
 
+        if (this.notificationService) {
+            const actorName = await this.getUsername(actorId);
+
+            this.notify({
+                userId: targetId,
+                category: 'friend.request',
+                title: `${actorName} sent you a friend request`,
+                body: 'Accept or decline it from your Friends page.',
+                url: '/community/friends',
+                // No dedupe key: a re-request after a decline is a genuinely new
+                // event, and the "request already sent" guard above already
+                // stops a pending request being sent twice.
+                data: { fromUserId: actorId, fromUsername: actorName }
+            });
+        }
+
         return { success: true };
     }
 
@@ -80,6 +121,20 @@ class FriendService {
                     '"RespondedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
                 [rows[0].Id]
             );
+
+            // Only the acceptance is worth a notification - telling someone
+            // their request was declined is a message nobody benefits from.
+            if (this.notificationService) {
+                const actorName = await this.getUsername(actorId);
+
+                this.notify({
+                    userId: requesterId,
+                    category: 'friend.accepted',
+                    title: `${actorName} accepted your friend request`,
+                    url: '/community/friends',
+                    data: { userId: actorId, username: actorName }
+                });
+            }
         } else {
             await this.db.query('DELETE FROM "Friendships" WHERE "Id" = $1', [rows[0].Id]);
         }

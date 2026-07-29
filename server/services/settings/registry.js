@@ -211,6 +211,18 @@ const REGISTRY = {
                 min: 1,
                 max: 250,
                 default: 25
+            },
+            sweepEnabled: {
+                type: 'boolean',
+                label: 'Refresh stale SAS in the background (otherwise only when a deck is opened)',
+                default: true
+            },
+            sweepBatchSize: {
+                type: 'number',
+                label: 'Decks the background sweep refreshes per run (it stops early if live traffic needs the budget)',
+                min: 1,
+                max: 200,
+                default: 10
             }
         }
     },
@@ -249,6 +261,71 @@ const REGISTRY = {
                 min: 1,
                 max: 24,
                 default: 24
+            }
+        }
+    },
+    replay: {
+        title: 'Replays',
+        description:
+            'How long recorded games are kept and how large a single recording may be. Recording itself happens in the game node and is never on the gameplay path; these settings only govern what is stored and for how long.',
+        fields: {
+            enabled: { type: 'boolean', label: 'Record replays for finished games', default: true },
+            retentionDays: {
+                type: 'number',
+                label: 'Delete replays older than (days; 0 = keep forever)',
+                min: 0,
+                max: 3650,
+                default: 0
+            },
+            maxCaptureKb: {
+                type: 'number',
+                label: 'Largest replay to store (KB) - bigger captures are skipped',
+                min: 64,
+                max: 20480,
+                default: 2000
+            },
+            purgeIntervalHours: {
+                type: 'number',
+                label: 'Run the retention purge every N hours (0 = never)',
+                min: 0,
+                max: 168,
+                default: 24
+            },
+            allowSharing: {
+                type: 'boolean',
+                label: 'Players may create public share links for their replays',
+                default: true
+            }
+        }
+    },
+    watch: {
+        title: 'Watch & Spectating',
+        description:
+            'The Watch hub. A broadcast delay holds the board back from spectators only - the two players always see the live position - so an event can be streamed without the stream leaking the position to anyone watching it.',
+        fields: {
+            showSpectatorCounts: {
+                type: 'boolean',
+                label: 'Show how many people are watching each game',
+                default: true
+            },
+            broadcastDelaySeconds: {
+                type: 'number',
+                label: 'Hold the board back from spectators by (seconds; 0 = live)',
+                min: 0,
+                max: 600,
+                default: 0
+            },
+            featuredGameId: {
+                type: 'text',
+                label: 'Featured game id (pinned to the top of Watch; empty = none)',
+                maxLength: 64,
+                default: ''
+            },
+            featuredLabel: {
+                type: 'text',
+                label: 'Featured game caption',
+                maxLength: 120,
+                default: ''
             }
         }
     },
@@ -392,6 +469,37 @@ function validateAgainstFields(fields, value, prefix, errors) {
 }
 
 /**
+ * The code defaults for a section, built from the same field descriptors the
+ * admin UI renders. Sections whose values come from a config file (rating,
+ * dok) already merge their own defaults; this exists for sections that live
+ * only in the registry, so a service reading them cannot drift from what the
+ * admin panel says the default is.
+ */
+function sectionDefaults(section) {
+    const definition = REGISTRY[section];
+
+    if (!definition) {
+        return {};
+    }
+
+    const walk = (fields) => {
+        const result = {};
+
+        for (const [key, descriptor] of Object.entries(fields)) {
+            if (descriptor.type === 'section') {
+                result[key] = walk(descriptor.fields);
+            } else if (descriptor.default !== undefined) {
+                result[key] = descriptor.default;
+            }
+        }
+
+        return result;
+    };
+
+    return walk(definition.fields);
+}
+
+/**
  * Validate a partial overrides object for a section. Returns a list of
  * error strings; empty means valid. Partial objects are fine — only the
  * provided fields are checked (they override defaults field-by-field).
@@ -409,4 +517,4 @@ function validateSection(section, value) {
     return errors;
 }
 
-module.exports = { REGISTRY, validateSection };
+module.exports = { REGISTRY, validateSection, sectionDefaults };

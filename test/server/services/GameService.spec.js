@@ -121,9 +121,208 @@ describe('GameService replays', function () {
 
     it('getReplay returns the stored data, or null when absent', async function () {
         db.query.mockResolvedValueOnce([{ Data: { messages: [], winner: 'bob' } }]);
-        expect(await service.getReplay('game-uuid')).toEqual({ messages: [], winner: 'bob' });
+        expect(await service.getReplay('game-uuid')).toEqual({
+            messages: [],
+            winner: 'bob',
+            shareToken: null
+        });
 
         db.query.mockResolvedValueOnce([]);
         expect(await service.getReplay('missing')).toBeNull();
+    });
+
+    it('saveReplay reports why it skipped rather than looking like "never recorded"', async function () {
+        // A silent skip and a game that was never recorded were indistinguishable
+        // from the outside; the caller can now tell them apart.
+        const tooBig = await service.saveReplay('g', { messages: 'x'.repeat(2000001) });
+        expect(tooBig).toEqual(
+            expect.objectContaining({ stored: false, reason: 'too-large', limit: 2000000 })
+        );
+
+        expect(await service.saveReplay('g', null)).toEqual({
+            stored: false,
+            reason: 'no-replay'
+        });
+    });
+
+    it('honours an admin-raised capture limit', async function () {
+        // The same capture that was refused at the default 2000 KB is stored
+        // once an admin raises the cap - i.e. the limit really is the setting.
+        const settings = { getSectionWithDefaults: () => ({ enabled: true, maxCaptureKb: 8000 }) };
+        const configured = new GameService(db, settings);
+
+        const result = await configured.saveReplay('g', { messages: 'x'.repeat(2000001) });
+
+        expect(result.stored).toBe(true);
+        expect(db.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('records nothing at all when replays are switched off', async function () {
+        const settings = { getSectionWithDefaults: () => ({ enabled: false }) };
+        const off = new GameService(db, settings);
+
+        expect(await off.saveReplay('g', { messages: [] })).toEqual({
+            stored: false,
+            reason: 'disabled'
+        });
+        expect(db.query).not.toHaveBeenCalled();
+    });
+});
+
+describe('GameService replay retention', function () {
+    let db;
+    let service;
+
+    beforeEach(function () {
+        db = { query: vi.fn().mockResolvedValue([]) };
+        service = new GameService(db);
+    });
+
+    it('keeps everything when no retention window is set', async function () {
+        // The default. A site that has not chosen a policy must never silently
+        // start destroying game history.
+        expect(await service.purgeExpiredReplays(0)).toBe(0);
+        expect(await service.purgeExpiredReplays(undefined)).toBe(0);
+        expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it('deletes only replays past the window and reports the count', async function () {
+        db.query.mockResolvedValueOnce([{ GameDbId: 1 }, { GameDbId: 2 }]);
+
+        expect(await service.purgeExpiredReplays(30)).toBe(2);
+
+        const [sql, params] = db.query.mock.calls[0];
+        expect(sql).toContain('DELETE FROM "GameReplays"');
+        expect(sql).toContain('interval');
+        expect(params).toEqual(['30']);
+    });
+});
+
+describe('GameService replay sharing', function () {
+    let db;
+    let service;
+
+    beforeEach(function () {
+        db = { query: vi.fn().mockResolvedValue([]) };
+        service = new GameService(db);
+    });
+
+    it('refuses to share a game the caller did not play in', async function () {
+        db.query.mockResolvedValueOnce([]); // participant check: no rows
+
+        const result = await service.createShareToken('game-uuid', 42);
+
+        expect(result.success).toBe(false);
+        expect(result.message).toMatch(/only the players/i);
+    });
+
+    it('mints an unguessable token and hands back the same one next time', async function () {
+        db.query
+            .mockResolvedValueOnce([{ '?column?': 1 }]) // participant
+            .mockResolvedValueOnce([{ ShareToken: null }]) // existing replay, unshared
+            .mockResolvedValueOnce([]); // the UPDATE
+
+        const first = await service.createShareToken('game-uuid', 42);
+
+        expect(first.success).toBe(true);
+        expect(first.shareToken).toMatch(/^[0-9a-f]{32}$/);
+
+        db.query
+            .mockResolvedValueOnce([{ '?column?': 1 }])
+            .mockResolvedValueOnce([{ ShareToken: first.shareToken }]);
+
+        // Idempotent: a player who shares twice must not invalidate the link
+        // they already sent someone.
+        const second = await service.createShareToken('game-uuid', 42);
+        expect(second.shareToken).toBe(first.shareToken);
+    });
+
+    it('will not share a game with no recorded replay', async function () {
+        db.query.mockResolvedValueOnce([{ '?column?': 1 }]).mockResolvedValueOnce([]);
+
+        const result = await service.createShareToken('game-uuid', 42);
+
+        expect(result.success).toBe(false);
+        expect(result.message).toMatch(/no replay/i);
+    });
+
+    it('serves a shared replay by token and nothing without one', async function () {
+        db.query.mockResolvedValueOnce([
+            { Data: { messages: [], winner: 'bob' }, GameId: 'game-uuid' }
+        ]);
+
+        const replay = await service.getReplayByShareToken('a'.repeat(32));
+        expect(replay).toEqual(
+            expect.objectContaining({ winner: 'bob', gameId: 'game-uuid', shared: true })
+        );
+
+        expect(await service.getReplayByShareToken('')).toBeNull();
+        expect(await service.getReplayByShareToken(null)).toBeNull();
+    });
+
+    it('serves nothing by token while sharing is switched off site-wide', async function () {
+        // Turning sharing off has to close existing links too, not just stop
+        // new ones being minted.
+        const settings = { getSectionWithDefaults: () => ({ allowSharing: false }) };
+        const off = new GameService(db, settings);
+
+        expect(await off.getReplayByShareToken('a'.repeat(32))).toBeNull();
+        expect(db.query).not.toHaveBeenCalled();
+    });
+});
+
+describe('GameService match history filters', function () {
+    let db;
+    let service;
+
+    beforeEach(function () {
+        db = { query: vi.fn().mockResolvedValue([]) };
+        service = new GameService(db);
+    });
+
+    it('filters in SQL, before the row limit', async function () {
+        // The point of the whole feature: filtering the last 30 games
+        // client-side would answer "you never played that deck" for anyone
+        // with a longer history.
+        await service.findByUserName('alice', { format: 'sealed' });
+
+        const [sql] = db.query.mock.calls[0];
+        const whereClause = sql.slice(0, sql.indexOf('LIMIT'));
+        expect(whereClause).toContain('"GameFormat" = $2');
+    });
+
+    it('builds each filter as a bound parameter', async function () {
+        await service.findByUserName('alice', {
+            format: 'normal',
+            deck: 'Some Deck',
+            opponent: 'bob',
+            result: 'win'
+        });
+
+        const [sql, params] = db.query.mock.calls[0];
+        expect(params).toEqual(['alice', 'normal', 'Some Deck', 'bob']);
+        expect(sql).toContain('g."WinnerId" = u."Id"');
+    });
+
+    it('treats a loss as decided-and-not-mine, not merely not-won', async function () {
+        // An abandoned game has no winner; it is not a loss.
+        await service.findByUserName('alice', { result: 'loss' });
+
+        const [sql] = db.query.mock.calls[0];
+        expect(sql).toContain('g."WinnerId" IS NOT NULL AND g."WinnerId" <> u."Id"');
+    });
+
+    it('caps the row limit however large a value is asked for', async function () {
+        await service.findByUserName('alice', { limit: 100000 });
+
+        expect(db.query.mock.calls[0][0]).toContain('LIMIT 200');
+    });
+
+    it('is unchanged when no filters are given', async function () {
+        await service.findByUserName('alice');
+
+        const [sql, params] = db.query.mock.calls[0];
+        expect(sql).toContain('LIMIT 30');
+        expect(params).toEqual(['alice']);
     });
 });

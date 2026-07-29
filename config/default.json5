@@ -19,6 +19,12 @@
         port: 4000,
         appName: 'Archon Arena',
         emailFromAddress: 'noreply@archonarena.com',
+        // ARCHON: public origin, used to build absolute links in notification
+        // emails. Activation and reset mail derive this from the request, but a
+        // notification raised by a background job (a paired round, a nightly
+        // sweep) has no request to derive it from. Empty leaves the link
+        // relative, which still reads correctly in the in-app centre.
+        siteUrl: '',
         blockDisposableEmail: false,
         requireActivation: false,
         // Content-Security-Policy mode: 'enforce' | 'report-only' | 'off'.

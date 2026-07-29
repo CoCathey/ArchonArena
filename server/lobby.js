@@ -8,6 +8,10 @@ const PendingGame = require('./pendinggame');
 const GameRouter = require('./gamerouter');
 const ServiceFactory = require('./services/ServiceFactory');
 const DeckService = require('./services/DeckService');
+const GameService = require('./services/GameService');
+// ARCHON: in-app/email notifications (N2)
+const sharedNotificationService = require('./services/notifications');
+const tournamentNotifications = require('./services/notifications/tournamentNotifications');
 const DokService = require('./services/dok/DokService');
 const UserService = require('./services/UserService');
 const ConfigService = require('./services/ConfigService');
@@ -62,6 +66,15 @@ class Lobby {
         tournamentEvents.on('roundPaired', this.onTournamentRoundPaired.bind(this));
         tournamentEvents.on('ensureMatchGame', this.onTournamentEnsureMatchGame.bind(this));
 
+        // ARCHON: tell paired players their round is up (N2). A separate
+        // listener on the same bridge, so a notification failure cannot affect
+        // table creation and vice versa.
+        this.notificationService = options.notificationService || sharedNotificationService;
+        tournamentNotifications.install({
+            tournamentService: this.tournamentService,
+            notificationService: this.notificationService
+        });
+
         // ARCHON: Quick Match matchmaking - queue players and pair them by Amber.
         this.ratingService = options.ratingService || new RatingService(this.configService);
         this.matchmaking = options.matchmaking || new MatchmakingService();
@@ -82,6 +95,26 @@ class Lobby {
         this.decaySweep = setInterval(() => this.runDecaySweep(), 60 * 60 * 1000);
         if (this.decaySweep && this.decaySweep.unref) {
             this.decaySweep.unref();
+        }
+
+        // ARCHON: replay retention (N1). Ticks hourly and only deletes once the
+        // admin-configured cadence is due; a retention of 0 days (the default)
+        // keeps everything, so a site that has not decided on a policy never
+        // silently destroys game history.
+        this.gameService = options.gameService || new GameService();
+        this.lastReplayPurgeMs = 0;
+        this.replayPurgeSweep = setInterval(() => this.runReplayPurge(), 60 * 60 * 1000);
+        if (this.replayPurgeSweep && this.replayPurgeSweep.unref) {
+            this.replayPurgeSweep.unref();
+        }
+
+        // ARCHON: periodic SAS refresh (N3). Refresh used to happen only when
+        // someone opened a deck, so a deck nobody looked at kept a stale score
+        // forever and the whole site's SAS drifted with the DoK model. The
+        // sweep spends only what this minute's DoK budget leaves over.
+        this.sasSweep = setInterval(() => this.runSasRefreshSweep(), 15 * 60 * 1000);
+        if (this.sasSweep && this.sasSweep.unref) {
+            this.sasSweep.unref();
         }
 
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
@@ -145,6 +178,62 @@ class Lobby {
             }
         } catch (err) {
             logger.error('Rating decay sweep failed', err);
+        }
+    }
+
+    /**
+     * ARCHON: replay retention (N1). Hourly tick, gated by the admin-configured
+     * purge cadence; deleting is idempotent (rows past the window are simply
+     * gone the second time), so an overlapping run on another lobby instance is
+     * harmless.
+     */
+    async runReplayPurge() {
+        try {
+            const config = this.gameService.getReplayConfig();
+            const hours = Number(config.purgeIntervalHours) || 0;
+            const retentionDays = Number(config.retentionDays) || 0;
+
+            if (hours <= 0 || retentionDays <= 0) {
+                return;
+            }
+
+            const now = Date.now();
+            if (now - this.lastReplayPurgeMs < hours * 60 * 60 * 1000) {
+                return;
+            }
+
+            this.lastReplayPurgeMs = now;
+            await this.gameService.purgeExpiredReplays(retentionDays);
+        } catch (err) {
+            logger.error('Replay retention sweep failed', err);
+        }
+    }
+
+    /**
+     * ARCHON: periodic SAS refresh (N3).
+     *
+     * Deliberately opportunistic. It asks the DoK service to refresh the
+     * stalest decks and stops the moment this minute's shared request budget is
+     * spent, so a live deck import or a pre-game SAS lookup is never queued
+     * behind the sweep. Whatever it does not reach this pass, it reaches on the
+     * next one.
+     */
+    async runSasRefreshSweep() {
+        if (!this.dokService) {
+            return;
+        }
+
+        try {
+            const result = await this.dokService.refreshStaleDecks();
+
+            if (result && result.refreshed > 0) {
+                logger.info(
+                    `SAS refresh sweep updated ${result.refreshed} deck(s)` +
+                        (result.budgetExhausted ? ' (DoK budget reached, will continue later)' : '')
+                );
+            }
+        } catch (err) {
+            logger.error('SAS refresh sweep failed', err);
         }
     }
 

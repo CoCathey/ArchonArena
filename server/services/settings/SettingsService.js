@@ -1,5 +1,5 @@
 const logger = require('../../log');
-const { REGISTRY, validateSection } = require('./registry');
+const { REGISTRY, validateSection, sectionDefaults } = require('./registry');
 
 /**
  * Runtime admin-editable settings, backed by the SiteSettings table.
@@ -63,6 +63,16 @@ class SettingsService {
      */
     getSection(section) {
         return this.cache[section] || {};
+    }
+
+    /**
+     * A section's registry defaults with any stored overrides merged over
+     * them. Sections that also have file config (rating, dok) layer that in
+     * themselves; this is for registry-only sections, so a caller never has to
+     * restate a default the admin UI already publishes.
+     */
+    getSectionWithDefaults(section) {
+        return { ...sectionDefaults(section), ...this.getSection(section) };
     }
 
     /**

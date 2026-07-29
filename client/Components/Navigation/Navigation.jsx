@@ -10,6 +10,8 @@ import { RightMenu, ProfileMenu, LeftMenu } from '../../menus';
 import LanguageSelector from './LanguageSelector';
 import ProfileDropdown from './ProfileDropdown';
 import ServerStatus from './ServerStatus';
+// ARCHON (N2): in-app notification centre
+import NotificationBell from '../Site/NotificationBell';
 import GameContextMenu from './GameContextMenu';
 import Link from './Link';
 
@@ -279,6 +281,7 @@ const Navigation = (props) => {
                             />
                         )}
                         {renderMenuItems(RightMenu)}
+                        {props.user && <NotificationBell />}
                         <ProfileDropdown menu={ProfileMenu} user={props.user} />
                         <LanguageSelector />
                     </div>
@@ -324,6 +327,7 @@ const Navigation = (props) => {
                                     />
                                 )}
                                 {renderMenuItems(RightMenu, { mobile: true })}
+                                {props.user && <NotificationBell mobile />}
                                 <ProfileDropdown menu={ProfileMenu} user={props.user} mobile />
                                 <LanguageSelector mobile />
                             </div>

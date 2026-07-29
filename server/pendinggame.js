@@ -4,6 +4,9 @@ const crypto = require('crypto');
 
 const GameChat = require('./game/gamechat.js');
 const logger = require('./log');
+// ARCHON: site-wide Watch settings (spectator broadcast delay). Read from the
+// in-memory snapshot, so handing a game to a node never waits on the database.
+const settings = require('./services/settings');
 
 class PendingGame {
     constructor(owner, details) {
@@ -436,6 +439,11 @@ class PendingGame {
             previousWinner: this.previousWinner,
             showHand: this.showHand,
             spectators,
+            // ARCHON (N1): how long the node should hold the board back from
+            // spectators. Resolved once, here, at hand-off - so a mid-game
+            // settings change cannot retime a game that is already running.
+            spectatorDelaySeconds:
+                Number(settings.getSectionWithDefaults('watch').broadcastDelaySeconds) || 0,
             started: this.started,
             startingChains: this.startingChains,
             swap: this.swap,

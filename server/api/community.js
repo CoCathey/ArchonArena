@@ -28,8 +28,13 @@ const storeCreateLimit = rateLimit({
     message: 'You have added several stores recently. Please wait a while before adding another.'
 });
 
-const friendService = new FriendService();
-const clubService = new ClubService();
+// ARCHON: community actions raise notifications (N2). The service is shared
+// process-wide and every call from here is fire-and-forget, so no response
+// waits on a database write or an email.
+const notificationService = require('../services/notifications');
+
+const friendService = new FriendService(require('../db'), notificationService);
+const clubService = new ClubService(require('../db'), notificationService);
 const memberDirectory = new MemberDirectoryService();
 const storeService = new StoreService();
 const playerProfileService = new PlayerProfileService();

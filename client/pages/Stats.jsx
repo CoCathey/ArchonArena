@@ -81,6 +81,98 @@ const BarList = ({ items, max = 100, showMidline = false, emptyText }) => {
     );
 };
 
+/**
+ * ARCHON (N3): the house-vs-house matchup matrix.
+ *
+ * Read as "the row house, when facing the column house". Every game feeds nine
+ * cells, because each deck brings three houses — so a cell counts games in
+ * which a deck containing that house met a deck containing the other, which is
+ * what a KeyForge matchup table means.
+ *
+ * Cells with too few games behind them are blank rather than coloured: a 100%
+ * win rate off two games reads as a finding and is noise.
+ */
+const MatchupMatrix = ({ matchups }) => {
+    const { t } = useTranslation();
+    const houses = matchups?.houses || [];
+    const cells = matchups?.cells || {};
+
+    if (houses.length === 0) {
+        return null;
+    }
+
+    const cellClass = (winRate) => {
+        if (winRate == null) {
+            return 'text-muted';
+        }
+
+        if (winRate >= 55) {
+            return 'bg-emerald-500/20 text-emerald-200';
+        }
+
+        if (winRate <= 45) {
+            return 'bg-rose-500/20 text-rose-200';
+        }
+
+        return 'text-foreground';
+    };
+
+    return (
+        <Panel title={t('House Matchups')}>
+            <p className='mb-3 text-xs text-muted'>
+                {t(
+                    'How often a deck containing the row house beats a deck containing the column house. Matchups with fewer than {{min}} games are left blank.',
+                    { min: matchups.minGames }
+                )}
+            </p>
+            <div className='overflow-x-auto'>
+                <table className='w-full border-collapse text-sm'>
+                    <thead>
+                        <tr className='text-xs uppercase tracking-wide text-muted'>
+                            <th className='px-2 py-1 text-left'>{t('vs')}</th>
+                            {houses.map((house) => (
+                                <th key={house} className='px-2 py-1 text-center'>
+                                    {t(house)}
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {houses.map((house) => (
+                            <tr key={house} className='border-b border-border/40'>
+                                <td className='whitespace-nowrap px-2 py-1.5 text-foreground'>
+                                    {t(house)}
+                                </td>
+                                {houses.map((opponent) => {
+                                    const cell = cells[`${house}|${opponent}`];
+
+                                    return (
+                                        <td
+                                            key={opponent}
+                                            className={`px-2 py-1.5 text-center ${cellClass(
+                                                cell?.winRate
+                                            )}`}
+                                            title={
+                                                cell
+                                                    ? t('{{games}} games', { games: cell.games })
+                                                    : undefined
+                                            }
+                                        >
+                                            {cell?.winRate == null ? '—' : `${cell.winRate}%`}
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </Panel>
+    );
+};
+
+MatchupMatrix.displayName = 'MatchupMatrix';
+
 const MetaStats = () => {
     const { t } = useTranslation();
     const { data, isFetching, isError } = useGetMetaStatsQuery();
@@ -120,6 +212,13 @@ const MetaStats = () => {
         value: format.share,
         valueLabel: pct(format.share),
         sub: t('({{count}} games)', { count: format.games })
+    }));
+
+    // ARCHON (N3): win rate per expansion.
+    const setItems = (stats.sets || []).map((entry) => ({
+        label: entry.set,
+        value: entry.winRate,
+        detail: t('{{games}} games', { games: entry.games })
     }));
 
     const sasItems = (stats.sasBands || []).map((band) => ({
@@ -189,6 +288,21 @@ const MetaStats = () => {
                             emptyText={t('No rated decks have finished a game yet.')}
                         />
                     </Panel>
+
+                    <Panel title={t('Win Rate by Set')}>
+                        <p className='mb-3 text-xs text-muted'>
+                            {t(
+                                'Share of games won by decks from each expansion, newest set first. The line marks an even 50%.'
+                            )}
+                        </p>
+                        <BarList
+                            items={setItems}
+                            showMidline
+                            emptyText={t('No sets have finished a game yet.')}
+                        />
+                    </Panel>
+
+                    <MatchupMatrix matchups={stats.houseMatchups} />
 
                     <Panel title={t('Format Popularity')}>
                         <p className='mb-3 text-xs text-muted'>
@@ -341,7 +455,8 @@ const DeckStats = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
     const { data, isFetching } = useGetDeckStatsQuery(user?.username, { skip: !user });
-    const decks = data?.stats?.decks || [];
+    const stats = data?.stats;
+    const decks = stats?.decks || [];
 
     if (!user) {
         return (
@@ -365,60 +480,146 @@ const DeckStats = () => {
         );
     }
 
+    // ARCHON (N3): the callouts. Ranked by how far a deck beats what its SAS
+    // band predicts, not by raw win rate - see StatisticsService.deckCallouts
+    // for why that is the more useful question.
+    const callouts = [
+        stats?.bestDeck && {
+            key: 'best',
+            label: t('Your best deck'),
+            deck: stats.bestDeck,
+            tone: 'text-emerald-300'
+        },
+        stats?.worstDeck && {
+            key: 'worst',
+            label: t('Your weakest result'),
+            deck: stats.worstDeck,
+            tone: 'text-rose-300'
+        }
+    ].filter(Boolean);
+
+    const matchupItems = (stats?.matchups || [])
+        .filter((entry) => entry.winRate != null)
+        .map((entry) => ({
+            label: entry.opponentHouse,
+            value: entry.winRate,
+            detail: t('{{games}} games', { games: entry.games })
+        }));
+
     return (
-        <Panel title={t('Your Decks')}>
-            <p className='mb-3 text-xs text-muted'>
-                {t(
-                    'Delta compares each deck to what decks of its SAS band actually win here. Positive means it beats its paper strength.'
-                )}
-            </p>
-            <div className='overflow-x-auto'>
-                <table className='w-full text-sm'>
-                    <thead>
-                        <tr className='text-left text-xs uppercase tracking-wide text-muted'>
-                            <th className='px-2 py-1'>{t('Deck')}</th>
-                            <th className='px-2 py-1 text-center'>{t('SAS')}</th>
-                            <th className='px-2 py-1 text-center'>{t('W-L')}</th>
-                            <th className='px-2 py-1 text-center'>{t('Win %')}</th>
-                            <th className='px-2 py-1 text-center'>{t('Delta')}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {decks.map((deck) => (
-                            <tr key={deck.deckId} className='border-b border-border/40'>
-                                <td className='max-w-0 truncate px-2 py-1.5 text-foreground'>
-                                    {deck.name}
-                                </td>
-                                <td className='px-2 py-1.5 text-center text-muted'>
-                                    {deck.sasRating ?? '-'}
-                                </td>
-                                <td className='px-2 py-1.5 text-center text-muted'>
-                                    {deck.wins}-{deck.losses}
-                                </td>
-                                <td className='px-2 py-1.5 text-center font-semibold text-foreground'>
-                                    {deck.winRate}%
-                                </td>
-                                <td
-                                    className={`px-2 py-1.5 text-center font-semibold ${
-                                        deck.sasDelta == null
-                                            ? 'text-muted'
-                                            : deck.sasDelta > 0
-                                            ? 'text-emerald-300'
-                                            : deck.sasDelta < 0
-                                            ? 'text-rose-300'
-                                            : 'text-muted'
-                                    }`}
-                                >
-                                    {deck.sasDelta == null
-                                        ? '-'
-                                        : `${deck.sasDelta > 0 ? '+' : ''}${deck.sasDelta}`}
-                                </td>
-                            </tr>
+        <div className='space-y-4'>
+            {callouts.length > 0 && (
+                <Panel title={t('Highlights')}>
+                    <div className='grid gap-3 sm:grid-cols-2'>
+                        {callouts.map((callout) => (
+                            <div
+                                key={callout.key}
+                                className='rounded-md border border-border/55 bg-surface-secondary/35 px-3 py-2'
+                            >
+                                <div className='text-xs uppercase tracking-wide text-muted'>
+                                    {callout.label}
+                                </div>
+                                <div className='truncate text-sm font-semibold text-foreground'>
+                                    {callout.deck.name}
+                                </div>
+                                <div className='text-xs text-muted'>
+                                    {t('{{wins}}-{{losses}} · {{rate}}% win rate', {
+                                        wins: callout.deck.wins,
+                                        losses: callout.deck.losses,
+                                        rate: callout.deck.winRate
+                                    })}
+                                    {callout.deck.sasDelta != null && (
+                                        <span className={`ml-1 font-semibold ${callout.tone}`}>
+                                            {callout.deck.sasDelta > 0 ? '+' : ''}
+                                            {callout.deck.sasDelta} {t('vs its SAS band')}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
                         ))}
-                    </tbody>
-                </table>
-            </div>
-        </Panel>
+                    </div>
+                    <p className='mt-2 text-xs text-muted'>
+                        {t(
+                            'Ranked by how far each deck beats what decks of its power actually win here, so a modest deck you pilot well outranks a strong deck with ordinary results. Decks with fewer than {{min}} games are not considered.',
+                            { min: stats?.calloutMinGames ?? 5 }
+                        )}
+                    </p>
+                </Panel>
+            )}
+
+            {stats?.bestMatchup && stats?.worstMatchup && (
+                <Panel title={t('Your Matchups')}>
+                    <p className='mb-3 text-xs text-muted'>
+                        {t(
+                            'How you do against decks containing each house. Best: {{best}}. Hardest: {{worst}}.',
+                            {
+                                best: stats.bestMatchup.opponentHouse,
+                                worst: stats.worstMatchup.opponentHouse
+                            }
+                        )}
+                    </p>
+                    <BarList
+                        items={matchupItems}
+                        showMidline
+                        emptyText={t('Not enough games against any house yet.')}
+                    />
+                </Panel>
+            )}
+
+            <Panel title={t('Your Decks')}>
+                <p className='mb-3 text-xs text-muted'>
+                    {t(
+                        'Delta compares each deck to what decks of its SAS band actually win here. Positive means it beats its paper strength.'
+                    )}
+                </p>
+                <div className='overflow-x-auto'>
+                    <table className='w-full text-sm'>
+                        <thead>
+                            <tr className='text-left text-xs uppercase tracking-wide text-muted'>
+                                <th className='px-2 py-1'>{t('Deck')}</th>
+                                <th className='px-2 py-1 text-center'>{t('SAS')}</th>
+                                <th className='px-2 py-1 text-center'>{t('W-L')}</th>
+                                <th className='px-2 py-1 text-center'>{t('Win %')}</th>
+                                <th className='px-2 py-1 text-center'>{t('Delta')}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {decks.map((deck) => (
+                                <tr key={deck.deckId} className='border-b border-border/40'>
+                                    <td className='max-w-0 truncate px-2 py-1.5 text-foreground'>
+                                        {deck.name}
+                                    </td>
+                                    <td className='px-2 py-1.5 text-center text-muted'>
+                                        {deck.sasRating ?? '-'}
+                                    </td>
+                                    <td className='px-2 py-1.5 text-center text-muted'>
+                                        {deck.wins}-{deck.losses}
+                                    </td>
+                                    <td className='px-2 py-1.5 text-center font-semibold text-foreground'>
+                                        {deck.winRate}%
+                                    </td>
+                                    <td
+                                        className={`px-2 py-1.5 text-center font-semibold ${
+                                            deck.sasDelta == null
+                                                ? 'text-muted'
+                                                : deck.sasDelta > 0
+                                                ? 'text-emerald-300'
+                                                : deck.sasDelta < 0
+                                                ? 'text-rose-300'
+                                                : 'text-muted'
+                                        }`}
+                                    >
+                                        {deck.sasDelta == null
+                                            ? '-'
+                                            : `${deck.sasDelta > 0 ? '+' : ''}${deck.sasDelta}`}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </Panel>
+        </div>
     );
 };
 

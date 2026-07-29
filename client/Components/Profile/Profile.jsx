@@ -8,6 +8,8 @@ import * as yup from 'yup';
 import ProfileMain from './ProfileMain';
 import ProfileBackground from './ProfileBackground';
 import KeyforgeGameSettings from './KeyforgeGameSettings';
+// ARCHON (N2): per-category notification delivery preferences
+import NotificationPreferences from './NotificationPreferences';
 import ProfileCardSize from './ProfileCardSize';
 import { Constants } from '../../constants';
 import { toBase64 } from '../../util.jsx';
@@ -78,7 +80,9 @@ const ProfileSection = Object.freeze({
     Account: 'account',
     Integrations: 'integrations',
     Appearance: 'appearance',
-    Gameplay: 'gameplay'
+    Gameplay: 'gameplay',
+    // ARCHON (N2): per-category notification opt-out.
+    Notifications: 'notifications'
 });
 
 // ARCHON: the Integrations tab (Patreon linking and - once SSO is enabled -
@@ -228,7 +232,8 @@ const Profile = ({ onSubmit, isLoading }) => {
                                             ? [[ProfileSection.Integrations, t('Integrations')]]
                                             : []),
                                         [ProfileSection.Appearance, t('Appearance')],
-                                        [ProfileSection.Gameplay, t('Gameplay')]
+                                        [ProfileSection.Gameplay, t('Gameplay')],
+                                        [ProfileSection.Notifications, t('Notifications')]
                                     ].map(([sectionKey, label]) => (
                                         <HeroButton
                                             key={sectionKey}
@@ -257,6 +262,8 @@ const Profile = ({ onSubmit, isLoading }) => {
                                             ? t('Appearance')
                                             : activeSection === ProfileSection.Gameplay
                                             ? t('Gameplay')
+                                            : activeSection === ProfileSection.Notifications
+                                            ? t('Notifications')
                                             : t('Settings')}
                                     </h2>
                                 </header>
@@ -303,6 +310,12 @@ const Profile = ({ onSubmit, isLoading }) => {
                                                 formProps={formProps}
                                                 user={user}
                                             />
+                                        )}
+                                        {/* ARCHON (N2): saves on toggle, not
+                                            through the form's Save button - it
+                                            is not part of the profile form. */}
+                                        {activeSection === ProfileSection.Notifications && (
+                                            <NotificationPreferences />
                                         )}
                                     </div>
                                 </div>

@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const _ = require('underscore');
 
 const logger = require('../log.js');
@@ -6,8 +7,16 @@ const db = require('../db');
 class GameService {
     // ARCHON: db is injectable (defaults to the shared PG pool) so the
     // service is unit-testable, matching RatingService/TournamentService.
-    constructor(database = db) {
+    // settingsService likewise, so retention and capture limits can be driven
+    // from the admin panel without the service reaching for a singleton.
+    constructor(database = db, settingsService = require('./settings')) {
         this.db = database;
+        this.settingsService = settingsService;
+    }
+
+    /** Replay settings (registry defaults with admin overrides applied). */
+    getReplayConfig() {
+        return this.settingsService.getSectionWithDefaults('replay');
     }
 
     async create(game) {
@@ -134,7 +143,47 @@ class GameService {
      * { gameId, gameFormat, startedAt, finishedAt, winReason,
      *   winner, players: [{ name, deck, keys }], decks: [{ name, identity }] }.
      */
-    async findByUserName(username) {
+    async findByUserName(username, filters = {}) {
+        // ARCHON: filters (deck / opponent / format / result) are applied
+        // inside the CTE, before the row limit - filtering the last 30 games
+        // client-side would silently answer "you have never played that deck"
+        // for anyone with a longer history.
+        const params = [username];
+        const conditions = [];
+
+        if (filters.format) {
+            params.push(filters.format);
+            conditions.push(`g."GameFormat" = $${params.length}`);
+        }
+
+        if (filters.deck) {
+            params.push(String(filters.deck));
+            conditions.push(
+                `EXISTS (SELECT 1 FROM "Decks" fd WHERE fd."Id" = gp."DeckId" ` +
+                    `AND (fd."Identity" = $${params.length} OR fd."Name" ILIKE '%' || $${params.length} || '%'))`
+            );
+        }
+
+        if (filters.opponent) {
+            params.push(String(filters.opponent));
+            conditions.push(
+                `EXISTS (SELECT 1 FROM "GamePlayers" ogp ` +
+                    `JOIN "Users" ou ON ou."Id" = ogp."PlayerId" ` +
+                    `WHERE ogp."GameId" = g."Id" AND ogp."PlayerId" <> u."Id" ` +
+                    `AND lower(ou."Username") = lower($${params.length}))`
+            );
+        }
+
+        if (filters.result === 'win') {
+            conditions.push('g."WinnerId" = u."Id"');
+        } else if (filters.result === 'loss') {
+            conditions.push('g."WinnerId" IS NOT NULL AND g."WinnerId" <> u."Id"');
+        }
+
+        // Bounded so a crafted limit cannot ask for the whole game log.
+        const requested = parseInt(filters.limit, 10);
+        const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 200) : 30;
+
         const rows = await this.db.query(
             'WITH user_games AS (' +
                 'SELECT g."Id", g."GameId", g."GameFormat", g."StartedAt", ' +
@@ -143,7 +192,8 @@ class GameService {
                 'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
                 'JOIN "Users" u ON u."Id" = gp."PlayerId" ' +
                 'WHERE u."Username" = $1 AND g."FinishedAt" IS NOT NULL ' +
-                'ORDER BY g."FinishedAt" DESC LIMIT 30' +
+                (conditions.length ? `AND ${conditions.join(' AND ')} ` : '') +
+                `ORDER BY g."FinishedAt" DESC LIMIT ${limit}` +
                 ') ' +
                 'SELECT ug."GameId", ug."GameFormat", ug."StartedAt", ' +
                 'ug."FinishedAt", ug."WinReason", wu."Username" AS "Winner", gp."Keys", ' +
@@ -155,7 +205,7 @@ class GameService {
                 'LEFT JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                 'LEFT JOIN "Users" wu ON wu."Id" = ug."WinnerId" ' +
                 'ORDER BY ug."FinishedAt" DESC, gp."Id"',
-            [username]
+            params
         );
 
         // Group the flat rows (one per player) into game objects, keeping
@@ -197,20 +247,89 @@ class GameService {
     }
 
     /**
+     * ARCHON: the values that actually appear in this player's history, so the
+     * filter controls offer real choices instead of the site-wide list of every
+     * format and a free-text box you have to guess into.
+     */
+    async getGameFilterOptions(username) {
+        const [formatRows, deckRows, opponentRows] = await Promise.all([
+            this.db.query(
+                'SELECT DISTINCT g."GameFormat" AS "format" FROM "Games" g ' +
+                    'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                    'JOIN "Users" u ON u."Id" = gp."PlayerId" ' +
+                    'WHERE u."Username" = $1 AND g."FinishedAt" IS NOT NULL ' +
+                    'AND g."GameFormat" IS NOT NULL ORDER BY 1',
+                [username]
+            ),
+            this.db.query(
+                'SELECT d."Identity" AS "identity", d."Name" AS "name", COUNT(*) AS "games" ' +
+                    'FROM "Games" g ' +
+                    'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                    'JOIN "Users" u ON u."Id" = gp."PlayerId" ' +
+                    'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                    'WHERE u."Username" = $1 AND g."FinishedAt" IS NOT NULL ' +
+                    'GROUP BY d."Identity", d."Name" ORDER BY COUNT(*) DESC, d."Name" LIMIT 100',
+                [username]
+            ),
+            this.db.query(
+                'SELECT ou."Username" AS "username", COUNT(*) AS "games" FROM "Games" g ' +
+                    'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                    'JOIN "Users" u ON u."Id" = gp."PlayerId" ' +
+                    'JOIN "GamePlayers" ogp ON ogp."GameId" = g."Id" AND ogp."PlayerId" <> u."Id" ' +
+                    'JOIN "Users" ou ON ou."Id" = ogp."PlayerId" ' +
+                    'WHERE u."Username" = $1 AND g."FinishedAt" IS NOT NULL ' +
+                    'GROUP BY ou."Username" ORDER BY COUNT(*) DESC, ou."Username" LIMIT 100',
+                [username]
+            )
+        ]);
+
+        return {
+            formats: (formatRows || []).map((row) => row.format),
+            decks: (deckRows || []).map((row) => ({
+                identity: row.identity,
+                name: row.name,
+                games: Number(row.games) || 0
+            })),
+            opponents: (opponentRows || []).map((row) => ({
+                username: row.username,
+                games: Number(row.games) || 0
+            }))
+        };
+    }
+
+    /**
      * ARCHON: persist a finished game's replay (structured play-by-play),
      * keyed to the game's DB row. Best-effort and idempotent (one replay per
      * game); oversized captures are skipped rather than stored.
+     *
+     * The size cap and the recording switch are admin-configurable
+     * (Site Settings > Replays). A skip used to be a bare log line, which read
+     * from the outside exactly like "this game was never recorded"; the return
+     * value now says which happened so callers - and the tests - can tell.
      */
     async saveReplay(gameUuid, replay) {
         if (!gameUuid || !replay) {
-            return;
+            return { stored: false, reason: 'no-replay' };
+        }
+
+        const config = this.getReplayConfig();
+
+        if (!config.enabled) {
+            return { stored: false, reason: 'disabled' };
         }
 
         const data = JSON.stringify(replay);
-        // Guard against a pathologically large log bloating storage.
-        if (data.length > 2000000) {
-            logger.warn(`Skipping oversized replay for game ${gameUuid} (${data.length} bytes)`);
-            return;
+        // Guard against a pathologically large log bloating storage. Configured
+        // in KB because that is the unit an operator sizing a disk thinks in.
+        const maxBytes = Math.max(1, Number(config.maxCaptureKb) || 2000) * 1000;
+
+        if (data.length > maxBytes) {
+            logger.warn(
+                `Skipping oversized replay for game ${gameUuid} (${data.length} bytes, ` +
+                    `limit ${maxBytes}). Raise Site Settings > Replays > largest replay to keep these.`
+            );
+
+            return { stored: false, reason: 'too-large', bytes: data.length, limit: maxBytes };
         }
 
         await this.db.query(
@@ -219,6 +338,8 @@ class GameService {
                 'ON CONFLICT ("GameDbId") DO NOTHING',
             [gameUuid, data]
         );
+
+        return { stored: true, bytes: data.length };
     }
 
     /**
@@ -227,12 +348,156 @@ class GameService {
      */
     async getReplay(gameUuid) {
         const rows = await this.db.query(
-            'SELECT gr."Data" FROM "GameReplays" gr ' +
+            'SELECT gr."Data", gr."ShareToken" FROM "GameReplays" gr ' +
                 'JOIN "Games" g ON g."Id" = gr."GameDbId" WHERE g."GameId" = $1',
             [gameUuid]
         );
 
-        return rows && rows[0] ? rows[0].Data : null;
+        if (!rows || !rows[0]) {
+            return null;
+        }
+
+        return { ...rows[0].Data, shareToken: rows[0].ShareToken || null };
+    }
+
+    /**
+     * ARCHON: delete replays older than the configured retention window.
+     *
+     * Returns the number of rows removed. `retentionDays` of 0 means keep
+     * everything, which is the default - a site that has not thought about
+     * retention should not silently start destroying game history.
+     */
+    async purgeExpiredReplays(retentionDays = this.getReplayConfig().retentionDays) {
+        const days = Number(retentionDays);
+
+        if (!Number.isFinite(days) || days <= 0) {
+            return 0;
+        }
+
+        const rows = await this.db.query(
+            'DELETE FROM "GameReplays" ' +
+                "WHERE \"CreatedAt\" < (now() AT TIME ZONE 'utc') - ($1 || ' days')::interval " +
+                'RETURNING "GameDbId"',
+            [String(Math.floor(days))]
+        );
+
+        const removed = rows ? rows.length : 0;
+
+        if (removed > 0) {
+            logger.info(`Replay retention: removed ${removed} replay(s) older than ${days} days`);
+        }
+
+        return removed;
+    }
+
+    /**
+     * ARCHON: was this user one of the two players in this game?
+     *
+     * Sharing is a player's call about their own game, so the answer has to
+     * come from the game record rather than from whoever happens to be able to
+     * read the replay (which today is every logged-in account).
+     */
+    async isGameParticipant(gameUuid, userId) {
+        if (!gameUuid || !userId) {
+            return false;
+        }
+
+        const rows = await this.db.query(
+            'SELECT 1 FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                'WHERE g."GameId" = $1 AND gp."PlayerId" = $2',
+            [gameUuid, userId]
+        );
+
+        return !!(rows && rows.length > 0);
+    }
+
+    /**
+     * ARCHON: mint (or return) the public share link token for a replay.
+     *
+     * Idempotent: asking twice hands back the same token, so a player who
+     * shares a game, loses the link and shares again does not invalidate the
+     * link they already sent someone. 32 hex characters from the CSPRNG - the
+     * token is the whole credential, so it has to be unguessable.
+     */
+    async createShareToken(gameUuid, userId) {
+        if (!this.getReplayConfig().allowSharing) {
+            return { success: false, message: 'Replay sharing is disabled on this site' };
+        }
+
+        if (!(await this.isGameParticipant(gameUuid, userId))) {
+            return { success: false, message: 'Only the players in a game can share it' };
+        }
+
+        const existing = await this.db.query(
+            'SELECT gr."ShareToken" FROM "GameReplays" gr ' +
+                'JOIN "Games" g ON g."Id" = gr."GameDbId" WHERE g."GameId" = $1',
+            [gameUuid]
+        );
+
+        if (!existing || existing.length === 0) {
+            return { success: false, message: 'No replay was recorded for that game' };
+        }
+
+        if (existing[0].ShareToken) {
+            return { success: true, shareToken: existing[0].ShareToken };
+        }
+
+        const token = crypto.randomBytes(16).toString('hex');
+
+        await this.db.query(
+            'UPDATE "GameReplays" SET "ShareToken" = $2, ' +
+                '"SharedAt" = now() AT TIME ZONE \'utc\', "SharedBy" = $3 ' +
+                'WHERE "GameDbId" = (SELECT "Id" FROM "Games" WHERE "GameId" = $1)',
+            [gameUuid, token, userId]
+        );
+
+        return { success: true, shareToken: token };
+    }
+
+    /** Revoke a share link. The replay itself is untouched. */
+    async revokeShareToken(gameUuid, userId) {
+        if (!(await this.isGameParticipant(gameUuid, userId))) {
+            return { success: false, message: 'Only the players in a game can unshare it' };
+        }
+
+        await this.db.query(
+            'UPDATE "GameReplays" SET "ShareToken" = NULL, "SharedAt" = NULL, "SharedBy" = NULL ' +
+                'WHERE "GameDbId" = (SELECT "Id" FROM "Games" WHERE "GameId" = $1)',
+            [gameUuid]
+        );
+
+        return { success: true };
+    }
+
+    /**
+     * ARCHON: a shared replay, looked up by its token. This is the only path
+     * that serves a replay to an anonymous caller, and it can only ever return
+     * a recording someone deliberately shared.
+     *
+     * The recording is spectator-safe by construction (snapshots are rendered
+     * through AnonymousSpectator), so a share link cannot reveal more than
+     * watching the game would have.
+     */
+    async getReplayByShareToken(token) {
+        if (!token || typeof token !== 'string') {
+            return null;
+        }
+
+        if (!this.getReplayConfig().allowSharing) {
+            return null;
+        }
+
+        const rows = await this.db.query(
+            'SELECT gr."Data", g."GameId" FROM "GameReplays" gr ' +
+                'JOIN "Games" g ON g."Id" = gr."GameDbId" WHERE gr."ShareToken" = $1',
+            [token]
+        );
+
+        if (!rows || !rows[0]) {
+            return null;
+        }
+
+        return { ...rows[0].Data, gameId: rows[0].GameId, shared: true };
     }
 }
 
