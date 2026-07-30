@@ -77,6 +77,10 @@ class Game extends EventEmitter {
         this.previousWinner = details.previousWinner;
         this.savedGameId = details.savedGameId;
         this.showHand = details.showHand;
+        // ARCHON (N1): seconds to hold the board back from spectators. Set from
+        // the site's Watch settings when the game is handed to the node; the
+        // game itself only carries the value, the node enforces it.
+        this.spectatorDelaySeconds = details.spectatorDelaySeconds || 0;
         this.started = false;
         this.errorHandling = false;
         this.swap = details.swap;

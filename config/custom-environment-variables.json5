@@ -9,6 +9,7 @@
     dbDatabase: 'DB_NAME',
     redisUrl: 'REDIS_URL',
     redisKeyPrefix: 'REDIS_KEY_PREFIX',
+    gameNodeOrigins: 'GAME_NODE_ORIGINS',
     secret: 'SECRET',
     domain: 'DOMAIN',
     https: 'false',
@@ -23,6 +24,8 @@
         // player who forgets their password cannot recover their account.
         emailFromAddress: 'EMAIL_FROM_ADDRESS',
         emailReplyTo: 'EMAIL_REPLY_TO',
+        // Public origin for absolute links in notification email.
+        siteUrl: 'SITE_URL',
         awsSesRegion: 'AWS_SES_REGION',
         awsAccessKeyId: 'AWS_ACCESS_KEY_ID',
         awsSecretAccessKey: 'AWS_SECRET_ACCESS_KEY'

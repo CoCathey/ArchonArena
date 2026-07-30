@@ -1786,6 +1786,7 @@ class TournamentService {
 
         logger.info(`Tournament ${tournamentId} started by user ${actor.id}`);
 
+        this.emitTournamentStarted(tournamentId);
         this.emitRoundPaired(tournamentId);
 
         return { success: true };
@@ -1797,6 +1798,77 @@ class TournamentService {
         } catch (err) {
             logger.error(`Failed to emit roundPaired for tournament ${tournamentId}`, err);
         }
+    }
+
+    /**
+     * ARCHON: the event has begun (N2). Distinct from 'roundPaired', which also
+     * fires for rounds 2..n - a player wants "your event is starting" once, and
+     * "you are paired" every round.
+     */
+    emitTournamentStarted(tournamentId) {
+        try {
+            tournamentEvents.emit('tournamentStarted', { tournamentId });
+        } catch (err) {
+            logger.error(`Failed to emit tournamentStarted for tournament ${tournamentId}`, err);
+        }
+    }
+
+    /**
+     * ARCHON: who is playing whom in the current round, for notifications (N2).
+     *
+     * Deliberately separate from getMatchesNeedingGames, which is scoped to
+     * online events that still need a lobby table. A pairing ping matters most
+     * at a paper event, where there is no auto-created game to notice.
+     */
+    async getCurrentRoundPairings(tournamentId) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament || tournament.Status !== 'active' || !tournament.CurrentRound) {
+            return null;
+        }
+
+        const rows = await this.db.query(
+            'SELECT m."Id", m."TableNumber", m."Player1Id", m."Player2Id", ' +
+                'u1."Username" AS "Player1Name", u2."Username" AS "Player2Name" ' +
+                'FROM "TournamentMatches" m ' +
+                'LEFT JOIN "Users" u1 ON u1."Id" = m."Player1Id" ' +
+                'LEFT JOIN "Users" u2 ON u2."Id" = m."Player2Id" ' +
+                'WHERE m."TournamentId" = $1 AND m."Round" = $2 ' +
+                'ORDER BY m."TableNumber" NULLS LAST, m."Id"',
+            [tournamentId, tournament.CurrentRound]
+        );
+
+        return {
+            tournamentId: tournament.Id,
+            name: tournament.Name,
+            round: tournament.CurrentRound,
+            matches: (rows || []).map((row) => ({
+                matchId: row.Id,
+                table: row.TableNumber,
+                players: [
+                    { userId: row.Player1Id, username: row.Player1Name },
+                    { userId: row.Player2Id, username: row.Player2Name }
+                ].filter((player) => !!player.userId)
+            }))
+        };
+    }
+
+    /**
+     * Playing participants of an event, for notifications (N2): registered,
+     * not dropped, and not still on the waitlist - a waitlisted player has not
+     * got in, so telling them the event they are not in has started would be
+     * worse than saying nothing.
+     */
+    async getActiveParticipants(tournamentId) {
+        const rows = await this.db.query(
+            'SELECT tp."UserId", u."Username" FROM "TournamentPlayers" tp ' +
+                'JOIN "Users" u ON u."Id" = tp."UserId" ' +
+                'WHERE tp."TournamentId" = $1 AND tp."Dropped" = false ' +
+                'AND tp."Waitlisted" = false',
+            [tournamentId]
+        );
+
+        return (rows || []).map((row) => ({ userId: row.UserId, username: row.Username }));
     }
 
     async roundComplete(tournamentId, round) {

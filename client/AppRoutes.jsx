@@ -16,6 +16,7 @@ import Logout from './pages/Logout';
 import CommunityNews from './pages/CommunityNews';
 import ContentPageGuard from './Components/Navigation/ContentPageGuard';
 import Replay from './pages/Replay';
+import SharedReplay from './pages/SharedReplay';
 import Stats from './pages/Stats';
 import Leaderboards from './pages/Leaderboards';
 import Matches from './pages/Matches';
@@ -121,6 +122,10 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/matches' element={<Matches />} />
             {/* ARCHON: public player profile - every username on the site links here */}
             <Route path='/players/:username' element={<PlayerProfile />} />
+            {/* ARCHON (N1): public share link. Registered before the
+                parameterised replay route so 'shared' is never read as a
+                game id. */}
+            <Route path='/replay/shared/:token' element={<SharedReplay />} />
             <Route path='/replay/:gameId' element={<Replay />} />
             <Route
                 path='/community/news'

@@ -624,7 +624,12 @@ module.exports.init = function (server, options) {
             // message is deliberately the same regardless of which key tripped,
             // so it reveals nothing about whether the account exists.
             const keys = loginKeys(req);
-            const lockedFor = Math.max(...keys.map((key) => loginFailures.blockedFor(key)));
+            // ARCHON (I5): the throttle is Redis-backed and therefore async.
+            // These must be awaited - an unawaited check would let every
+            // attempt through while the lockout was still being read.
+            const lockedFor = Math.max(
+                ...(await Promise.all(keys.map((key) => loginFailures.blockedFor(key))))
+            );
 
             if (lockedFor > 0) {
                 res.set('Retry-After', String(lockedFor));
@@ -636,17 +641,18 @@ module.exports.init = function (server, options) {
                 });
             }
 
-            const recordFailedLogin = () => keys.forEach((key) => loginFailures.recordFailure(key));
+            const recordFailedLogin = () =>
+                Promise.all(keys.map((key) => loginFailures.recordFailure(key)));
 
             let user = await userService.getFullUserByUsername(req.body.username);
             if (!user) {
-                recordFailedLogin();
+                await recordFailedLogin();
 
                 return res.send({ success: false, message: 'Invalid username/password' });
             }
 
             if (user.disabled) {
-                recordFailedLogin();
+                await recordFailedLogin();
 
                 return res.send({ success: false, message: 'Invalid username/password' });
             }
@@ -665,7 +671,7 @@ module.exports.init = function (server, options) {
             }
 
             if (!isValidPassword) {
-                recordFailedLogin();
+                await recordFailedLogin();
 
                 return res.send({ success: false, message: 'Invalid username/password' });
             }
@@ -679,7 +685,7 @@ module.exports.init = function (server, options) {
 
             // Correct credentials: clear the lockout counters so a legitimate
             // user is never penalised for earlier typos.
-            keys.forEach((key) => loginFailures.reset(key));
+            await Promise.all(keys.map((key) => loginFailures.reset(key)));
 
             let userObj = user.getWireSafeDetails();
 

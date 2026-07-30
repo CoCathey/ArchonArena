@@ -14,8 +14,11 @@ const JOIN_CODE_LENGTH = 8;
  * can join without searching (used by the onboarding wizard too).
  */
 class ClubService {
-    constructor(db = require('../../db')) {
+    // ARCHON: notifications (N2) are injected and optional - a ClubService
+    // built without one behaves exactly as it always did.
+    constructor(db = require('../../db'), notificationService = null) {
         this.db = db;
+        this.notificationService = notificationService;
     }
 
     generateJoinCode() {
@@ -158,11 +161,38 @@ class ClubService {
             return { success: false, message: 'No such club' };
         }
 
-        await this.db.query(
+        const inserted = await this.db.query(
             'INSERT INTO "ClubMembers" ("ClubId", "UserId", "CreatedAt") ' +
-                "VALUES ($1, $2, now() AT TIME ZONE 'utc') ON CONFLICT DO NOTHING",
+                "VALUES ($1, $2, now() AT TIME ZONE 'utc') ON CONFLICT DO NOTHING " +
+                'RETURNING "Id"',
             [clubId, actorId]
         );
+
+        // ARCHON (N2): the club owner is the only person who can act on a new
+        // member, and with invite codes they otherwise have no idea anyone
+        // used theirs. Only on an actual insert - re-joining a club you are
+        // already in is not news - and never to yourself, since the owner's own
+        // membership row is created by create().
+        if (
+            this.notificationService &&
+            inserted &&
+            inserted.length > 0 &&
+            club.OwnerId !== actorId
+        ) {
+            const rows = await this.db.query('SELECT "Username" FROM "Users" WHERE "Id" = $1', [
+                actorId
+            ]);
+            const username = rows && rows[0] ? rows[0].Username : 'A player';
+
+            // Not awaited: joining a club must not sit behind an email send.
+            this.notificationService.notify({
+                userId: club.OwnerId,
+                category: 'club.join',
+                title: `${username} joined ${club.Name}`,
+                url: `/community/clubs/${clubId}`,
+                data: { clubId, clubName: club.Name, username }
+            });
+        }
 
         return { success: true };
     }

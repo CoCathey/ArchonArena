@@ -66,6 +66,43 @@ function sasBandCaseSql(column) {
 const round2 = (value) => (value == null ? null : Math.round(Number(value) * 100) / 100);
 const roundInt = (value) => (value == null ? null : Math.round(Number(value)));
 
+// A matchup cell needs enough games behind it to mean anything; below this a
+// win rate is noise and is reported as null rather than as a number that will
+// be read as a finding.
+const MIN_MATCHUP_GAMES = 20;
+
+// Likewise for "your best deck": one lucky game is not a callout.
+const MIN_DECK_CALLOUT_GAMES = 5;
+
+/**
+ * ARCHON (N3): shape flat (house, opponent, games, wins) rows into the matrix
+ * the dashboard renders - an ordered house list plus a lookup keyed
+ * `house|opponent`.
+ *
+ * Cells thinner than MIN_MATCHUP_GAMES keep their game count but report a null
+ * win rate: an empty cell says "not enough games" honestly, where 100% off two
+ * games says something false confidently.
+ */
+function buildMatchupMatrix(rows) {
+    const houses = [...new Set((rows || []).flatMap((row) => [row.house, row.opponent]))].sort();
+    const cells = {};
+
+    for (const row of rows || []) {
+        const games = Number(row.games) || 0;
+        const wins = Number(row.wins) || 0;
+
+        cells[`${row.house}|${row.opponent}`] = {
+            house: row.house,
+            opponent: row.opponent,
+            games,
+            wins,
+            winRate: games >= MIN_MATCHUP_GAMES ? winRate(wins, games) : null
+        };
+    }
+
+    return { houses, cells, minGames: MIN_MATCHUP_GAMES };
+}
+
 /**
  * ARCHON: platform statistics & analytics.
  *
@@ -113,55 +150,92 @@ class StatisticsService {
     }
 
     async computeMetaStats() {
-        const [totalsRows, houseRows, formatRows, sasRows] = await Promise.all([
-            // Game-level totals in one round-trip (subqueries keep the
-            // players-level avg keys from double-counting the game rows).
-            this.db.query(
-                'SELECT ' +
-                    '(SELECT COUNT(*) FROM "Games" WHERE "FinishedAt" IS NOT NULL) AS "finishedGames", ' +
-                    '(SELECT COUNT(*) FROM "Games" WHERE "FinishedAt" IS NOT NULL ' +
-                    'AND "WinnerId" IS NOT NULL) AS "decidedGames", ' +
-                    '(SELECT AVG(EXTRACT(EPOCH FROM ("FinishedAt" - "StartedAt"))) FROM "Games" ' +
-                    'WHERE "FinishedAt" IS NOT NULL AND "StartedAt" IS NOT NULL ' +
-                    'AND "FinishedAt" > "StartedAt") AS "avgDurationSec", ' +
-                    '(SELECT AVG(gp."Keys") FROM "GamePlayers" gp ' +
-                    'JOIN "Games" g ON g."Id" = gp."GameId" ' +
-                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL) AS "avgKeys"'
-            ),
-            // Win rate per house: every deck contributes its three houses to
-            // the games it played, won or lost.
-            this.db.query(
-                'SELECT h."Name" AS "house", COUNT(*) AS "games", ' +
-                    'COUNT(*) FILTER (WHERE gp."PlayerId" = g."WinnerId") AS "wins" ' +
-                    'FROM "Games" g ' +
-                    'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
-                    'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
-                    'JOIN "DeckHouses" dh ON dh."DeckId" = d."Id" ' +
-                    'JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
-                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
-                    'GROUP BY h."Name"'
-            ),
-            // Format distribution (one row per game, so count Games directly).
-            this.db.query(
-                'SELECT "GameFormat" AS "format", COUNT(*) AS "games" ' +
-                    'FROM "Games" WHERE "FinishedAt" IS NOT NULL ' +
-                    'GROUP BY "GameFormat" ORDER BY COUNT(*) DESC'
-            ),
-            // Win rate by deck-power band (joined to DeckSas via deck Uuid).
-            this.db.query(
-                'SELECT ' +
-                    sasBandCaseSql('ds."SasRating"') +
-                    ' AS "band", COUNT(*) AS "games", ' +
-                    'COUNT(*) FILTER (WHERE gp."PlayerId" = g."WinnerId") AS "wins" ' +
-                    'FROM "Games" g ' +
-                    'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
-                    'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
-                    'JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
-                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
-                    'AND ds."SasRating" IS NOT NULL ' +
-                    'GROUP BY "band"'
-            )
-        ]);
+        const [totalsRows, houseRows, formatRows, sasRows, setRows, matchupRows] =
+            await Promise.all([
+                // Game-level totals in one round-trip (subqueries keep the
+                // players-level avg keys from double-counting the game rows).
+                this.db.query(
+                    'SELECT ' +
+                        '(SELECT COUNT(*) FROM "Games" WHERE "FinishedAt" IS NOT NULL) AS "finishedGames", ' +
+                        '(SELECT COUNT(*) FROM "Games" WHERE "FinishedAt" IS NOT NULL ' +
+                        'AND "WinnerId" IS NOT NULL) AS "decidedGames", ' +
+                        '(SELECT AVG(EXTRACT(EPOCH FROM ("FinishedAt" - "StartedAt"))) FROM "Games" ' +
+                        'WHERE "FinishedAt" IS NOT NULL AND "StartedAt" IS NOT NULL ' +
+                        'AND "FinishedAt" > "StartedAt") AS "avgDurationSec", ' +
+                        '(SELECT AVG(gp."Keys") FROM "GamePlayers" gp ' +
+                        'JOIN "Games" g ON g."Id" = gp."GameId" ' +
+                        'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL) AS "avgKeys"'
+                ),
+                // Win rate per house: every deck contributes its three houses to
+                // the games it played, won or lost.
+                this.db.query(
+                    'SELECT h."Name" AS "house", COUNT(*) AS "games", ' +
+                        'COUNT(*) FILTER (WHERE gp."PlayerId" = g."WinnerId") AS "wins" ' +
+                        'FROM "Games" g ' +
+                        'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                        'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                        'JOIN "DeckHouses" dh ON dh."DeckId" = d."Id" ' +
+                        'JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
+                        'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                        'GROUP BY h."Name"'
+                ),
+                // Format distribution (one row per game, so count Games directly).
+                this.db.query(
+                    'SELECT "GameFormat" AS "format", COUNT(*) AS "games" ' +
+                        'FROM "Games" WHERE "FinishedAt" IS NOT NULL ' +
+                        'GROUP BY "GameFormat" ORDER BY COUNT(*) DESC'
+                ),
+                // Win rate by deck-power band (joined to DeckSas via deck Uuid).
+                this.db.query(
+                    'SELECT ' +
+                        sasBandCaseSql('ds."SasRating"') +
+                        ' AS "band", COUNT(*) AS "games", ' +
+                        'COUNT(*) FILTER (WHERE gp."PlayerId" = g."WinnerId") AS "wins" ' +
+                        'FROM "Games" g ' +
+                        'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                        'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                        'JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                        'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                        'AND ds."SasRating" IS NOT NULL ' +
+                        'GROUP BY "band"'
+                ),
+                // ARCHON (N3): win rate per expansion. Which sets are actually
+                // winning is the first question anyone asks of a card-game meta,
+                // and the deck already carries its expansion.
+                this.db.query(
+                    'SELECT e."Name" AS "set", e."ExpansionId" AS "expansionId", ' +
+                        'COUNT(*) AS "games", ' +
+                        'COUNT(*) FILTER (WHERE gp."PlayerId" = g."WinnerId") AS "wins" ' +
+                        'FROM "Games" g ' +
+                        'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                        'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                        'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
+                        'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                        'GROUP BY e."Name", e."ExpansionId"'
+                ),
+                // ARCHON (N3): the house-vs-house matchup matrix.
+                //
+                // Every game contributes nine (myHouse, theirHouse) cells, because
+                // each deck brings three houses - so a cell counts games in which
+                // a deck containing that house faced a deck containing the other.
+                // That is what a KeyForge matchup table means; it is not a count of
+                // distinct games, and the row totals deliberately exceed them.
+                this.db.query(
+                    'SELECT h."Name" AS "house", oh."Name" AS "opponent", COUNT(*) AS "games", ' +
+                        'COUNT(*) FILTER (WHERE gp."PlayerId" = g."WinnerId") AS "wins" ' +
+                        'FROM "Games" g ' +
+                        'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                        'JOIN "GamePlayers" ogp ON ogp."GameId" = g."Id" AND ogp."Id" <> gp."Id" ' +
+                        'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                        'JOIN "DeckHouses" dh ON dh."DeckId" = d."Id" ' +
+                        'JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
+                        'JOIN "Decks" od ON od."Id" = ogp."DeckId" ' +
+                        'JOIN "DeckHouses" odh ON odh."DeckId" = od."Id" ' +
+                        'JOIN "Houses" oh ON oh."Id" = odh."HouseId" ' +
+                        'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                        'GROUP BY h."Name", oh."Name"'
+                )
+            ]);
 
         const totals = (totalsRows && totalsRows[0]) || {};
         const formatTotal = (formatRows || []).reduce(
@@ -203,7 +277,18 @@ class StatisticsService {
                     wins: Number(row.wins) || 0,
                     winRate: winRate(row.wins, row.games)
                 }))
-                .sort((a, b) => BAND_ORDER.indexOf(a.band) - BAND_ORDER.indexOf(b.band))
+                .sort((a, b) => BAND_ORDER.indexOf(a.band) - BAND_ORDER.indexOf(b.band)),
+            // Newest set first: that is the one a player is deciding about.
+            sets: (setRows || [])
+                .map((row) => ({
+                    set: row.set,
+                    expansionId: Number(row.expansionId) || null,
+                    games: Number(row.games) || 0,
+                    wins: Number(row.wins) || 0,
+                    winRate: winRate(row.wins, row.games)
+                }))
+                .sort((a, b) => (b.expansionId ?? 0) - (a.expansionId ?? 0)),
+            houseMatchups: buildMatchupMatrix(matchupRows)
         };
     }
 
@@ -239,7 +324,7 @@ class StatisticsService {
             return null;
         }
 
-        const [deckRows, bandRows] = await Promise.all([
+        const [deckRows, bandRows, matchupRows] = await Promise.all([
             this.db.query(
                 'SELECT d."Id", d."Name", d."Identity", ds."SasRating", ' +
                     'COUNT(*) AS "games", ' +
@@ -267,6 +352,22 @@ class StatisticsService {
                     'JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
                     'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
                     'AND ds."SasRating" IS NOT NULL GROUP BY "band"'
+            ),
+            // ARCHON (N3): this player's record against each opposing house -
+            // the "who beats me" half of deck intelligence. Every game
+            // contributes the opponent's three houses.
+            this.db.query(
+                'SELECT oh."Name" AS "opponent", COUNT(*) AS "games", ' +
+                    'COUNT(*) FILTER (WHERE gp."PlayerId" = g."WinnerId") AS "wins" ' +
+                    'FROM "Games" g ' +
+                    'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" AND gp."PlayerId" = $1 ' +
+                    'JOIN "GamePlayers" ogp ON ogp."GameId" = g."Id" AND ogp."PlayerId" <> $1 ' +
+                    'JOIN "Decks" od ON od."Id" = ogp."DeckId" ' +
+                    'JOIN "DeckHouses" odh ON odh."DeckId" = od."Id" ' +
+                    'JOIN "Houses" oh ON oh."Id" = odh."HouseId" ' +
+                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                    'GROUP BY oh."Name"',
+                [user.Id]
             )
         ]);
 
@@ -275,34 +376,92 @@ class StatisticsService {
             bandWinRate[row.band] = winRate(row.wins, row.games);
         }
 
-        return {
-            username: user.Username,
-            decks: (deckRows || []).map((row) => {
+        const decks = (deckRows || []).map((row) => {
+            const games = Number(row.games) || 0;
+            const wins = Number(row.wins) || 0;
+            const rate = winRate(wins, games);
+            const band = sasBandLabel(row.SasRating);
+            const expected = band ? bandWinRate[band] : null;
+
+            return {
+                deckId: row.Id,
+                name: row.Name,
+                identity: row.Identity,
+                sasRating: row.SasRating,
+                sasBand: band,
+                games,
+                wins,
+                losses: Math.max(0, games - wins),
+                winRate: rate,
+                expectedWinRate: expected,
+                // Positive: this deck beats what its power predicts.
+                sasDelta:
+                    rate != null && expected != null
+                        ? Math.round((rate - expected) * 10) / 10
+                        : null,
+                lastPlayed: row.lastPlayed
+            };
+        });
+
+        // ARCHON (N3): the record against each opposing house, best first.
+        const matchups = (matchupRows || [])
+            .map((row) => {
                 const games = Number(row.games) || 0;
                 const wins = Number(row.wins) || 0;
-                const rate = winRate(wins, games);
-                const band = sasBandLabel(row.SasRating);
-                const expected = band ? bandWinRate[band] : null;
 
                 return {
-                    deckId: row.Id,
-                    name: row.Name,
-                    identity: row.Identity,
-                    sasRating: row.SasRating,
-                    sasBand: band,
+                    opponentHouse: row.opponent,
                     games,
                     wins,
                     losses: Math.max(0, games - wins),
-                    winRate: rate,
-                    expectedWinRate: expected,
-                    // Positive: this deck beats what its power predicts.
-                    sasDelta:
-                        rate != null && expected != null
-                            ? Math.round((rate - expected) * 10) / 10
-                            : null,
-                    lastPlayed: row.lastPlayed
+                    winRate: games >= MIN_MATCHUP_GAMES ? winRate(wins, games) : null
                 };
             })
+            .sort((a, b) => (b.winRate ?? -1) - (a.winRate ?? -1));
+
+        const ranked = matchups.filter((entry) => entry.winRate != null);
+
+        return {
+            username: user.Username,
+            decks,
+            matchups,
+            // Only meaningful once there is a matchup on each end - with one
+            // qualifying house, "best" and "worst" would be the same row
+            // presented as two findings.
+            bestMatchup: ranked.length >= 2 ? ranked[0] : null,
+            worstMatchup: ranked.length >= 2 ? ranked[ranked.length - 1] : null,
+            ...this.deckCallouts(decks)
+        };
+    }
+
+    /**
+     * ARCHON (N3): "your best deck" / "your worst deck".
+     *
+     * Ranked by how far a deck beats what its SAS band predicts, not by raw win
+     * rate - a 45% win rate with a weak deck is a better piloting result than
+     * 55% with the strongest deck on the site, and raw win rate would call the
+     * second one your best deck. Decks with no SAS (so no expectation) fall
+     * back to win rate, and anything under MIN_DECK_CALLOUT_GAMES is ignored.
+     */
+    deckCallouts(decks) {
+        const eligible = (decks || []).filter(
+            (deck) => deck.games >= MIN_DECK_CALLOUT_GAMES && deck.winRate != null
+        );
+
+        if (eligible.length === 0) {
+            return { bestDeck: null, worstDeck: null, calloutMinGames: MIN_DECK_CALLOUT_GAMES };
+        }
+
+        const score = (deck) => (deck.sasDelta != null ? deck.sasDelta : deck.winRate - 50);
+        const sorted = [...eligible].sort((a, b) => score(b) - score(a));
+
+        return {
+            bestDeck: sorted[0],
+            // One eligible deck is your best deck and nothing else; calling it
+            // your worst as well would be a true statement that reads as a
+            // criticism.
+            worstDeck: sorted.length >= 2 ? sorted[sorted.length - 1] : null,
+            calloutMinGames: MIN_DECK_CALLOUT_GAMES
         };
     }
 

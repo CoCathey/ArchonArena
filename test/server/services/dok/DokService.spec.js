@@ -464,3 +464,138 @@ describe('DokService.getAercBreakdown', function () {
         expect(await serviceWith([]).getAercBreakdown(undefined)).toBeNull();
     });
 });
+
+describe('DokService background SAS refresh sweep', function () {
+    let service;
+    let db;
+    let config;
+    let fetchMock;
+
+    const uuid = (n) => `${String(n).padStart(8, '0')}-0000-0000-0000-000000000000`;
+
+    beforeEach(function () {
+        config = {
+            enabled: true,
+            apiKey: 'test-key',
+            apiUrl: 'https://dok.example/public-api/v3/decks/',
+            requestTimeoutMs: 1000,
+            refreshDays: 30,
+            maxRequestsPerMinute: 25,
+            sweepBatchSize: 5
+        };
+        db = { query: vi.fn().mockResolvedValue([]) };
+        service = new DokService({ getValue: (key) => (key === 'dok' ? config : undefined) }, db);
+        fetchMock = vi.spyOn(global, 'fetch');
+        DokService._resetRateLimiter();
+    });
+
+    afterEach(function () {
+        fetchMock.mockRestore();
+    });
+
+    const staleDecks = (count) =>
+        db.query.mockImplementation((sql) => {
+            if (sql.includes('LEFT JOIN "DeckSas"')) {
+                return Promise.resolve(
+                    Array.from({ length: count }, (_unused, i) => ({
+                        uuid: uuid(i + 1),
+                        fetchedAt: null
+                    }))
+                );
+            }
+
+            return Promise.resolve([]);
+        });
+
+    const dokReturns = (sasRating) =>
+        fetchMock.mockResolvedValue({ ok: true, json: async () => ({ deck: { sasRating } }) });
+
+    it('refreshes the stale decks it finds and stores the result', async function () {
+        staleDecks(3);
+        dokReturns(72);
+
+        const result = await service.refreshStaleDecks();
+
+        expect(result.refreshed).toBe(3);
+        expect(result.budgetExhausted).toBe(false);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(db.query.mock.calls.some(([sql]) => sql.includes('INSERT INTO "DeckSas"'))).toBe(
+            true
+        );
+    });
+
+    it('asks for the stalest decks first', async function () {
+        staleDecks(1);
+        dokReturns(60);
+
+        await service.refreshStaleDecks();
+
+        const [sql] = db.query.mock.calls[0];
+        expect(sql).toContain('ORDER BY ds."FetchedAt" ASC NULLS FIRST');
+    });
+
+    it('yields the moment live traffic has taken the per-minute budget', async function () {
+        // The load-bearing property: the sweep must never starve a deck import
+        // or a pre-game SAS lookup by queueing ahead of them.
+        config.maxRequestsPerMinute = 2;
+        staleDecks(10);
+        dokReturns(60);
+
+        const result = await service.refreshStaleDecks();
+
+        expect(result.attempted).toBe(2);
+        expect(result.budgetExhausted).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('spends exactly one request per deck, not two', async function () {
+        // fetchDeckStats reserves a slot of its own; the sweep already holds
+        // one, and double-spending would halve the effective budget.
+        config.maxRequestsPerMinute = 3;
+        staleDecks(3);
+        dokReturns(60);
+
+        const result = await service.refreshStaleDecks();
+
+        expect(result.attempted).toBe(3);
+        expect(result.refreshed).toBe(3);
+    });
+
+    it('keeps going after one deck fails', async function () {
+        staleDecks(3);
+        fetchMock
+            .mockResolvedValueOnce({ ok: false, status: 500 })
+            .mockResolvedValue({ ok: true, json: async () => ({ deck: { sasRating: 65 } }) });
+
+        const result = await service.refreshStaleDecks();
+
+        expect(result.attempted).toBe(3);
+        expect(result.refreshed).toBe(2);
+    });
+
+    it('does nothing while DoK is not configured', async function () {
+        config.apiKey = undefined;
+
+        expect(await service.refreshStaleDecks()).toEqual(
+            expect.objectContaining({ refreshed: 0, skipped: true })
+        );
+        expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it('does nothing while an admin has turned the sweep off', async function () {
+        config.sweepEnabled = false;
+
+        expect(await service.refreshStaleDecks()).toEqual(
+            expect.objectContaining({ refreshed: 0, skipped: true })
+        );
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('never throws when the deck query fails', async function () {
+        db.query.mockRejectedValue(new Error('db down'));
+
+        expect(await service.refreshStaleDecks()).toEqual(
+            expect.objectContaining({ refreshed: 0, attempted: 0 })
+        );
+    });
+});

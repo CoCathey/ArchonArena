@@ -64,6 +64,23 @@ describe('StatisticsService.getMetaStats', function () {
                 }
             ];
         }
+        // Checked before the plain house query: the matchup matrix also
+        // selects AS "house", and matching it first would feed the matrix
+        // rows with no opponent in them.
+        if (sql.includes('AS "opponent"')) {
+            return [
+                { house: 'Logos', opponent: 'Brobnar', games: '40', wins: '26' },
+                { house: 'Brobnar', opponent: 'Logos', games: '40', wins: '14' },
+                // Under the 20-game floor: a real count, but no win rate.
+                { house: 'Dis', opponent: 'Logos', games: '4', wins: '4' }
+            ];
+        }
+        if (sql.includes('AS "set"')) {
+            return [
+                { set: 'Call of the Archons', expansionId: '341', games: '4', wins: '1' },
+                { set: 'Prophetic Visions', expansionId: '907', games: '6', wins: '5' }
+            ];
+        }
         if (sql.includes('AS "house"')) {
             return [
                 { house: 'Logos', games: '6', wins: '4' },
@@ -114,6 +131,40 @@ describe('StatisticsService.getMetaStats', function () {
         expect(stats.sasBands[1].winRate).toBe(75);
     });
 
+    it('reports set win rates newest set first', async function () {
+        const stats = await service.getMetaStats();
+
+        expect(stats.sets.map((entry) => entry.set)).toEqual([
+            'Prophetic Visions',
+            'Call of the Archons'
+        ]);
+        expect(stats.sets[0].winRate).toBe(83.3);
+        expect(stats.sets[1].winRate).toBe(25);
+    });
+
+    it('builds the house matchup matrix with a sorted house axis', async function () {
+        const stats = await service.getMetaStats();
+
+        expect(stats.houseMatchups.houses).toEqual(['Brobnar', 'Dis', 'Logos']);
+        expect(stats.houseMatchups.cells['Logos|Brobnar']).toMatchObject({
+            games: 40,
+            wins: 26,
+            winRate: 65
+        });
+        expect(stats.houseMatchups.cells['Brobnar|Logos'].winRate).toBe(35);
+    });
+
+    it('reports no win rate for a matchup with too few games behind it', async function () {
+        // 4/4 is 100%, which reads as a finding. It is noise, and saying
+        // nothing is the honest answer.
+        const stats = await service.getMetaStats();
+        const thin = stats.houseMatchups.cells['Dis|Logos'];
+
+        expect(thin.games).toBe(4);
+        expect(thin.winRate).toBeNull();
+        expect(stats.houseMatchups.minGames).toBe(20);
+    });
+
     it('handles an empty database without throwing', async function () {
         db.query.mockResolvedValue([]);
 
@@ -123,6 +174,8 @@ describe('StatisticsService.getMetaStats', function () {
         expect(stats.houses).toEqual([]);
         expect(stats.formats).toEqual([]);
         expect(stats.sasBands).toEqual([]);
+        expect(stats.sets).toEqual([]);
+        expect(stats.houseMatchups).toEqual({ houses: [], cells: {}, minGames: 20 });
     });
 });
 
@@ -236,7 +289,12 @@ describe('StatisticsService TTL cache', function () {
 describe('StatisticsService.getDeckStats', function () {
     const StatisticsService = require('../../../server/services/StatisticsService');
 
-    const serviceWith = (deckRows, bandRows, user = { Id: 7, Username: 'Player1' }) => {
+    const serviceWith = (
+        deckRows,
+        bandRows,
+        user = { Id: 7, Username: 'Player1' },
+        matchupRows = []
+    ) => {
         const db = {
             query: vi.fn(async (sql) => {
                 if (sql.includes('FROM "Users"')) {
@@ -247,6 +305,9 @@ describe('StatisticsService.getDeckStats', function () {
                 }
                 if (sql.includes('GROUP BY "band"')) {
                     return bandRows;
+                }
+                if (sql.includes('GROUP BY oh."Name"')) {
+                    return matchupRows;
                 }
                 return [];
             })
@@ -338,5 +399,110 @@ describe('StatisticsService.getDeckStats', function () {
         const stats = await serviceWith([], []).getDeckStats('player1');
 
         expect(stats.decks).toEqual([]);
+    });
+    it('reports the record against each opposing house, best first', async function () {
+        const stats = await serviceWith([], [], undefined, [
+            { opponent: 'Brobnar', games: '40', wins: '30' },
+            { opponent: 'Dis', games: '40', wins: '10' },
+            { opponent: 'Logos', games: '40', wins: '20' }
+        ]).getDeckStats('player1');
+
+        expect(stats.matchups.map((entry) => entry.opponentHouse)).toEqual([
+            'Brobnar',
+            'Logos',
+            'Dis'
+        ]);
+        expect(stats.bestMatchup.opponentHouse).toBe('Brobnar');
+        expect(stats.bestMatchup.winRate).toBe(75);
+        expect(stats.worstMatchup.opponentHouse).toBe('Dis');
+    });
+
+    it('reports no win rate for a matchup with too few games behind it', async function () {
+        const stats = await serviceWith([], [], undefined, [
+            { opponent: 'Brobnar', games: '3', wins: '3' }
+        ]).getDeckStats('player1');
+
+        expect(stats.matchups[0].games).toBe(3);
+        expect(stats.matchups[0].winRate).toBeNull();
+        // One unranked matchup is not a best and a worst.
+        expect(stats.bestMatchup).toBeNull();
+        expect(stats.worstMatchup).toBeNull();
+    });
+
+    it('picks the best deck by how far it beats its SAS band, not by raw win rate', async function () {
+        // The strong deck wins more games; the weak deck wins more than a deck
+        // of its power should. The second is the better piloting result, and
+        // ranking by raw win rate would call the first one your best deck.
+        const stats = await serviceWith(
+            [
+                {
+                    Id: 1,
+                    Name: 'Strong deck, ordinary results',
+                    Identity: 'a',
+                    SasRating: 95,
+                    games: '20',
+                    wins: '12',
+                    lastPlayed: null
+                },
+                {
+                    Id: 2,
+                    Name: 'Weak deck, punching up',
+                    Identity: 'b',
+                    SasRating: 45,
+                    games: '20',
+                    wins: '11',
+                    lastPlayed: null
+                }
+            ],
+            [
+                { band: '90+', games: '100', wins: '60' },
+                { band: '<50', games: '100', wins: '40' }
+            ]
+        ).getDeckStats('player1');
+
+        expect(stats.bestDeck.name).toBe('Weak deck, punching up');
+        expect(stats.bestDeck.sasDelta).toBe(15);
+        expect(stats.worstDeck.name).toBe('Strong deck, ordinary results');
+    });
+
+    it('ignores decks with too few games to call anything', async function () {
+        const stats = await serviceWith(
+            [
+                {
+                    Id: 1,
+                    Name: 'Played twice',
+                    Identity: 'a',
+                    SasRating: 70,
+                    games: '2',
+                    wins: '2',
+                    lastPlayed: null
+                }
+            ],
+            []
+        ).getDeckStats('player1');
+
+        expect(stats.bestDeck).toBeNull();
+        expect(stats.worstDeck).toBeNull();
+        expect(stats.calloutMinGames).toBe(5);
+    });
+
+    it('does not call a lone deck both the best and the worst', async function () {
+        const stats = await serviceWith(
+            [
+                {
+                    Id: 1,
+                    Name: 'Only deck',
+                    Identity: 'a',
+                    SasRating: 70,
+                    games: '10',
+                    wins: '6',
+                    lastPlayed: null
+                }
+            ],
+            [{ band: '70-79', games: '100', wins: '50' }]
+        ).getDeckStats('player1');
+
+        expect(stats.bestDeck.name).toBe('Only deck');
+        expect(stats.worstDeck).toBeNull();
     });
 });

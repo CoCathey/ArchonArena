@@ -11,20 +11,84 @@
  *
  * Deliberate exceptions, and why:
  *
- *  - style-src 'unsafe-inline'. React inline `style={{...}}` props and the
- *    runtime style injection from Tailwind/HeroUI both produce inline styles.
- *    Removing this needs per-render nonces or hashes throughout the component
- *    tree; it is a real project, not a config change.
- *  - wss: (ws: in development). Gameplay runs over socket.io. In production the
- *    game node is deliberately same-origin behind Caddy, but an operator may
- *    split nodes onto their own hosts (docs/DEPLOYMENT.md §6), and a CSP that
- *    silently kills game connections on that topology is worse than one that
- *    allows secure websockets broadly.
- *  - Development adds 'unsafe-inline'/'unsafe-eval' to script-src because Vite's
- *    dev server and HMR require both. Production never gets them.
+ *  - Development adds 'unsafe-inline'/'unsafe-eval' to script-src, and ws:,
+ *    because Vite's dev server and HMR require them. Production never gets them.
+ *
+ * ARCHON (I5): style-src no longer carries 'unsafe-inline', and connect-src no
+ * longer carries a blanket `wss:`. Both were removed against the real built
+ * bundle in Chromium rather than by reasoning about what the app might do —
+ * see the notes on REACT_ARIA_PRESSABLE_STYLE and gameNodeOrigins below.
  */
 
+const crypto = require('crypto');
+
 const HCAPTCHA = ['https://hcaptcha.com', 'https://*.hcaptcha.com'];
+
+/**
+ * The one inline stylesheet the app still injects at runtime.
+ *
+ * @react-aria/interactions' `usePress` prepends this 88-byte rule to <head> on
+ * first use. It offers no nonce hook and no way to opt out, so the choice is
+ * between keeping 'unsafe-inline' for the whole site or allowing exactly this
+ * one block by hash. (Font Awesome used to inject ~15 KB the same way; that one
+ * had a supported fix and is now bundled — see client/index.jsx.)
+ *
+ * A hash pins the *content*, so if a React Aria upgrade changes the rule the
+ * style silently stops applying and mobile press handling degrades. That would
+ * be a nasty way to find out, so `csp.spec.js` asserts this text still matches
+ * the rule in the installed package: the upgrade fails CI instead.
+ *
+ * Note that a hash in style-src also makes browsers ignore 'unsafe-inline'
+ * entirely, which is precisely the point.
+ */
+const REACT_ARIA_PRESSABLE_STYLE = `@layer {
+  [data-react-aria-pressable] {
+    touch-action: pan-x pan-y pinch-zoom;
+  }
+}`;
+
+const inlineStyleHash = (css) =>
+    `'sha256-${crypto.createHash('sha256').update(css, 'utf8').digest('base64')}'`;
+
+/**
+ * Extra websocket origins for a deployment that runs game nodes on their own
+ * hosts.
+ *
+ * The documented topology (docs/DEPLOYMENT.md §6) keeps every node behind the
+ * same Caddy, so gameplay websockets are same-origin and `'self'` covers them —
+ * verified in a browser, since `'self'` matching ws/wss on the same host is a
+ * CSP3 behaviour rather than something to assume. `wss:` used to be allowed
+ * blanket-wide to cover a split-host setup nobody runs; this makes that case
+ * opt-in instead, so the default policy does not permit a websocket to any host
+ * on the internet.
+ *
+ * Accepts an array or a comma-separated string (so it can come from an
+ * environment variable). Anything unparseable is dropped rather than emitted
+ * into the header.
+ *
+ * @param {string[]|string} [origins]
+ * @returns {string[]}
+ */
+function gameNodeOrigins(origins) {
+    const list = Array.isArray(origins)
+        ? origins
+        : String(origins || '')
+              .split(',')
+              .map((entry) => entry.trim());
+
+    return list
+        .filter(Boolean)
+        .map((entry) => {
+            try {
+                const url = new URL(entry);
+
+                return url.protocol === 'ws:' || url.protocol === 'wss:' ? url.origin : null;
+            } catch {
+                return null;
+            }
+        })
+        .filter(Boolean);
+}
 
 /**
  * The origin a Sentry DSN reports to, so `connect-src` can allow it. DSNs look
@@ -50,11 +114,15 @@ function sentryOrigin(dsn) {
  * @param {object} options
  * @param {boolean} [options.isDeveloping] loosen script-src for the Vite dev server
  * @param {string}  [options.sentryDsn]    allow the Sentry ingest origin
+ * @param {string[]|string} [options.gameNodeOrigins] ws(s) origins for game
+ *        nodes on their own hosts; unset means same-origin, covered by 'self'
  * @returns {object} helmet contentSecurityPolicy directives
  */
-function buildDirectives({ isDeveloping = false, sentryDsn } = {}) {
+function buildDirectives({ isDeveloping = false, sentryDsn, gameNodeOrigins: nodes } = {}) {
     const devScript = isDeveloping ? ["'unsafe-inline'", "'unsafe-eval'"] : [];
-    const socketSchemes = isDeveloping ? ['ws:', 'wss:'] : ['wss:'];
+    // Development talks to the Vite dev server and HMR over plain ws on a
+    // possibly-different port; production is same-origin or explicitly listed.
+    const socketSchemes = isDeveloping ? ['ws:', 'wss:'] : gameNodeOrigins(nodes);
 
     return {
         defaultSrc: ["'self'"],
@@ -67,7 +135,10 @@ function buildDirectives({ isDeveloping = false, sentryDsn } = {}) {
         // Stops an injected form from posting credentials off-site.
         formAction: ["'self'"],
         scriptSrc: ["'self'", ...devScript, ...HCAPTCHA],
-        styleSrc: ["'self'", "'unsafe-inline'", ...HCAPTCHA],
+        // The hash covers React Aria's one runtime-injected rule; everything
+        // else is the bundled same-origin stylesheet. A hash here also disables
+        // 'unsafe-inline' semantics for this directive in every modern browser.
+        styleSrc: ["'self'", inlineStyleHash(REACT_ARIA_PRESSABLE_STYLE), ...HCAPTCHA],
         // Fonts are self-hosted (client/assets/fonts), so no third-party font
         // origin is needed; data: covers any inlined face.
         fontSrc: ["'self'", 'data:'],
@@ -103,4 +174,12 @@ function normalizeMode(mode) {
     return value === 'off' || value === 'report-only' ? value : 'enforce';
 }
 
-module.exports = { buildDirectives, normalizeMode, sentryOrigin, HCAPTCHA };
+module.exports = {
+    buildDirectives,
+    normalizeMode,
+    sentryOrigin,
+    gameNodeOrigins,
+    inlineStyleHash,
+    REACT_ARIA_PRESSABLE_STYLE,
+    HCAPTCHA
+};

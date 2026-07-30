@@ -15,10 +15,23 @@
      *  - sentryDsn (for production only)
      */
 
+    // ARCHON (I5): websocket origins for game nodes that run on their own
+    // hosts. The documented topology keeps every node behind the same Caddy, so
+    // gameplay websockets are same-origin and the CSP's 'self' covers them;
+    // leave this empty unless you have genuinely split nodes onto other hosts.
+    // Comma-separated string or array, e.g. 'wss://node1.example.com'.
+    gameNodeOrigins: '',
+
     lobby: {
         port: 4000,
         appName: 'Archon Arena',
         emailFromAddress: 'noreply@archonarena.com',
+        // ARCHON: public origin, used to build absolute links in notification
+        // emails. Activation and reset mail derive this from the request, but a
+        // notification raised by a background job (a paired round, a nightly
+        // sweep) has no request to derive it from. Empty leaves the link
+        // relative, which still reads correctly in the in-app centre.
+        siteUrl: '',
         blockDisposableEmail: false,
         requireActivation: false,
         // Content-Security-Policy mode: 'enforce' | 'report-only' | 'off'.

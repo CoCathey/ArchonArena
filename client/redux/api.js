@@ -687,11 +687,64 @@ export const api = createApi({
             invalidatesTags: [{ type: TAG_TYPES.BANLIST, id: BANLIST_ID }]
         }),
         getUserGames: builder.query({
-            query: () => '/games',
+            // ARCHON (N1): filters are applied server-side, before the row
+            // limit, so a filtered view searches the whole history.
+            query: (params) => ({ url: '/games', params }),
             providesTags: [{ type: TAG_TYPES.GAMES, id: GAMES_ID }]
         }),
+        // ARCHON (N1): the decks, opponents and formats that actually appear in
+        // this player's history, so the filter controls offer real choices.
+        getGameFilters: builder.query({
+            query: () => '/games/filters',
+            providesTags: [{ type: TAG_TYPES.GAMES, id: 'FILTERS' }]
+        }),
         getGameReplay: builder.query({
-            query: (gameId) => `/games/${encodeURIComponent(gameId)}/replay`
+            query: (gameId) => `/games/${encodeURIComponent(gameId)}/replay`,
+            providesTags: (result, error, gameId) => [{ type: TAG_TYPES.GAMES, id: gameId }]
+        }),
+        // ARCHON (N1): a replay someone shared. Public - no auth header is
+        // needed and none is required by the endpoint.
+        getSharedReplay: builder.query({
+            query: (token) => `/replays/shared/${encodeURIComponent(token)}`
+        }),
+        shareReplay: builder.mutation({
+            query: (gameId) => ({
+                url: `/games/${encodeURIComponent(gameId)}/share`,
+                method: 'POST'
+            }),
+            invalidatesTags: (result, error, gameId) => [{ type: TAG_TYPES.GAMES, id: gameId }]
+        }),
+        unshareReplay: builder.mutation({
+            query: (gameId) => ({
+                url: `/games/${encodeURIComponent(gameId)}/share`,
+                method: 'DELETE'
+            }),
+            invalidatesTags: (result, error, gameId) => [{ type: TAG_TYPES.GAMES, id: gameId }]
+        }),
+        // ARCHON (N2): in-app notification centre.
+        getNotifications: builder.query({
+            query: (params) => ({ url: '/notifications', params }),
+            providesTags: [{ type: TAG_TYPES.NOTIFICATIONS, id: 'LIST' }]
+        }),
+        getUnreadNotificationCount: builder.query({
+            query: () => '/notifications/unread-count',
+            providesTags: [{ type: TAG_TYPES.NOTIFICATIONS, id: 'UNREAD' }]
+        }),
+        markNotificationsRead: builder.mutation({
+            // No ids means "all of them".
+            query: (ids) => ({ url: '/notifications/read', method: 'POST', body: { ids } }),
+            invalidatesTags: [
+                { type: TAG_TYPES.NOTIFICATIONS, id: 'LIST' },
+                { type: TAG_TYPES.NOTIFICATIONS, id: 'UNREAD' }
+            ]
+        }),
+        getNotificationPreferences: builder.query({
+            query: () => '/notifications/preferences',
+            providesTags: [{ type: TAG_TYPES.NOTIFICATIONS, id: 'PREFS' }]
+        }),
+        setNotificationPreference: builder.mutation({
+            query: (body) => ({ url: '/notifications/preferences', method: 'POST', body }),
+            invalidatesTags: [{ type: TAG_TYPES.NOTIFICATIONS, id: 'PREFS' }]
         }),
         // ARCHON: Amber change for a finished game (post-game result screen).
         getGameRating: builder.query({
@@ -792,7 +845,16 @@ export const {
     useAddBanlistMutation,
     useDeleteBanlistMutation,
     useGetUserGamesQuery,
+    useGetGameFiltersQuery,
     useGetGameReplayQuery,
+    useGetSharedReplayQuery,
+    useShareReplayMutation,
+    useUnshareReplayMutation,
+    useGetNotificationsQuery,
+    useGetUnreadNotificationCountQuery,
+    useMarkNotificationsReadMutation,
+    useGetNotificationPreferencesQuery,
+    useSetNotificationPreferenceMutation,
     useGetGameRatingQuery,
     useRemoveLobbyMessageMutation
 } = api;

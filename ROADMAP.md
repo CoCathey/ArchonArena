@@ -38,14 +38,19 @@
 
 ---
 
-## Where the platform stands (2026-07-25)
+## Where the platform stands (2026-07-29)
 
 **The engineering is far ahead of the operations.** Almost every headline system in this
-roadmap — ratings, tournaments, community, matchmaking, statistics, replays, a native iOS
-app — is built, tested, and wired end to end. What is missing is the last mile: the site is
-not yet serving players at archonarena.com, and a handful of player-facing surfaces that
-turn those systems into a habit-forming loop (public profiles, post-game results,
-notifications) do not exist yet.
+roadmap — ratings, tournaments, community, matchmaking, statistics, replays, notifications,
+a native iOS app — is built, tested, and wired end to end. The retention loop closed with
+**N1/N2/N3**: a game can be replayed board-by-board and shared with a public link, players
+are told when their round is paired, and the deck intelligence that differentiates the
+platform is on the screens where the decisions get made.
+
+**What is missing is the last mile, and it is almost all operational.** The site is not yet
+serving players at archonarena.com (**I1**) and there are no off-host backups (**I7**) —
+both gated on owner infrastructure actions rather than code. The largest genuinely unbuilt
+systems are moderation (**N5**) and the tutorial (**N11**).
 
 **Built and working**
 
@@ -59,34 +64,33 @@ notifications) do not exist yet.
 | Rankings           | Leaderboards (world/region/country/state), Top Players, personal Ratings page, W–L records                                                                                                                                            |
 | Tournaments        | Swiss / single-elim / double-elim / round robin / cut-to-top-N, Bo1/3/5, waitlists, check-in, staff, seeding, penalties, brackets, printables, online automation, KeyForge conditions (deck rules, chains, Triad, Reversal, Adaptive) |
 | Matchmaking        | Quick Match queue with Amber-proximity pairing and widening tolerance                                                                                                                                                                 |
+| Notifications      | Typed taxonomy, in-app centre (bell + unread), branded email, per-category opt-out; pairing / event-start / friend / club triggers                                                                                                    |
 | Community          | Friends, member directory, clubs + invite codes, local store directory, Play IRL hub, onboarding wizard                                                                                                                               |
-| Statistics         | Meta dashboard (house win rates, SAS bands, format share) + per-player breakdowns, TTL-cached                                                                                                                                         |
-| Match history      | Game History page on PostgreSQL; recorded play-by-play + step-through viewer                                                                                                                                                          |
-| Admin              | Settings service + `/admin/settings` (rating, DoK, tournament, regions, content, navigation), user/ratings/banlist/nodes/motd/news/bug-report admin                                                                                   |
+| Statistics         | Meta dashboard (house/set win rates, SAS bands, format share, house matchup matrix) + per-player and per-deck breakdowns, TTL-cached                                                                                                  |
+| Match history      | Filterable Game History on PostgreSQL; board-state replays with forge jumps, per-player perspective and public share links; Watch hub                                                                                                 |
+| Admin              | Settings service + `/admin/settings` (rating, DoK, tournament, replay retention, watch/broadcast delay, regions, content, navigation), user/ratings/banlist/nodes/motd/news/bug-report admin                                          |
 | Mobile             | Expo iOS app (`mobile/`): login, decks, lobby, pending, full board, spectate, reconnect; EAS + TestFlight runbook                                                                                                                     |
 | Ops                | CI (typecheck/lint/build/test + CodeQL), prod compose + Caddy TLS, `deploy/healthcheck.sh`, Sentry wired client + server                                                                                                              |
 
 **Incomplete — built but not finished**
 
--   **Replays** capture the chat/play-by-play log only; there is no board-state snapshot,
-    no retention policy, no share link.
--   **Spectating** works from the lobby game list, but there is no Watch hub, no broadcast
-    delay, and no caster mode.
--   **SAS** shows on the deck summary only — not on deck lists, lobby games, or the pre-game
-    screen; the AERC component breakdown stored in `DeckSas.RawData` is never displayed.
--   **Meta dashboards** lack set win rates and matchup matrices; there are no per-deck stats
-    and no admin/operational analytics.
--   **Admin-config coverage** stops short of auth (SSO-only mode), matchmaking, replay
-    retention, and moderation policy; there is no feature-flag section and only a
-    last-editor audit trail.
+-   **Caster mode** does not exist. Spectating, the Watch hub, spectator counts, a featured
+    match and a server-enforced broadcast delay all do (**N1**); both hands visible to a
+    caster is the remaining half, and it belongs with **F4** because it needs a privileged
+    view rather than a delay.
+-   **SAS on the lobby game list.** Deliberately skipped, not missed: decks are not chosen for
+    open games, so there is nothing to show there yet. Everywhere else — deck lists, the deck
+    view with its AERC breakdown, the pre-game screen, per-deck stats — is done (**N3**).
+-   **Admin analytics.** The meta dashboard now covers set win rates and the house matchup
+    matrix (**N3**), but there is still no operational/funnel analytics for admins (**N8**).
+-   **Admin-config coverage** stops short of auth (SSO-only mode), matchmaking and moderation
+    policy; replay retention and the Watch settings are now wired. There is still no
+    feature-flag section and only a last-editor audit trail.
 -   **Clubs** have no leaderboards, approval-based joins, or ownership transfer.
+-   **Web push** is the one part of notifications not built; it waits on the PWA (**N6**).
 
 **Missing entirely**
 
--   **Public player profiles.** No `/players/:username` route exists; no username anywhere on
-    the site is clickable. For a competitive community platform this is the single largest hole.
--   **Post-game result screen.** A rated game ends with no indication that Amber moved.
--   **Notifications** of any kind — in-app, email, or push.
 -   **Moderation tooling** beyond the inherited block list / ban list: no reports, mutes,
     timeouts, or moderation queue.
 -   **Any way to learn the game on the platform.** No tutorial, and onboarding never asks how
@@ -96,7 +100,6 @@ notifications) do not exist yet.
 -   **A reason to visit an empty site.** Nothing to watch when nobody happens to be playing.
 -   **Teams**, **versioned public API**, **Discord**, **coaching/AI**, **streaming tools**,
     **organized-play program**.
--   **Schema migration ledger.** Migrations are applied by hand with no record of what ran.
 
 **Not yet verified in production:** DNS, live WebSocket pass-through, Keycloak client
 registration, DoK API key, uptime monitoring, off-host backups.
@@ -274,9 +277,10 @@ found by auditing the launch path rather than the feature list. All three are fi
 #### I5 — Pre-launch security and abuse pass
 
 **Why:** the moment the site is public it is a target, and account/auth endpoints are the
-softest surface. Rate limiting exists (`server/api/rateLimit.js`) but is applied only to bug
-reports, community actions, deck DoK prepare, and tournament creation — not to login,
-registration, or password reset.
+softest surface. When this item was written, rate limiting existed but was applied only to
+bug reports, community actions, deck DoK prepare and tournament creation — not to login,
+registration or password reset. Every auth endpoint is now limited, and the limits are
+shared across lobby processes; what remains is the `fabric` upgrade.
 **Tasks**
 
 -   [x] `helmet` upgraded v3 → v8. Its default CSP is disabled (it would break the site and
@@ -292,22 +296,66 @@ registration, or password reset.
         never logged. SQL confirmed exclusively parameterised.
 -   [x] `docs/SECURITY.md` written — controls, dependency triage with reasoning, two
         documented accepted risks, and a standing re-review checklist.
--   [ ] **`fabric` v5 → v7** — the last critical/high advisories all trace to it. A rewrite
-        (ESM-only, promise-based, ~1,000 lines of usage across the archon maker, game board
-        and fetchdata pipeline), so it is its own project. Exposure documented as low: no SVG
-        path exists and uploads are magic-byte-gated.
--   [ ] Replace the unmaintained `patreon` package with direct `fetch` (folds into **N12**).
--   [ ] Move the rate limiter and login failure throttle to Redis so limits hold across
-        processes; both are per-process today.
--   [ ] Tighten `style-src` off `'unsafe-inline'` with nonces or hashes, and narrow
-        `connect-src` from `wss:` to the actual game-node origins.
+-   [ ] **`fabric` v5 → v7** — now the **only** root left: every remaining critical and high
+        in the production tree traces to it alone (13 advisories, down from 16). Scoped in
+        detail during this pass:
+    -   **What it buys:** fabric 7 declares no hard dependencies (`canvas`/`jsdom` become
+        optional, and `canvas@3` drops `@mapbox/node-pre-gyp`), so the whole
+        `canvas` → `node-pre-gyp` → `tar` chain — and the only critical in the tree — goes
+        away. It keeps a CommonJS entry (`fabric/node`), so server callers need not become
+        ESM.
+    -   **Real size:** 98 call sites over 10 APIs in 7 files, ~1,600 lines.
+    -   **Why it is still its own project:** the migration is mechanical, but the risk is
+        _silent visual regression_. Text metrics and shadow rendering changed in fabric 6,
+        and the archon maker generates the deck images players look at — a shifted baseline
+        would ship subtly wrong deck lists with nothing failing. `buildDeckList`,
+        `buildCard` and `buildCardBack` are cleanly exported, so a before/after image-diff
+        harness is buildable; that harness is the actual first task, and it does not exist
+        yet.
+    -   Exposure meanwhile stays low: no SVG path exists (the fabric advisory is stored XSS
+        via SVG export) and uploads are magic-byte-gated.
+-   [x] **Replaced the unmaintained `patreon` package with direct `fetch`.** It was three
+        HTTP calls wrapped in a package that has been abandoned for years; it now talks to
+        Patreon's **v2** API, because the package spoke the long-deprecated v1. Three high
+        advisories went with it. The integration is still dormant, so **N12** still owns
+        verifying it against a live campaign — the public interface is unchanged so N12 has
+        the same surface to wire up.
+-   [x] **Rate limiter and login failure throttle moved to Redis.** Being per-process
+        quietly divided every limit by the number of lobbies — "10 login failures in 15
+        minutes" meant 10 _per lobby_, and an attacker who reconnected got a fresh budget.
+        Each decision is one Lua script, so check-and-record is atomic; a read followed by
+        a separate write lets concurrent requests through at exactly the moment the limit
+        matters. **Verified against a real Redis:** exactly 10 of 50 concurrent requests
+        allowed, a lockout raised in one process visible from another, and windows that
+        slide correctly. If Redis is unreachable the store falls back to per-process
+        limits, so an outage degrades enforcement rather than removing it — and cannot take
+        login down with it.
+-   [x] **`style-src` no longer carries `'unsafe-inline'`, and `connect-src` no longer
+        carries a blanket `wss:`.** Both were settled against the real built bundle in
+        Chromium rather than by reasoning about what the app might do at runtime, with a
+        negative control proving the check detects violations at all.
+    -   Font Awesome was injecting ~15 KB of CSS into a runtime `<style>` tag; that is now
+        off (`config.autoAddCss = false`) in favour of the bundled stylesheet — Font
+        Awesome's own documented answer, and one less thing injected at runtime.
+    -   React Aria's `usePress` prepends one 88-byte rule and offers no nonce hook, so it is
+        allowed **by hash**. A hash pins content, which would silently stop applying on a
+        library upgrade and quietly degrade mobile press handling — so a test rebuilds the
+        rule from the installed package and fails CI instead.
+    -   `wss:` permitted a websocket to _any host on the internet_. The documented topology
+        keeps game nodes behind the same Caddy, so `'self'` covers them (verified in a
+        browser — `'self'` matching ws/wss is a CSP3 behaviour, not something to assume).
+        A split-host deployment is now opt-in via `GAME_NODE_ORIGINS`.
 
 **Depends on:** nothing. Blocks: public announcement of the site.
 **Acceptance criteria**
 
--   A scripted credential-stuffing attempt against login is throttled and locked out, with a test.
--   No high or critical advisory outstanding in `npm audit`, or each is documented with a reason.
--   `docs/SECURITY.md` exists with the checklist, the date it was last run, and the results.
+-   [x] A scripted credential-stuffing attempt against login is throttled and locked out,
+        with a test — and the lockout is now visible from a second lobby process, not only
+        the one that counted the failures.
+-   [x] No high or critical advisory outstanding in `npm audit`, or each is documented with a
+        reason. Down to a single documented root (`fabric`) from two.
+-   [x] `docs/SECURITY.md` exists with the checklist, the date it was last run, and the
+        results.
 
 #### I6 — Terms of Service and transactional email polish _(mostly done)_
 
@@ -360,7 +408,7 @@ Ratings, tournament history, and replays are unrecoverable if the VPS is lost.
 _Goal: reasons to come back tomorrow. Sequenced after players exist, because each of these is
 tuned by what live usage shows._
 
-#### N1 — Full replays, share links, and the Watch hub _(mostly done)_
+#### N1 — Full replays, share links, and the Watch hub _(done)_
 
 **Why:** replays currently capture the message log only, and `/watch` is a placeholder.
 Replays are also the substrate for coaching, AI analysis, and streaming tools later.
@@ -382,39 +430,92 @@ Replays are also the substrate for coaching, AI analysis, and streaming tools la
 -   [x] **Watch hub** (`/watch`): live, spectatable, non-private games, as a filtered view
         over the same lobby state so spectating, passwords and permissions behave exactly as
         they do in the lobby.
--   [ ] Retention budget and policy **(admin-config)**; the 2 MB oversized-capture skip is
-        still implicit.
--   [ ] Share links for replays and matches (public, no auth) — replays are still
-        authenticated.
--   [ ] Featured match, spectator counts, and an optional broadcast delay **(admin-config)**.
--   [ ] Jump-to-key-forge and per-player perspective in the viewer.
+-   [x] Retention budget and policy **(admin-config)**: Site Settings > Replays carries the
+        recording switch, the size cap (the old 2 MB skip, now explicit and tunable), the
+        retention window and the purge cadence. An hourly lobby sweep deletes past the window;
+        deleting is idempotent, so an overlapping run on another lobby instance is harmless.
+        Retention defaults to **0 days = keep forever** — a site that has not decided on a
+        policy must never silently start destroying game history. `saveReplay` now reports
+        _why_ it skipped, so "too large" and "never recorded" stop being indistinguishable.
+-   [x] Share links (public, no auth): a share token is minted per replay on request and is
+        the only way an anonymous caller can read one, so sharing stays an explicit act by a
+        player **in the game** rather than a property of every recording. Idempotent, so
+        re-sharing never invalidates a link already sent; revocable; and turning sharing off
+        site-wide closes existing links, not just new ones. `/replay/shared/:token` renders
+        through the same viewer as the authenticated route.
+-   [x] Spectator counts on the Watch hub (already on every lobby game summary, never shown),
+        an admin-pinned **featured match** (only rendered while that game is actually live, so
+        a stale setting quietly does nothing), and an optional **broadcast delay**
+        **(admin-config)**. The delay is enforced in the game node, on spectators only — the
+        two players always see the live position. The delay path shares the diff base with the
+        live path, so a delayed viewer is sent diffs against the position they have actually
+        seen; anything still held is flushed when the game closes rather than dropped.
+-   [x] Jump-to-key-forge and per-player perspective in the viewer. Forges are read off the
+        recorded key counts rather than parsed out of the log — wording is localised and
+        changes with the engine, key counts do not. Version 1 recordings have no snapshots, so
+        they show no jump controls rather than wrong ones.
+-   [x] Match history filters by deck, opponent, format and result, applied in SQL **before**
+        the row limit — filtering the last 30 games client-side would answer "you never played
+        that deck" for anyone with a longer history. The controls offer the decks, opponents
+        and formats that actually appear in that player's history.
 
 **Depends on:** I2 (retention migration), I3 (profile links from replays).
 **Acceptance criteria**
 
--   A finished game can be replayed board-state-by-board-state by someone who did not play it.
--   A spectator (live or replay) can never see hidden information, asserted by a test.
--   Retention is enforced by a job and configurable without redeploy.
+-   [x] A finished game can be replayed board-state-by-board-state by someone who did not play
+        it — and now by someone who is not signed in at all, via a share link.
+-   [x] A spectator (live or replay) can never see hidden information, asserted by a test. A
+        share link inherits this for free: the snapshots are rendered through the same
+        `AnonymousSpectator` path, so a link cannot reveal more than watching would have.
+-   [x] Retention is enforced by a job and configurable without redeploy.
+-   [ ] Caster mode (both hands visible) stays with **F4** — the delay is the half of it that
+        the Watch hub needs, and the half that is safe without a separate privileged view.
 
-#### N2 — Notifications
+#### N2 — Notifications _(done, less web push)_
 
 **Why:** tournaments and asynchronous community features are only useful if players are told
 things happened. Round pairings in particular are unusable without a ping.
 **Tasks**
 
--   In-app notification centre (bell + unread state) with a typed event taxonomy.
--   Email notifications for round pairings, tournament start, friend requests, club invites,
-    with per-category opt-out in account settings.
--   Web push once the PWA lands (N6).
+-   [x] Typed event taxonomy (`server/services/notifications/taxonomy.js`): a small closed
+        list, because every notification has to be something a player can find, understand and
+        switch off, and an unnamed category is none of those. The key is both the event type
+        and the opt-out unit, so "turn off pairing emails" is one row rather than a policy
+        spread across the code that raises the events.
+-   [x] In-app notification centre: bell with unread badge, dropdown list, read-on-open,
+        mark-all-read. The badge polls a bare count and the list is only fetched when the
+        dropdown opens — polling a page of rows every minute in every signed-in tab is the
+        expensive way to render a number.
+-   [x] Email for round pairings, tournament start and friend requests, through the branded
+        template from **I6**. `email` defaults are set per category by whether the notification
+        is useless if missed: a pairing you do not see costs you the match, so it mails; "your
+        friend request was accepted" does not.
+-   [x] Per-category opt-out in Profile > Notifications, honoured **server-side at the point of
+        delivery** rather than at each call site, so a new trigger cannot forget to respect it.
+-   [x] Triggers: round pairing and event start (over the existing `tournamentEvents` bridge,
+        so the tournament service still knows nothing about notifications), friend request,
+        friend request accepted, and someone joining a club you own.
+-   [x] Idempotency: a `DedupeKey` partial unique index makes a repeated trigger a no-op —
+        `emitRoundPaired` also fires when a best-of series spins up its next game, and a player
+        should not be told twice that they are paired. A duplicate suppresses the email too.
+-   [ ] Web push once the PWA lands (**N6**).
 
 **Depends on:** I6 (email template), I3 (linking to profiles). Blocks: F2 (Discord reuses the taxonomy).
 **Acceptance criteria**
 
--   Pairing a tournament round notifies every paired player in-app and by email within a minute.
--   Every category can be turned off per player, and opt-out is honoured (tested).
--   No notification path can block or slow a gameplay or tournament operation.
+-   [x] Pairing a tournament round notifies every paired player in-app and by email. A bye is
+        named as a bye rather than sent as a pairing with no opponent.
+-   [x] Every category can be turned off per player, and opt-out is honoured (tested, including
+        each channel independently).
+-   [x] No notification path can block or slow a gameplay or tournament operation. `notify()`
+        never throws and never rejects — a database or SES failure is logged and dropped — and
+        every caller invokes it fire-and-forget. Asserted by tests that take the database and
+        SES away underneath it. A missed notification is a small harm; a pairing that fails to
+        commit because the mail server is down is a large one.
+-   [x] Notification reads and writes are scoped to the calling account inside the service, so
+        an id belonging to someone else is a no-op rather than a cross-account read.
 
-#### N3 — Deck intelligence _(mostly done)_
+#### N3 — Deck intelligence _(done, less the lobby-list exception)_
 
 **Why:** SAS is the platform's differentiator against a generic ladder, and it is currently
 under-displayed — the SAS the platform already stores appears on one screen.
@@ -437,16 +538,31 @@ under-displayed — the SAS the platform already stores appears on one screen.
         invented expectation.
 -   [ ] Lobby game list: decks are not chosen for open games, so there is nothing to show
         there yet — deliberately skipped rather than rendering mostly-empty cells.
--   [ ] Best/worst matchups and "your best deck" callouts.
--   [ ] Periodic background SAS refresh sweep (today refresh is access-triggered only).
+-   [x] Best/worst matchups (your record against each opposing house) and "your best deck".
+        The callout is ranked by how far a deck beats what its SAS band predicts, **not** by
+        raw win rate — a 45% win rate with a weak deck is a better piloting result than 55%
+        with the strongest deck on the site, and raw win rate would call the second one your
+        best deck. Decks under five games are ignored, and a lone deck is not reported as both
+        the best and the worst.
+-   [x] Periodic background SAS refresh sweep. Refresh used to be access-triggered only, so a
+        deck nobody opened kept its first-ever score forever and the site's SAS drifted away
+        from DoK as the model was revised. The sweep takes the stalest decks first and yields
+        the moment the shared per-minute budget is gone, one request at a time, so a live
+        import or a pre-game lookup is never queued behind it. Cadence and batch size are
+        **admin-config**.
+-   [x] Set win rates and a house-vs-house matchup matrix on the meta dashboard (**Phase 11**).
+        A matchup cell under twenty games reports its game count but **no** win rate: 100% off
+        two games reads as a finding and is noise.
 
 **Depends on:** I2 (any stats migration).
 **Acceptance criteria**
 
--   A player can see, without leaving the deck page, how their deck performs relative to what
-    its SAS predicts.
--   Deck lists and lobby games show SAS whenever it is cached, and degrade silently when not.
--   The refresh sweep respects the existing per-minute DoK budget and never starves live requests.
+-   [x] A player can see, without leaving the deck page, how their deck performs relative to
+        what its SAS predicts — and which houses they actually beat.
+-   [x] Deck lists show SAS whenever it is cached, and degrade silently when not. Lobby games
+        are the deliberate exception above.
+-   [x] The refresh sweep respects the existing per-minute DoK budget and never starves live
+        requests — asserted by a test that leaves it two slots and watches it stop at two.
 
 #### N4 — Ladder maturity
 
@@ -906,7 +1022,8 @@ OpenID Connect.
 -   [x] **Bulk / live import from Decks of KeyForge** (docs/design/dok-import.md), with a live
         progress bar, re-run sync, and a remembered DoK username (Users.DokUsername).
 -   [ ] Show SAS on deck _lists_, lobby games, and pre-game screen → **N3**.
--   [ ] Periodic refresh sweep job (currently access-triggered only) → **N3**.
+-   [x] **Periodic refresh sweep job** — stalest decks first, yields to live traffic, cadence
+        and batch size admin-config (**N3**).
 -   [ ] AERC component breakdown display from stored RawData → **N3**.
 -   [ ] Redis-backed shared rate-limit counter for multi-process scale → **F8**.
 
@@ -1016,7 +1133,7 @@ much stronger deck pays less.
 -   [ ] QR join codes / check-in kiosk flows for IRL events → **N9**.
 -   [ ] Alliance-specific conditions (pod legality checks per event) → **N9**.
 -   [ ] Archon Adaptive Bo3 (full swap/bid series) as a match type → **N9**.
--   [ ] Round-pairing notifications → **N2**.
+-   [x] **Round-pairing notifications** — in-app and email, deduplicated per player per round (**N2**).
 
 ## Phase 8 — Modern UI
 
@@ -1086,10 +1203,13 @@ much stronger deck pays less.
         at each log position, rendered beside the play-by-play, and is spectator-safe by
         construction (**N1**).
 -   [x] **Watch hub** (`/watch`): live spectatable games (**N1**).
--   [ ] Storage-budgeted retention **(admin-config)** → **N1**.
--   [ ] Featured match, spectator counts, optional broadcast delay → **N1**.
--   [ ] Share links for replays/matches → **N1**.
--   [ ] Match history filters by deck, opponent, format, result → **N1**.
+-   [x] **Storage-budgeted retention** **(admin-config)**: size cap, retention window and purge
+        cadence in Site Settings > Replays, enforced by an hourly lobby sweep (**N1**).
+-   [x] **Featured match, spectator counts, optional broadcast delay** — the delay is enforced
+        in the game node on spectators only, so the players always see the live position (**N1**).
+-   [x] **Share links for replays** (public, no auth, revocable, per-replay token) (**N1**).
+-   [x] **Match history filters** by deck, opponent, format and result, applied in SQL before
+        the row limit (**N1**).
 -   [ ] Two bots playing each other continuously, watchable by anyone — permanent content for the
         Watch hub and a continuous engine soak test → **F9**.
 
@@ -1100,8 +1220,10 @@ much stronger deck pays less.
 -   [x] Player stats: win rates by house & format, key rates, average game length.
 -   [x] Meta dashboards: house win rates, SAS bands vs. win %, format popularity.
 -   [x] Public API for stats (`/api/stats/*`), cached.
--   [ ] Set win rates and matchup matrices on the meta dashboard → **N3**.
--   [ ] Deck stats: per-deck W/L, SAS vs. performance deltas → **N3**.
+-   [x] **Set win rates and the house matchup matrix** on the meta dashboard; matchups under
+        twenty games report a game count but no win rate (**N3**).
+-   [x] Deck stats: per-deck W/L, SAS vs. performance deltas, per-opposing-house matchups and
+        best/worst deck callouts (**N3**).
 -   [ ] Admin analytics: DAU/MAU, games/day, queue health, funnel metrics → **N8**.
 -   [ ] Rate limiting + versioning for the public stats API → **F1**.
 
@@ -1207,12 +1329,17 @@ competitive advantage.
         snapshot with periodic refresh, who/when audit, defaults in code
         (docs/design/settings-service.md).
 -   [x] Admin settings UI at /admin/settings (isAdmin) covering rating (Elo knobs, decay,
-        seasons, leaderboard threshold), DoK, tournaments, regions, site content, and
-        navigation page visibility.
+        seasons, leaderboard threshold), DoK (including the background SAS sweep), tournaments,
+        replays (recording, size cap, retention, purge cadence, sharing), watch (spectator
+        counts, broadcast delay, featured game), regions, site content, and navigation page
+        visibility.
 -   [x] Admin tooling: user admin (roles, disable, delete, password reset), per-player rating
         set/reset, season operations, ban list, nodes, MOTD, news, bug reports.
+-   [x] `sectionDefaults()` / `getSectionWithDefaults()`: a registry-only section's code
+        defaults are built from the same field descriptors the admin UI renders, so a service
+        reading a setting cannot drift from what the admin panel says the default is.
 -   [ ] Wire remaining **(admin-config)** flags through the registry: auth SSO-only mode,
-        matchmaking parameters, replay retention, moderation policy thresholds.
+        matchmaking parameters, moderation policy thresholds.
 -   [ ] Redis pub/sub snapshot invalidation for multi-lobby deployments → **N8**.
 -   [ ] Full audit-log table (currently last-editor only) → **N5**.
 -   [ ] Feature flags section for gradual rollout of new systems → **N8**.
@@ -1255,11 +1382,12 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
 -   [x] **Third-party font loading** — Noto Sans and Orbitron self-hosted in
         `client/assets/fonts/` (~210 KB: Noto Sans is a variable font, so one file per subset
         covers 400/500/600). OFL licences bundled. Two origins dropped from the CSP.
--   [ ] **`helmet` pinned at v3**, several majors behind. Now mounted with a CSP (**I0**);
-        the major-version upgrade stays with **I5**.
--   [ ] **Silent replay drop**: `GameService.saveReplay` skips captures over 2 MB with only a
-        log line. Fold into the retention policy in **N1** so the behaviour is explicit and
-        visible.
+-   [x] **`helmet` upgraded v3 → v8** in **I5** (this entry was stale — the checkbox was never
+        ticked when the upgrade landed; `package.json` has carried `^8.3.0` since).
+-   [x] **Silent replay drop** — the 2 MB skip is now the admin-configurable
+        `replay.maxCaptureKb`, and `saveReplay` returns which of "stored", "too large",
+        "recording disabled" or "no replay" happened. A skip used to read from the outside
+        exactly like a game that was never recorded (**N1**).
 -   [x] **"Rematch: Swap Decks" read as the wrong thing** — now "Rematch: Trade Decks" and
         "Rematch: Pick New Decks", so the difference is stated rather than implied.
         `GameWonPrompt.spec.js` updated; no locale entries existed for these labels.

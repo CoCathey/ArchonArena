@@ -21,6 +21,9 @@
     lobby: {
         appName: 'Archon Arena',
         emailFromAddress: 'noreply@archonarena.com',
+        // Absolute links in notification email (SITE_URL). Background-raised
+        // notifications have no request to derive the origin from.
+        siteUrl: 'https://archonarena.com',
         blockDisposableEmail: true
     }
 }

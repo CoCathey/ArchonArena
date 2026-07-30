@@ -69,6 +69,10 @@ module.exports.init = function (server) {
         wrapAsync(async (req, res) => {
             const content = settingsService.getSection('content') || {};
             const navigation = settingsService.getSection('navigation') || {};
+            // ARCHON (N1): Watch hub presentation. Public on purpose - a
+            // broadcast delay that spectators cannot see is a delay they will
+            // report as a bug, and the featured game is a public pointer.
+            const watch = settingsService.getSectionWithDefaults('watch');
 
             res.send({
                 success: true,
@@ -82,6 +86,12 @@ module.exports.init = function (server) {
                     articles: navigation.showArticles !== false,
                     blogs: navigation.showBlogs !== false,
                     forums: navigation.showForums !== false
+                },
+                watch: {
+                    showSpectatorCounts: watch.showSpectatorCounts !== false,
+                    broadcastDelaySeconds: Number(watch.broadcastDelaySeconds) || 0,
+                    featuredGameId: watch.featuredGameId || '',
+                    featuredLabel: watch.featuredLabel || ''
                 }
             });
         })

@@ -218,6 +218,11 @@ class GameServer {
      * @param {import("../game/game")} game
      */
     closeGame(game) {
+        // ARCHON (N1): deliver anything a broadcast delay is still holding
+        // before the sockets go, so a delayed spectator sees the end of the
+        // game rather than the board freezing a minute short of it.
+        this.clearSpectatorDelay(game);
+
         for (const player of Object.values(game.getPlayersAndSpectators())) {
             if (player.socket) {
                 player.socket.tIsClosing = true;
@@ -308,6 +313,12 @@ class GameServer {
             // Deliberately swallowed; the recording is best-effort.
         }
 
+        // ARCHON (N1): optional broadcast delay. Spectators - and only
+        // spectators - can be held back by a configured number of seconds so an
+        // event can be streamed without the stream becoming a side channel back
+        // to the table. The two players are never delayed.
+        const delayMs = Math.max(0, Number(game.spectatorDelaySeconds) || 0) * 1000;
+
         for (const player of Object.values(game.getPlayersAndSpectators())) {
             if (player.left || player.disconnectedAt || !player.socket) {
                 continue;
@@ -315,16 +326,113 @@ class GameServer {
 
             let state = game.getState(player.name);
 
-            let stateToSend = state;
+            if (delayMs > 0 && game.isSpectator(player)) {
+                this.queueDelayedState(game, player.name, state, delayMs);
 
-            if (game.jsonForUsers[player.name]) {
-                stateToSend = jsondiffpatch.diff(game.jsonForUsers[player.name], state);
+                continue;
             }
 
-            player.socket.send('gamestate', stateToSend);
-
-            game.jsonForUsers[player.name] = jsondiffpatch.clone(state);
+            this.sendStateTo(game, player, state);
         }
+    }
+
+    /**
+     * Send one player their state, diffed against what they were last sent.
+     *
+     * Split out of sendGameState so the delayed path shares it: the diff base
+     * (`jsonForUsers`) must only advance when a state is actually delivered,
+     * otherwise a delayed spectator would be sent diffs against a position they
+     * have not seen yet and their board would desynchronise.
+     */
+    sendStateTo(game, player, state) {
+        let stateToSend = state;
+
+        if (game.jsonForUsers[player.name]) {
+            stateToSend = jsondiffpatch.diff(game.jsonForUsers[player.name], state);
+        }
+
+        player.socket.send('gamestate', stateToSend);
+
+        game.jsonForUsers[player.name] = jsondiffpatch.clone(state);
+    }
+
+    /**
+     * Hold a spectator's state until the broadcast delay has elapsed.
+     *
+     * The state is captured now and delivered later, rather than recomputed on
+     * a timer - what a delayed viewer must see is the position as it was
+     * `delayMs` ago, not a stale render of the position as it is.
+     */
+    queueDelayedState(game, playerName, state, delayMs) {
+        if (!game.spectatorDelayQueue) {
+            game.spectatorDelayQueue = [];
+        }
+
+        game.spectatorDelayQueue.push({
+            playerName,
+            state: jsondiffpatch.clone(state),
+            dueAt: Date.now() + delayMs
+        });
+
+        this.scheduleDelayedFlush(game);
+    }
+
+    scheduleDelayedFlush(game) {
+        if (game.spectatorDelayTimer || !game.spectatorDelayQueue?.length) {
+            return;
+        }
+
+        const wait = Math.max(0, game.spectatorDelayQueue[0].dueAt - Date.now());
+
+        game.spectatorDelayTimer = setTimeout(() => {
+            game.spectatorDelayTimer = null;
+            this.flushDelayedStates(game);
+        }, wait);
+
+        if (game.spectatorDelayTimer.unref) {
+            game.spectatorDelayTimer.unref();
+        }
+    }
+
+    /**
+     * Deliver every queued spectator state whose delay has elapsed. `force`
+     * delivers the lot regardless, which is what a finished or closing game
+     * needs so the tail of the game is not simply dropped on the floor.
+     */
+    flushDelayedStates(game, { force = false } = {}) {
+        const queue = game.spectatorDelayQueue;
+
+        if (!queue || queue.length === 0) {
+            return;
+        }
+
+        const now = Date.now();
+
+        while (queue.length > 0 && (force || queue[0].dueAt <= now)) {
+            const entry = queue.shift();
+            const player = game.playersAndSpectators[entry.playerName];
+
+            // A spectator who left in the meantime simply misses it.
+            if (player && !player.left && !player.disconnectedAt && player.socket) {
+                try {
+                    this.sendStateTo(game, player, entry.state);
+                } catch (err) {
+                    logger.error('Failed to send delayed spectator state', err);
+                }
+            }
+        }
+
+        this.scheduleDelayedFlush(game);
+    }
+
+    /** Stop a game's delay timer and deliver anything still held. */
+    clearSpectatorDelay(game) {
+        if (game.spectatorDelayTimer) {
+            clearTimeout(game.spectatorDelayTimer);
+            game.spectatorDelayTimer = null;
+        }
+
+        this.flushDelayedStates(game, { force: true });
     }
 
     /**

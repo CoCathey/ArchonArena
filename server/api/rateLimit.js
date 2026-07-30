@@ -1,25 +1,37 @@
+const logger = require('../log');
+const { MemoryStore, RedisStore } = require('./rateLimitStore');
+
 /**
- * ARCHON: lightweight in-memory sliding-window rate limiter.
+ * ARCHON: sliding-window rate limiting and login failure throttling.
  *
  * Applied to record-creating / invite / external-API endpoints that have no
- * legitimate high-frequency use, to bound spam and automated abuse (friend
- * requests, club/store/tournament creation, DoK collection import).
+ * legitimate high-frequency use (friend requests, club/store/tournament
+ * creation, DoK collection import, replay sharing), and to every auth endpoint.
  *
- * State is per-process, consistent with the rest of the app's per-instance
- * state (e.g. the DoK outbound budget). A hard multi-instance guarantee would
- * move this to Redis, but per-instance limits already raise the cost of abuse
- * substantially and add no new failure modes (no external dependency, fails
- * open only if the process itself is unhealthy).
+ * ARCHON (I5): state now lives in Redis rather than in a per-process Map. The
+ * production topology runs more than one lobby, and a per-process limit divides
+ * by the number of processes — "10 login failures" silently became 10 per
+ * lobby. See rateLimitStore.js for the storage, including why a Redis outage
+ * degrades to per-process limits instead of dropping them.
  */
 
-// key -> number[] of request timestamps (ms since epoch)
-const store = new Map();
+// The active store. Starts in-process so anything that imports this module
+// before the lobby boots (tests, scripts) still gets working limits; `setRedisStore`
+// swaps in the shared one at startup.
+let store = new MemoryStore();
 
-// Opportunistic cleanup horizon. Kept comfortably above every window below so
-// the sweep never discards data a limiter still needs; per-request enforcement
-// re-filters against each limiter's own window.
-const MAX_AGE_MS = 60 * 60 * 1000;
-let lastSweepAt = 0;
+/**
+ * Back the limiters with Redis. Called once from server startup with a
+ * connected client; safe to skip entirely, in which case limits stay
+ * per-process exactly as they were.
+ *
+ * @param {object} client   a connected node-redis client
+ * @param {string} [prefix] key prefix (the site's redisKeyPrefix)
+ */
+function setRedisStore(client, prefix = '') {
+    store = new RedisStore(client, { prefix });
+    logger.info('Rate limiting is backed by Redis (limits are shared across lobby processes)');
+}
 
 /**
  * The client address to key an anonymous caller on.
@@ -38,24 +50,6 @@ function clientIp(req) {
     return req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
 }
 
-function sweep(now) {
-    if (now - lastSweepAt < 60 * 1000) {
-        return;
-    }
-
-    lastSweepAt = now;
-    const cutoff = now - MAX_AGE_MS;
-
-    for (const [key, times] of store) {
-        const kept = times.filter((time) => time > cutoff);
-        if (kept.length === 0) {
-            store.delete(key);
-        } else if (kept.length !== times.length) {
-            store.set(key, kept);
-        }
-    }
-}
-
 /**
  * @param {object} options
  * @param {number} options.windowMs sliding window length in milliseconds
@@ -67,17 +61,25 @@ function sweep(now) {
 function rateLimit({ windowMs, max, name, message }) {
     const bucket = name || 'action';
 
-    return (req, res, next) => {
+    return async (req, res, next) => {
         const identity = req.user && req.user.id ? `u:${req.user.id}` : `ip:${clientIp(req)}`;
         const key = `${bucket}:${identity}`;
-        const now = Date.now();
-        const windowStart = now - windowMs;
 
-        const times = (store.get(key) || []).filter((time) => time > windowStart);
+        let result;
 
-        if (times.length >= max) {
-            const retryAfterSec = Math.max(1, Math.ceil((times[0] + windowMs - now) / 1000));
-            res.set('Retry-After', String(retryAfterSec));
+        try {
+            result = await store.hit(key, windowMs, max, Date.now());
+        } catch (err) {
+            // The store already falls back to memory internally, so reaching
+            // here means something unexpected. Let the request through rather
+            // than 500 on it: a limiter is a safeguard, not a gate.
+            logger.error('Rate limiter failed; allowing the request', err);
+
+            return next();
+        }
+
+        if (result.limited) {
+            res.set('Retry-After', String(result.retryAfterSec));
 
             return res.status(429).send({
                 success: false,
@@ -86,10 +88,6 @@ function rateLimit({ windowMs, max, name, message }) {
                     'You are doing that too often. Please slow down and try again shortly.'
             });
         }
-
-        times.push(now);
-        store.set(key, times);
-        sweep(now);
 
         next();
     };
@@ -110,71 +108,39 @@ function rateLimit({ windowMs, max, name, message }) {
  * account separately: per-IP catches one host working through many accounts,
  * per-username catches many hosts working on one account.
  *
+ * Every method is async because the state is shared (see the module comment);
+ * callers must await them, or a lockout will not be observed until the next
+ * request.
+ *
  * @param {object} options
  * @param {number} options.windowMs how far back failures are counted
  * @param {number} options.max      failures allowed within the window
  * @param {number} options.blockMs  how long a key stays locked out
  */
 function createFailureThrottle({ windowMs, max, blockMs }) {
-    // key -> { failures: number[], blockedUntil: number }
-    const buckets = new Map();
-
-    const bucketFor = (key) => {
-        let bucket = buckets.get(key);
-
-        if (!bucket) {
-            bucket = { failures: [], blockedUntil: 0 };
-            buckets.set(key, bucket);
-        }
-
-        return bucket;
-    };
-
     return {
         /**
          * Seconds remaining on the lockout for `key`, or 0 when not locked out.
          */
-        blockedFor(key, now = Date.now()) {
-            const bucket = buckets.get(key);
-
-            if (!bucket || bucket.blockedUntil <= now) {
-                return 0;
-            }
-
-            return Math.max(1, Math.ceil((bucket.blockedUntil - now) / 1000));
+        async blockedFor(key, now = Date.now()) {
+            return store.blockedFor(key, now);
         },
 
         /** Record one failed attempt; locks the key out once max is reached. */
-        recordFailure(key, now = Date.now()) {
-            const bucket = bucketFor(key);
-
-            bucket.failures = bucket.failures.filter((time) => time > now - windowMs);
-            bucket.failures.push(now);
-
-            if (bucket.failures.length >= max) {
-                bucket.blockedUntil = now + blockMs;
-                // Start the next window clean so a locked-out key is not
-                // immediately re-locked by failures that already counted.
-                bucket.failures = [];
-            }
+        async recordFailure(key, now = Date.now()) {
+            return store.recordFailure(key, windowMs, max, blockMs, now);
         },
 
         /** Clear all state for a key. Called on a successful authentication. */
-        reset(key) {
-            buckets.delete(key);
-        },
-
-        // Exposed for tests.
-        _reset() {
-            buckets.clear();
+        async reset(key) {
+            return store.resetKey(key);
         }
     };
 }
 
-// Exposed for tests.
+// Exposed for tests: drop back to a clean in-process store.
 function _reset() {
-    store.clear();
-    lastSweepAt = 0;
+    store = new MemoryStore();
 }
 
-module.exports = { rateLimit, createFailureThrottle, clientIp, _reset };
+module.exports = { rateLimit, createFailureThrottle, clientIp, setRedisStore, _reset };

@@ -118,7 +118,7 @@ class DokService {
      * Fetch deck statistics from the DoK public API. Returns the extracted
      * stats or null on any failure (never throws).
      */
-    async fetchDeckStats(uuid) {
+    async fetchDeckStats(uuid, { alreadyReserved = false } = {}) {
         const config = this.getConfig();
 
         if (!this.isEnabled()) {
@@ -126,8 +126,10 @@ class DokService {
         }
 
         // Enrichment is best-effort: if this minute's budget is spent, skip
-        // and let a later access retry (needsRefresh stays true).
-        if (!this.reserveRequestSlot()) {
+        // and let a later access retry (needsRefresh stays true). Callers that
+        // reserved their own slot (the refresh sweep, which has to know whether
+        // the budget or the request failed) say so rather than double-spending.
+        if (!alreadyReserved && !this.reserveRequestSlot()) {
             return null;
         }
 
@@ -463,6 +465,92 @@ class DokService {
         } finally {
             this.pendingFetches.delete(uuid);
         }
+    }
+
+    /**
+     * ARCHON: the decks whose cached SAS is missing or past its refresh
+     * window, stalest first.
+     *
+     * Only decks somebody actually owns - a DeckSas row whose deck has since
+     * been deleted is not worth an API call.
+     */
+    async findStaleDeckUuids(limit) {
+        const config = this.getConfig();
+        const refreshDays = config.refreshDays == null ? 30 : config.refreshDays;
+        const cutoff = new Date(Date.now() - refreshDays * 24 * 60 * 60 * 1000);
+
+        const rows = await this.db.query(
+            'SELECT DISTINCT d."Uuid" AS "uuid", ds."FetchedAt" AS "fetchedAt" ' +
+                'FROM "Decks" d LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                'WHERE d."Uuid" IS NOT NULL AND (ds."FetchedAt" IS NULL OR ds."FetchedAt" < $1) ' +
+                'ORDER BY ds."FetchedAt" ASC NULLS FIRST LIMIT $2',
+            [cutoff, limit]
+        );
+
+        return (rows || []).map((row) => row.uuid);
+    }
+
+    /**
+     * ARCHON: periodic background SAS refresh (N3).
+     *
+     * Refresh used to be access-triggered only: a deck nobody opened kept its
+     * first-ever score forever, so the site's SAS slowly drifted away from what
+     * DoK actually says as the model was revised.
+     *
+     * This deliberately spends only what is left of the shared per-minute
+     * budget after live traffic, one request at a time, and stops the moment a
+     * slot is unavailable - a player importing a collection or looking at a
+     * pre-game screen is never queued behind the sweep. Whatever it does not
+     * reach this pass it reaches on the next, because the stalest decks sort
+     * first and the sweep re-queries each run.
+     *
+     * Never throws: a failed sweep must not take a lobby tick with it.
+     */
+    async refreshStaleDecks({ batchSize } = {}) {
+        const config = this.getConfig();
+
+        if (!this.isEnabled() || config.sweepEnabled === false) {
+            return { refreshed: 0, attempted: 0, budgetExhausted: false, skipped: true };
+        }
+
+        const cap = Math.max(1, parseInt(batchSize ?? config.sweepBatchSize, 10) || 10);
+        let uuids;
+
+        try {
+            uuids = await this.findStaleDeckUuids(cap);
+        } catch (err) {
+            logger.warn(`SAS refresh sweep could not list stale decks: ${err.message}`);
+
+            return { refreshed: 0, attempted: 0, budgetExhausted: false };
+        }
+
+        let refreshed = 0;
+        let attempted = 0;
+        let budgetExhausted = false;
+
+        for (const uuid of uuids) {
+            // Peek-and-take: if this returns false, live traffic has the budget
+            // and the sweep yields rather than waiting for a slot.
+            if (!this.reserveRequestSlot()) {
+                budgetExhausted = true;
+                break;
+            }
+
+            attempted++;
+
+            try {
+                const stats = await this.fetchDeckStats(uuid, { alreadyReserved: true });
+
+                if (stats) {
+                    await this.upsertStats(uuid, stats);
+                    refreshed++;
+                }
+            } catch (err) {
+                logger.warn(`SAS refresh sweep failed for deck ${uuid}: ${err.message}`);
+            }
+        }
+
+        return { refreshed, attempted, budgetExhausted };
     }
 
     /**

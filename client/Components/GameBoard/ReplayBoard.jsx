@@ -2,6 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import CardImage from './CardImage';
+import { orderPlayersForPerspective } from '../../replayMarkers';
 
 /**
  * ARCHON: the board as it stood at a point in a recorded game.
@@ -15,9 +16,14 @@ import CardImage from './CardImage';
  * are counts rather than contents here for the same reason they are hidden from
  * live spectators — a replay reveals no more than watching would have.
  *
- * @param {{ board?: object }} props
+ * `perspective` names the player to show at the bottom, where your own side of
+ * the table sits in the live game. It only reorders — a replay shows the same
+ * information whichever way round it is read, because the snapshot itself is
+ * spectator-safe.
+ *
+ * @param {{ board?: object, perspective?: string }} props
  */
-const ReplayBoard = ({ board }) => {
+const ReplayBoard = ({ board, perspective }) => {
     const { t } = useTranslation();
 
     if (!board || !board.players || board.players.length === 0) {
@@ -59,7 +65,7 @@ const ReplayBoard = ({ board }) => {
                 </div>
             )}
 
-            {board.players.map((player) => (
+            {orderPlayersForPerspective(board.players, perspective).map((player) => (
                 <div
                     key={player.name}
                     className={`rounded-md border px-3 py-2 ${

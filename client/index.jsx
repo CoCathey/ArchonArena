@@ -2,6 +2,16 @@ import 'core-js/stable';
 import 'regenerator-runtime/runtime';
 import './styles/tailwind.css';
 
+// ARCHON (I5): Font Awesome injects ~15 KB of CSS into a runtime <style> tag by
+// default, which needs style-src 'unsafe-inline' to survive the CSP. This is
+// Font Awesome's own documented answer: turn the injection off and import the
+// stylesheet, so Vite bundles it into the site's CSS file and it is served as
+// an ordinary same-origin stylesheet. Must run before any icon renders.
+import { config } from '@fortawesome/fontawesome-svg-core';
+import '@fortawesome/fontawesome-svg-core/styles.css';
+
+config.autoAddCss = false;
+
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';

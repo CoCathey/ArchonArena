@@ -13,6 +13,8 @@ const community = require('./community');
 const onboarding = require('./onboarding');
 // ARCHON: beta bug reports
 const bugReports = require('./bug-reports');
+// ARCHON: in-app notification centre + delivery preferences
+const notifications = require('./notifications');
 const decks = require('./decks');
 const games = require('./games');
 // ARCHON: platform statistics & analytics
@@ -44,6 +46,8 @@ module.exports.init = function (server, options) {
     community.init(server);
     // ARCHON: beta bug reports
     bugReports.init(server);
+    // ARCHON: notification centre + preferences
+    notifications.init(server);
     decks.init(server);
     games.init(server);
     // ARCHON: platform statistics & analytics
