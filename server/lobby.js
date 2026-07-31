@@ -73,6 +73,10 @@ class Lobby {
         // ARCHON (N8): matchmaking queue metrics. Optional - a lobby built
         // without one simply records nothing.
         this.analyticsService = options.analyticsService || null;
+        // ARCHON (N5): mute and timeout enforcement on the chat paths.
+        // Optional for the same reason: a lobby built without one enforces
+        // nothing rather than failing to start.
+        this.moderationService = options.moderationService || null;
         tournamentNotifications.install({
             tournamentService: this.tournamentService,
             notificationService: this.notificationService
@@ -1124,10 +1128,27 @@ class Lobby {
         }
     }
 
-    onPendingGameChat(socket, message) {
+    async onPendingGameChat(socket, message) {
         let game = this.findGameForUser(socket.user.username);
         if (!game) {
             return;
+        }
+
+        // ARCHON (N5): the same mute applies at the table. Muting someone in
+        // the lobby while leaving them free to talk in a game they are
+        // sitting in would not be the sanction the moderator chose.
+        if (this.moderationService) {
+            const check = await this.moderationService.checkRestriction(socket.user.id, 'chat');
+
+            if (!check.allowed) {
+                socket.send('nochat', {
+                    message: check.message,
+                    reason: check.reason,
+                    expiresAt: check.expiresAt
+                });
+
+                return;
+            }
         }
 
         game.chat(socket.user.username, message);
@@ -1141,6 +1162,24 @@ class Lobby {
         ) {
             socket.send('nochat');
             return;
+        }
+
+        // ARCHON (N5): a mute has to actually stop the message, and the
+        // player has to be told why and until when - a message that silently
+        // vanishes is indistinguishable from the site being broken, and the
+        // player just says it again.
+        if (this.moderationService) {
+            const check = await this.moderationService.checkRestriction(socket.user.id, 'chat');
+
+            if (!check.allowed) {
+                socket.send('nochat', {
+                    message: check.message,
+                    reason: check.reason,
+                    expiresAt: check.expiresAt
+                });
+
+                return;
+            }
         }
 
         let chatMessage = {

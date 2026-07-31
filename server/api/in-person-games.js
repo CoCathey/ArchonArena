@@ -12,7 +12,10 @@ const inPersonGameService = new InPersonGameService(require('../db'), {
     notificationService,
     // A confirmed paper game goes through exactly the same rating path as an
     // online one - see InPersonGameService.commit.
-    ratingService: new RatingService(new ConfigService())
+    ratingService: new RatingService(new ConfigService()),
+    // ARCHON (N5): a dispute the players cannot settle can be escalated into
+    // the moderation queue.
+    moderationService: require('./moderation').moderationService
 });
 
 // Opening games is the only cheap way to spam someone with notifications
@@ -84,6 +87,20 @@ module.exports.init = function (server) {
         wrapAsync(async (req, res) => {
             res.send(
                 await inPersonGameService.withdrawReport(parseInt(req.params.id, 10), req.user.id)
+            );
+        })
+    );
+
+    server.post(
+        '/api/in-person-games/:id/escalate',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(
+                await inPersonGameService.escalate(
+                    parseInt(req.params.id, 10),
+                    req.user.id,
+                    req.body.details
+                )
             );
         })
     );

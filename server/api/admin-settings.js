@@ -116,7 +116,8 @@ module.exports.init = function (server) {
             const result = await settingsService.setSection(
                 req.params.section,
                 req.body.value,
-                req.user.id
+                req.user.id,
+                req.user.username
             );
 
             res.send(result);
@@ -128,7 +129,11 @@ module.exports.init = function (server) {
         passport.authenticate('jwt', { session: false }),
         requireAdmin,
         wrapAsync(async (req, res) => {
-            const result = await settingsService.resetSection(req.params.section, req.user.id);
+            const result = await settingsService.resetSection(
+                req.params.section,
+                req.user.id,
+                req.user.username
+            );
 
             res.send(result);
         })

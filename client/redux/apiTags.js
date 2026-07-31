@@ -24,5 +24,7 @@ export const TAG_TYPES = {
     // ARCHON (N13): in-person (paper) games.
     IN_PERSON_GAMES: 'InPersonGames',
     // ARCHON (N8): the admin operations dashboard.
-    ANALYTICS: 'Analytics'
+    ANALYTICS: 'Analytics',
+    // ARCHON (N5): reports, the moderation queue and the audit log.
+    MODERATION: 'Moderation'
 };

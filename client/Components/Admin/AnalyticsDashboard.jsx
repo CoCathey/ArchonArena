@@ -119,7 +119,12 @@ const AnalyticsDashboard = () => {
         );
     }
 
-    const { activity, gamesPerDay, funnel, tournaments, matchmaking, registrations } = data;
+    const { activity, gamesPerDay, funnel, tournaments, matchmaking, registrations, moderation } =
+        data;
+
+    const oldestOpenDays = moderation?.oldestOpenAt
+        ? Math.floor((Date.now() - new Date(moderation.oldestOpenAt).getTime()) / 86400000)
+        : null;
 
     return (
         <>
@@ -206,6 +211,40 @@ const AnalyticsDashboard = () => {
                     <Stat label='Peak queue depth' value={matchmaking.peakDepth} />
                 </div>
             </Panel>
+
+            {/* ARCHON (N5): an unread moderation queue is an outage nobody
+                gets paged for, so it belongs on the operations dashboard. */}
+            {moderation && (
+                <Panel title={t('Moderation ({{days}} days)', { days: moderation.windowDays })}>
+                    <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                        <Stat label='Open reports' value={moderation.open} />
+                        <Stat label='Being handled' value={moderation.claimed} />
+                        <Stat
+                            label='Average time to resolve'
+                            value={moderation.averageResolutionHours}
+                            suffix='h'
+                        />
+                        <Stat
+                            label='Oldest open report'
+                            value={oldestOpenDays}
+                            suffix={oldestOpenDays === 1 ? ' day' : ' days'}
+                            hint='Queue age is the health signal'
+                        />
+                    </div>
+                    {Object.keys(moderation.actions).length > 0 && (
+                        <div className='mt-3 flex flex-wrap gap-2 text-xs'>
+                            {Object.entries(moderation.actions).map(([action, count]) => (
+                                <span
+                                    key={action}
+                                    className='rounded bg-surface-secondary/70 px-2 py-1 text-muted'
+                                >
+                                    {t(action)}: <span className='text-foreground'>{count}</span>
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                </Panel>
+            )}
 
             <Panel title={t('Registrations')}>
                 <Sparkline

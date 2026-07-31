@@ -56,6 +56,26 @@ const CATEGORIES = {
         description:
             'Someone recorded a paper game with you, your report is needed, or a result was confirmed or disputed.',
         defaults: { inApp: true, email: true }
+    },
+    // ARCHON (N5). Deliberately the two categories a player CANNOT opt out
+    // of in practice: a sanction nobody told you about is indistinguishable
+    // from the site being broken, and "why can I not chat" is the single
+    // most predictable support question a moderation system generates.
+    // They are still listed here so the preferences page is honest about
+    // what the platform sends.
+    'moderation.action': {
+        group: 'Account',
+        label: 'Moderation actions on your account',
+        description:
+            'A moderator has warned, muted, timed out or suspended your account - or lifted one of those.',
+        defaults: { inApp: true, email: true }
+    },
+    'moderation.update': {
+        group: 'Account',
+        label: 'Updates on reports you filed',
+        description:
+            'A report you submitted has been reviewed. You are told it was handled, never what was done to the other account.',
+        defaults: { inApp: true, email: false }
     }
 };
 

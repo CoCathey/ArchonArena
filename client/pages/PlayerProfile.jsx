@@ -7,6 +7,8 @@ import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
 import Avatar from '../Components/Site/Avatar';
 import AmberValue from '../Components/Site/AmberValue';
+// ARCHON (N5): reporting
+import ReportButton from '../Components/Site/ReportButton';
 import {
     useGetPlayerProfileQuery,
     useGetPlayerStatsQuery,
@@ -116,6 +118,12 @@ const PlayerProfile = () => {
                             )}
                         </div>
                     </div>
+                </div>
+                {/* ARCHON (N5): report from the surface where the problem
+                    appears. Below the header row rather than inside it, so the
+                    form has the full panel width when it opens. */}
+                <div className='mt-2'>
+                    <ReportButton targetType='player' targetUsername={profile.username} />
                 </div>
             </Panel>
 

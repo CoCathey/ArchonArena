@@ -321,6 +321,76 @@ describe('InPersonGameService', function () {
         });
     });
 
+    // ARCHON (N5): escalating a dispute the two players cannot settle.
+    describe('escalation', function () {
+        let moderation;
+
+        beforeEach(function () {
+            moderation = { report: vi.fn().mockResolvedValue({ success: true, id: 77 }) };
+            service.moderationService = moderation;
+            gameRow.Status = 'disputed';
+            gameRow.ReportId = null;
+        });
+
+        it('only escalates a disputed game', async function () {
+            gameRow.Status = 'pending';
+
+            const result = await service.escalate(5, 1, 'help');
+
+            expect(result.success).toBe(false);
+            expect(moderation.report).not.toHaveBeenCalled();
+        });
+
+        it('only lets the two players escalate', async function () {
+            const result = await service.escalate(5, 99, 'help');
+
+            expect(result.success).toBe(false);
+        });
+
+        it('files a report and links it to the game', async function () {
+            const result = await service.escalate(5, 1, 'We cannot agree on the keys.');
+
+            expect(result).toMatchObject({ success: true, reportId: 77 });
+            expect(moderation.report).toHaveBeenCalledWith(
+                1,
+                expect.objectContaining({ targetType: 'inPersonGame', targetId: 5 })
+            );
+            expect(
+                db.query.mock.calls.some(
+                    ([sql]) => sql.includes('UPDATE "InPersonGames"') && sql.includes('"ReportId"')
+                )
+            ).toBe(true);
+        });
+
+        it('will not escalate the same dispute twice', async function () {
+            gameRow.ReportId = 77;
+
+            const result = await service.escalate(5, 1, 'again');
+
+            expect(result.success).toBe(false);
+            expect(moderation.report).not.toHaveBeenCalled();
+        });
+
+        // Escalating behind one player's back is a worse process than none.
+        it('tells both players it has gone to the moderators', async function () {
+            await service.escalate(5, 1, 'We cannot agree.');
+
+            const notified = notifications.notify.mock.calls.map(([call]) => call.userId);
+
+            expect(notified).toContain(1);
+            expect(notified).toContain(2);
+        });
+
+        it('still disputes correctly with no moderation service wired in', async function () {
+            service.moderationService = null;
+
+            const result = await service.escalate(5, 1, 'help');
+
+            expect(result.success).toBe(false);
+            expect(result.message).toMatch(/not available/i);
+        });
+    });
+
     describe('lifecycle', function () {
         it('refuses to report against a confirmed game', async function () {
             gameRow.Status = 'confirmed';
