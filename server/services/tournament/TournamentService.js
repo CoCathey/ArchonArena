@@ -15,7 +15,9 @@ const {
 } = require('./pairing');
 
 const FORMATS = ['swiss', 'single-elim', 'double-elim', 'round-robin'];
-const MODES = ['online', 'irl'];
+// ARCHON (N9): 'hybrid' is an event where some tables play on the platform
+// and some play on paper, both feeding one standing.
+const MODES = ['online', 'irl', 'hybrid'];
 const SEED_METHODS = ['registration', 'rating', 'random', 'manual'];
 const VISIBILITIES = ['public', 'private'];
 const BEST_OF_OPTIONS = [1, 3, 5];
@@ -90,6 +92,10 @@ class TournamentService {
         this.db = db;
         this.configService = options.configService || null;
         this.settingsService = options.settingsService || require('../settings');
+        // ARCHON (N7): injected so a TournamentService built without one (as
+        // most tests do) finishes team events without rating them, rather
+        // than failing to finish them at all.
+        this.teamRatingService = options.teamRatingService || null;
     }
 
     getConfig() {
@@ -159,6 +165,61 @@ class TournamentService {
         }
 
         return await this.isStaff(tournament.Id, actor.id);
+    }
+
+    /**
+     * ARCHON (N9): per-event Alliance pod rules.
+     *
+     * Returns null when the event sets none, which is the default and means
+     * "any legal Alliance deck". Every field is a restriction, so an absent
+     * policy can never be more restrictive than a present one.
+     */
+    parseAlliancePolicy(policy, errors) {
+        if (!policy || typeof policy !== 'object') {
+            return null;
+        }
+
+        const out = {};
+
+        // Reject Alliance decks built before the platform recorded which
+        // decks their pods came from. Those decks cannot be checked at all,
+        // so an event that cares has to turn people away rather than let an
+        // unverifiable deck through as if it had passed.
+        out.requirePodProvenance = !!policy.requirePodProvenance;
+
+        if (policy.maxPodsPerSourceDeck !== undefined && policy.maxPodsPerSourceDeck !== null) {
+            const max = parseInt(policy.maxPodsPerSourceDeck, 10);
+
+            if (Number.isNaN(max) || max < 1 || max > 3) {
+                errors.push('Pods per source deck must be between 1 and 3');
+            } else {
+                out.maxPodsPerSourceDeck = max;
+            }
+        }
+
+        if (Array.isArray(policy.allowedPodSets) && policy.allowedPodSets.length > 0) {
+            out.allowedPodSets = policy.allowedPodSets
+                .map((id) => parseInt(id, 10))
+                .filter((id) => !Number.isNaN(id));
+        }
+
+        if (Array.isArray(policy.bannedPodHouses) && policy.bannedPodHouses.length > 0) {
+            const houses = policy.bannedPodHouses.map((code) => String(code).toLowerCase());
+            const unknown = houses.find((code) => !HOUSE_CODES.includes(code));
+
+            if (unknown) {
+                errors.push(`Unknown house '${unknown}'`);
+            } else {
+                out.bannedPodHouses = houses;
+            }
+        }
+
+        // One physical deck, one player. Alliance is the format where this
+        // matters most: two players can each build a legal Alliance deck that
+        // silently depends on the same physical Archon sitting on the table.
+        out.exclusiveSourceDecks = !!policy.exclusiveSourceDecks;
+
+        return Object.keys(out).length > 0 ? out : null;
     }
 
     parseEventOptions(options, config) {
@@ -370,6 +431,49 @@ class TournamentService {
             errors.push('Sealed events cannot require deck registration');
         }
 
+        // ARCHON (N7): team events.
+        out.teamEvent = !!options.teamEvent;
+
+        const teamSize = options.teamSize ? parseInt(options.teamSize, 10) : null;
+
+        if (teamSize !== null && (Number.isNaN(teamSize) || teamSize < 2 || teamSize > 12)) {
+            errors.push('Team size must be between 2 and 12');
+        }
+
+        out.teamSize = out.teamEvent ? teamSize : null;
+
+        // ARCHON (N9): paper results. An IRL or hybrid event accepts them by
+        // definition; an online event has to opt in, because on a purely
+        // online event a typed-in result is a claim about a game the platform
+        // could have witnessed and did not.
+        out.allowPaperResults =
+            out.mode === 'irl' || out.mode === 'hybrid' ? true : !!options.allowPaperResults;
+
+        // ARCHON (N9): Adaptive Bo3 - the loser of each game chooses to swap
+        // decks or bid chains to keep their own.
+        out.adaptiveBo3 = !!options.adaptiveBo3;
+
+        if (out.adaptiveBo3) {
+            if (out.triad) {
+                errors.push('Adaptive and Triad are different series formats - pick one');
+            }
+
+            if (options.gameFormat === 'sealed') {
+                errors.push('Adaptive swaps registered decks and cannot be sealed');
+            }
+
+            // The whole point of Adaptive is a three-game series.
+            out.bestOf = 3;
+        }
+
+        const alliancePolicy = this.parseAlliancePolicy(options.alliancePolicy, errors);
+
+        if (alliancePolicy && options.gameFormat !== 'alliance') {
+            errors.push('Alliance pod rules only apply to Alliance events');
+        }
+
+        out.alliancePolicy = alliancePolicy;
+
         return { errors, values: out };
     }
 
@@ -390,9 +494,13 @@ class TournamentService {
                 '"RoundTimerMinutes", "RatedGames", "RequireDeckRegistration", "SasMin", ' +
                 '"SasMax", "HideDecklists", "GameTimeLimit", "DeckSwapPolicy", "AllowedSets", ' +
                 '"RequiredHouses", "BannedHouses", "SasChainHandicap", "ChainsPerMatchWin", ' +
-                '"Triad", "CreatedAt") ' +
+                // ARCHON: team events (N7); paper results, Alliance pod rules
+                // and Adaptive Bo3 (N9).
+                '"Triad", "TeamEvent", "TeamSize", "AllowPaperResults", "AlliancePolicy", ' +
+                '"AdaptiveBo3", "CreatedAt") ' +
                 'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ' +
                 '$16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, ' +
+                '$30, $31, $32, $33, $34, ' +
                 'now() AT TIME ZONE \'utc\') RETURNING "Id"',
             [
                 values.name,
@@ -423,7 +531,12 @@ class TournamentService {
                 values.bannedHouses ? JSON.stringify(values.bannedHouses) : null,
                 values.sasChainHandicap,
                 values.chainsPerMatchWin,
-                values.triad
+                values.triad,
+                values.teamEvent,
+                values.teamSize,
+                values.allowPaperResults,
+                values.alliancePolicy ? JSON.stringify(values.alliancePolicy) : null,
+                values.adaptiveBo3
             ]
         );
 
@@ -800,6 +913,14 @@ class TournamentService {
                 roundTimerMinutes: tournament.RoundTimerMinutes,
                 roundStartedAt: tournament.RoundStartedAt,
                 checkInOpen: !!tournament.CheckInOpenedAt,
+                // ARCHON (N9): the kiosk code is the organizer's to print.
+                checkInCode: canManage ? tournament.CheckInCode : undefined,
+                allowPaperResults: !!tournament.AllowPaperResults,
+                adaptiveBo3: !!tournament.AdaptiveBo3,
+                alliancePolicy: this.parseJsonColumn(tournament.AlliancePolicy),
+                // ARCHON (N7): team events.
+                teamEvent: !!tournament.TeamEvent,
+                teamSize: tournament.TeamSize,
                 rated: !!tournament.RatedGames,
                 requireDeckRegistration: !!tournament.RequireDeckRegistration,
                 sasMin: tournament.SasMin,
@@ -903,6 +1024,44 @@ class TournamentService {
             }
         }
 
+        // ARCHON (N7): a team event is entered under a team. Players still
+        // register and play individually - what makes it a team event is that
+        // their results roll up to the roster they entered under.
+        let teamId = null;
+
+        if (tournament.TeamEvent) {
+            teamId = parseInt(options.teamId, 10);
+
+            if (!Number.isInteger(teamId)) {
+                return { success: false, message: 'This is a team event - choose your team' };
+            }
+
+            const membership = await this.db.query(
+                'SELECT 1 FROM "TeamMembers" WHERE "TeamId" = $1 AND "UserId" = $2',
+                [teamId, actor.id]
+            );
+
+            if (!membership || membership.length === 0) {
+                return { success: false, message: 'You are not on that team' };
+            }
+
+            if (tournament.TeamSize) {
+                const roster = await this.db.query(
+                    'SELECT COUNT(*) AS "Count" FROM "TournamentPlayers" ' +
+                        'WHERE "TournamentId" = $1 AND "TeamId" = $2 AND "UserId" <> $3 ' +
+                        'AND NOT "Dropped"',
+                    [tournamentId, teamId, actor.id]
+                );
+
+                if (parseInt(roster[0].Count, 10) >= tournament.TeamSize) {
+                    return {
+                        success: false,
+                        message: `That team has already entered ${tournament.TeamSize} player(s)`
+                    };
+                }
+            }
+        }
+
         let waitlisted = false;
 
         if (tournament.PlayerCap) {
@@ -916,19 +1075,128 @@ class TournamentService {
         }
 
         await this.db.query(
-            'INSERT INTO "TournamentPlayers" ("TournamentId", "UserId", "Waitlisted", "DeckId", "CreatedAt") ' +
-                "VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc') " +
+            'INSERT INTO "TournamentPlayers" ("TournamentId", "UserId", "Waitlisted", "DeckId", "TeamId", "CreatedAt") ' +
+                "VALUES ($1, $2, $3, $4, $5, now() AT TIME ZONE 'utc') " +
                 'ON CONFLICT ("TournamentId", "UserId") DO UPDATE SET "Dropped" = false, ' +
-                '"DeckId" = COALESCE(EXCLUDED."DeckId", "TournamentPlayers"."DeckId")',
-            [tournamentId, actor.id, waitlisted, options.deckId || null]
+                '"DeckId" = COALESCE(EXCLUDED."DeckId", "TournamentPlayers"."DeckId"), ' +
+                '"TeamId" = COALESCE(EXCLUDED."TeamId", "TournamentPlayers"."TeamId")',
+            [tournamentId, actor.id, waitlisted, options.deckId || null, teamId]
         );
 
         return { success: true, waitlisted };
     }
 
+    /**
+     * ARCHON (N9): Alliance pod legality for one event.
+     *
+     * Every rule here is about provenance - which physical decks the three
+     * pods came from - which is why Decks.AlliancePods had to start being
+     * recorded (migration 46). A deck built before that has no pod record and
+     * cannot be checked; an event with requirePodProvenance says so out loud
+     * rather than letting it through as though it had passed.
+     */
+    async validateAlliancePods(tournament, userId, deck) {
+        const policy = this.parseJsonColumn(tournament.AlliancePolicy);
+
+        if (!policy) {
+            return { success: true };
+        }
+
+        const pods = this.parseJsonColumn(deck.AlliancePods);
+
+        if (!pods || pods.length === 0) {
+            if (policy.requirePodProvenance) {
+                return {
+                    success: false,
+                    message:
+                        `'${deck.Name}' was built before pod sources were recorded, and this ` +
+                        'event checks them. Rebuild the Alliance deck to register it.'
+                };
+            }
+
+            return { success: true };
+        }
+
+        if (policy.bannedPodHouses) {
+            const hit = pods.find((pod) =>
+                policy.bannedPodHouses.includes(String(pod.house || '').toLowerCase())
+            );
+
+            if (hit) {
+                return { success: false, message: `This event bans ${hit.house} pods` };
+            }
+        }
+
+        if (policy.maxPodsPerSourceDeck) {
+            const counts = new Map();
+
+            for (const pod of pods) {
+                const key = pod.deckUuid;
+                counts.set(key, (counts.get(key) || 0) + 1);
+            }
+
+            const over = Array.from(counts.values()).some(
+                (count) => count > policy.maxPodsPerSourceDeck
+            );
+
+            if (over) {
+                return {
+                    success: false,
+                    message:
+                        `This event allows at most ${policy.maxPodsPerSourceDeck} pod(s) ` +
+                        'from any one deck'
+                };
+            }
+        }
+
+        const sourceUuids = Array.from(new Set(pods.map((pod) => pod.deckUuid).filter(Boolean)));
+
+        if (policy.allowedPodSets && sourceUuids.length > 0) {
+            const sources = await this.db.query(
+                'SELECT "Uuid", "ExpansionId" FROM "Decks" WHERE "Uuid" = ANY($1)',
+                [sourceUuids]
+            );
+
+            const offending = (sources || []).find(
+                (source) => !policy.allowedPodSets.includes(source.ExpansionId)
+            );
+
+            if (offending) {
+                return {
+                    success: false,
+                    message: 'A pod comes from a set this event does not allow'
+                };
+            }
+        }
+
+        if (policy.exclusiveSourceDecks && sourceUuids.length > 0) {
+            // The same physical Archon cannot sit behind two players' Alliance
+            // decks - at a paper event there is only one copy on the table.
+            const clash = await this.db.query(
+                'SELECT d."Name" FROM "TournamentPlayers" tp ' +
+                    'JOIN "Decks" d ON d."Id" = tp."DeckId" ' +
+                    'WHERE tp."TournamentId" = $1 AND tp."UserId" <> $2 ' +
+                    'AND d."AlliancePods" IS NOT NULL ' +
+                    'AND EXISTS (SELECT 1 FROM jsonb_array_elements(d."AlliancePods") pod ' +
+                    "WHERE pod->>'deckUuid' = ANY($3)) LIMIT 1",
+                [tournament.Id, userId, sourceUuids]
+            );
+
+            if (clash && clash.length > 0) {
+                return {
+                    success: false,
+                    message: 'Another player already sourced a pod from one of those decks'
+                };
+            }
+        }
+
+        return { success: true };
+    }
+
     async validateDeck(tournament, userId, deckId) {
         const rows = await this.db.query(
-            'SELECT d."Id", d."UserId", d."Name", d."Uuid", d."ExpansionId", ds."SasRating", ' +
+            'SELECT d."Id", d."UserId", d."Name", d."Uuid", d."ExpansionId", d."IsAlliance", ' +
+                'd."AlliancePods", ds."SasRating", ' +
                 '(SELECT json_agg(h."Code") FROM "DeckHouses" dh ' +
                 'JOIN "Houses" h ON h."Id" = dh."HouseId" WHERE dh."DeckId" = d."Id") AS "Houses" ' +
                 'FROM "Decks" d ' +
@@ -939,6 +1207,31 @@ class TournamentService {
 
         if (!deck || deck.UserId !== userId) {
             return { success: false, message: 'That deck is not in your collection' };
+        }
+
+        // ARCHON (N9): an Alliance event needs an Alliance deck, and a
+        // constructed event does not want one. Checked before the pod rules
+        // so the message names the actual problem.
+        if (tournament.GameFormat === 'alliance' && !deck.IsAlliance) {
+            return {
+                success: false,
+                message: 'This is an Alliance event - register an Alliance deck'
+            };
+        }
+
+        if (tournament.GameFormat !== 'alliance' && deck.IsAlliance && tournament.GameFormat) {
+            return {
+                success: false,
+                message: 'Alliance decks can only be registered for Alliance events'
+            };
+        }
+
+        if (deck.IsAlliance) {
+            const podCheck = await this.validateAlliancePods(tournament, userId, deck);
+
+            if (!podCheck.success) {
+                return podCheck;
+            }
         }
 
         // Set legality: the deck's expansion must be on the allow list.
@@ -1205,15 +1498,22 @@ class TournamentService {
             return { success: false, message: 'Check-in only applies before the event starts' };
         }
 
+        // ARCHON (N9): mint the kiosk code when check-in opens, so the QR an
+        // organizer prints is only live for the window it is meant for.
+        // Deliberately not JoinCode: that one grants entry to a private event
+        // and must not end up on a poster by the door.
+        const checkInCode = tournament.CheckInCode || this.generateJoinCode();
+
         await this.db.query(
-            'UPDATE "Tournaments" SET "CheckInOpenedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
-            [tournamentId]
+            'UPDATE "Tournaments" SET "CheckInOpenedAt" = now() AT TIME ZONE \'utc\', ' +
+                '"CheckInCode" = $2 WHERE "Id" = $1',
+            [tournamentId, checkInCode]
         );
 
-        return { success: true };
+        return { success: true, checkInCode };
     }
 
-    async checkIn(tournamentId, actor) {
+    async checkIn(tournamentId, actor, options = {}) {
         const tournament = await this.getTournamentRow(tournamentId);
 
         if (!tournament) {
@@ -1225,9 +1525,10 @@ class TournamentService {
         }
 
         const rows = await this.db.query(
-            'UPDATE "TournamentPlayers" SET "CheckedIn" = true ' +
+            'UPDATE "TournamentPlayers" SET "CheckedIn" = true, ' +
+                '"CheckedInAt" = now() AT TIME ZONE \'utc\', "CheckedInVia" = $3 ' +
                 'WHERE "TournamentId" = $1 AND "UserId" = $2 AND NOT "Dropped" RETURNING "Id"',
-            [tournamentId, actor.id]
+            [tournamentId, actor.id, options.via === 'kiosk' ? 'kiosk' : 'self']
         );
 
         if (!rows || rows.length === 0) {
@@ -1235,6 +1536,35 @@ class TournamentService {
         }
 
         return { success: true };
+    }
+
+    /**
+     * ARCHON (N9): kiosk check-in. A player scans the QR at the door, which
+     * carries the check-in code, and lands here already signed in - so a
+     * store can run the desk without a laptop per table, or even one at all.
+     *
+     * The code identifies the event, never the player: it marks whoever is
+     * signed in as present, so a scanned code cannot check anyone else in.
+     */
+    async checkInByCode(code, actor) {
+        const normalized = this.normalizeJoinCode(code);
+
+        if (normalized.length < 4) {
+            return { success: false, message: 'Invalid check-in code' };
+        }
+
+        const rows = await this.db.query(
+            'SELECT "Id" FROM "Tournaments" WHERE "CheckInCode" = $1',
+            [normalized]
+        );
+
+        if (!rows || rows.length === 0) {
+            return { success: false, message: 'No event matches that check-in code' };
+        }
+
+        const result = await this.checkIn(rows[0].Id, actor, { via: 'kiosk' });
+
+        return result.success ? { ...result, tournamentId: rows[0].Id } : result;
     }
 
     /**
@@ -2072,7 +2402,11 @@ class TournamentService {
     /**
      * Mark a match complete and cascade bracket consequences.
      */
-    async completeMatch(tournament, match, { winnerId, resultType, reporterId, p1Wins, p2Wins }) {
+    async completeMatch(
+        tournament,
+        match,
+        { winnerId, resultType, reporterId, p1Wins, p2Wins, resultSource }
+    ) {
         const player1Wins =
             p1Wins !== undefined && p1Wins !== null
                 ? p1Wins
@@ -2088,8 +2422,20 @@ class TournamentService {
 
         await this.db.query(
             'UPDATE "TournamentMatches" SET "WinnerId" = $2, "ResultType" = $3, "ReportedBy" = $4, ' +
-                '"Player1Wins" = $5, "Player2Wins" = $6, "ReportedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
-            [match.Id, winnerId || null, resultType, reporterId, player1Wins, player2Wins]
+                '"Player1Wins" = $5, "Player2Wins" = $6, "ResultSource" = $7, ' +
+                '"ReportedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
+            [
+                match.Id,
+                winnerId || null,
+                resultType,
+                reporterId,
+                player1Wins,
+                player2Wins,
+                // ARCHON (N9): 'paper' marks a result the platform did not
+                // witness. An organizer auditing a disputed standing needs to
+                // know which rows are claims and which are records.
+                resultSource === 'paper' ? 'paper' : 'online'
+            ]
         );
 
         // Chainbound-style accrual: played match wins add chains that
@@ -2329,6 +2675,19 @@ class TournamentService {
             p2Wins = winnerId === match.Player2Id ? needed : 0;
         }
 
+        // ARCHON (N9): a paper result is a game played across a table, typed
+        // in afterwards. Allowed only where the event says so - on a purely
+        // online event with no opt-in, a typed result is a claim about a game
+        // the platform could have witnessed and did not.
+        const isPaper = scores.source === 'paper';
+
+        if (isPaper && !tournament.AllowPaperResults) {
+            return {
+                success: false,
+                message: 'This event does not accept results reported from paper play'
+            };
+        }
+
         if (alreadyDecided && match.Bracket) {
             await this.clearDownstream(tournament, match);
         }
@@ -2338,7 +2697,8 @@ class TournamentService {
             resultType: 'played',
             reporterId: actor.id,
             p1Wins,
-            p2Wins
+            p2Wins,
+            resultSource: isPaper ? 'paper' : 'online'
         });
 
         return { success: true };
@@ -2525,6 +2885,257 @@ class TournamentService {
         });
 
         return { success: true };
+    }
+
+    /**
+     * ARCHON (N9): Archon Adaptive Bo3.
+     *
+     * The official three-game series:
+     *   Game 1 - each player pilots their own registered deck.
+     *   Game 2 - the decks swap. A player who wins both has beaten the
+     *            opponent with each deck and takes the match 2-0.
+     *   Game 3 - only reached at 1-1, where each deck has won once and the
+     *            question is which is stronger. Players bid CHAINS for the
+     *            right to pilot one nominated deck; the bid is a handicap, so
+     *            bidding higher means claiming you can win with that deck even
+     *            burdened. The loser of game 2 opens the bidding, and a pass
+     *            hands the deck to the standing high bidder at their own bid.
+     *
+     * The negotiation lives on the match row rather than in memory because it
+     * happens between games, across reconnects and page reloads, and an
+     * organizer standing at the table has to be able to see where it got to.
+     */
+    adaptiveGameNumber(match) {
+        return (match.Player1Wins || 0) + (match.Player2Wins || 0) + 1;
+    }
+
+    /**
+     * Which deck each player pilots for a given game, before any bid. Game 3
+     * is deliberately absent: it is whatever the bid decides.
+     */
+    adaptiveDecksForGame(match, gameNumber) {
+        if (gameNumber === 1) {
+            return { [match.Player1Id]: 'own', [match.Player2Id]: 'own' };
+        }
+
+        if (gameNumber === 2) {
+            return { [match.Player1Id]: 'opponent', [match.Player2Id]: 'opponent' };
+        }
+
+        return null;
+    }
+
+    async adaptiveContext(tournamentId, matchId, actor) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament) {
+            return { error: 'No such tournament' };
+        }
+
+        if (!tournament.AdaptiveBo3) {
+            return { error: 'This event is not Adaptive' };
+        }
+
+        const match = await this.getMatchRow(tournamentId, matchId);
+
+        if (!match) {
+            return { error: 'No such match' };
+        }
+
+        if (!match.Player1Id || !match.Player2Id) {
+            return { error: 'Byes have no series' };
+        }
+
+        if (actor.id !== match.Player1Id && actor.id !== match.Player2Id) {
+            const isManager = await this.canManage(actor, tournament);
+
+            if (!isManager) {
+                return { error: 'You are not in this match' };
+            }
+        }
+
+        return { tournament, match };
+    }
+
+    async getAdaptiveState(tournamentId, matchId, actor) {
+        const context = await this.adaptiveContext(tournamentId, matchId, actor);
+
+        if (context.error) {
+            return { success: false, message: context.error };
+        }
+
+        const { match } = context;
+        const gameNumber = this.adaptiveGameNumber(match);
+        const state = this.parseJsonColumn(match.AdaptiveState) || {};
+
+        return {
+            success: true,
+            gameNumber,
+            decks: this.adaptiveDecksForGame(match, gameNumber),
+            // Bidding only exists at 1-1 going into game 3.
+            bidding:
+                gameNumber === 3
+                    ? {
+                          bidDeckOwnerId: state.bidDeckOwnerId ?? match.Player1Id,
+                          currentBid: state.currentBid ?? 0,
+                          highBidderId: state.highBidderId ?? null,
+                          turnUserId: state.turnUserId ?? this.adaptiveFirstBidder(match),
+                          resolved: !!state.resolved,
+                          chains: state.chains || null,
+                          decks: state.decks || null
+                      }
+                    : null
+        };
+    }
+
+    /** The loser of game 2 opens the bidding. */
+    adaptiveFirstBidder(match) {
+        const p1 = match.Player1Wins || 0;
+        const p2 = match.Player2Wins || 0;
+
+        if (p1 === p2) {
+            // 1-1 with no recorded order: player 1 opens by convention.
+            return match.Player1Id;
+        }
+
+        return p1 > p2 ? match.Player2Id : match.Player1Id;
+    }
+
+    async saveAdaptiveState(matchId, state) {
+        await this.db.query('UPDATE "TournamentMatches" SET "AdaptiveState" = $2 WHERE "Id" = $1', [
+            matchId,
+            JSON.stringify(state)
+        ]);
+    }
+
+    async adaptiveBid(tournamentId, matchId, actor, chains) {
+        const context = await this.adaptiveContext(tournamentId, matchId, actor);
+
+        if (context.error) {
+            return { success: false, message: context.error };
+        }
+
+        const { match } = context;
+
+        if (this.adaptiveGameNumber(match) !== 3) {
+            return { success: false, message: 'Bidding only happens before game three' };
+        }
+
+        const state = this.parseJsonColumn(match.AdaptiveState) || {};
+
+        if (state.resolved) {
+            return { success: false, message: 'The bid is already settled' };
+        }
+
+        const turnUserId = state.turnUserId ?? this.adaptiveFirstBidder(match);
+
+        if (actor.id !== turnUserId) {
+            return { success: false, message: 'It is not your turn to bid' };
+        }
+
+        const bid = parseInt(chains, 10);
+        const currentBid = state.currentBid ?? 0;
+
+        // A bid is a handicap you take on, so it only ever goes up - and it
+        // has to actually beat the standing one or the auction never ends.
+        if (Number.isNaN(bid) || bid < 0 || bid > 24) {
+            return { success: false, message: 'Bid must be between 0 and 24 chains' };
+        }
+
+        if (state.highBidderId && bid <= currentBid) {
+            return { success: false, message: `Bid must be more than ${currentBid} chains` };
+        }
+
+        const opponentId = actor.id === match.Player1Id ? match.Player2Id : match.Player1Id;
+
+        const next = {
+            ...state,
+            bidDeckOwnerId: state.bidDeckOwnerId ?? match.Player1Id,
+            currentBid: bid,
+            highBidderId: actor.id,
+            turnUserId: opponentId,
+            resolved: false
+        };
+
+        await this.saveAdaptiveState(match.Id, next);
+
+        return { success: true, currentBid: bid, turnUserId: opponentId };
+    }
+
+    async adaptivePass(tournamentId, matchId, actor) {
+        const context = await this.adaptiveContext(tournamentId, matchId, actor);
+
+        if (context.error) {
+            return { success: false, message: context.error };
+        }
+
+        const { match } = context;
+
+        if (this.adaptiveGameNumber(match) !== 3) {
+            return { success: false, message: 'Bidding only happens before game three' };
+        }
+
+        const state = this.parseJsonColumn(match.AdaptiveState) || {};
+
+        if (state.resolved) {
+            return { success: false, message: 'The bid is already settled' };
+        }
+
+        const turnUserId = state.turnUserId ?? this.adaptiveFirstBidder(match);
+
+        if (actor.id !== turnUserId) {
+            return { success: false, message: 'It is not your turn' };
+        }
+
+        if (!state.highBidderId) {
+            // Nobody has bid. Passing first concedes the choice: the opponent
+            // takes the nominated deck at zero chains rather than the series
+            // deadlocking on two players who both refuse to open.
+            const opponentId = actor.id === match.Player1Id ? match.Player2Id : match.Player1Id;
+            const bidDeckOwnerId = state.bidDeckOwnerId ?? match.Player1Id;
+
+            const resolved = {
+                ...state,
+                bidDeckOwnerId,
+                currentBid: 0,
+                highBidderId: opponentId,
+                turnUserId: null,
+                resolved: true,
+                chains: { [opponentId]: 0, [actor.id]: 0 },
+                decks: {
+                    [opponentId]: bidDeckOwnerId,
+                    [actor.id]:
+                        bidDeckOwnerId === match.Player1Id ? match.Player2Id : match.Player1Id
+                }
+            };
+
+            await this.saveAdaptiveState(match.Id, resolved);
+
+            return { success: true, resolved: true, winnerOfBid: opponentId, chains: 0 };
+        }
+
+        const bidDeckOwnerId = state.bidDeckOwnerId ?? match.Player1Id;
+        const otherDeckOwnerId =
+            bidDeckOwnerId === match.Player1Id ? match.Player2Id : match.Player1Id;
+
+        const resolved = {
+            ...state,
+            turnUserId: null,
+            resolved: true,
+            // The high bidder pilots the nominated deck carrying the chains
+            // they bid; the other player takes the remaining deck unchained.
+            chains: { [state.highBidderId]: state.currentBid ?? 0, [actor.id]: 0 },
+            decks: { [state.highBidderId]: bidDeckOwnerId, [actor.id]: otherDeckOwnerId }
+        };
+
+        await this.saveAdaptiveState(match.Id, resolved);
+
+        return {
+            success: true,
+            resolved: true,
+            winnerOfBid: state.highBidderId,
+            chains: state.currentBid ?? 0
+        };
     }
 
     /**
@@ -2838,7 +3449,24 @@ class TournamentService {
 
         logger.info(`Tournament ${tournamentId} finished by user ${actor.id}`);
 
-        return { success: true };
+        // ARCHON (N7): rate the team ladder from the final standings. The
+        // event is already marked complete above, so a rating failure leaves a
+        // finished event that is not team-rated - which an organizer can
+        // retry - rather than an event stuck mid-finish.
+        let teamRating = null;
+
+        if (tournament.TeamEvent && this.teamRatingService) {
+            try {
+                teamRating = await this.teamRatingService.rateEvent(
+                    tournamentId,
+                    tournament.GameFormat
+                );
+            } catch (err) {
+                logger.error(`Failed to rate team event ${tournamentId}`, err);
+            }
+        }
+
+        return { success: true, teamRating };
     }
 
     async cancel(tournamentId, actor) {

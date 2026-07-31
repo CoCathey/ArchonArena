@@ -18,5 +18,11 @@ export const TAG_TYPES = {
     STORES: 'Stores',
     RATINGS: 'Ratings',
     BUG_REPORTS: 'BugReports',
-    NOTIFICATIONS: 'Notifications'
+    NOTIFICATIONS: 'Notifications',
+    // ARCHON (N7): team rosters and the team ladder.
+    TEAMS: 'Teams',
+    // ARCHON (N13): in-person (paper) games.
+    IN_PERSON_GAMES: 'InPersonGames',
+    // ARCHON (N8): the admin operations dashboard.
+    ANALYTICS: 'Analytics'
 };

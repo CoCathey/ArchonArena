@@ -2,6 +2,8 @@ const passport = require('passport');
 
 const FriendService = require('../services/community/FriendService');
 const ClubService = require('../services/community/ClubService');
+// ARCHON (N7): teams are rosters that enter events as a unit.
+const TeamService = require('../services/community/TeamService');
 const MemberDirectoryService = require('../services/community/MemberDirectoryService');
 const StoreService = require('../services/community/StoreService');
 const PlayerProfileService = require('../services/community/PlayerProfileService');
@@ -33,8 +35,18 @@ const storeCreateLimit = rateLimit({
 // waits on a database write or an email.
 const notificationService = require('../services/notifications');
 
+// ARCHON (N7): club boards show Amber, so the club service borrows the
+// rating service rather than growing a second copy of the rating queries.
+const ConfigService = require('../services/ConfigService');
+const RatingService = require('../services/rating/RatingService');
+
 const friendService = new FriendService(require('../db'), notificationService);
-const clubService = new ClubService(require('../db'), notificationService);
+const clubService = new ClubService(
+    require('../db'),
+    notificationService,
+    new RatingService(new ConfigService())
+);
+const teamService = new TeamService(require('../db'), notificationService);
 const memberDirectory = new MemberDirectoryService();
 const storeService = new StoreService();
 const playerProfileService = new PlayerProfileService();
@@ -206,6 +218,159 @@ module.exports.init = function (server) {
         jwt,
         wrapAsync(async (req, res) => {
             res.send(await clubService.disband(parseInt(req.params.id, 10), req.user));
+        })
+    );
+
+    // ----- ARCHON (N7): club competition
+    // Public: a club board is no more than the site leaderboard already shows.
+    server.get(
+        '/api/clubs/:id/leaderboard',
+        wrapAsync(async (req, res) => {
+            res.send(
+                await clubService.getLeaderboard(parseInt(req.params.id, 10), {
+                    pool: req.query.pool
+                })
+            );
+        })
+    );
+
+    server.post(
+        '/api/clubs/:id/settings',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(
+                await clubService.updateSettings(parseInt(req.params.id, 10), req.user, req.body)
+            );
+        })
+    );
+
+    server.post(
+        '/api/clubs/:id/requests/:userId',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(
+                await clubService.decideJoinRequest(
+                    parseInt(req.params.id, 10),
+                    parseInt(req.params.userId, 10),
+                    req.user,
+                    req.body.approve === true
+                )
+            );
+        })
+    );
+
+    server.post(
+        '/api/clubs/:id/transfer',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(
+                await clubService.transferOwnership(
+                    parseInt(req.params.id, 10),
+                    parseInt(req.body.userId, 10),
+                    req.user
+                )
+            );
+        })
+    );
+
+    // ----- ARCHON (N7): teams
+    // The team ladder registers before /api/teams/:id so 'leaderboard' is
+    // never parsed as a team id (Express matches in registration order).
+    server.get(
+        '/api/teams/leaderboard',
+        wrapAsync(async (req, res) => {
+            res.send({
+                success: true,
+                entries: await teamService.getLeaderboard({
+                    pool: req.query.pool,
+                    limit: req.query.limit
+                })
+            });
+        })
+    );
+
+    server.get(
+        '/api/teams/mine',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send({ success: true, teams: await teamService.getTeamsForUser(req.user.id) });
+        })
+    );
+
+    server.get(
+        '/api/teams',
+        wrapAsync(async (req, res) => {
+            res.send({ success: true, teams: await teamService.list(req.query.query) });
+        })
+    );
+
+    server.post(
+        '/api/teams',
+        jwt,
+        clubCreateLimit,
+        wrapAsync(async (req, res) => {
+            res.send(await teamService.create(req.user.id, req.body));
+        })
+    );
+
+    server.post(
+        '/api/teams/join-by-code',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(await teamService.joinByCode(req.user.id, req.body.code));
+        })
+    );
+
+    server.get(
+        '/api/teams/:id',
+        wrapAsync(async (req, res) => {
+            const user = req.user || null;
+
+            res.send(await teamService.getDetail(parseInt(req.params.id, 10), user?.id || null));
+        })
+    );
+
+    server.post(
+        '/api/teams/:id/leave',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(await teamService.leave(parseInt(req.params.id, 10), req.user.id));
+        })
+    );
+
+    server.post(
+        '/api/teams/:id/remove',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(
+                await teamService.removeMember(
+                    parseInt(req.params.id, 10),
+                    parseInt(req.body.userId, 10),
+                    req.user
+                )
+            );
+        })
+    );
+
+    server.post(
+        '/api/teams/:id/transfer',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(
+                await teamService.transferCaptaincy(
+                    parseInt(req.params.id, 10),
+                    parseInt(req.body.userId, 10),
+                    req.user
+                )
+            );
+        })
+    );
+
+    server.post(
+        '/api/teams/:id/disband',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(await teamService.disband(parseInt(req.params.id, 10), req.user));
         })
     );
 

@@ -70,6 +70,9 @@ class Lobby {
         // listener on the same bridge, so a notification failure cannot affect
         // table creation and vice versa.
         this.notificationService = options.notificationService || sharedNotificationService;
+        // ARCHON (N8): matchmaking queue metrics. Optional - a lobby built
+        // without one simply records nothing.
+        this.analyticsService = options.analyticsService || null;
         tournamentNotifications.install({
             tournamentService: this.tournamentService,
             notificationService: this.notificationService
@@ -809,7 +812,26 @@ class Lobby {
             );
         };
 
-        for (const [a, b] of this.matchmaking.collectMatches(Date.now(), canPair)) {
+        const now = Date.now();
+        // Depth BEFORE pairing: after the sweep the matched players are gone,
+        // so sampling afterwards would report a queue that always looks empty.
+        const depthBefore = this.matchmaking.list().length;
+
+        for (const [a, b] of this.matchmaking.collectMatches(now, canPair)) {
+            // ARCHON (N8): the queue is in-memory and leaves no trace, so how
+            // long anyone waited is unanswerable an hour later unless it is
+            // written down as it happens. Fire-and-forget - a metrics write
+            // must never delay or fail a player getting a game.
+            if (this.analyticsService) {
+                for (const entry of [a, b]) {
+                    this.analyticsService.record({
+                        format: entry.format,
+                        queueDepth: depthBefore,
+                        waitSeconds: Math.max(0, Math.round((now - entry.joinedAt) / 1000))
+                    });
+                }
+            }
+
             this.createMatchedGame(a, b);
         }
 

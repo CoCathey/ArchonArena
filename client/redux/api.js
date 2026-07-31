@@ -411,6 +411,108 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.CLUBS]
         }),
+        // ARCHON (N7): club competition
+        getClubLeaderboard: builder.query({
+            query: ({ id, pool }) => ({ url: `/clubs/${id}/leaderboard`, params: { pool } }),
+            providesTags: (result, error, { id }) => [{ type: TAG_TYPES.CLUBS, id }]
+        }),
+        decideClubJoinRequest: builder.mutation({
+            query: ({ id, userId, approve }) => ({
+                url: `/clubs/${id}/requests/${userId}`,
+                method: 'POST',
+                body: { approve }
+            }),
+            invalidatesTags: (result, error, { id }) => [
+                TAG_TYPES.CLUBS,
+                { type: TAG_TYPES.CLUBS, id }
+            ]
+        }),
+        // ARCHON (N7): teams
+        getTeams: builder.query({
+            query: (params) => ({ url: '/teams', params }),
+            providesTags: [TAG_TYPES.TEAMS]
+        }),
+        getTeam: builder.query({
+            query: (id) => `/teams/${id}`,
+            providesTags: (result, error, id) => [{ type: TAG_TYPES.TEAMS, id }]
+        }),
+        getMyTeams: builder.query({
+            query: () => '/teams/mine',
+            providesTags: [TAG_TYPES.TEAMS]
+        }),
+        getTeamLeaderboard: builder.query({
+            query: (params) => ({ url: '/teams/leaderboard', params }),
+            providesTags: [TAG_TYPES.TEAMS]
+        }),
+        createTeam: builder.mutation({
+            query: (body) => ({ url: '/teams', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.TEAMS]
+        }),
+        joinTeamByCode: builder.mutation({
+            query: (code) => ({ url: '/teams/join-by-code', method: 'POST', body: { code } }),
+            invalidatesTags: [TAG_TYPES.TEAMS]
+        }),
+        teamAction: builder.mutation({
+            query: ({ id, action, body }) => ({
+                url: `/teams/${id}/${action}`,
+                method: 'POST',
+                body
+            }),
+            invalidatesTags: (result, error, { id }) => [
+                TAG_TYPES.TEAMS,
+                { type: TAG_TYPES.TEAMS, id }
+            ]
+        }),
+        // ARCHON (N13): in-person (paper) games
+        getInPersonGames: builder.query({
+            query: (params) => ({ url: '/in-person-games', params }),
+            providesTags: [TAG_TYPES.IN_PERSON_GAMES]
+        }),
+        getInPersonGame: builder.query({
+            query: (id) => `/in-person-games/${id}`,
+            providesTags: (result, error, id) => [{ type: TAG_TYPES.IN_PERSON_GAMES, id }]
+        }),
+        createInPersonGame: builder.mutation({
+            query: (body) => ({ url: '/in-person-games', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.IN_PERSON_GAMES]
+        }),
+        inPersonGameAction: builder.mutation({
+            query: ({ id, action, body }) => ({
+                url: `/in-person-games/${id}/${action}`,
+                method: 'POST',
+                body
+            }),
+            // A confirmed report writes a real game, so match history and
+            // ratings are stale the moment it lands.
+            invalidatesTags: (result, error, { id }) => [
+                TAG_TYPES.IN_PERSON_GAMES,
+                { type: TAG_TYPES.IN_PERSON_GAMES, id },
+                TAG_TYPES.GAMES,
+                TAG_TYPES.RATINGS
+            ]
+        }),
+        getClubInPersonGames: builder.query({
+            query: ({ id, limit }) => ({ url: `/clubs/${id}/in-person-games`, params: { limit } }),
+            providesTags: [TAG_TYPES.IN_PERSON_GAMES]
+        }),
+        // ARCHON (N8): admin operations dashboard
+        getAnalytics: builder.query({
+            query: (params) => ({ url: '/admin/analytics', params }),
+            providesTags: [TAG_TYPES.ANALYTICS]
+        }),
+        // ARCHON (N9): Adaptive Bo3 chain bidding
+        getAdaptiveState: builder.query({
+            query: ({ id, matchId }) => `/tournaments/${id}/matches/${matchId}/adaptive`,
+            providesTags: (result, error, { id }) => [{ type: TAG_TYPES.TOURNAMENTS, id }]
+        }),
+        checkInByCode: builder.mutation({
+            query: (code) => ({
+                url: '/tournaments/check-in-by-code',
+                method: 'POST',
+                body: { code }
+            }),
+            invalidatesTags: [TAG_TYPES.TOURNAMENTS]
+        }),
         // ARCHON: local stores / venues for in-person play (Play IRL)
         getStores: builder.query({
             query: (params) => ({ url: '/stores', params }),
@@ -831,6 +933,27 @@ export const {
     useCreateClubMutation,
     useClubActionMutation,
     useJoinClubByCodeMutation,
+    // ARCHON (N7): club competition and teams
+    useGetClubLeaderboardQuery,
+    useDecideClubJoinRequestMutation,
+    useGetTeamsQuery,
+    useGetTeamQuery,
+    useGetMyTeamsQuery,
+    useGetTeamLeaderboardQuery,
+    useCreateTeamMutation,
+    useJoinTeamByCodeMutation,
+    useTeamActionMutation,
+    // ARCHON (N13): in-person games
+    useGetInPersonGamesQuery,
+    useGetInPersonGameQuery,
+    useCreateInPersonGameMutation,
+    useInPersonGameActionMutation,
+    useGetClubInPersonGamesQuery,
+    // ARCHON (N8): admin analytics
+    useGetAnalyticsQuery,
+    // ARCHON (N9): Adaptive Bo3 and kiosk check-in
+    useGetAdaptiveStateQuery,
+    useCheckInByCodeMutation,
     useGetStoresQuery,
     useAddStoreMutation,
     useRemoveStoreMutation,

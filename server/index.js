@@ -46,6 +46,9 @@ async function runServer() {
     let options = { configService: configService };
 
     options.userService = new UserService(options.configService);
+    // ARCHON (N8): the lobby records matchmaking queue depth and wait times.
+    // Shared with the admin dashboard so both read the same service.
+    options.analyticsService = require('./api/analytics').analyticsService;
 
     let server = new Server(process.env.NODE_ENV !== 'production');
     let httpServer = await server.init(options);

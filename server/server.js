@@ -138,6 +138,10 @@ class Server {
         // rather than the site failing to start over a cache.
         await this.connectRateLimitStore();
 
+        // ARCHON (N8): make a settings change - above all a feature flag -
+        // land on every lobby immediately instead of within one refresh.
+        await this.connectSettingsInvalidation();
+
         api.init(app, options);
 
         app.use(express.static(__dirname + '/../public'));
@@ -211,6 +215,45 @@ class Server {
             logger.warn(
                 `Rate limiting could not reach Redis (${err.message}); ` +
                     'limits will apply per lobby process only.'
+            );
+        }
+    }
+
+    /**
+     * ARCHON (N8): Redis pub/sub invalidation for the settings snapshot.
+     *
+     * Same posture as the rate limit store: best-effort, never fatal. The
+     * periodic refresh keeps running underneath, so failing to reach Redis
+     * only costs propagation latency - it can never leave settings frozen or
+     * stop the site from booting.
+     */
+    async connectSettingsInvalidation() {
+        try {
+            const factory = new RedisClientFactory(this.configService);
+            // A subscribing connection cannot issue other commands, so the
+            // publisher has to be its own client.
+            const subscriber = factory.createClient();
+            const publisher = factory.createClient();
+
+            subscriber.on('error', (err) =>
+                logger.warn(`Settings invalidation Redis error: ${err.message}`)
+            );
+            publisher.on('error', (err) =>
+                logger.warn(`Settings invalidation Redis error: ${err.message}`)
+            );
+
+            await subscriber.connect();
+            await publisher.connect();
+
+            await require('./services/settings').connectInvalidation(
+                subscriber,
+                publisher,
+                factory.prefix
+            );
+        } catch (err) {
+            logger.warn(
+                `Settings invalidation could not reach Redis (${err.message}); ` +
+                    'changes will propagate on the refresh interval instead.'
             );
         }
     }

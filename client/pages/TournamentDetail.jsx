@@ -9,6 +9,9 @@ import SelectDeckModal from '../Components/Games/SelectDeckModal';
 import RoundTimer from '../Components/Tournaments/RoundTimer';
 import BracketView from '../Components/Tournaments/BracketView';
 import MyMatchPanel from '../Components/Tournaments/MyMatchPanel';
+// ARCHON (N9): kiosk check-in QR and the Adaptive Bo3 chain bid
+import CheckInKiosk from '../Components/Tournaments/CheckInKiosk';
+import AdaptiveBidding from '../Components/Tournaments/AdaptiveBidding';
 import RoundsPanel from '../Components/Tournaments/RoundsPanel';
 import StandingsPanel from '../Components/Tournaments/StandingsPanel';
 import PlayersPanel from '../Components/Tournaments/PlayersPanel';
@@ -190,6 +193,19 @@ const TournamentDetail = () => {
             : t(tournament.status);
 
     const hasBracket = matches.some((match) => match.bracket);
+
+    // ARCHON (N9): the viewer's current-round pairing, while it is still
+    // undecided. A settled match has nothing left to bid over, so the
+    // Adaptive panel disappears with the result rather than lingering.
+    const myOpenMatch = user
+        ? matches.find(
+              (match) =>
+                  match.round === tournament.currentRound &&
+                  (match.player1Id === user.id || match.player2Id === user.id) &&
+                  !match.winnerId &&
+                  !match.resultType
+          )
+        : null;
 
     const startTimeLabel = tournament.startTime
         ? new Date(tournament.startTime).toLocaleString()
@@ -578,6 +594,11 @@ const TournamentDetail = () => {
                 )}
             </Panel>
 
+            {/* ARCHON (N9): the QR an organizer prints for the door. */}
+            {tournament.canManage && tournament.checkInOpen && tournament.checkInCode && (
+                <CheckInKiosk code={tournament.checkInCode} />
+            )}
+
             <MyMatchPanel
                 tournament={tournament}
                 matches={matches}
@@ -585,6 +606,16 @@ const TournamentDetail = () => {
                 user={user}
                 act={act}
             />
+
+            {/* ARCHON (N9): the Adaptive chain bid, shown only to the two
+                players in the open match it belongs to. */}
+            {tournament.adaptiveBo3 && myOpenMatch && (
+                <AdaptiveBidding
+                    tournamentId={tournament.id}
+                    matchId={myOpenMatch.id}
+                    players={players}
+                />
+            )}
 
             {hasBracket && (
                 <Panel title={tournament.stage === 'playoff' ? t('Playoff Bracket') : t('Bracket')}>

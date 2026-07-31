@@ -386,6 +386,78 @@ const REGISTRY = {
             showBlogs: { type: 'boolean', label: 'Show the Blogs page', default: true },
             showForums: { type: 'boolean', label: 'Show the Forums page', default: true }
         }
+    },
+    // ARCHON (N7): the team ladder.
+    teamRating: {
+        title: 'Team Rating',
+        description:
+            "The separate ladder for teams. A team rating is never derived from its members' Amber - a roster is rated on what it does as a unit.",
+        fields: {
+            enabled: { type: 'boolean', label: 'Rate team events', default: true },
+            defaultRating: {
+                type: 'number',
+                label: 'Starting team rating',
+                min: 100,
+                max: 4000,
+                default: 1200
+            },
+            kFactor: {
+                type: 'number',
+                label: 'K-factor per event',
+                min: 1,
+                max: 200,
+                default: 32
+            },
+            ratingFloor: {
+                type: 'number',
+                label: 'Team rating floor',
+                min: 0,
+                max: 2000,
+                default: 100
+            }
+        }
+    },
+    // ARCHON (N13): whether paper games count.
+    inPersonGames: {
+        title: 'In-Person Games',
+        description:
+            'Paper games recorded by both players. A game is only ever committed when the two independent reports agree; rating it is a separate decision made here.',
+        fields: {
+            rated: {
+                type: 'boolean',
+                label: 'In-person games move Amber',
+                // Off by default on purpose. Turning this on is a real
+                // decision about the ladder - the platform did not witness
+                // these games - and it should be made deliberately rather
+                // than discovered after the fact.
+                default: false
+            },
+            reportWindowDays: {
+                type: 'number',
+                label: 'Days a game stays open for reports',
+                min: 1,
+                max: 90,
+                default: 7
+            }
+        }
+    },
+    // ARCHON (N8): gradual rollout. Every flag defaults to the behaviour the
+    // site already has, so an unset flag is never a behaviour change.
+    features: {
+        title: 'Feature Flags',
+        description:
+            'Turn features on or off at runtime. Flags apply across every lobby process within one refresh (immediately when Redis is available).',
+        fields: {
+            teams: { type: 'boolean', label: 'Teams and team events', default: true },
+            inPersonGames: { type: 'boolean', label: 'In-person game tracking', default: true },
+            clubLeaderboards: { type: 'boolean', label: 'Club leaderboards', default: true },
+            adaptiveBo3: { type: 'boolean', label: 'Adaptive Bo3 events', default: true },
+            hybridEvents: {
+                type: 'boolean',
+                label: 'Hybrid (paper + online) events',
+                default: true
+            }
+        }
     }
 };
 
