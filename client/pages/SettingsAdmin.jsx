@@ -4,6 +4,8 @@ import { Button as HeroButton, Label, toast } from '@heroui/react';
 
 import Panel from '../Components/Site/Panel';
 import SeasonOperations from '../Components/Admin/SeasonOperations';
+// ARCHON (N4): rebuild the ladder after changing the Elo config
+import RatingRecalculation from '../Components/Admin/RatingRecalculation';
 import {
     useGetAdminSettingsQuery,
     useResetAdminSettingsMutation,
@@ -367,6 +369,7 @@ const SettingsAdmin = () => {
                 </Panel>
             ))}
             <SeasonOperations />
+            <RatingRecalculation />
         </div>
     );
 };

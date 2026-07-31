@@ -21,6 +21,11 @@ const POOL_LABELS = {
 };
 
 const MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
+// ARCHON (N4): the same medals for season podiums; everything else gets a dot.
+const SEASON_MEDALS = MEDALS;
+// A finish outside this many places is a line in the season table rather than
+// a badge on the profile - a wall of "#312 in season 4" is not an achievement.
+const SEASON_BADGE_LIMIT = 10;
 
 /**
  * ARCHON: public player profile (`/players/:username`).
@@ -71,6 +76,10 @@ const PlayerProfile = () => {
 
     const location = [profile.state, profile.country].filter(Boolean).join(', ');
     const podiums = events.filter((event) => event.placement && event.placement <= 3);
+    // Ranked top finishes only, newest season first.
+    const seasonBadges = (ratingsData?.seasonHistory || []).filter(
+        (entry) => entry.rank && entry.rank <= SEASON_BADGE_LIMIT
+    );
 
     return (
         <div className='mx-auto w-full max-w-3xl space-y-4'>
@@ -172,6 +181,33 @@ const PlayerProfile = () => {
                             ))}
                         </div>
                     )}
+                </Panel>
+            )}
+
+            {/* ARCHON (N4): season finishes. Sourced from the standings
+                archived when each season ended, so a badge keeps meaning what
+                it meant even though the ladder behind it is long gone. Only
+                ranked finishes earn one - "unranked in season 2" is not a
+                badge. */}
+            {seasonBadges.length > 0 && (
+                <Panel title={t('Season finishes')}>
+                    <div className='flex flex-wrap gap-2'>
+                        {seasonBadges.map((entry) => (
+                            <div
+                                key={`${entry.season}-${entry.pool}`}
+                                className='rounded-md border border-border/55 bg-surface-secondary/40 px-3 py-1.5 text-sm'
+                                title={t('{{games}} rated games', { games: entry.gamesPlayed })}
+                            >
+                                <span className='mr-1'>{SEASON_MEDALS[entry.rank] || '•'}</span>
+                                <span className='font-semibold text-foreground'>
+                                    {t('S{{season}}', { season: entry.season })}
+                                </span>{' '}
+                                <span className='text-muted'>
+                                    {t(POOL_LABELS[entry.pool] || entry.pool)} · #{entry.rank}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
                 </Panel>
             )}
 

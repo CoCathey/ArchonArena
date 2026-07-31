@@ -29,6 +29,13 @@ const REGISTRY = {
                 max: 1000,
                 default: 5
             },
+            leaderboardActivityDays: {
+                type: 'number',
+                label: 'Only rank players active within (days; 0 = rank everyone)',
+                min: 0,
+                max: 3650,
+                default: 0
+            },
             elo: {
                 type: 'section',
                 label: 'Elo parameters',

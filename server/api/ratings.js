@@ -4,6 +4,7 @@ const ConfigService = require('../services/ConfigService');
 const RatingService = require('../services/rating/RatingService');
 const { REGION_NAMES } = require('../services/rating/regions');
 const { wrapAsync } = require('../util.js');
+const logger = require('../log.js');
 
 const configService = new ConfigService();
 const ratingService = new RatingService(configService);
@@ -30,12 +31,46 @@ module.exports.init = function (server) {
         })
     );
 
+    // ARCHON (N4): season list and archived standings. Public, like the
+    // leaderboard itself - a past season's ladder is no more sensitive than the
+    // current one. Registered before /api/ratings/:username so 'seasons' is
+    // never read as a username.
+    server.get(
+        '/api/ratings/seasons',
+        wrapAsync(async (req, res) => {
+            res.send({ success: true, seasons: await ratingService.getSeasons() });
+        })
+    );
+
+    server.get(
+        '/api/ratings/seasons/:season',
+        wrapAsync(async (req, res) => {
+            const standings = await ratingService.getSeasonStandings(req.params.season, {
+                pool: req.query.pool,
+                limit: req.query.limit,
+                offset: req.query.offset
+            });
+
+            if (!standings) {
+                return res.status(404).send({ success: false, message: 'No such season' });
+            }
+
+            res.send({ success: true, ...standings });
+        })
+    );
+
     server.get(
         '/api/ratings/:username',
         wrapAsync(async (req, res) => {
-            const ratings = await ratingService.getRatingsForUsername(req.params.username);
+            const [ratings, seasonHistory, currentSeason] = await Promise.all([
+                ratingService.getRatingsForUsername(req.params.username),
+                // ARCHON (N4): where they finished in prior seasons, and what
+                // each soft reset did to their Amber.
+                ratingService.getSeasonHistoryForUsername(req.params.username),
+                ratingService.getCurrentSeason()
+            ]);
 
-            res.send({ success: true, ratings: ratings });
+            res.send({ success: true, ratings, seasonHistory, currentSeason });
         })
     );
 
@@ -129,6 +164,38 @@ module.exports.init = function (server) {
             }
 
             res.send(await ratingService.startNewSeason());
+        })
+    );
+
+    // ARCHON (N4): rebuild the ladder by replaying RatingHistory under a
+    // different Elo config.
+    //
+    // Deliberately a dry run unless `confirm` is exactly true, matching
+    // AdminResetService: this rewrites the competitive standing of every player
+    // on the site, so the default has to be "show me what would happen".
+    server.post(
+        '/api/admin/ratings/recalculate',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!ensureAdmin(req, res)) {
+                return;
+            }
+
+            const result = await ratingService.recalculateRatings({
+                elo: req.body?.elo,
+                commit: req.body?.confirm === true,
+                reportLimit: req.body?.reportLimit
+            });
+
+            if (result.success && result.committed) {
+                // Loud and attributable: there is no undo.
+                logger.warn(
+                    `ADMIN RATING RECALCULATION by ${req.user.username}: ` +
+                        `${result.changed} rating(s) rewritten from ${result.gamesReplayed} game(s)`
+                );
+            }
+
+            res.send(result);
         })
     );
 

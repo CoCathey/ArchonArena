@@ -291,6 +291,18 @@ export const api = createApi({
             query: (username) => `/ratings/${encodeURIComponent(username)}`,
             providesTags: [TAG_TYPES.RATINGS]
         }),
+        // ARCHON (N4): season list and archived final standings (public).
+        getSeasons: builder.query({
+            query: () => '/ratings/seasons',
+            providesTags: [TAG_TYPES.RATINGS]
+        }),
+        getSeasonStandings: builder.query({
+            query: ({ season, pool, limit, offset }) => ({
+                url: `/ratings/seasons/${encodeURIComponent(season)}`,
+                params: { pool, limit, offset }
+            }),
+            providesTags: [TAG_TYPES.RATINGS]
+        }),
         // ARCHON: platform statistics & analytics (public aggregate lookups)
         getMetaStats: builder.query({
             query: () => '/stats/meta'
@@ -458,6 +470,12 @@ export const api = createApi({
         startNewSeason: builder.mutation({
             query: () => ({ url: '/admin/ratings/new-season', method: 'POST' }),
             invalidatesTags: [TAG_TYPES.RATINGS]
+        }),
+        // ARCHON (N4): rebuild the ladder from RatingHistory. Dry run unless
+        // `confirm` is true; the caller is expected to show the report first.
+        recalculateRatings: builder.mutation({
+            query: (body) => ({ url: '/admin/ratings/recalculate', method: 'POST', body }),
+            invalidatesTags: (result) => (result?.committed ? [TAG_TYPES.RATINGS] : [])
         }),
         // ARCHON: runtime admin settings
         getAdminSettings: builder.query({
@@ -787,6 +805,9 @@ export const {
     useStartNewSeasonMutation,
     useGetLeaderboardQuery,
     useGetRatingsQuery,
+    useGetSeasonsQuery,
+    useGetSeasonStandingsQuery,
+    useRecalculateRatingsMutation,
     useGetMetaStatsQuery,
     useGetPlayerStatsQuery,
     useGetDeckStatsQuery,

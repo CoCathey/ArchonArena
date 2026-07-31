@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton } from '@heroui/react';
 
@@ -7,7 +8,12 @@ import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
 import AmberValue from '../Components/Site/AmberValue';
 import { countryName } from '../geo';
-import { useGetLeaderboardQuery, useGetLocationQuery } from '../redux/api';
+import {
+    useGetLeaderboardQuery,
+    useGetLocationQuery,
+    useGetSeasonsQuery,
+    useGetSeasonStandingsQuery
+} from '../redux/api';
 
 const PAGE_SIZE = 50;
 
@@ -23,7 +29,18 @@ const Leaderboards = () => {
     const [pool, setPool] = useState('archon');
     const [page, setPage] = useState(0);
 
+    // ARCHON (N4): which season's ladder to show. '' is the live one; a number
+    // reads the archived final standings for a season that has ended. Seeded
+    // from the query string so the Ratings page can link straight to a season.
+    const [searchParams] = useSearchParams();
+    const [season, setSeason] = useState(searchParams.get('season') || '');
+
     const { data: location } = useGetLocationQuery(undefined, { skip: !user });
+    const { data: seasonData } = useGetSeasonsQuery();
+    const seasons = useMemo(() => seasonData?.seasons || [], [seasonData]);
+    const currentSeason = useMemo(() => seasons.find((entry) => entry.current), [seasons]);
+    const pastSeasons = useMemo(() => seasons.filter((entry) => !entry.current), [seasons]);
+    const viewingArchive = season !== '';
 
     const scopeParams =
         scope === 'region'
@@ -35,19 +52,29 @@ const Leaderboards = () => {
             : {};
 
     const scopeReady =
+        viewingArchive ||
         scope === 'world' ||
         (scope === 'region' && !!location?.region) ||
         (scope === 'country' && !!location?.country) ||
         (scope === 'state' && !!location?.country && !!location?.state);
 
-    const { data, isFetching } = useGetLeaderboardQuery(
+    const { data: liveData, isFetching: liveFetching } = useGetLeaderboardQuery(
         // Over-fetch one row so we can tell whether a next page exists even
         // when the current page is exactly full (otherwise "Next" stays
         // enabled on a full final page and advances to an empty page).
         { pool, scope, limit: PAGE_SIZE + 1, offset: page * PAGE_SIZE, ...scopeParams },
-        { skip: !scopeReady }
+        { skip: !scopeReady || viewingArchive }
     );
 
+    // An archived season is a snapshot of a ladder that no longer exists, so it
+    // has no geographic scopes - it is stored as the final worldwide standings.
+    const { data: archiveData, isFetching: archiveFetching } = useGetSeasonStandingsQuery(
+        { season, pool, limit: PAGE_SIZE + 1, offset: page * PAGE_SIZE },
+        { skip: !viewingArchive }
+    );
+
+    const data = viewingArchive ? archiveData : liveData;
+    const isFetching = viewingArchive ? archiveFetching : liveFetching;
     const rawEntries = data?.entries || [];
     const hasMore = rawEntries.length > PAGE_SIZE;
     const entries = rawEntries.slice(0, PAGE_SIZE);
@@ -78,21 +105,52 @@ const Leaderboards = () => {
         <div className='mx-auto w-full max-w-4xl'>
             <Panel title={t('Leaderboards')}>
                 <div className='mb-3 flex flex-wrap items-center gap-2'>
-                    <div className='flex gap-1'>
-                        {scopes.map(([key, label]) => (
-                            <HeroButton
-                                key={key}
-                                size='sm'
-                                variant={scope === key ? 'primary' : 'tertiary'}
-                                onPress={() => {
-                                    setScope(key);
-                                    setPage(0);
-                                }}
-                            >
-                                {label}
-                            </HeroButton>
-                        ))}
-                    </div>
+                    {/* Archived standings are stored as one worldwide final
+                        ladder, so the geographic scopes do not apply to them. */}
+                    {!viewingArchive && (
+                        <div className='flex gap-1'>
+                            {scopes.map(([key, label]) => (
+                                <HeroButton
+                                    key={key}
+                                    size='sm'
+                                    variant={scope === key ? 'primary' : 'tertiary'}
+                                    onPress={() => {
+                                        setScope(key);
+                                        setPage(0);
+                                    }}
+                                >
+                                    {label}
+                                </HeroButton>
+                            ))}
+                        </div>
+                    )}
+                    {/* ARCHON (N4): seasons existed in the engine but were
+                        invisible; this is where a player finds the one they
+                        are in and the ones that finished. */}
+                    {seasons.length > 0 && (
+                        <select
+                            className='rounded-md border border-border/70 bg-surface px-2 py-1 text-sm text-foreground'
+                            value={season}
+                            aria-label={t('Season')}
+                            onChange={(event) => {
+                                setSeason(event.target.value);
+                                setPage(0);
+                            }}
+                        >
+                            <option value=''>
+                                {currentSeason
+                                    ? t('Season {{season}} (current)', {
+                                          season: currentSeason.number
+                                      })
+                                    : t('Current')}
+                            </option>
+                            {pastSeasons.map((entry) => (
+                                <option key={entry.number} value={entry.number}>
+                                    {t('Season {{season}}', { season: entry.number })}
+                                </option>
+                            ))}
+                        </select>
+                    )}
                     <div className='ml-auto flex gap-1'>
                         {pools.map(([key, label]) => (
                             <HeroButton
@@ -131,7 +189,12 @@ const Leaderboards = () => {
                 ) : (
                     <>
                         <div className='mb-2 text-xs uppercase tracking-wide text-muted'>
-                            {scopeLabel}
+                            {viewingArchive
+                                ? t('Season {{season}} final standings', { season })
+                                : scopeLabel}
+                            {!viewingArchive && currentSeason?.number
+                                ? ` · ${t('Season {{season}}', { season: currentSeason.number })}`
+                                : ''}
                         </div>
                         <div className='overflow-x-auto'>
                             <table className='w-full text-sm'>
