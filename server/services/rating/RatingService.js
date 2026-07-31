@@ -8,6 +8,10 @@ const DEFAULT_RATING_CONFIG = {
     excludedWinReasons: ['rematch'],
     // Rated games required to appear on leaderboards.
     leaderboardMinGames: 5,
+    // ARCHON (N4): only show players active within this many days (0 = show
+    // everyone, which is the default - a young ladder that hid its inactive
+    // players would look emptier than it is).
+    leaderboardActivityDays: 0,
     // Maximum rows a single leaderboard request may return.
     leaderboardMaxLimit: 100,
     // Overrides for the Elo calculator (see eloDefaults.js).
@@ -524,9 +528,17 @@ class RatingService {
     }
 
     /**
-     * Start a new season: soft-reset every rating toward the baseline and
-     * record the season. Returns the new season number and how many ratings
-     * moved. The per-game RatingHistory audit is left untouched.
+     * Start a new season: archive the outgoing season's final ladder, then
+     * soft-reset every rating toward the baseline and record the new season.
+     * Returns the new season number and how many ratings moved. The per-game
+     * RatingHistory audit is left untouched.
+     *
+     * ARCHON (N4): the archive step is new. A season used to end by silently
+     * overwriting every rating, so the ladder that just finished ceased to
+     * exist - no final standings, no record of where anyone placed, and no way
+     * to tell a player what the reset cost them. Each archived row carries both
+     * halves of the transition (where they finished, what they carried
+     * forward), which is also what the recalculation tool replays from.
      */
     async startNewSeason() {
         const config = this.getConfig();
@@ -536,9 +548,20 @@ class RatingService {
         const floor = eloConfig.ratingFloor;
         const carry = seasonConfig.carryFactor ?? 0.5;
 
-        const rows = await this.db.query('SELECT "UserId", "Pool", "Rating" FROM "Ratings"');
+        const outgoing = await this.getCurrentSeason();
+        // Ordered so the archived rank can be assigned per pool in one pass.
+        const rows = await this.db.query(
+            'SELECT r."UserId", r."Pool", r."Rating", r."GamesPlayed" FROM "Ratings" r ' +
+                'JOIN "Users" u ON u."Id" = r."UserId" ' +
+                'ORDER BY r."Pool", r."Rating" DESC, r."GamesPlayed" DESC, u."Username"'
+        );
 
+        // Rank only the players the leaderboards would have shown, so an
+        // archived "#3 of season 2" means the same thing the board did.
+        const rankByPool = {};
+        const archive = [];
         let adjusted = 0;
+
         for (const row of rows || []) {
             const newRating = computeSeasonReset(row.Rating, baseline, carry, floor);
 
@@ -546,25 +569,510 @@ class RatingService {
                 adjusted++;
             }
 
-            await this.db.query(
-                'UPDATE "Ratings" SET "Rating" = $1, "LastDecayAt" = NULL ' +
-                    'WHERE "UserId" = $2 AND "Pool" = $3',
-                [newRating, row.UserId, row.Pool]
-            );
+            let rank = null;
+            if (row.GamesPlayed >= config.leaderboardMinGames) {
+                rankByPool[row.Pool] = (rankByPool[row.Pool] || 0) + 1;
+                rank = rankByPool[row.Pool];
+            }
+
+            archive.push({
+                userId: row.UserId,
+                pool: row.Pool,
+                rank,
+                rating: row.Rating,
+                gamesPlayed: row.GamesPlayed,
+                ratingAfterReset: newRating
+            });
         }
 
-        const inserted = await this.db.query(
-            'INSERT INTO "Seasons" ("StartedAt") VALUES (now() AT TIME ZONE \'utc\') ' +
-                'RETURNING "Id", "StartedAt"'
+        const client = await this.db.startTransaction();
+
+        try {
+            // Archiving and resetting must land together: standings that
+            // recorded a season nobody was reset out of - or a reset with no
+            // record of what came before it - would both be worse than either.
+            // Guarded on startedAt, NOT on the season number: getCurrentSeason()
+            // reports season 1 for a site that has never started one, and there
+            // is no Seasons row behind that number - archiving against it would
+            // violate the foreign key.
+            if (outgoing.startedAt && archive.length > 0) {
+                for (const entry of archive) {
+                    await this.db.queryTran(
+                        client,
+                        'INSERT INTO "SeasonStandings" ' +
+                            '("SeasonId", "UserId", "Pool", "Rank", "Rating", "GamesPlayed", ' +
+                            '"RatingAfterReset", "CreatedAt") ' +
+                            "VALUES ($1, $2, $3, $4, $5, $6, $7, now() AT TIME ZONE 'utc') " +
+                            'ON CONFLICT ("SeasonId", "UserId", "Pool") DO NOTHING',
+                        [
+                            outgoing.number,
+                            entry.userId,
+                            entry.pool,
+                            entry.rank,
+                            entry.rating,
+                            entry.gamesPlayed,
+                            entry.ratingAfterReset
+                        ]
+                    );
+                }
+            }
+
+            for (const entry of archive) {
+                await this.db.queryTran(
+                    client,
+                    'UPDATE "Ratings" SET "Rating" = $1, "LastDecayAt" = NULL ' +
+                        'WHERE "UserId" = $2 AND "Pool" = $3',
+                    [entry.ratingAfterReset, entry.userId, entry.pool]
+                );
+            }
+
+            // Close the outgoing season only if it was ever actually recorded.
+            // getCurrentSeason() reports season 1 for a site that has never
+            // started one, and there is no row to stamp in that case.
+            if (outgoing.startedAt) {
+                await this.db.queryTran(
+                    client,
+                    'UPDATE "Seasons" SET "EndedAt" = now() AT TIME ZONE \'utc\' ' +
+                        'WHERE "Id" = $1 AND "EndedAt" IS NULL',
+                    [outgoing.number]
+                );
+            }
+
+            const inserted = await this.db.queryTran(
+                client,
+                'INSERT INTO "Seasons" ("StartedAt") VALUES (now() AT TIME ZONE \'utc\') ' +
+                    'RETURNING "Id", "StartedAt"'
+            );
+            const season = inserted && inserted[0] ? inserted[0] : null;
+
+            await this.db.queryTran(client, 'COMMIT');
+
+            return {
+                success: true,
+                season: season ? season.Id : null,
+                startedAt: season ? season.StartedAt : null,
+                adjusted,
+                archived: outgoing.startedAt ? archive.length : 0
+            };
+        } catch (err) {
+            await this.db.queryTran(client, 'ROLLBACK');
+            logger.error('Failed to start a new season', err);
+
+            return { success: false, message: 'Failed to start a new season' };
+        } finally {
+            // Matches processGameInner: the pool client must go back whether
+            // the transaction committed or rolled back, and tests inject a db
+            // whose client has no release().
+            if (client.release) {
+                client.release();
+            }
+        }
+    }
+
+    /**
+     * ARCHON (N4): SQL fragment restricting a Ratings row to players active
+     * within the configured window, or '' when the window is off.
+     *
+     * Built once here and used by every place that counts the ranked field, so
+     * the leaderboard rows, the rank number on a player's own Ratings page and
+     * the "of M" field size can never diverge. The interval is interpolated
+     * rather than bound because it is a validated integer from the settings
+     * registry (1..3650) and PostgreSQL will not take a parameter inside an
+     * interval literal without a cast dance that obscures the query.
+     *
+     * @param {object} config effective rating config
+     * @param {string} alias  the Ratings table alias in the caller's query
+     */
+    activityWindowSql(config, alias) {
+        const days = Math.floor(Number(config.leaderboardActivityDays) || 0);
+
+        if (!Number.isFinite(days) || days <= 0) {
+            return '';
+        }
+
+        return `${alias}."UpdatedAt" >= (now() AT TIME ZONE 'utc') - interval '${days} days'`;
+    }
+
+    /**
+     * ARCHON (N4): every season with its dates and how many players it ranked.
+     * Newest first; the current (unfinished) season is included and flagged.
+     */
+    async getSeasons() {
+        const rows = await this.db.query(
+            'SELECT s."Id", s."StartedAt", s."EndedAt", ' +
+                '(SELECT COUNT(*) FROM "SeasonStandings" ss ' +
+                'WHERE ss."SeasonId" = s."Id" AND ss."Rank" IS NOT NULL) AS "ranked" ' +
+                'FROM "Seasons" s ORDER BY s."Id" DESC'
         );
-        const season = inserted && inserted[0] ? inserted[0] : null;
+
+        return (rows || []).map((row) => ({
+            number: row.Id,
+            startedAt: row.StartedAt,
+            endedAt: row.EndedAt,
+            rankedPlayers: Number(row.ranked) || 0,
+            current: !row.EndedAt
+        }));
+    }
+
+    /**
+     * ARCHON (N4): the archived final ladder for one finished season.
+     *
+     * Reads the standings recorded when the season ended rather than
+     * recomputing from today's ratings - the whole point is that it is a
+     * snapshot of a ladder that no longer exists.
+     */
+    async getSeasonStandings(seasonId, options = {}) {
+        const season = parseInt(seasonId, 10);
+
+        if (!Number.isFinite(season)) {
+            return null;
+        }
+
+        const config = this.getConfig();
+        const pool = this.normalizePool(options.pool);
+        const limit = Math.min(
+            Math.max(1, parseInt(options.limit, 10) || 50),
+            config.leaderboardMaxLimit
+        );
+        const offset = Math.max(0, parseInt(options.offset, 10) || 0);
+
+        const rows = await this.db.query(
+            'SELECT ss."Rank", ss."Rating", ss."GamesPlayed", ss."RatingAfterReset", ' +
+                'u."Username", u."Country", u."State", u."Settings_Avatar" ' +
+                'FROM "SeasonStandings" ss JOIN "Users" u ON u."Id" = ss."UserId" ' +
+                'WHERE ss."SeasonId" = $1 AND ss."Pool" = $2 AND ss."Rank" IS NOT NULL ' +
+                'AND u."Disabled" IS NOT TRUE ' +
+                'ORDER BY ss."Rank" LIMIT $3 OFFSET $4',
+            [season, pool, limit, offset]
+        );
 
         return {
-            success: true,
-            season: season ? season.Id : null,
-            startedAt: season ? season.StartedAt : null,
-            adjusted
+            season,
+            pool,
+            entries: (rows || []).map((row) => ({
+                rank: row.Rank,
+                username: row.Username,
+                country: row.Country,
+                state: row.State,
+                avatar: row.Settings_Avatar,
+                rating: row.Rating,
+                gamesPlayed: row.GamesPlayed,
+                // What the soft reset carried into the next season.
+                ratingAfterReset: row.RatingAfterReset,
+                resetDelta: row.RatingAfterReset - row.Rating
+            }))
         };
+    }
+
+    /**
+     * ARCHON (N4): one player's season history - where they finished each
+     * season and what the reset did to them. Backs both the end-of-season
+     * summary on the Ratings page and the finish badges on public profiles.
+     */
+    async getSeasonHistoryForUsername(username) {
+        if (!username) {
+            return [];
+        }
+
+        const rows = await this.db.query(
+            'SELECT ss."SeasonId", ss."Pool", ss."Rank", ss."Rating", ss."GamesPlayed", ' +
+                'ss."RatingAfterReset", s."StartedAt", s."EndedAt" ' +
+                'FROM "SeasonStandings" ss ' +
+                'JOIN "Users" u ON u."Id" = ss."UserId" ' +
+                'JOIN "Seasons" s ON s."Id" = ss."SeasonId" ' +
+                'WHERE lower(u."Username") = lower($1) ' +
+                'ORDER BY ss."SeasonId" DESC, ss."Pool"',
+            [username]
+        );
+
+        return (rows || []).map((row) => ({
+            season: row.SeasonId,
+            pool: row.Pool,
+            rank: row.Rank,
+            rating: row.Rating,
+            gamesPlayed: row.GamesPlayed,
+            ratingAfterReset: row.RatingAfterReset,
+            // Negative: the soft reset took this much off.
+            resetDelta: row.RatingAfterReset - row.Rating,
+            startedAt: row.StartedAt,
+            endedAt: row.EndedAt
+        }));
+    }
+
+    /**
+     * ARCHON (N4): recalculate the ladder by replaying RatingHistory under a
+     * different Elo configuration.
+     *
+     * Tuning the Elo config only ever affected games played *after* the change,
+     * so a config that turned out wrong stayed baked into the ladder forever.
+     * This replays the recorded results and rebuilds the standings.
+     *
+     * **Dry run by default.** Nothing is written unless `commit` is explicitly
+     * true; the report it returns is the thing to look at first, because this
+     * rewrites the competitive standing of every player on the site.
+     *
+     * Two things shape the replay:
+     *
+     *  - **It starts at the current season, not at the beginning of time.** A
+     *    season soft-reset moves ratings without writing RatingHistory, so a
+     *    replay from zero would silently undo every reset ever applied and hand
+     *    players back Amber that a season deliberately took away. Seeds come
+     *    from the archived standings (`RatingAfterReset`); a site that has
+     *    never run a season replays from the default rating, which is the same
+     *    thing.
+     *  - **It does not replay decay.** Decay is a function of inactivity rather
+     *    than of games, and is not in RatingHistory either. Committing clears
+     *    `LastDecayAt` so the next decay sweep re-derives it from the rebuilt
+     *    ratings rather than from a stale high-water mark.
+     *
+     * @param {object} [options]
+     * @param {object} [options.elo]    Elo overrides to replay under; defaults
+     *                                  to the live configuration, which makes
+     *                                  the run a no-op consistency check.
+     * @param {boolean} [options.commit] write the result (default false)
+     * @param {number} [options.reportLimit] how many movers to list
+     */
+    async recalculateRatings(options = {}) {
+        const config = this.getConfig();
+        const commit = options.commit === true;
+        const reportLimit = Math.min(Math.max(1, parseInt(options.reportLimit, 10) || 25), 200);
+
+        let eloConfig;
+
+        try {
+            // normalizeConfig validates; a bad override must fail here, before
+            // anything is replayed, not halfway through a rewrite.
+            eloConfig = normalizeConfig(options.elo ?? config.elo);
+        } catch (err) {
+            return { success: false, message: `Invalid Elo configuration: ${err.message}` };
+        }
+
+        const seeds = await this.getRecalculationSeeds();
+        const games = await this.getReplayableHistory(seeds.sinceStartedAt);
+
+        // userId|pool -> { rating, gamesPlayed }
+        const state = new Map();
+        const keyFor = (userId, pool) => `${userId}|${pool}`;
+        const stateFor = (userId, pool) => {
+            const key = keyFor(userId, pool);
+
+            if (!state.has(key)) {
+                state.set(key, {
+                    userId,
+                    pool,
+                    rating: seeds.byKey.get(key)?.rating ?? eloConfig.defaultRating,
+                    gamesPlayed: seeds.byKey.get(key)?.gamesPlayed ?? 0
+                });
+            }
+
+            return state.get(key);
+        };
+
+        for (const game of games) {
+            const winner = stateFor(game.winnerId, game.pool);
+            const loser = stateFor(game.loserId, game.pool);
+
+            const result = calculateGameResult(
+                {
+                    winner: {
+                        rating: winner.rating,
+                        gamesPlayed: winner.gamesPlayed,
+                        deckSas: game.winnerSas
+                    },
+                    loser: {
+                        rating: loser.rating,
+                        gamesPlayed: loser.gamesPlayed,
+                        deckSas: game.loserSas
+                    },
+                    // movMultiplier only reads the difference, and the stored
+                    // KeyDiff is exactly that - the raw key counts are not in
+                    // RatingHistory and are not needed.
+                    winnerKeys: game.keyDiff,
+                    loserKeys: 0,
+                    resultType: game.resultType,
+                    isTournament: game.isTournament
+                },
+                eloConfig
+            );
+
+            winner.rating = result.winner.newRating;
+            winner.gamesPlayed += 1;
+            loser.rating = result.loser.newRating;
+            loser.gamesPlayed += 1;
+        }
+
+        // Compare against what the ladder currently says.
+        const currentRows = await this.db.query(
+            'SELECT r."UserId", r."Pool", r."Rating", r."GamesPlayed", u."Username" ' +
+                'FROM "Ratings" r JOIN "Users" u ON u."Id" = r."UserId"'
+        );
+
+        const changes = [];
+        let unchanged = 0;
+
+        for (const row of currentRows || []) {
+            const replayed = state.get(keyFor(row.UserId, row.Pool));
+
+            // A rating with no replayed games keeps whatever it has: it was
+            // seeded by a season reset or set by an admin, and inventing a
+            // value for it would be a change this tool never made.
+            if (!replayed) {
+                unchanged++;
+                continue;
+            }
+
+            if (replayed.rating === row.Rating) {
+                unchanged++;
+                continue;
+            }
+
+            changes.push({
+                userId: row.UserId,
+                username: row.Username,
+                pool: row.Pool,
+                before: row.Rating,
+                after: replayed.rating,
+                delta: replayed.rating - row.Rating
+            });
+        }
+
+        changes.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+        const report = {
+            success: true,
+            committed: false,
+            dryRun: !commit,
+            gamesReplayed: games.length,
+            ratingsCompared: (currentRows || []).length,
+            changed: changes.length,
+            unchanged,
+            seededFromSeason: seeds.season,
+            largestGain: changes.find((entry) => entry.delta > 0) || null,
+            largestLoss: changes.find((entry) => entry.delta < 0) || null,
+            movers: changes.slice(0, reportLimit)
+        };
+
+        if (!commit) {
+            return report;
+        }
+
+        const client = await this.db.startTransaction();
+
+        try {
+            for (const change of changes) {
+                await this.db.queryTran(
+                    client,
+                    // LastDecayAt is cleared deliberately: the rebuilt rating
+                    // has no relationship to the decay already applied to the
+                    // old one, so the next sweep re-derives it.
+                    'UPDATE "Ratings" SET "Rating" = $1, "LastDecayAt" = NULL ' +
+                        'WHERE "UserId" = $2 AND "Pool" = $3',
+                    [change.after, change.userId, change.pool]
+                );
+            }
+
+            await this.db.queryTran(client, 'COMMIT');
+        } catch (err) {
+            await this.db.queryTran(client, 'ROLLBACK');
+            logger.error('Rating recalculation failed to commit', err);
+
+            return { success: false, message: 'Recalculation failed to commit; nothing changed' };
+        } finally {
+            if (client.release) {
+                client.release();
+            }
+        }
+
+        logger.warn(
+            `RATING RECALCULATION committed: ${changes.length} rating(s) rewritten from ` +
+                `${games.length} replayed game(s)`
+        );
+
+        return { ...report, committed: true, dryRun: false };
+    }
+
+    /**
+     * Seed ratings for a replay: where each player stood when the current
+     * season began, plus the history cut-off that season corresponds to.
+     *
+     * Returns empty seeds for a site that has never started a season, which
+     * replays the whole history from the default rating.
+     */
+    async getRecalculationSeeds() {
+        const current = await this.getCurrentSeason();
+        const byKey = new Map();
+
+        if (!current.startedAt) {
+            return { byKey, season: null, sinceHistoryId: null };
+        }
+
+        // The standings archived when the PREVIOUS season ended are exactly the
+        // ratings the current season started from.
+        const rows = await this.db.query(
+            'SELECT "UserId", "Pool", "RatingAfterReset", "GamesPlayed" ' +
+                'FROM "SeasonStandings" WHERE "SeasonId" = $1',
+            [current.number - 1]
+        );
+
+        for (const row of rows || []) {
+            byKey.set(`${row.UserId}|${row.Pool}`, {
+                rating: row.RatingAfterReset,
+                gamesPlayed: row.GamesPlayed
+            });
+        }
+
+        return { byKey, season: current.number, sinceStartedAt: current.startedAt };
+    }
+
+    /**
+     * Recorded games in replay order, one entry per game (RatingHistory holds
+     * two rows per game - winner and loser - which are folded together here).
+     *
+     * `sinceStartedAt` limits the replay to the current season.
+     */
+    async getReplayableHistory(sinceStartedAt) {
+        // Only the winner's row per game. RatingHistory holds two rows per
+        // game and the loser's is the mirror image, so replaying both would
+        // double-count every result.
+        const params = [];
+        let where = 'WHERE w."Won" = true';
+
+        if (sinceStartedAt) {
+            params.push(sinceStartedAt);
+            where += ` AND w."CreatedAt" >= $${params.length}`;
+        }
+
+        const rows = await this.db.query(
+            'SELECT w."GameId", w."Pool", w."UserId" AS "WinnerId", w."OpponentId" AS "LoserId", ' +
+                'w."OwnSas" AS "WinnerSas", w."OpponentSas" AS "LoserSas", ' +
+                'w."KeyDiff", w."ResultType", w."CreatedAt", ' +
+                // isTournament is not stored on the history row, but it changes
+                // K via tournamentKMultiplier, so it has to be re-derived or
+                // the replay would rate every event game as casual.
+                'EXISTS (SELECT 1 FROM "TournamentMatchGames" tmg ' +
+                'JOIN "Games" g ON g."Id" = w."GameId" ' +
+                'WHERE tmg."GameUuid" = g."GameId") AS "IsTournament" ' +
+                'FROM "RatingHistory" w ' +
+                `${where} ` +
+                // Chronological: a replay in any other order would feed each
+                // game the wrong "rating before".
+                'ORDER BY w."CreatedAt" ASC, w."GameId" ASC, w."Id" ASC',
+            params
+        );
+
+        return (rows || []).map((row) => ({
+            gameId: row.GameId,
+            pool: row.Pool,
+            winnerId: row.WinnerId,
+            loserId: row.LoserId,
+            winnerSas: row.WinnerSas,
+            loserSas: row.LoserSas,
+            // A missing key differential falls back to the narrowest margin
+            // rather than to zero, which movMultiplier would clamp to 1 anyway.
+            keyDiff: row.KeyDiff == null ? 1 : row.KeyDiff,
+            resultType: row.ResultType || 'keys',
+            isTournament: !!row.IsTournament
+        }));
     }
 
     /**
@@ -588,20 +1096,29 @@ class RatingService {
      */
     async getRatingsForUsername(username) {
         const config = this.getConfig();
+        // ARCHON (N4): the same activity window the leaderboard applies, so
+        // "#3 of 40" here means the same 40 the board shows.
+        const rankWindow = this.activityWindowSql(config, 'r2');
+        const totalWindow = this.activityWindowSql(config, 'r3');
+
         const rows = await this.db.query(
             'SELECT r."Pool", r."Rating", r."GamesPlayed", ' +
                 // Worldwide rank in the pool (players with a strictly higher
                 // rating, plus one) and the size of the rated field. Both count
                 // only the same population the leaderboard shows - rated
-                // (GamesPlayed >= minimum) and non-disabled accounts - so the
-                // profile's "rank #N of M" agrees with the leaderboard.
+                // (GamesPlayed >= minimum), non-disabled accounts, and within
+                // the activity window - so the profile's "rank #N of M" agrees
+                // with the leaderboard.
                 '(SELECT COUNT(*) + 1 FROM "Ratings" r2 ' +
                 'JOIN "Users" u2 ON u2."Id" = r2."UserId" WHERE r2."Pool" = r."Pool" ' +
                 'AND r2."Rating" > r."Rating" AND r2."GamesPlayed" >= $2 ' +
+                (rankWindow ? `AND ${rankWindow} ` : '') +
                 'AND u2."Disabled" IS NOT TRUE) AS "Rank", ' +
                 '(SELECT COUNT(*) FROM "Ratings" r3 ' +
                 'JOIN "Users" u3 ON u3."Id" = r3."UserId" WHERE r3."Pool" = r."Pool" ' +
-                'AND r3."GamesPlayed" >= $2 AND u3."Disabled" IS NOT TRUE) AS "TotalRated", ' +
+                'AND r3."GamesPlayed" >= $2 ' +
+                (totalWindow ? `AND ${totalWindow} ` : '') +
+                'AND u3."Disabled" IS NOT TRUE) AS "TotalRated", ' +
                 // Win/loss record from the audit history.
                 '(SELECT COUNT(*) FROM "RatingHistory" h WHERE h."UserId" = r."UserId" ' +
                 'AND h."Pool" = r."Pool" AND h."Won") AS "Wins", ' +
@@ -756,6 +1273,16 @@ class RatingService {
 
         const params = [pool, config.leaderboardMinGames];
         let where = 'r."Pool" = $1 AND r."GamesPlayed" >= $2';
+
+        // ARCHON (N4): the activity window. Applied here AND in the rank
+        // subquery on the Ratings page (see activityWindowSql) - if the two
+        // disagreed, a player's "#3 of 40" would not match the board they are
+        // looking at, which is worse than not having the window at all.
+        const activityClause = this.activityWindowSql(config, 'r');
+
+        if (activityClause) {
+            where += ` AND ${activityClause}`;
+        }
 
         if (scope === 'region') {
             const countries = countriesInRegion(options.region);

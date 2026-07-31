@@ -564,24 +564,41 @@ under-displayed — the SAS the platform already stores appears on one screen.
 -   [x] The refresh sweep respects the existing per-minute DoK budget and never starves live
         requests — asserted by a test that leaves it two slots and watches it stop at two.
 
-#### N4 — Ladder maturity
+#### N4 — Ladder maturity _(done)_
 
 **Why:** seasons and decay exist in the engine but are invisible to players, and there is no
 way to correct the ladder after tuning the Elo config.
 **Tasks**
 
--   Season display: current season on leaderboards, season archive, end-of-season summary.
--   Season rewards/badges surfaced on profiles (depends on I3).
--   Activity window on boards **(admin-config)**.
--   Rating recalculation tool: replay `RatingHistory` under a new config, admin-triggered,
-    dry-run first.
+-   [x] Season archive (migration 43): `startNewSeason` now records every rating it is about
+        to reset — final rating, games played, rank, and the rating the reset left behind —
+        into `SeasonStandings`, and stamps `Seasons.EndedAt`. Archiving and resetting happen
+        in one transaction: standings for a season nobody was reset out of, or a reset with no
+        record of what came before, would each be worse than neither.
+-   [x] Season display: the current season names the Ratings panel and the leaderboard header,
+        Leaderboards gained a season picker that switches the board to final standings, and the
+        end-of-season summary is that archive — final rank, Amber, and what the soft reset took.
+-   [x] Season badges on profiles: medals for top-three finishes and a "Season finishes" panel
+        on the public profile, from the same archive.
+-   [x] Activity window on boards **(admin-config)**: `rating.leaderboardActivityDays`, off by
+        default. Applied to the board, and to the rank and field size on a profile — if those
+        disagreed a player would read "#3 of 40" beside a board listing a different 40.
+-   [x] Rating recalculation tool: replays `RatingHistory` under a candidate Elo config,
+        admin-triggered, dry-run first, seeded from the season archive.
 
 **Depends on:** I3, I4.
 **Acceptance criteria**
 
--   A player can see which season they are in, where they finished in prior seasons, and what
-    a soft reset did to their Amber.
--   Recalculation produces a diff report before it commits, and is idempotent for an unchanged config.
+-   [x] A player can see which season they are in, where they finished in prior seasons, and
+        what a soft reset did to their Amber. The reset delta is stored rather than inferred,
+        because a soft reset writes no `RatingHistory` row and is otherwise unrecoverable.
+-   [x] Recalculation produces a diff report before it commits, and is idempotent for an
+        unchanged config. The Apply button does not exist until a preview has returned, and
+        disappears again once committed. Verified against a real PostgreSQL: replaying an
+        unchanged config moves nobody; a different K moves the winner further.
+-   [x] Recalculation replays only the season in progress, seeded from the archived post-reset
+        ratings. Replaying all history would silently undo every soft reset the ladder has ever
+        had — resets mutate `Ratings` without leaving a history row to replay.
 
 #### N5 — Moderation toolkit
 
@@ -1052,7 +1069,8 @@ much stronger deck pays less.
 -   [x] Provisional/placement badge until N games.
 -   [x] Separate rating pools: Archon / Sealed / Alliance, mapped from game format.
 -   [ ] Per-game rating delta surfaced to players → **I4**.
--   [ ] Recalculation tool (replay rating history after config change; admin-triggered) → **N4**.
+-   [x] **Recalculation tool** (replay rating history under a candidate Elo config;
+        admin-triggered, dry-run first, seeded from the season archive) — migration 43.
 
 ## Phase 6 — Rankings & leaderboards
 

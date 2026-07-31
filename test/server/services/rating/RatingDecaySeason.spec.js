@@ -115,15 +115,24 @@ describe('RatingService decay & seasons (persistence)', function () {
     });
 
     describe('startNewSeason', function () {
+        // ARCHON (N4): starting a season now archives the outgoing ladder and
+        // resets it in ONE transaction, so the writes go through queryTran
+        // rather than query. The soft-reset maths below is unchanged.
         it('soft-resets every rating and records the season', async function () {
             ratingConfig = { season: { carryFactor: 0.5, baseline: 1200 } };
+            const client = { release: vi.fn() };
+
             db.query.mockImplementation(async (sql) => {
-                if (sql.includes('SELECT "UserId", "Pool", "Rating" FROM "Ratings"')) {
+                if (sql.includes('FROM "Ratings"')) {
                     return [
-                        { UserId: 1, Pool: 'archon', Rating: 1600 },
-                        { UserId: 2, Pool: 'archon', Rating: 1000 }
+                        { UserId: 1, Pool: 'archon', Rating: 1600, GamesPlayed: 20 },
+                        { UserId: 2, Pool: 'archon', Rating: 1000, GamesPlayed: 20 }
                     ];
                 }
+                return [];
+            });
+            db.startTransaction = vi.fn().mockResolvedValue(client);
+            db.queryTran = vi.fn().mockImplementation(async (c, sql) => {
                 if (sql.includes('INSERT INTO "Seasons"')) {
                     return [{ Id: 2, StartedAt: '2026-07-01T00:00:00Z' }];
                 }
@@ -136,10 +145,12 @@ describe('RatingService decay & seasons (persistence)', function () {
             expect(result.season).toBe(2);
             expect(result.adjusted).toBe(2);
 
-            const updates = db.query.mock.calls.filter(([sql]) => sql.includes('UPDATE "Ratings"'));
+            const updates = db.queryTran.mock.calls.filter(([, sql]) =>
+                sql.includes('UPDATE "Ratings"')
+            );
             expect(updates.length).toBe(2);
-            expect(updates[0][1][0]).toBe(1400); // 1600 -> 1200 + 400*0.5
-            expect(updates[1][1][0]).toBe(1100); // 1000 -> 1200 - 200*0.5
+            expect(updates[0][2][0]).toBe(1400); // 1600 -> 1200 + 400*0.5
+            expect(updates[1][2][0]).toBe(1100); // 1000 -> 1200 - 200*0.5
         });
     });
 

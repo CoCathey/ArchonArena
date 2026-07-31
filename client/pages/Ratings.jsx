@@ -24,10 +24,20 @@ const Ratings = () => {
 
     const { data, isFetching } = useGetRatingsQuery(user?.username, { skip: !user });
     const ratings = data?.ratings || [];
+    // ARCHON (N4): seasons and decay have existed in the engine since Phase 5
+    // but were completely invisible to players.
+    const currentSeason = data?.currentSeason;
+    const seasonHistory = data?.seasonHistory || [];
 
     return (
         <div className='mx-auto w-full max-w-3xl space-y-4'>
-            <Panel title={t('Your Amber')}>
+            <Panel
+                title={
+                    currentSeason?.number
+                        ? t('Your Amber — Season {{season}}', { season: currentSeason.number })
+                        : t('Your Amber')
+                }
+            >
                 {!user ? (
                     <p className='text-sm text-muted'>
                         {t('Log in to see your Amber and world ranking.')}{' '}
@@ -109,6 +119,72 @@ const Ratings = () => {
                 )}
             </Panel>
 
+            {/* ARCHON (N4): the end-of-season summary. A soft reset used to
+                move a player's Amber with no explanation anywhere on the site. */}
+            {seasonHistory.length > 0 && (
+                <Panel title={t('Your seasons')}>
+                    <p className='mb-3 text-xs text-muted'>
+                        {t(
+                            'Where you finished each season, and what the soft reset carried into the next one.'
+                        )}
+                    </p>
+                    <div className='overflow-x-auto'>
+                        <table className='w-full text-left text-sm'>
+                            <thead>
+                                <tr className='text-xs uppercase tracking-wide text-muted'>
+                                    <th className='px-2 py-1'>{t('Season')}</th>
+                                    <th className='px-2 py-1'>{t('Pool')}</th>
+                                    <th className='px-2 py-1 text-center'>{t('Finished')}</th>
+                                    <th className='px-2 py-1 text-center'>{t('Amber')}</th>
+                                    <th className='px-2 py-1 text-center'>{t('Reset to')}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {seasonHistory.map((entry) => (
+                                    <tr
+                                        key={`${entry.season}-${entry.pool}`}
+                                        className='border-b border-border/40'
+                                    >
+                                        <td className='px-2 py-1.5 text-foreground'>
+                                            <Link
+                                                href={`/leaderboards?season=${entry.season}`}
+                                                className='hover:text-amber-300 hover:underline'
+                                            >
+                                                {t('Season {{season}}', { season: entry.season })}
+                                            </Link>
+                                        </td>
+                                        <td className='px-2 py-1.5 text-muted'>
+                                            {t(POOL_LABELS[entry.pool] || entry.pool)}
+                                        </td>
+                                        <td className='px-2 py-1.5 text-center text-muted'>
+                                            {entry.rank ? `#${entry.rank}` : t('Unranked')}
+                                        </td>
+                                        <td className='px-2 py-1.5 text-center font-semibold text-foreground'>
+                                            {entry.rating}
+                                        </td>
+                                        <td className='px-2 py-1.5 text-center text-muted'>
+                                            {entry.ratingAfterReset}
+                                            {entry.resetDelta !== 0 && (
+                                                <span
+                                                    className={`ml-1 text-xs ${
+                                                        entry.resetDelta > 0
+                                                            ? 'text-emerald-300'
+                                                            : 'text-rose-300'
+                                                    }`}
+                                                >
+                                                    ({entry.resetDelta > 0 ? '+' : ''}
+                                                    {entry.resetDelta})
+                                                </span>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </Panel>
+            )}
+
             <Panel title={t('How Amber works')}>
                 <div className='space-y-3 text-sm text-muted'>
                     <p>
@@ -141,6 +217,11 @@ const Ratings = () => {
                     <p>
                         {t(
                             'Amber can go down as well as up - it always reflects your current standing against the field.'
+                        )}
+                    </p>
+                    <p>
+                        {t(
+                            'Seasons: when a new season starts, every rating is softly reset toward the middle - you keep part of the gap you built, so a strong season still counts for something without the ladder freezing in place. Your previous finishes are kept, and the exact reset is shown above.'
                         )}
                     </p>
                 </div>
