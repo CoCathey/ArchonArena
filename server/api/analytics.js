@@ -3,7 +3,10 @@ const passport = require('passport');
 const AnalyticsService = require('../services/AnalyticsService');
 const { wrapAsync } = require('../util.js');
 
-const analyticsService = new AnalyticsService();
+// ARCHON (N5): the moderation queue's health is part of operations.
+const analyticsService = new AnalyticsService(require('../db'), {
+    moderationService: require('./moderation').moderationService
+});
 
 const requireAdmin = (req, res, next) => {
     if (!req.user?.permissions?.isAdmin) {

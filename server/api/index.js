@@ -19,6 +19,8 @@ const notifications = require('./notifications');
 const inPersonGames = require('./in-person-games');
 // ARCHON: admin analytics and operations dashboard
 const analytics = require('./analytics');
+// ARCHON: reports and the moderation queue
+const moderation = require('./moderation');
 const decks = require('./decks');
 const games = require('./games');
 // ARCHON: platform statistics & analytics
@@ -56,6 +58,8 @@ module.exports.init = function (server, options) {
     inPersonGames.init(server);
     // ARCHON: admin analytics and operations dashboard
     analytics.init(server);
+    // ARCHON: reports and the moderation queue
+    moderation.init(server);
     decks.init(server);
     games.init(server);
     // ARCHON: platform statistics & analytics

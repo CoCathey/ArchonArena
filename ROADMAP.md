@@ -608,24 +608,54 @@ way to correct the ladder after tuning the Elo config.
         ratings. Replaying all history would silently undo every soft reset the ladder has ever
         had — resets mutate `Ratings` without leaving a history row to replay.
 
-#### N5 — Moderation toolkit
+#### N5 — Moderation toolkit _(done)_
 
 **Why:** the platform inherits a block list and ban list and has a `canModerateChat` role, but
 no way to report anything or act proportionately. Community size makes this urgent, not optional.
 **Tasks**
 
--   Reports: player, chat message, deck name, club, store listing — with reason and context capture.
--   Moderation queue with claim/resolve, and graduated actions (warn, mute, timeout, ban) with
-    reason and expiry.
--   Full audit log of moderator actions (replacing the settings service's last-editor-only trail).
--   Policy thresholds **(admin-config)**.
+-   [x] **Reports** (migration 48): player, chat message, deck, club, store listing — and
+        in-person game disputes. Each captures a **snapshot** of what was reported, not just a
+        foreign key to it: deleting the evidence is the first thing a bad actor does, and a
+        report that reads "message #4213" after the message is gone is not a report. A report
+        about a deck is recorded as a report about its owner, so a moderator does not have to
+        re-derive who to act on. Verified against a real database by deleting the reported
+        message and confirming the report still reads.
+-   [x] **Moderation queue** with claim / release / resolve. Claiming is conditional on the
+        report still being open, so two moderators racing resolve to one winner rather than
+        both believing they have it. Resolving requires written reasoning — a closed report
+        with none is indistinguishable from one that was ignored. The queue shows how many
+        **distinct** people have reported an account recently, because one complaint is a
+        disagreement and five is a pattern, and the report alone does not say which.
+-   [x] **Graduated actions**: note, warn, mute, timeout, ban. Each is an append-only row with
+        a reason and an expiry, never a flag on the account — that is what lets a player be
+        told why and until when, and what makes an action reversible without erasing that it
+        happened. A timeout takes chat too, since being unable to play while still free to
+        talk is not the sanction anyone picks. A ban also sets `Users.Disabled`, because the
+        login path checks that and knows nothing about this table; revoking one puts it back.
+        A moderator cannot sanction themselves or another moderator — only an admin can.
+-   [x] **Full audit log** of every moderator action, **and** of settings changes, replacing
+        the settings service's last-editor-only trail (`SiteSettings` recorded only the most
+        recent editor, so "who turned rated play off in March" was unanswerable — the next
+        edit overwrote the answer). Entries keep the moderator's name as text beside their id,
+        so the trail survives the account being deleted; verified by deleting a moderator and
+        confirming their entries still name them. Writing an entry never throws: a moderator
+        who saw an error would reasonably repeat the action.
+-   [x] **Policy thresholds (admin-config)**: minimum report length, default mute and timeout
+        durations, and the repeat-report window and threshold.
 
 **Depends on:** I3 (profiles are where reports start), N2 (notifying the reporter).
 **Acceptance criteria**
 
--   Any player can report from the surface where the problem appears, in two clicks.
--   Every moderator action is attributable, reversible, and visible in the audit log.
--   A muted or timed-out player is blocked from the relevant surfaces and told why and for how long.
+-   [x] Any player can report from the surface where the problem appears, in two clicks —
+        `ReportButton` is inline on the profile and club pages rather than a link to a form
+        that would make someone re-describe what they were already looking at.
+-   [x] Every moderator action is attributable, reversible, and visible in the audit log.
+-   [x] A muted or timed-out player is blocked from the relevant surfaces and told why and for
+        how long. Enforced on both chat paths (lobby and table), and the player is sent the
+        reason and expiry rather than having the message silently vanish — a message that
+        disappears without explanation reads as the site being broken, and they just say it
+        again.
 
 #### N6 — Design system, responsive, accessibility, PWA
 
@@ -720,7 +750,10 @@ are tournaments completing.
         a dependency: the interval keeps running underneath, so losing Redis costs propagation
         latency instead of freezing settings site-wide. The message carries no payload on
         purpose — a pushed snapshot could arrive out of order and overwrite newer state.
--   [ ] Extend the admin panel to tournaments and moderation → moderation waits on **N5**.
+-   [x] **Moderation surfaces on the dashboard** (N5): open reports, how many are being
+        handled, average time to resolve, and the age of the oldest open report — an unread
+        queue is an outage nobody gets paged for. Tournaments remain reachable from the event
+        list rather than duplicated into the admin panel.
 
 **Depends on:** I1 (needs traffic), N5 (moderation surfaces).
 **Acceptance criteria**
@@ -887,8 +920,11 @@ events, which feed one tournament standing rather than the open ladder.
         against a real PostgreSQL: after a disagreement no `Games` row exists at all.
 -   [x] Whether IRL games count toward Amber is an admin setting, and players can see the
         answer before they report (the list endpoint returns it alongside the games).
--   [ ] Escalating a dispute to a club officer or TO → waits on **N5**'s moderation queue.
-        Today a dispute is visible to both players and settled by them re-reporting.
+-   [x] **Escalating a dispute** into the moderation queue (N5). Player-initiated rather than
+        automatic: most disagreements are a mistyped key count and get sorted out by
+        re-reporting, and routing every one into the queue would bury the reports that are
+        about someone behaving badly. The report carries both accounts of the game side by
+        side and accuses neither player.
 
 #### N14 — App distribution: Android beta and iOS TestFlight requests
 
@@ -1318,7 +1354,8 @@ much stronger deck pays less.
 -   [x] **Club leaderboards, approval-based joins, ownership transfer** (migration 44).
 -   [x] **Teams** (competitive): rosters distinct from clubs, team events, and a team ladder
         earned as a unit rather than averaged from members' Amber.
--   [ ] Moderation tools: reports, mutes, bans, audit log **(admin-config policies)** → **N5**.
+-   [x] **Moderation tools**: reports with captured evidence, graduated actions with reason
+        and expiry, and a full audit log **(admin-config policies)** — migration 48.
 -   [ ] Friend activity feed, DMs (moderated), block-list integration → **N5**/**N7**.
 -   [ ] Store follow-ups: map view, store-hosted event listings, verified/official badges → **N7**.
 -   [ ] Onboarding asks each new account how well they know KeyForge, and (if they do) how well
@@ -1482,7 +1519,9 @@ competitive advantage.
         matchmaking parameters, moderation policy thresholds.
 -   [x] **Redis pub/sub snapshot invalidation** for multi-lobby deployments. An accelerator
         over the interval refresh, never a dependency on it.
--   [ ] Full audit-log table (currently last-editor only) → **N5**.
+-   [x] **Full audit-log table** (`ModerationAuditLog`, migration 48). Settings changes append
+        to it alongside every moderator action, so "who changed this, when, and to what" has an
+        answer that the next edit cannot overwrite.
 -   [x] **Feature flags** section for gradual rollout; every flag defaults to current behaviour.
 -   [ ] Admin panel coverage for tournaments, moderation, and analytics → **N5**/**N8**.
 -   [x] **Reset all statistics** (isAdmin, `AdminResetService`): site-wide reset scoped by

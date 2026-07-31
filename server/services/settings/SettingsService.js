@@ -22,6 +22,17 @@ class SettingsService {
         // what shipped before.
         this.publisher = null;
         this.channel = null;
+        // ARCHON (N5): the audit trail. SiteSettings records only the LAST
+        // editor, so "who turned rated play off in March" was unanswerable -
+        // the next edit overwrote the answer. Settings changes now append to
+        // the same moderation audit log every other privileged action does.
+        // Injected rather than required so this module keeps no dependency on
+        // moderation, and an audit failure can never block a settings write.
+        this.auditService = null;
+    }
+
+    setAuditService(auditService) {
+        this.auditService = auditService;
     }
 
     /**
@@ -128,7 +139,7 @@ class SettingsService {
      * Validate and persist overrides for a section, then refresh the
      * snapshot so the change applies immediately in this process.
      */
-    async setSection(section, value, userId) {
+    async setSection(section, value, userId, username = null) {
         const errors = validateSection(section, value);
 
         if (errors.length > 0) {
@@ -145,6 +156,13 @@ class SettingsService {
 
         await this.refresh();
         this.publishInvalidation();
+        // The value itself goes into the entry: knowing that 'rating' changed
+        // without knowing what it changed to is not an audit trail.
+        this.auditService?.audit({ id: userId, username }, 'settings.update', {
+            targetType: 'settings',
+            targetName: section,
+            detail: { section, value }
+        });
         logger.info(`Site settings '${section}' updated by user ${userId}`);
 
         return { success: true };
@@ -153,7 +171,7 @@ class SettingsService {
     /**
      * Remove a section's overrides (revert to code/file defaults).
      */
-    async resetSection(section, userId) {
+    async resetSection(section, userId, username = null) {
         if (!REGISTRY[section]) {
             return { success: false, message: `Unknown settings section '${section}'` };
         }
@@ -161,6 +179,11 @@ class SettingsService {
         await this.db.query('DELETE FROM "SiteSettings" WHERE "Key" = $1', [section]);
         await this.refresh();
         this.publishInvalidation();
+        this.auditService?.audit({ id: userId, username }, 'settings.reset', {
+            targetType: 'settings',
+            targetName: section,
+            detail: { section }
+        });
         logger.info(`Site settings '${section}' reset by user ${userId}`);
 
         return { success: true };

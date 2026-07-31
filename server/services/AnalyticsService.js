@@ -20,9 +20,14 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
  * stale.
  */
 class AnalyticsService {
-    constructor(db = require('../db')) {
+    constructor(db = require('../db'), options = {}) {
         this.db = db;
         this.cache = new Map();
+        // ARCHON (N5): the moderation queue's health belongs on the
+        // operations dashboard - an unread queue is an outage nobody gets
+        // paged for. Injected, so a dashboard built without moderation simply
+        // omits the section.
+        this.moderationService = options.moderationService || null;
     }
 
     async cached(key, producer) {
@@ -243,15 +248,26 @@ class AnalyticsService {
             const days = options.days || 30;
 
             try {
-                const [activity, gamesPerDay, funnel, tournaments, matchmaking, registrations] =
-                    await Promise.all([
-                        this.getActivity(),
-                        this.getGamesPerDay(days),
-                        this.getFunnel(days),
-                        this.getTournamentHealth(),
-                        this.getMatchmakingHealth(),
-                        this.getRegistrations(days)
-                    ]);
+                const [
+                    activity,
+                    gamesPerDay,
+                    funnel,
+                    tournaments,
+                    matchmaking,
+                    registrations,
+                    moderation
+                ] = await Promise.all([
+                    this.getActivity(),
+                    this.getGamesPerDay(days),
+                    this.getFunnel(days),
+                    this.getTournamentHealth(),
+                    this.getMatchmakingHealth(),
+                    this.getRegistrations(days),
+                    // ARCHON (N5): null when moderation is not wired in, so
+                    // the dashboard omits the section rather than showing
+                    // zeroes that would read as "queue is empty".
+                    this.moderationService ? this.moderationService.getStats(days) : null
+                ]);
 
                 return {
                     success: true,
@@ -260,7 +276,8 @@ class AnalyticsService {
                     funnel,
                     tournaments,
                     matchmaking,
-                    registrations
+                    registrations,
+                    moderation
                 };
             } catch (err) {
                 logger.error('Failed to build the analytics dashboard', err);

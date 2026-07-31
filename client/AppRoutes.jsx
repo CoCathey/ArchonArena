@@ -35,6 +35,8 @@ import TeamDetail from './pages/TeamDetail';
 import InPersonGames from './pages/InPersonGames';
 // ARCHON (N8): admin operations dashboard
 import AnalyticsAdmin from './pages/AnalyticsAdmin';
+// ARCHON (N5): reports and the moderation queue
+import ModerationQueue from './pages/ModerationQueue';
 import Onboarding from './pages/Onboarding';
 import TopPlayers from './pages/TopPlayers';
 import Ratings from './pages/Ratings';
@@ -128,6 +130,13 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route
                 path='/admin/analytics'
                 element={requirePermission('isAdmin', <AnalyticsAdmin />)}
+            />
+            {/* ARCHON (N5): the moderation queue. canModerateChat, not
+                isAdmin - the whole point is that moderation can be delegated
+                without handing over the site. */}
+            <Route
+                path='/admin/moderation'
+                element={requirePermission('canModerateChat', <ModerationQueue />)}
             />
             <Route path='/patreon' element={<Patreon code={getParam('code')} />} />
             {/* ARCHON: game history + community news are live features */}

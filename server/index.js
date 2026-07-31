@@ -49,6 +49,8 @@ async function runServer() {
     // ARCHON (N8): the lobby records matchmaking queue depth and wait times.
     // Shared with the admin dashboard so both read the same service.
     options.analyticsService = require('./api/analytics').analyticsService;
+    // ARCHON (N5): the lobby enforces mutes and timeouts on the chat paths.
+    options.moderationService = require('./api/moderation').moderationService;
 
     let server = new Server(process.env.NODE_ENV !== 'production');
     let httpServer = await server.init(options);

@@ -319,11 +319,39 @@ const InPersonGames = () => {
                                 </span>
                             </div>
                             {game.status === 'disputed' && (
-                                <p className='mt-1 text-xs text-muted'>
-                                    {t(
-                                        'Nothing was recorded. Talk it over, then one of you can withdraw and re-report.'
+                                <div className='mt-1 flex flex-wrap items-center gap-2'>
+                                    <p className='text-xs text-muted'>
+                                        {game.reportId
+                                            ? t(
+                                                  'Nothing was recorded. A moderator is looking at this.'
+                                              )
+                                            : t(
+                                                  'Nothing was recorded. Talk it over, then one of you can withdraw and re-report.'
+                                              )}
+                                    </p>
+                                    {/* ARCHON (N5): escalate when the two of
+                                        you cannot settle it. Player-initiated
+                                        on purpose - most disagreements are a
+                                        mistyped key count, and routing every
+                                        one into the queue would bury the
+                                        reports that matter. */}
+                                    {!game.reportId && (
+                                        <HeroButton
+                                            size='sm'
+                                            variant='tertiary'
+                                            className='!h-6 !px-2 text-xs'
+                                            onPress={() =>
+                                                simpleAction(
+                                                    game.id,
+                                                    'escalate',
+                                                    t('Sent to the moderators')
+                                                )
+                                            }
+                                        >
+                                            {t('Ask a moderator')}
+                                        </HeroButton>
                                     )}
-                                </p>
+                                </div>
                             )}
                             {reportingId === game.id && game.awaitingMyReport && (
                                 <ReportForm

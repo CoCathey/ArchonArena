@@ -7,6 +7,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import Panel from '../Components/Site/Panel';
 import AmberValue from '../Components/Site/AmberValue';
+// ARCHON (N5): reporting
+import ReportButton from '../Components/Site/ReportButton';
 import { countryName } from '../geo';
 import {
     useClubActionMutation,
@@ -155,6 +157,13 @@ const ClubDetail = () => {
                     <p className='mt-3 whitespace-pre-wrap text-sm text-muted'>
                         {club.description}
                     </p>
+                )}
+                {/* ARCHON (N5): a club name or description is a surface that
+                    can carry abuse like any other. */}
+                {!club.isOwner && (
+                    <div className='mt-2'>
+                        <ReportButton targetType='club' targetId={club.id} />
+                    </div>
                 )}
                 {club.isOwner && club.joinCode && (
                     <div className='mt-3 flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-surface-secondary/50 px-3 py-2 text-sm'>

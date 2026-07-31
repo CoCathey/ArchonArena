@@ -32,6 +32,80 @@ class InPersonGameService {
         this.notificationService = options.notificationService || null;
         // Injected: a confirmed game goes through the ordinary rating path.
         this.ratingService = options.ratingService || null;
+        // ARCHON (N5): a dispute the two players cannot settle between them
+        // can be escalated into the moderation queue. Optional, so a service
+        // built without one still disputes correctly - it just has no
+        // escalation path, which is exactly how N13 shipped.
+        this.moderationService = options.moderationService || null;
+    }
+
+    /**
+     * Hand a disputed game to the moderators.
+     *
+     * Deliberately player-initiated rather than automatic. Most disagreements
+     * are a mis-typed key count and get sorted out by re-reporting; routing
+     * every one of them into the queue would bury the reports that are
+     * actually about someone behaving badly. Escalation is what a player does
+     * when re-reporting has not worked.
+     */
+    async escalate(id, actorId, details) {
+        const game = await this.getGameRow(id);
+
+        if (!game) {
+            return { success: false, message: 'No such game' };
+        }
+
+        if (game.Player1Id !== actorId && game.Player2Id !== actorId) {
+            return { success: false, message: 'You were not in that game' };
+        }
+
+        if (game.Status !== 'disputed') {
+            return { success: false, message: 'Only a disputed game can be escalated' };
+        }
+
+        if (game.ReportId) {
+            return { success: false, message: 'This dispute is already with the moderators' };
+        }
+
+        if (!this.moderationService) {
+            return { success: false, message: 'Escalation is not available' };
+        }
+
+        const report = await this.moderationService.report(actorId, {
+            targetType: 'inPersonGame',
+            targetId: id,
+            reason: 'other',
+            details:
+                String(details || '').trim() ||
+                'The two reports of this in-person game do not match and we cannot agree.'
+        });
+
+        if (!report.success) {
+            return report;
+        }
+
+        await this.db.query('UPDATE "InPersonGames" SET "ReportId" = $2 WHERE "Id" = $1', [
+            id,
+            report.id
+        ]);
+
+        // Both players are told, because a dispute escalated behind one
+        // player's back is a worse process than no escalation at all.
+        if (this.notificationService) {
+            for (const userId of [game.Player1Id, game.Player2Id]) {
+                this.notificationService.notify({
+                    userId,
+                    category: 'game.inperson',
+                    title: 'Your in-person game dispute has gone to the moderators',
+                    url: `/play/in-person/${id}`,
+                    data: { inPersonGameId: id, reportId: report.id }
+                });
+            }
+        }
+
+        logger.info(`In-person game ${id} escalated to report ${report.id} by user ${actorId}`);
+
+        return { success: true, reportId: report.id };
     }
 
     getConfig() {
@@ -487,6 +561,9 @@ class InPersonGameService {
             status: row.Status,
             rated: row.Rated,
             unratedReason: row.UnratedReason,
+            // ARCHON (N5): set once the dispute has gone to the moderators,
+            // so the UI offers "escalate" exactly once.
+            reportId: row.ReportId,
             playedAt: row.PlayedAt,
             confirmedAt: row.ConfirmedAt,
             // Whether THIS player still owes a report is the only thing they

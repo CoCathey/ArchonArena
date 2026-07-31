@@ -495,6 +495,52 @@ export const api = createApi({
             query: ({ id, limit }) => ({ url: `/clubs/${id}/in-person-games`, params: { limit } }),
             providesTags: [TAG_TYPES.IN_PERSON_GAMES]
         }),
+        // ARCHON (N5): reports and moderation
+        getModerationOptions: builder.query({
+            query: () => '/moderation/options'
+        }),
+        submitReport: builder.mutation({
+            query: (body) => ({ url: '/reports', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.MODERATION]
+        }),
+        getMyRestrictions: builder.query({
+            query: () => '/moderation/me',
+            providesTags: [TAG_TYPES.MODERATION]
+        }),
+        getModerationQueue: builder.query({
+            query: (params) => ({ url: '/moderation/queue', params }),
+            providesTags: [TAG_TYPES.MODERATION]
+        }),
+        moderationReportAction: builder.mutation({
+            query: ({ id, action, body }) => ({
+                url: `/moderation/reports/${id}/${action}`,
+                method: 'POST',
+                body
+            }),
+            // A resolution usually comes with a sanction, so the dashboard's
+            // moderation counts go stale at the same moment.
+            invalidatesTags: [TAG_TYPES.MODERATION, TAG_TYPES.ANALYTICS]
+        }),
+        moderationAct: builder.mutation({
+            query: (body) => ({ url: '/moderation/actions', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.MODERATION, TAG_TYPES.ANALYTICS]
+        }),
+        revokeModerationAction: builder.mutation({
+            query: ({ id, reason }) => ({
+                url: `/moderation/actions/${id}/revoke`,
+                method: 'POST',
+                body: { reason }
+            }),
+            invalidatesTags: [TAG_TYPES.MODERATION, TAG_TYPES.ANALYTICS]
+        }),
+        getPlayerModerationHistory: builder.query({
+            query: (username) => `/moderation/players/${encodeURIComponent(username)}`,
+            providesTags: [TAG_TYPES.MODERATION]
+        }),
+        getModerationAudit: builder.query({
+            query: (params) => ({ url: '/moderation/audit', params }),
+            providesTags: [TAG_TYPES.MODERATION]
+        }),
         // ARCHON (N8): admin operations dashboard
         getAnalytics: builder.query({
             query: (params) => ({ url: '/admin/analytics', params }),
@@ -949,6 +995,16 @@ export const {
     useCreateInPersonGameMutation,
     useInPersonGameActionMutation,
     useGetClubInPersonGamesQuery,
+    // ARCHON (N5): reports and moderation
+    useGetModerationOptionsQuery,
+    useSubmitReportMutation,
+    useGetMyRestrictionsQuery,
+    useGetModerationQueueQuery,
+    useModerationReportActionMutation,
+    useModerationActMutation,
+    useRevokeModerationActionMutation,
+    useGetPlayerModerationHistoryQuery,
+    useGetModerationAuditQuery,
     // ARCHON (N8): admin analytics
     useGetAnalyticsQuery,
     // ARCHON (N9): Adaptive Bo3 and kiosk check-in

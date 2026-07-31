@@ -441,6 +441,51 @@ const REGISTRY = {
             }
         }
     },
+    // ARCHON (N5): moderation policy.
+    moderation: {
+        title: 'Moderation',
+        description:
+            'Reporting and sanction policy. Durations are defaults a moderator can override per action; every action always carries a reason.',
+        fields: {
+            minDetailLength: {
+                type: 'number',
+                label: 'Minimum characters in a report',
+                min: 0,
+                max: 500,
+                // A player who has to write something has thought about it,
+                // and empty reports are the bulk of a queue's noise.
+                default: 10
+            },
+            defaultMuteHours: {
+                type: 'number',
+                label: 'Default mute length (hours)',
+                min: 1,
+                max: 8760,
+                default: 24
+            },
+            defaultTimeoutHours: {
+                type: 'number',
+                label: 'Default timeout length (hours)',
+                min: 1,
+                max: 8760,
+                default: 72
+            },
+            repeatWindowDays: {
+                type: 'number',
+                label: 'Repeat-report window (days)',
+                min: 1,
+                max: 365,
+                default: 30
+            },
+            repeatThreshold: {
+                type: 'number',
+                label: 'Distinct reporters that flag an account as a pattern',
+                min: 2,
+                max: 50,
+                default: 3
+            }
+        }
+    },
     // ARCHON (N8): gradual rollout. Every flag defaults to the behaviour the
     // site already has, so an unset flag is never a behaviour change.
     features: {

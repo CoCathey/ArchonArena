@@ -131,6 +131,13 @@ class Server {
         app.use(cookieParser());
         // ARCHON: load runtime admin settings snapshot + periodic refresh
         require('./services/settings').start();
+        // ARCHON (N5): settings changes append to the moderation audit log,
+        // replacing SiteSettings' last-editor-only trail. Wired here rather
+        // than inside the settings module so it keeps no dependency on
+        // moderation.
+        require('./services/settings').setAuditService(
+            require('./api/moderation').moderationService
+        );
 
         // ARCHON (I5): share rate-limit and login-throttle state across lobby
         // processes. Best-effort on purpose - if Redis cannot be reached the
