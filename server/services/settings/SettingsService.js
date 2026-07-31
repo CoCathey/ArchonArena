@@ -17,6 +17,55 @@ class SettingsService {
         this.cache = {};
         this.loaded = false;
         this.timer = null;
+        // ARCHON (N8): set by connectSettingsInvalidation() when Redis is
+        // reachable. Null means "interval refresh only", which is exactly
+        // what shipped before.
+        this.publisher = null;
+        this.channel = null;
+    }
+
+    /**
+     * ARCHON (N8): make a settings change take effect on every lobby at once.
+     *
+     * The interval refresh already converges - eventually. That is fine for a
+     * rating tweak and wrong for a feature flag: the point of a flag is to
+     * turn something off NOW, and a thirty-second window in which half the
+     * lobbies still serve the broken feature is the window that matters.
+     *
+     * Pub/sub is an accelerator, never a dependency. The interval keeps
+     * running underneath, so a Redis outage degrades the propagation delay
+     * back to what it always was rather than freezing settings site-wide.
+     */
+    connectInvalidation(subscriber, publisher, prefix = '') {
+        this.publisher = publisher;
+        this.channel = `${prefix}settings:invalidate`;
+
+        return subscriber.subscribe(this.channel, () => {
+            // The message carries no payload on purpose - a snapshot pushed
+            // over the wire could arrive out of order and overwrite newer
+            // state with older. "Something changed, go and look" cannot.
+            this.refresh();
+        });
+    }
+
+    publishInvalidation() {
+        if (!this.publisher || !this.channel) {
+            return;
+        }
+
+        try {
+            const result = this.publisher.publish(this.channel, '1');
+
+            // node-redis returns a promise; a publish failure must not fail
+            // the write that already committed.
+            if (result && typeof result.catch === 'function') {
+                result.catch((err) =>
+                    logger.warn(`Failed to publish settings invalidation: ${err.message}`)
+                );
+            }
+        } catch (err) {
+            logger.warn(`Failed to publish settings invalidation: ${err.message}`);
+        }
     }
 
     /**
@@ -95,6 +144,7 @@ class SettingsService {
         );
 
         await this.refresh();
+        this.publishInvalidation();
         logger.info(`Site settings '${section}' updated by user ${userId}`);
 
         return { success: true };
@@ -110,6 +160,7 @@ class SettingsService {
 
         await this.db.query('DELETE FROM "SiteSettings" WHERE "Key" = $1', [section]);
         await this.refresh();
+        this.publishInvalidation();
         logger.info(`Site settings '${section}' reset by user ${userId}`);
 
         return { success: true };

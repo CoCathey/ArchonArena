@@ -1352,6 +1352,58 @@ class RatingService {
             }))
         };
     }
+
+    /**
+     * ARCHON (N7): rank one club's members by Amber.
+     *
+     * Deliberately NOT a filtered slice of the world board. The site board
+     * hides anyone under leaderboardMinGames and (when configured) anyone
+     * inactive; applied to a twelve-person club that can empty the page,
+     * which makes the feature pointless for exactly the small local scenes
+     * it exists for. So a club board lists every rated member and marks the
+     * ones who also qualify site-wide, rather than quietly using different
+     * rules and looking like the world board disagrees with itself.
+     */
+    async getClubLeaderboard(clubId, options = {}) {
+        const config = this.getConfig();
+        const pool = this.normalizePool(options.pool);
+        const id = parseInt(clubId, 10);
+
+        if (!Number.isInteger(id)) {
+            return [];
+        }
+
+        const rows = await this.db.query(
+            'SELECT u."Username", u."Country", u."Settings_Avatar", cm."Role", ' +
+                'r."Rating", r."GamesPlayed", record."Wins", record."Losses" ' +
+                'FROM "ClubMembers" cm ' +
+                'JOIN "Users" u ON u."Id" = cm."UserId" ' +
+                'JOIN "Ratings" r ON r."UserId" = cm."UserId" AND r."Pool" = $2 ' +
+                'LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE h."Won") AS "Wins", ' +
+                'COUNT(*) FILTER (WHERE NOT h."Won") AS "Losses" ' +
+                'FROM "RatingHistory" h WHERE h."UserId" = r."UserId" AND h."Pool" = r."Pool") record ON true ' +
+                'WHERE cm."ClubId" = $1 AND cm."Status" = \'active\' AND (u."Disabled" IS NOT TRUE) ' +
+                'ORDER BY r."Rating" DESC, r."GamesPlayed" DESC, u."Username" ASC LIMIT 200',
+            [id, pool]
+        );
+
+        const eloConfig = normalizeConfig(config.elo);
+
+        return (rows || []).map((row, index) => ({
+            rank: index + 1,
+            username: row.Username,
+            country: row.Country,
+            avatar: row.Settings_Avatar,
+            role: row.Role,
+            rating: row.Rating,
+            gamesPlayed: row.GamesPlayed,
+            provisional: row.GamesPlayed < eloConfig.provisionalGames,
+            // Whether this player also appears on the site-wide board.
+            rankedSiteWide: row.GamesPlayed >= config.leaderboardMinGames,
+            wins: parseInt(row.Wins, 10) || 0,
+            losses: parseInt(row.Losses, 10) || 0
+        }));
+    }
 }
 
 module.exports = RatingService;

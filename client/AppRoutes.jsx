@@ -28,6 +28,13 @@ import Friends from './pages/Friends';
 import Members from './pages/Members';
 import Clubs from './pages/Clubs';
 import ClubDetail from './pages/ClubDetail';
+// ARCHON (N7): teams and team events
+import Teams from './pages/Teams';
+import TeamDetail from './pages/TeamDetail';
+// ARCHON (N13): in-person (paper) game tracking
+import InPersonGames from './pages/InPersonGames';
+// ARCHON (N8): admin operations dashboard
+import AnalyticsAdmin from './pages/AnalyticsAdmin';
 import Onboarding from './pages/Onboarding';
 import TopPlayers from './pages/TopPlayers';
 import Ratings from './pages/Ratings';
@@ -117,6 +124,11 @@ const AppRoutes = ({ currentGame, user }) => {
                 path='/admin/settings'
                 element={requirePermission('isAdmin', <SettingsAdmin />)}
             />
+            {/* ARCHON (N8): operations dashboard (admin only) */}
+            <Route
+                path='/admin/analytics'
+                element={requirePermission('isAdmin', <AnalyticsAdmin />)}
+            />
             <Route path='/patreon' element={<Patreon code={getParam('code')} />} />
             {/* ARCHON: game history + community news are live features */}
             <Route path='/matches' element={<Matches />} />
@@ -137,6 +149,9 @@ const AppRoutes = ({ currentGame, user }) => {
             />
             {/* ARCHON: placeholders for roadmap features (see ROADMAP.md) */}
             <Route path='/play-irl' element={<PlayIrl />} />
+            {/* ARCHON (N13): record a game played across a table */}
+            <Route path='/play/in-person' element={<InPersonGames />} />
+            <Route path='/play/in-person/:id' element={<InPersonGames />} />
             <Route
                 path='/mobile/ios'
                 element={
@@ -172,6 +187,9 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/community/friends' element={<Friends />} />
             <Route path='/community/clubs' element={<Clubs />} />
             <Route path='/community/clubs/:id' element={<ClubDetail />} />
+            {/* ARCHON (N7): teams */}
+            <Route path='/community/teams' element={<Teams />} />
+            <Route path='/community/teams/:id' element={<TeamDetail />} />
             <Route path='/community/members' element={<Members />} />
             <Route path='/community/top-players' element={<TopPlayers />} />
             <Route path='/community/ratings' element={<Ratings />} />

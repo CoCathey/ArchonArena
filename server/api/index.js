@@ -15,6 +15,10 @@ const onboarding = require('./onboarding');
 const bugReports = require('./bug-reports');
 // ARCHON: in-app notification centre + delivery preferences
 const notifications = require('./notifications');
+// ARCHON: in-person (paper) game tracking
+const inPersonGames = require('./in-person-games');
+// ARCHON: admin analytics and operations dashboard
+const analytics = require('./analytics');
 const decks = require('./decks');
 const games = require('./games');
 // ARCHON: platform statistics & analytics
@@ -48,6 +52,10 @@ module.exports.init = function (server, options) {
     bugReports.init(server);
     // ARCHON: notification centre + preferences
     notifications.init(server);
+    // ARCHON: in-person (paper) game tracking
+    inPersonGames.init(server);
+    // ARCHON: admin analytics and operations dashboard
+    analytics.init(server);
     decks.init(server);
     games.init(server);
     // ARCHON: platform statistics & analytics

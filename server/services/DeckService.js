@@ -919,6 +919,15 @@ class DeckService {
         deck.identity = deck.name;
         deck.cards = podCards;
         deck.isAlliance = true;
+        // ARCHON (N9): record which physical decks the pods came from. Until
+        // now this was consumed here and discarded, leaving the finished deck
+        // with no trace of its provenance - so no Alliance event rule ("one
+        // pod per deck", "pods only from these sets", "nobody else may source
+        // from a deck you used") could be checked at all.
+        deck.alliancePods = parsedPods.map((pod) => ({
+            deckUuid: pod.deckId,
+            house: pod.house
+        }));
 
         return this.insertDeck(deck, user);
     }
@@ -1002,8 +1011,8 @@ class DeckService {
 
             if (user) {
                 ret = await db.query(
-                    'INSERT INTO "Decks" ("UserId", "Uuid", "Identity", "Name", "IncludeInSealed", "LastUpdated", "Verified", "ExpansionId", "Flagged", "Banned", "IsAlliance") ' +
-                        'VALUES ($1, $2, $3, $4, $5, $6, false, (SELECT "Id" FROM "Expansions" WHERE "ExpansionId" = $7), false, false, $8) RETURNING "Id"',
+                    'INSERT INTO "Decks" ("UserId", "Uuid", "Identity", "Name", "IncludeInSealed", "LastUpdated", "Verified", "ExpansionId", "Flagged", "Banned", "IsAlliance", "AlliancePods") ' +
+                        'VALUES ($1, $2, $3, $4, $5, $6, false, (SELECT "Id" FROM "Expansions" WHERE "ExpansionId" = $7), false, false, $8, $9) RETURNING "Id"',
                     [
                         user.id,
                         deck.uuid,
@@ -1012,7 +1021,8 @@ class DeckService {
                         !deck.isAlliance,
                         deck.lastUpdated,
                         deck.expansion,
-                        deck.isAlliance
+                        deck.isAlliance,
+                        deck.alliancePods ? JSON.stringify(deck.alliancePods) : null
                     ]
                 );
             } else {

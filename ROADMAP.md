@@ -119,19 +119,27 @@ reach the platform and feel the competitive loop close._
 the single highest-value item on the roadmap.
 **Tasks**
 
--   Owner: provision the VPS, point Porkbun DNS at it (docs/DEPLOYMENT.md §2), register the
-    Keycloak client in the keybringer realm, obtain a DoK API key.
+-   [x] Owner: VPS provisioned, Porkbun DNS pointed at it (docs/DEPLOYMENT.md §2), DoK API
+        key obtained.
+-   [~] **Keycloak client in the keybringer realm — deferred.** Registering it needs Ghost
+    Galaxy's permission, which the platform does not have, so Keybringer SSO is out of
+    scope until that changes. Nothing is blocked by it: `auth.oidc.enabled` is `false` by
+    default, the login page asks `/api/account/oidc/status` before offering the button, and
+    local registration is a complete signup path on its own. When permission does arrive
+    this becomes config, not code.
 -   Bring up `docker-compose.prod.yml` + Caddy; set `SENTRY_DSN`.
 -   Verify WebSocket pass-through to the game node end to end on the live host.
 -   Point an external uptime monitor at the site; alert on 5xx and on TLS expiry.
 -   Run `deploy/healthcheck.sh` on the host until it is all-PASS.
 
-**Depends on:** owner actions (VPS, DNS, Keycloak, DoK key). Blocks: I3–I7, all near-term work.
+**Depends on:** owner actions (remaining: bring-up and monitoring). Blocks: I7, and the public
+announcement.
 **Acceptance criteria**
 
 -   Two players on two different networks complete a full game start-to-finish through
     `https://archonarena.com`, including a reconnect mid-game.
--   Keybringer SSO login and local registration both succeed against the live host.
+-   Local registration succeeds against the live host. (Keybringer SSO is deferred above; it is
+    not a launch gate.)
 -   A deck imports with SAS attached from the live DoK key.
 -   `deploy/healthcheck.sh` reports zero FAILs; a deliberately triggered error appears in Sentry.
 -   Uptime monitor green for 24 continuous hours.
@@ -640,55 +648,129 @@ experience for most new players.
 -   Lobby, decks, tournaments, and profile are fully keyboard-navigable and pass a contrast audit.
 -   The site is installable and receives a push notification on a phone.
 
-#### N7 — Teams and club competition
+#### N7 — Teams and club competition _(done)_
 
 **Why:** clubs exist but are inert — the local-scene story the platform is aiming at needs
 competition between groups, not just membership lists.
 **Tasks**
 
--   Club leaderboards, approval-based joins, ownership transfer (the recorded Clubs v1 follow-ups).
--   Team rosters distinct from clubs, team events in the tournament engine, team rating.
+-   [x] **Club leaderboards** — a club board ranks its members by Amber, reading the same
+        RatingService the site board does so the two can never disagree about a rating.
+        Deliberately not a filtered slice of the world board, though: the site board hides
+        anyone under `leaderboardMinGames`, which applied to a twelve-person club can empty
+        the page — exactly the small scenes the feature exists for. So every rated member is
+        listed and the ones who also qualify site-wide are marked.
+-   [x] **Approval-based joins** — `Clubs.JoinPolicy`; pending members are rows in
+        `ClubMembers` with `Status = 'pending'`, visible only to the owner. A join _code_ does
+        not bypass approval: codes get forwarded, and treating one as pre-approval would walk
+        a leaked code straight past the vetting the owner asked for. Declining deletes the row
+        rather than recording a rejection — a club is not a permanent record of who was turned
+        away, and a kept row would quietly stop the person ever asking again.
+-   [x] **Ownership transfer** — the club row and both membership rows move in one
+        transaction, because a club with two owners or none is worse than a failed transfer.
+        The old owner stays on as an ordinary member.
+-   [x] **Teams** (migration 44) — rosters distinct from clubs, because a club is a place you
+        belong to for years and a team is a roster assembled for a season, and the same player
+        is usually in one of each. A team may optionally be fielded by a club, which is how a
+        store enters several.
+-   [x] **Team events** — `Tournaments.TeamEvent` / `TeamSize`; players register and play
+        individually under the team they entered with, and their results roll up.
+-   [x] **Team rating** — a separate ladder, seeded flat, moved only by team events. Not
+        derived from members' Amber: averaging would let a roster inherit a rating it never
+        earned as a unit. An event rates as a round robin on final standings, with the
+        per-opponent deltas **averaged rather than summed** — summing would make a 32-team
+        event move ratings roughly ten times as far as a 4-team one for the same performance,
+        so the ladder would reward entering the biggest field rather than playing best.
 
 **Depends on:** I3, existing tournament engine.
 **Acceptance criteria**
 
--   A club page ranks its members and can run a club-only event.
--   A team can register as a unit for a team event and carries a team rating that updates from results.
+-   [x] A club page ranks its members and can run a club-only event.
+-   [x] A team can register as a unit for a team event and carries a team rating that updates
+        from results. Rating an event twice is a no-op (unique `(TournamentId, TeamId)`), so
+        finishing an event twice cannot rate it twice.
 
-#### N8 — Admin analytics and operations dashboard
+#### N8 — Admin analytics and operations dashboard _(done, less the moderation panel)_
 
 **Why:** after launch, decisions need numbers: is the funnel working, is the queue healthy,
 are tournaments completing.
 **Tasks**
 
--   DAU/MAU, games/day, matchmaking queue depth and wait times, tournament completion rates.
--   Funnel: register → onboard → first deck → first game → second game.
--   Feature-flag section in the settings registry for gradual rollout.
--   Redis pub/sub settings-snapshot invalidation for multi-lobby deployments.
--   Extend the admin panel to tournaments and moderation.
+-   [x] **DAU/MAU, games/day, tournament completion rates** at `/admin/analytics`. Every
+        figure is _derived_ from tables the platform already writes rather than kept in
+        counters — derived numbers can be recomputed and audited, counters silently drift and
+        then quietly lie. Cached five minutes: these queries scan the games table, and nobody
+        makes a different decision because a number is five minutes stale.
+-   [x] **Matchmaking queue depth and wait times** (migration 45). The one thing that _had_ to
+        be written down: the queue lives entirely in memory, so a queue that was ten deep at
+        8pm leaves no trace by 9pm. Recorded fire-and-forget from the lobby, and sampled
+        _before_ pairing, since after the sweep the matched players are gone and the queue
+        would always look empty. The dashboard leads with the 90th-percentile wait, not the
+        average — the average hides the people who gave up.
+-   [x] **Funnel**: register → onboard → first deck → first game → second game, scoped to
+        accounts registered in the window so it measures now rather than being permanently
+        flattered by history. The second game is the step that matters: one game is curiosity,
+        two is a returning player.
+-   [x] **Feature-flag section** in the settings registry. Every flag defaults to the
+        behaviour the site already has, so an unset flag is never a behaviour change.
+-   [x] **Redis pub/sub settings invalidation.** The interval refresh already converged
+        eventually — fine for a rating tweak, wrong for a flag, since the point of a flag is
+        to turn something off _now_ and a thirty-second window where half the lobbies still
+        serve the broken feature is the window that matters. Pub/sub is an accelerator, never
+        a dependency: the interval keeps running underneath, so losing Redis costs propagation
+        latency instead of freezing settings site-wide. The message carries no payload on
+        purpose — a pushed snapshot could arrive out of order and overwrite newer state.
+-   [ ] Extend the admin panel to tournaments and moderation → moderation waits on **N5**.
 
 **Depends on:** I1 (needs traffic), N5 (moderation surfaces).
 **Acceptance criteria**
 
--   An admin can answer "how many people played yesterday and how many came back" without SQL.
--   A feature flag can be flipped at runtime and takes effect on every lobby process.
+-   [x] An admin can answer "how many people played yesterday and how many came back" without
+        SQL. Where a figure has no meaningful value — stickiness with no monthly activity, a
+        completion rate with no settled events — it renders as a dash rather than a zero,
+        because "0%" is a claim and "no data" is not.
+-   [x] A feature flag can be flipped at runtime and takes effect on every lobby process.
 
-#### N9 — Tournament engine follow-ons
+#### N9 — Tournament engine follow-ons _(done)_
 
 **Why:** the engine is the most complete system on the platform; these are the remaining gaps
 organizers will hit in practice.
 **Tasks**
 
--   Hybrid events (online + paper results feeding one standing).
--   QR join codes / check-in kiosk flows for IRL events.
--   Alliance-specific conditions (pod legality checks per event).
--   Archon Adaptive Bo3 (full swap/bid series) as a match type.
+-   [x] **Hybrid events** (migration 46) — a new `hybrid` mode, plus `AllowPaperResults` and
+        `TournamentMatches.ResultSource`. An IRL or hybrid event takes paper results by
+        definition; a purely online event has to opt in, because there a typed result is a
+        claim about a game the platform could have witnessed and did not. Paper results feed
+        the **standing only, never Amber** — the Elo engine needs the key differential and
+        both decks' SAS, and a result typed in at a table has neither in a form anyone
+        verified. Rating paper play is N13's job, where both players report independently.
+-   [x] **QR check-in kiosk** — `CheckInCode` is minted when check-in opens, and the QR is
+        rendered locally to a data URI (never through a QR web service, which would hand a
+        third party the code). Deliberately **not** the join code: that one grants entry to a
+        private event and must never end up on a poster. The code identifies the _event_, so
+        scanning it marks whoever is signed in as present and a photographed code cannot check
+        anyone else in. `CheckedInVia` distinguishes a kiosk scan from a staff override.
+-   [x] **Alliance pod legality per event** — `requirePodProvenance`, `maxPodsPerSourceDeck`,
+        `allowedPodSets`, `bannedPodHouses`, `exclusiveSourceDecks`. This needed new data
+        first: `DeckService.createAlliance` consumed the three source pods and threw the
+        provenance away, so the finished deck recorded its cards but nothing about which
+        physical decks they came from — and every real Alliance rule is about provenance, so
+        none of them could be checked at all. `Decks.AlliancePods` now records it. Decks built
+        before that have no pod record and cannot be backfilled, which is exactly why
+        `requirePodProvenance` is a policy an event opts into rather than an assumption: it
+        turns those decks away by name instead of waving through a deck it cannot check.
+-   [x] **Archon Adaptive Bo3** — game 1 own decks, game 2 swapped, and at 1-1 a chain bid for
+        the right to pilot the nominated deck. The bid is a handicap, so bids only ever go up;
+        passing hands the deck to the standing high bidder at their own bid, and passing when
+        nobody has bid concedes it at zero rather than deadlocking two players who both refuse
+        to open. The negotiation lives on the match row (`AdaptiveState`) because it happens
+        between games and has to survive a reconnect and an organizer looking at the table.
 
 **Depends on:** existing tournament engine.
 **Acceptance criteria**
 
--   A store can run a paper event on the platform with QR check-in and no laptop per table.
--   An Alliance event rejects an illegal pod at registration with a clear reason.
+-   [x] A store can run a paper event on the platform with QR check-in and no laptop per table.
+-   [x] An Alliance event rejects an illegal pod at registration with a clear reason.
 
 #### N10 — Staging, zero-downtime deploys, upstream sync
 
@@ -764,42 +846,65 @@ tiers, and perks that cannot touch competitive fairness.
     and the support page says so.
 -   Perks are editable from admin settings without a redeploy.
 
-#### N13 — In-person game tracking
+#### N13 — In-person game tracking _(done, less dispute escalation)_
 
 **Why:** most KeyForge is still played across a table. The platform already knows decks, Amber
 and clubs; letting two players record a paper game keeps local scenes on the same ladder and
 gives the Play IRL hub something to do between tournaments.
 **Tasks**
 
--   Start an in-person game: one player opens it and names the opponent; the opponent confirms.
--   Both players report the result independently. Matching reports commit; a mismatch is flagged
-    back to both players (and to a club officer or TO when the game belongs to an event).
--   Optionally attach each player's deck (Master Vault id or from their library) so SAS, house
-    stats and deck records include paper play.
--   Decide and document whether IRL games are rated **(admin-config)**: the key differential and
-    both decks' SAS are inputs the Elo engine needs, so they must be reported, never inferred.
--   Surface these games in Game History, player stats, and on the club page.
+-   [x] **Start an in-person game** (migration 47): one player opens it and names the
+        opponent, who is notified. Opening a game asserts only that one happened — the result
+        comes from both of them separately.
+-   [x] **Both players report independently.** Deliberately not "confirm": neither player is
+        ever shown the other's answer to agree with, because a pre-filled result is a result
+        one person chose. Agreeing reports commit; anything else marks the game disputed and
+        tells both players. A mismatch on the _keys_ disputes too, even when both name the
+        same winner — keys are a direct Elo input, so agreeing on the winner is not agreeing
+        on the result. One report per player is enforced by a unique index rather than by the
+        service remembering to check. A disputed game can be withdrawn and re-reported.
+-   [x] **Optional deck attachment**, validated against ownership: a deck can only be attached
+        to the player who owns it, or a report could credit someone else's deck with a win and
+        corrupt deck records and SAS stats.
+-   [x] **Rated or not is admin-config** (`inPersonGames.rated`, **off by default** — turning
+        it on is a real decision about a ladder the platform did not witness). Even with it on,
+        a game with no decks attached is recorded **unrated**, because the Elo engine needs
+        both decks' SAS and the alternative is inventing an input. The row records _why_ it
+        was unrated, so a player who reported a game and saw no rating change gets an answer.
+-   [x] **Surfaced everywhere games already are.** A confirmed game materializes a real
+        `Games` row (`Source = 'irl'`) plus `GamePlayers`, then goes through the ordinary
+        rating path — so match history, deck records, house statistics and Elo all pick it up
+        with no changes. A parallel table would have meant teaching each of them about a
+        second kind of game: four places to forget. The club page shows its recent paper games.
 
 **Depends on:** I3 (profiles), N5 (disputes reuse the moderation queue). Related: **N9** hybrid
 events, which feed one tournament standing rather than the open ladder.
 **Acceptance criteria**
 
--   A paper game confirmed by both players appears in both histories with the right result, and in
-    deck/house stats when decks were attached.
--   A one-sided or contradictory report never silently moves anyone's Amber.
--   Whether IRL games count toward Amber is an admin setting, and players can see the answer
-    before they report.
+-   [x] A paper game confirmed by both players appears in both histories with the right result,
+        and in deck/house stats when decks were attached.
+-   [x] A one-sided or contradictory report never silently moves anyone's Amber — verified
+        against a real PostgreSQL: after a disagreement no `Games` row exists at all.
+-   [x] Whether IRL games count toward Amber is an admin setting, and players can see the
+        answer before they report (the list endpoint returns it alongside the games).
+-   [ ] Escalating a dispute to a club officer or TO → waits on **N5**'s moderation queue.
+        Today a dispute is visible to both players and settled by them re-reporting.
 
 #### N14 — App distribution: Android beta and iOS TestFlight requests
 
-**Why:** `/mobile/ios` and `/mobile/android` are placeholder pages while a working Expo build and
-a TestFlight runbook (`mobile/TESTFLIGHT.md`) already exist. Testers have no way in today.
+**Why:** builds are already in testers' hands — the owner has had friends running the app on both
+iOS and Android for a while, invited by hand. So the app is not the gap; **self-serve** is.
+`/mobile/ios` and `/mobile/android` are still `Placeholder` pages, which means the only way into
+the beta is knowing the owner personally. That does not scale past the current circle, and it is
+the whole of what is left here.
 **Tasks**
 
 -   `/mobile/android`: link straight to the Google Play beta track (or a signed APK) with install
     instructions.
 -   `/mobile/ios`: a form that requests a TestFlight invite — the requester's account and the
-    Apple ID email — plus an admin view of pending requests to work through.
+    Apple ID email — plus an admin view of pending requests to work through. Apple caps external
+    TestFlight testers, so the queue is the point: it lets the owner work through requests in
+    order rather than field them over chat.
 -   Show the current beta build number and what changed in it, so a tester knows if they are behind.
 
 **Depends on:** I6 (email template) for the invite request; folds into N2 once notifications exist.
@@ -809,7 +914,7 @@ a TestFlight runbook (`mobile/TESTFLIGHT.md`) already exist. Testers have no way
 -   An admin can see and clear pending invite requests.
 -   The Android page links to an install that works on a clean device.
 
-#### N15 — Move-by-move clarity in the apps
+#### N15 — Move-by-move clarity in the apps _(mobile done; web attribution and passive effects open)_
 
 **Why:** the Expo app keeps the play-by-play behind a slide-up sheet (`LogSheet`), so on a phone
 it is easy to miss what the opponent just did. And on both clients a prompt often asks for a
@@ -817,18 +922,29 @@ choice without saying which card is asking — the engine knows the source card,
 show it.
 **Tasks**
 
--   Expo app: surface each move as it happens — a persistent recent-moves strip or a per-action
-    inline notice — with the full log still available in the sheet.
--   Both clients: name the card and ability behind every prompt ("Choose a creature to destroy —
-    because of Gateway to Dis"), taken from the ability's source card rather than re-derived.
--   Same treatment for triggered and passive effects that change the board without prompting.
+-   [x] **Expo app: moves surface as they happen.** While it is the opponent's turn, `PromptPanel`
+        shows the latest log lines inline (`WAITING_FEED_LINES`) with a tap-through to the full
+        sheet, so following a turn no longer means opening the log (5a62a13).
+-   [x] **Expo app: prompts name their card.** `promptText.ts` interpolates `{{card}}` in titles
+        and buttons from `values` or the serialized card, and a "because of _<card>_" context row
+        renders `controls[].source` above the prompt with a thumbnail. This also fixed a literal
+        `{{card}}` rendering as button text when playing from archives.
+-   [ ] **Web client: still only interpolates, never attributes.** `ActivePlayerPrompt` resolves
+        `controls[0].source` into `{{card}}` placeholders (`localizedText`), so a prompt whose text
+        happens to mention the card reads correctly — but a prompt whose text does _not_ name it
+        shows nothing, and that is exactly the case the item was written for. The mobile
+        "because of _<card>_" row is the model to port.
+-   [ ] Same treatment for triggered and passive effects that change the board without prompting —
+        untouched on both clients.
 
 **Depends on:** nothing hard — the engine already tracks each ability's source card.
 **Acceptance criteria**
 
--   On a phone, a player can follow the opponent's whole turn without opening the log sheet.
--   Every prompt that originates from a card names that card.
--   Nothing about what the engine resolves changes — this is presentation only.
+-   [x] On a phone, a player can follow the opponent's whole turn without opening the log sheet.
+-   [ ] Every prompt that originates from a card names that card. True on mobile; on web only when
+        the prompt text carries a `{{card}}` placeholder.
+-   [x] Nothing about what the engine resolves changes — this is presentation only. The mobile work
+        is client-side interpolation and display over data the server already sent.
 
 ### Future — differentiation
 
@@ -1147,10 +1263,13 @@ much stronger deck pays less.
         adaptive-chains path; per-chain SAS + cap **admin-config**), Chainbound-style event
         chains, the official **Triad** format (3-deck pools, per-match opponent ban + pick),
         and Reversal / Adaptive Bo1 event formats with event→lobby format mapping.
--   [ ] Hybrid events (online + paper results feeding one standing) → **N9**.
--   [ ] QR join codes / check-in kiosk flows for IRL events → **N9**.
--   [ ] Alliance-specific conditions (pod legality checks per event) → **N9**.
--   [ ] Archon Adaptive Bo3 (full swap/bid series) as a match type → **N9**.
+-   [x] **Hybrid events**: online + paper results feeding one standing (migration 46). Paper
+        results move the standing, never Amber — the ladder needs inputs nobody typed in.
+-   [x] **Kiosk check-in**: a per-event QR, rendered locally, that only checks in whoever
+        scans it — safe to leave on the table.
+-   [x] **Alliance pod legality per event**, backed by newly-recorded pod provenance
+        (`Decks.AlliancePods`) — the rules were previously uncheckable for want of the data.
+-   [x] **Archon Adaptive Bo3**: own decks, swapped decks, then a chain bid for the decider.
 -   [x] **Round-pairing notifications** — in-app and email, deduplicated per player per round (**N2**).
 
 ## Phase 8 — Modern UI
@@ -1196,15 +1315,17 @@ much stronger deck pays less.
         auto-accept, online presence dots (server/services/community/FriendService).
 -   [ ] Rich public player profiles: avatar, bio, location, ratings, badges, favourite decks,
         match history summary → **I3**.
--   [ ] Club leaderboards, approval-based joins, ownership transfer → **N7**.
--   [ ] **Teams** (competitive): rosters, team events, team rating → **N7**.
+-   [x] **Club leaderboards, approval-based joins, ownership transfer** (migration 44).
+-   [x] **Teams** (competitive): rosters distinct from clubs, team events, and a team ladder
+        earned as a unit rather than averaged from members' Amber.
 -   [ ] Moderation tools: reports, mutes, bans, audit log **(admin-config policies)** → **N5**.
 -   [ ] Friend activity feed, DMs (moderated), block-list integration → **N5**/**N7**.
 -   [ ] Store follow-ups: map view, store-hosted event listings, verified/official badges → **N7**.
 -   [ ] Onboarding asks each new account how well they know KeyForge, and (if they do) how well
         they know the platform, then teaches only what is missing → **N11**.
--   [ ] **Track in-person games**: both players start it, both report the score, decks optional
-        → **N13**.
+-   [x] **Track in-person games**: both players report independently, agreeing reports commit
+        into a real game, decks optional (migration 47). Rating them is admin-config and off
+        by default.
 
 ## Phase 10 — Match history, replays & spectating
 
@@ -1242,7 +1363,7 @@ much stronger deck pays less.
         twenty games report a game count but no win rate (**N3**).
 -   [x] Deck stats: per-deck W/L, SAS vs. performance deltas, per-opposing-house matchups and
         best/worst deck callouts (**N3**).
--   [ ] Admin analytics: DAU/MAU, games/day, queue health, funnel metrics → **N8**.
+-   [x] **Admin analytics**: DAU/MAU, games/day, queue health, funnel metrics (/admin/analytics).
 -   [ ] Rate limiting + versioning for the public stats API → **F1**.
 
 ## Phase 12 — Platform APIs
@@ -1321,7 +1442,8 @@ turns a feature-complete site into a habit.
         `pages/Tournaments.jsx` and `mobile/app/new-game.tsx`.
 -   [ ] Post-game result screen with the Amber change → **I4**.
 -   [ ] Matchmaking parameters **(admin-config)**: base tolerance, widening rate, max wait.
--   [ ] Queue health telemetry (depth, wait time, match quality) → **N8**.
+-   [x] **Queue health telemetry** (depth, wait time) — recorded as it happens, since the
+        queue is in-memory and leaves no trace afterwards (migration 45).
 -   [ ] Rematch and rated-rematch flow from the result screen → **I4**.
 
 ## Phase 19 — Sustainability & supporter program
@@ -1358,9 +1480,10 @@ competitive advantage.
         reading a setting cannot drift from what the admin panel says the default is.
 -   [ ] Wire remaining **(admin-config)** flags through the registry: auth SSO-only mode,
         matchmaking parameters, moderation policy thresholds.
--   [ ] Redis pub/sub snapshot invalidation for multi-lobby deployments → **N8**.
+-   [x] **Redis pub/sub snapshot invalidation** for multi-lobby deployments. An accelerator
+        over the interval refresh, never a dependency on it.
 -   [ ] Full audit-log table (currently last-editor only) → **N5**.
--   [ ] Feature flags section for gradual rollout of new systems → **N8**.
+-   [x] **Feature flags** section for gradual rollout; every flag defaults to current behaviour.
 -   [ ] Admin panel coverage for tournaments, moderation, and analytics → **N5**/**N8**.
 -   [x] **Reset all statistics** (isAdmin, `AdminResetService`): site-wide reset scoped by
         category — ratings, replays, game records, seasons — rather than one opaque button.

@@ -4,7 +4,12 @@ const TournamentService = require('../services/tournament/TournamentService');
 const { wrapAsync } = require('../util.js');
 const { rateLimit } = require('./rateLimit');
 
-const tournamentService = new TournamentService();
+// ARCHON (N7): finishing a team event rates the team ladder.
+const TeamRatingService = require('../services/rating/TeamRatingService');
+
+const tournamentService = new TournamentService(require('../db'), {
+    teamRatingService: new TeamRatingService()
+});
 
 const tournamentCreateLimit = rateLimit({
     name: 'tournament-create',
@@ -82,8 +87,16 @@ module.exports.init = function (server) {
     action('/api/tournaments/:id/register', (req) =>
         tournamentService.register(parseInt(req.params.id, 10), req.user, {
             joinCode: req.body.joinCode,
-            deckId: req.body.deckId ? parseInt(req.body.deckId, 10) : null
+            deckId: req.body.deckId ? parseInt(req.body.deckId, 10) : null,
+            // ARCHON (N7): which team the player is entering under.
+            teamId: req.body.teamId ? parseInt(req.body.teamId, 10) : null
         })
+    );
+
+    // ARCHON (N9): kiosk check-in. Not under /:id - the scanned code IS the
+    // event, which is the whole point of a QR at the door.
+    action('/api/tournaments/check-in-by-code', (req) =>
+        tournamentService.checkInByCode(req.body.code, req.user)
     );
 
     action('/api/tournaments/:id/register-deck', (req) =>
@@ -156,7 +169,9 @@ module.exports.init = function (server) {
             req.user,
             {
                 player1Wins: req.body.player1Wins,
-                player2Wins: req.body.player2Wins
+                player2Wins: req.body.player2Wins,
+                // ARCHON (N9): 'paper' for a result played across a table.
+                source: req.body.source
             }
         )
     );
@@ -202,6 +217,38 @@ module.exports.init = function (server) {
             parseInt(req.params.matchId, 10),
             req.user,
             req.body.deckId
+        )
+    );
+
+    // ARCHON (N9): Adaptive Bo3 chain bidding before game three.
+    server.get(
+        '/api/tournaments/:id/matches/:matchId/adaptive',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            res.send(
+                await tournamentService.getAdaptiveState(
+                    parseInt(req.params.id, 10),
+                    parseInt(req.params.matchId, 10),
+                    req.user
+                )
+            );
+        })
+    );
+
+    action('/api/tournaments/:id/matches/:matchId/adaptive-bid', (req) =>
+        tournamentService.adaptiveBid(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user,
+            req.body.chains
+        )
+    );
+
+    action('/api/tournaments/:id/matches/:matchId/adaptive-pass', (req) =>
+        tournamentService.adaptivePass(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user
         )
     );
 

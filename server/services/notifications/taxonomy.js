@@ -45,6 +45,17 @@ const CATEGORIES = {
         label: 'Club joins',
         description: 'Someone joined a club you own.',
         defaults: { inApp: true, email: false }
+    },
+    // ARCHON (N13): an in-person game is stuck until the other player files
+    // their report, and neither of them is on the site when it happens - the
+    // whole exchange takes place across a table. So this mails by default:
+    // a report nobody is told about is a game that never gets recorded.
+    'game.inperson': {
+        group: 'Play',
+        label: 'In-person games',
+        description:
+            'Someone recorded a paper game with you, your report is needed, or a result was confirmed or disputed.',
+        defaults: { inApp: true, email: true }
     }
 };
 
