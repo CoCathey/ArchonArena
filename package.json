@@ -22,7 +22,8 @@
         "build": "vite build --config vite.config.mjs",
         "typecheck:client": "tsc -p client/tsconfig.json --noEmit",
         "migrate": "node server/scripts/migrate.js",
-        "sync:upstream": "node server/scripts/upstream-sync.js"
+        "sync:upstream": "node server/scripts/upstream-sync.js",
+        "check:email": "node server/scripts/check-email.js"
     },
     "lint-staged": {
         "!(*.{js,jsx,ts,tsx})": "prettier --ignore-unknown --write",

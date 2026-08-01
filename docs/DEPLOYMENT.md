@@ -42,7 +42,112 @@ Delete any Porkbun "parked domain" ALIAS/CNAME records on the apex first — the
 Wait for `dig +short archonarena.com` to return the server IP before first boot, because
 Let's Encrypt validates over the domain.
 
-## 3. First boot
+## 3. Transactional email (AWS SES)
+
+**Do this before opening sign-ups.** Email verification is on by default
+(`lobby.requireActivation`), so registration depends on outbound mail: if a send fails the
+account is rolled back rather than left unusable, which means a site with broken email takes
+**no new accounts at all**. Password reset depends on it either way — without it, a player
+who forgets their password has no route back into their account.
+
+If you are not ready, that is fine, but make it a decision: set `REQUIRE_ACTIVATION=false`
+in `.env.production`, accepting that people can play under addresses they do not own until
+you turn it back on.
+
+### 3.1 Verify the domain
+
+In the SES console, in **one region** — `us-east-1` unless you have a reason — go to
+**Identities → Create identity → Domain**, enter `archonarena.com`, and leave **Easy DKIM**
+on with RSA_2048.
+
+SES gives you three CNAME records. Add them at Porkbun:
+
+| Type  | Host                  | Answer                        | TTL |
+| ----- | --------------------- | ----------------------------- | --- |
+| CNAME | `<token1>._domainkey` | `<token1>.dkim.amazonses.com` | 600 |
+| CNAME | `<token2>._domainkey` | `<token2>.dkim.amazonses.com` | 600 |
+| CNAME | `<token3>._domainkey` | `<token3>.dkim.amazonses.com` | 600 |
+
+Porkbun appends the domain automatically, so enter only the host part shown above — a host
+of `<token>._domainkey.archonarena.com` becomes
+`<token>._domainkey.archonarena.com.archonarena.com` and will never verify.
+
+Verification usually completes within the hour. Also add an SPF record if the apex has no
+`TXT` yet — `v=spf1 include:amazonses.com ~all` — and, once mail is flowing, a DMARC record
+at `_dmarc`: `v=DMARC1; p=none; rua=mailto:you@archonarena.com`. Neither is required for
+SES to accept a send; both materially affect whether Gmail puts your activation mail in
+the inbox or the spam folder.
+
+### 3.2 Leave the sandbox
+
+A new SES account is sandboxed: it can only send **to** verified addresses, and is capped at
+200 messages/day. That is enough to test with your own address and useless for a public
+site.
+
+**Account dashboard → Request production access.** Say what the mail is (account activation
+and password reset for a game platform), that it is transactional and triggered by the
+recipient's own action, and that there is no marketing list. Approval typically takes a day
+or so. Until it lands, the preflight below will only succeed for addresses you have verified
+individually.
+
+### 3.3 Credentials
+
+Create an IAM user with programmatic access and exactly this policy — SES has no
+"send-only" managed policy, and the broad ones grant far more than sending:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+Then fill in `.env.production`:
+
+```sh
+EMAIL_FROM_ADDRESS=noreply@archonarena.com   # must be on the verified domain
+EMAIL_REPLY_TO=support@archonarena.com       # optional, but replies to noreply@ vanish
+AWS_SES_REGION=us-east-1                     # the SAME region the identity is in
+AWS_ACCESS_KEY_ID=<key id>
+AWS_SECRET_ACCESS_KEY=<secret>
+```
+
+The region must match the identity's region. An identity verified in `us-east-1` does not
+exist in `eu-west-1`, and the send is rejected as unverified — which reads like a DNS
+problem and is not.
+
+> A variable exported in the shell **overrides `--env-file`**. If the server has a stale
+> `AWS_ACCESS_KEY_ID` in root's profile or a CI runner's environment, it silently wins over
+> `.env.production` and you will debug the wrong credential. `docker compose ... config`
+> prints what the container will actually receive — trust that over the file.
+
+### 3.4 Prove it works
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production \
+  exec lobby npm run check:email -- you@example.com
+```
+
+This sends a real message through the same config and client the app uses, prints what it
+resolved, and turns an AWS failure into the thing to go and fix. Run it after any change to
+the email settings, and again after a redeploy.
+
+Two things it deliberately does not claim:
+
+-   **Accepted is not delivered.** Open the inbox, and check spam — activation mail in the
+    spam folder costs you sign-ups exactly as effectively as mail that was never sent.
+-   **A quiet boot log is not proof.** The server warns at startup when verification is on
+    with no sender address, but `config/production.json5` sets one, so in production that
+    guard is always satisfied and always silent. It cannot tell you the region or credentials
+    are missing. Only an actual send can.
+
+## 4. First boot
 
 ```bash
 git clone https://github.com/CoCathey/ArchonArena.git /opt/archonarena
@@ -89,7 +194,7 @@ Sign out and back in for the permissions to take effect. The command is idempote
 > `deploy/healthcheck.sh` now FAILs while they exist — delete or rename them, and treat the
 > site as compromised if it was publicly reachable with `admin` intact.
 
-## 4. Deploying updates
+## 5. Deploying updates
 
 ```bash
 cd /opt/archonarena
@@ -123,7 +228,7 @@ each file in its own transaction (so a failure leaves nothing half-applied), and
 run at all if a migration that was already applied has since been edited.
 `deploy/healthcheck.sh` FAILs when migrations are pending.
 
-## 5. Backups
+## 6. Backups
 
 Nightly dump (add to root's crontab on the host):
 
@@ -135,7 +240,7 @@ Restore: `gunzip -c <file> | docker compose ... exec -T postgres psql -U archona
 Keep at least 14 days; copy off-host (object storage) — a backup on the same disk is not
 a backup.
 
-## 6. Scaling game nodes
+## 7. Scaling game nodes
 
 Each node is one container with a unique identity:
 
@@ -150,7 +255,7 @@ When one host is no longer enough, nodes can move to separate machines by giving
 public address (set `HOST`) or by fronting them with the same Caddy over a private
 network — decision deferred until load requires it.
 
-## 7. Monitoring (minimum viable)
+## 8. Monitoring (minimum viable)
 
 -   Set `SENTRY_DSN` in `.env.production` for error tracking (client + server support is
     already wired upstream).
@@ -158,7 +263,7 @@ network — decision deferred until load requires it.
 -   `docker compose ... logs -f lobby node-0` for live logs; Winston writes structured
     logs to stdout.
 
-## 8. Health check
+## 9. Health check
 
 `deploy/healthcheck.sh` verifies everything the site needs in one pass — containers,
 HTTPS + certificate, the game-node socket path through Caddy, the game node's advertised

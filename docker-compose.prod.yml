@@ -60,6 +60,26 @@ services:
             - SENTRY_DSN=${SENTRY_DSN:-}
             - CAPTCHA_KEY=${CAPTCHA_KEY:-}
             - DOK_API_KEY=${DOK_API_KEY:-}
+            # ARCHON: transactional email. These were documented in
+            # .env.production.example but never forwarded here, so nothing set on
+            # the server reached the app. That was invisible rather than loud:
+            # config/production.json5 hardcodes emailFromAddress, so the "email
+            # not configured" guards all saw a sender and stayed quiet, while
+            # every send failed for want of a region and credentials. With
+            # verification required that means no account can be registered at
+            # all. Run `npm run check:email` after any change here.
+            - EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-}
+            - EMAIL_REPLY_TO=${EMAIL_REPLY_TO:-}
+            - AWS_SES_REGION=${AWS_SES_REGION:-}
+            - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+            - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+            # Absolute links in email raised by background jobs, which have no
+            # request to derive an origin from.
+            - SITE_URL=${SITE_URL:-}
+            - CSP_MODE=${CSP_MODE:-}
+            # Escape hatch: set false to run without email, accepting that
+            # unverified addresses can play. Anything else leaves it on.
+            - REQUIRE_ACTIVATION=${REQUIRE_ACTIVATION:-}
             - OIDC_ENABLED=${OIDC_ENABLED:-}
             - OIDC_ISSUER=${OIDC_ISSUER:-}
             - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
