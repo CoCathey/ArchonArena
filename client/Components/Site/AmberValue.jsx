@@ -23,7 +23,13 @@ const AmberValue = ({ value, className = '', iconClass = 'h-3.5 w-3.5', showLabe
         typeof value === 'number' ? value.toLocaleString() : value === undefined ? '-' : value;
 
     return (
-        <span className={`inline-flex items-center gap-1 font-bold text-amber-300 ${className}`}>
+        // ARCHON (N16 groundwork): tabular figures. An Amber value is a number
+        // that almost always sits above or below another one - in a board, a
+        // rank card, a standings row - and proportional digits make those
+        // columns visibly ragged.
+        <span
+            className={`numeric inline-flex items-center gap-1 font-bold text-amber-300 ${className}`}
+        >
             <AmberGem className={`${iconClass} shrink-0 text-amber-400`} />
             {display}
             {showLabel && <span className='ml-0.5 text-xs font-normal text-muted'>Amber</span>}

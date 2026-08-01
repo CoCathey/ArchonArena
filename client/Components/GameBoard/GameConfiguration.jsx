@@ -30,7 +30,7 @@ const GameConfiguration = ({ optionSettings, onOptionSettingToggle }) => {
     ];
 
     return (
-        <Panel title={t('Game Settings')} compactHeader>
+        <Panel title={t('Game Settings')} compactHeader titleAlign='center'>
             <div className='grid gap-2'>
                 {options.map((option) => (
                     <Switch

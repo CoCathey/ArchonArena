@@ -662,10 +662,16 @@ no way to report anything or act proportionately. Community size makes this urge
 **Why:** theme tokens and light/dark palettes exist, but there is no documented component
 library, no responsive pass, and no accessibility work. Mobile web is the default first
 experience for most new players.
+
+**Sequence after N16.** This item systematizes a visual language into a component library; if
+it runs first it will systematize the current look and then be rebuilt when the redesign lands.
+The responsive and accessibility work is independent of how things look and could go either
+way — but the component library specifically should wait.
 **Tasks**
 
 -   UI audit doc: component inventory, duplication, and the modernization order.
--   Document the token set and build the shared component library on top of it.
+-   Document the token set and build the shared component library on top of it (on the
+    direction chosen in **N16**).
 -   Page-by-page responsive pass (decks → community → tournaments → profile → game UI last,
     since the board carries the most gameplay risk).
 -   Accessibility: keyboard navigation, contrast, focus order, screen-reader landmarks.
@@ -720,7 +726,7 @@ competition between groups, not just membership lists.
         from results. Rating an event twice is a no-op (unique `(TournamentId, TeamId)`), so
         finishing an event twice cannot rate it twice.
 
-#### N8 — Admin analytics and operations dashboard _(done, less the moderation panel)_
+#### N8 — Admin analytics and operations dashboard _(done)_
 
 **Why:** after launch, decisions need numbers: is the funnel working, is the queue healthy,
 are tournaments completing.
@@ -879,7 +885,7 @@ tiers, and perks that cannot touch competitive fairness.
     and the support page says so.
 -   Perks are editable from admin settings without a redeploy.
 
-#### N13 — In-person game tracking _(done, less dispute escalation)_
+#### N13 — In-person game tracking _(done)_
 
 **Why:** most KeyForge is still played across a table. The platform already knows decks, Amber
 and clubs; letting two players record a paper game keeps local scenes on the same ladder and
@@ -981,6 +987,76 @@ show it.
         the prompt text carries a `{{card}}` placeholder.
 -   [x] Nothing about what the engine resolves changes — this is presentation only. The mobile work
         is client-side interpolation and display over data the server already sent.
+
+#### N16 — Visual redesign: make it look premium
+
+**Why:** the platform's look is inherited from keyteki with a rebrand painted over it. There
+are real theme tokens (oklch, light and dark) and ~2,200 lines of CSS behind 50 pages and 111
+components — but the visual language was never _designed_, it accreted, one feature at a time,
+including everything added recently. It works and it is consistent-ish; it does not look like
+something you would trust with a competitive rating, a tournament entry, or a subscription.
+
+That last point is the actual argument, not taste. The platform asks people to believe its
+Amber means something, to run their store's events on it, and eventually (**N12**) to pay for
+it. A site that looks like a hobby project makes every one of those asks harder, and no amount
+of correct Elo math compensates for it.
+
+**Sequence this BEFORE N6, not after.** N6 builds the shared component library on top of the
+tokens — if that happens first, the library systematizes the current look and then gets rebuilt
+when the look changes. Decide what it should look like, then systematize that.
+
+**Tasks**
+
+-   **Direction on paper first.** Two or three distinct visual directions, each shown on the
+    _same_ three screens (lobby, deck list, a tournament page), as static mockups. Pick one
+    before touching a component. This is the only cheap moment to change your mind, and
+    "premium" is far easier to judge by comparison than in the abstract.
+-   **Redesign the token layer, not the pages.** The oklch token set is already the leverage
+    point — surfaces, brand, chat rows, table headers all read from it, so a considered palette,
+    elevation model and border treatment moves the whole site at once. Pages that hardcode
+    colours instead of reading tokens get fixed as they are found; that list is itself useful
+    output for N6.
+-   **Typography and spacing scale.** The single biggest lever on whether something reads as
+    premium, and the one most often skipped: a real type scale with deliberate weights and
+    line-heights, and a spacing rhythm that is enforced rather than eyeballed per component.
+    The site currently uses Noto Sans for everything and picks sizes ad hoc.
+-   **Depth, density and motion.** Decide once how elevation works (shadow? border? tint?),
+    how dense a data table should be, and what moves — then apply it everywhere. Inconsistent
+    answers to these three are most of what makes a UI feel amateur.
+-   **Marketing surfaces get designed, not just themed**: the logged-out landing page, `/about`,
+    and the sign-up flow. They are the first thing a new player sees and currently look like
+    the app with the nav removed.
+-   **The game board is last, and separate.** It is the highest gameplay risk on the site and
+    the screen players tolerate least change on. It gets the new tokens, and a considered
+    restyle only once the rest has settled.
+-   **Both themes are designed.** Dark is not "light with the numbers inverted" — the current
+    dark theme is largely derived, and derived dark themes are where muddy contrast comes from.
+
+**Depends on:** nothing hard. **Blocks:** N6 (the component library should be built on the
+chosen direction). Pairs with **I5**'s archon-maker image-diff harness — the same harness that
+protects the deck images through the fabric upgrade is what proves a token change did not
+silently alter them, so build it once and use it for both.
+
+**Acceptance criteria**
+
+-   Every candidate direction was judged on the same three screens before any component changed.
+-   No route ships half-migrated: the site never shows the old look beside the new one, which
+    means sequencing by route and holding each until it is done.
+-   Light and dark are both designed and both audited for contrast — neither derived from the
+    other.
+-   The archon maker's output and the game board are pixel-verified unchanged by the token work,
+    via the image-diff harness, before any deliberate restyle of them begins.
+-   A short written record of the decisions — palette, type scale, spacing, elevation, motion —
+    lives in `docs/design/` so the next feature does not re-improvise them. **This is what stops
+    the redesign accreting all over again**, and it is the deliverable most likely to be skipped.
+
+**A caveat worth stating plainly:** "looks premium" is not a testable condition, and no
+acceptance criterion above can make it one. The criteria are about _process_ — comparing
+directions properly, not shipping half-migrated routes, writing the decisions down — because
+those are the things that reliably separate a redesign that lands from one that stalls
+half-finished. Whether the result actually looks premium is a judgement call, and it is yours;
+what this item can promise is that the judgement gets made once, deliberately, rather than
+re-improvised per page.
 
 ### Future — differentiation
 
@@ -1319,7 +1395,11 @@ much stronger deck pays less.
         complete ahead of the features; Stats, Tournaments, Play IRL and Watch have since
         shipped.
 -   [x] Design tokens: light/dark palettes, brand amber, typography, table/chat/nav tokens
-        (`client/styles/tailwind.css`).
+        (`client/styles/tailwind.css`). The token _mechanism_ is done and is the leverage point
+        for the redesign; what was never designed is the visual language sitting on it.
+-   [ ] **Total visual redesign** — a considered palette, type scale, spacing rhythm, elevation
+        and motion model, aimed at looking like something worth trusting with a rating and a
+        subscription → **N16**. Sequence before the component library below.
 -   [ ] UI audit of the client (component inventory, duplication, modernization order) → **N6**.
 -   [ ] Documented component library on top of the tokens → **N6**.
 -   [ ] Incremental page-by-page modernization (decks → profile → game UI last, since game

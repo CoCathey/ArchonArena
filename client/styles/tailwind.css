@@ -124,7 +124,17 @@
         --surface-foreground: var(--foreground);
         --overlay: var(--surface-secondary);
         --overlay-foreground: var(--foreground);
-        --muted: oklch(0.8 0.004 286);
+        /* ARCHON (N16 groundwork): muted text has to actually recede.
+         *
+         * This was 0.8 against a 0.9 foreground - measured, that is a contrast
+         * ratio of 1.39 between "primary" and "secondary" text, which is to
+         * say none. Every dark screen was quietly missing a level of hierarchy.
+         *
+         * 0.66 puts that separation at 2.31 while still reading comfortably:
+         * 5.36 against the panel surface and 6.59 against the page, both clear
+         * of WCAG AA's 4.5 for normal text. Deliberately not darker - the next
+         * step down starts trading legibility for the hierarchy. */
+        --muted: oklch(0.66 0.006 286);
         --brand: #f0c44d;
         --brand-strong: #ffd56f;
         --accent-strong: #ffd56f;
@@ -183,6 +193,30 @@
 .panel .panel-heading {
     font-weight: normal;
     background-size: cover;
+}
+
+/* ARCHON (N16 groundwork): tabular figures wherever numbers stack.
+ *
+ * This is a ratings site - Amber, ranks, keys, W-L, SAS and match scores all
+ * sit in columns - and proportional digits make those columns ragged, because
+ * a '1' is narrower than a '0'.
+ *
+ * HONEST CAVEAT: this currently changes nothing. Noto Sans, the site's body
+ * face, already ships tabular figures by default - measured in Chromium,
+ * '111111' and '000000' are both 61.08px with tnum on and with it off. The
+ * rule is here as insurance, not as a fix: the first task of the redesign
+ * proper is changing the text face, most candidates (Inter among them)
+ * default to PROPORTIONAL figures, and the day that lands every stat column
+ * on the site would silently go ragged. This makes that a non-event.
+ *
+ * Scoped to tables and to elements that opt in with .numeric, rather than set
+ * globally on body - tabular figures are slightly wider and look wrong in
+ * running prose, which is most of the text on the site.
+ */
+table,
+.numeric {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
 }
 
 /* Global tertiary button contrast override */

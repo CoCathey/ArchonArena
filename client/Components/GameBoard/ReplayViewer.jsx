@@ -94,7 +94,7 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
 
     return (
         <div className='mx-auto w-full max-w-3xl space-y-3'>
-            <Panel title={t('Replay')}>
+            <Panel title={t('Replay')} titleAlign='center'>
                 <div className='flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-foreground'>
                     <span className='font-semibold'>
                         {players.map((player) => player.name).join(' vs ') || t('Game')}
@@ -150,7 +150,7 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
                 )}
             </Panel>
 
-            <Panel title={t('Play-by-play')}>
+            <Panel title={t('Play-by-play')} titleAlign='center'>
                 <div className='mb-3 flex flex-wrap items-center gap-2'>
                     <HeroButton
                         size='sm'
@@ -232,7 +232,7 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
             </Panel>
 
             {snapshots.length > 0 && (
-                <Panel title={t('Board')}>
+                <Panel title={t('Board')} titleAlign='center'>
                     {replay?.truncated && (
                         <p className='mb-2 text-xs text-amber-300'>
                             {t(
