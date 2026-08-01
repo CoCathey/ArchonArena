@@ -386,6 +386,14 @@ that inherit only the site name from config.
 -   [ ] **Owner action:** AWS SES setup — verified sender identity and production access —
         before any of this mail can actually be delivered.
 
+> **This owner action is now a launch blocker, not a nicety.** Email verification is on by
+> default (see _Known defects_), so registration depends on outbound mail: with no working
+> sender, every sign-up is rolled back with "we could not send your confirmation email" and
+> the site takes no new accounts at all. The server logs an error at boot when verification
+> is on and `lobby.emailFromAddress` is unset. If SES is not ready when the site goes live,
+> set `REQUIRE_ACTIVATION=false` deliberately rather than discovering it from a player —
+> accepting that unverified addresses can play until it is turned back on.
+
 **Depends on:** nothing. Blocks: I1's public announcement.
 **Acceptance criteria**
 
@@ -1655,3 +1663,22 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         layout, the schema-vs-migrations split, service and settings conventions, the
         verification loop, and which features need third-party provisioning. Complements
         `local-development.md` rather than repeating it.
+-   [x] **Email verification never happened** — sign-ups got no confirmation mail and could
+        play immediately. `lobby.requireActivation` was `false`, which skipped the email _and_
+        wrote `Verified = true`; it is now on by default, overridable with
+        `REQUIRE_ACTIVATION=false` for an instance with no mail. Turning it on exposed four
+        further breakages, none of which had ever run against PostgreSQL: the expiry was
+        stored as the string `'YYYYMMDD-HH:mm:ss'` into a `timestamp` column (PG rejects it,
+        so registration threw); the activate endpoint validated the id against a MongoDB
+        ObjectId regex; the expiry check compared a string to a moment with `<`, giving NaN,
+        so no link ever expired; and `activateUser` updated a column named
+        `"ActivationExpiry"`, which does not exist. Minting, expiry and verification now share
+        `server/services/activationToken.js` so the three cannot disagree about the format
+        again, and the token compare is constant-time. A registration whose email cannot be
+        sent is rolled back rather than left as an unusable account holding a username, a new
+        rate-limited `POST /api/account/resend-activation` re-issues a link without leaking
+        whether the account exists, and the boot check warns when verification is on but no
+        sender is configured. Register no longer claims "you can now proceed to login" when
+        login will refuse them. Verified end to end against a real PostgreSQL 16 — register →
+        mail → activate → login, with negative controls for tampered, expired, replayed and
+        cross-account links.

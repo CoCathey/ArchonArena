@@ -107,7 +107,10 @@ const baseQueryWithReauth = async (args, api, extraOptions) => {
                 currentPath !== '/register' &&
                 currentPath !== '/forgot' &&
                 currentPath !== '/reset-password' &&
-                currentPath !== '/activate'
+                // ARCHON: the route is /activation - '/activate' matched
+                // nothing, so a stale refresh token could bounce someone off
+                // the activation page before their link was processed.
+                currentPath !== '/activation'
             ) {
                 window.location.assign('/login');
             }
@@ -224,6 +227,16 @@ export const api = createApi({
                 url: '/account/activate',
                 method: 'POST',
                 body: { id, token }
+            })
+        }),
+        // ARCHON: the server answers this identically whether or not the
+        // account exists, so there is nothing useful in the response and the
+        // UI must not pretend there is - see the endpoint for why.
+        resendActivation: builder.mutation({
+            query: ({ username }) => ({
+                url: '/account/resend-activation',
+                method: 'POST',
+                body: { username }
             })
         }),
         verifyAuthentication: builder.mutation({
@@ -937,6 +950,7 @@ export const {
     useForgotPasswordMutation,
     useResetPasswordMutation,
     useActivateAccountMutation,
+    useResendActivationMutation,
     useVerifyAuthenticationMutation,
     useLinkPatreonMutation,
     useGetOidcIdentitiesQuery,

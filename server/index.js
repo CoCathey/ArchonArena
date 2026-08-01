@@ -40,8 +40,37 @@ function assertSecureSecrets() {
     logger.warn(`Insecure secret configuration - ${detail} This is acceptable only locally.`);
 }
 
+/**
+ * ARCHON: with email verification on, registration depends on outbound mail.
+ * A deployment that has not configured a sender cannot create *any* new
+ * account - every registration rolls itself back - and the only symptom a
+ * player sees is "we could not send your confirmation email".
+ *
+ * That is a configuration mistake worth shouting about at boot rather than
+ * discovering from a support message. It is not fatal, though: the site still
+ * works perfectly well for everyone who already has an account, so refusing
+ * to start would turn a closed front door into an outage.
+ */
+function warnIfVerificationCannotWork() {
+    if (!configService.getValueForSection('lobby', 'requireActivation')) {
+        return;
+    }
+
+    if (configService.getValueForSection('lobby', 'emailFromAddress')) {
+        return;
+    }
+
+    logger.error(
+        'Email verification is required (lobby.requireActivation) but no sender address is ' +
+            'configured (lobby.emailFromAddress / EMAIL_FROM_ADDRESS). No new account can be ' +
+            'registered until this is set. Set REQUIRE_ACTIVATION=false if this instance is ' +
+            'deliberately running without email.'
+    );
+}
+
 async function runServer() {
     assertSecureSecrets();
+    warnIfVerificationCannotWork();
 
     let options = { configService: configService };
 

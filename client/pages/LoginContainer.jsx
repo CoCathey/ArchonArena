@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { toast } from '@heroui/react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
+import CheckYourEmail from '../Components/Site/CheckYourEmail';
 import Login from '../Components/Login';
 import Panel from '../Components/Site/Panel';
 import ApiStatus from '../Components/Site/ApiStatus';
@@ -20,6 +21,11 @@ const LoginContainer = () => {
     const location = useLocation();
     const [loginAccount, loginState] = useLoginAccountMutation();
     const { isSuccess, reset } = loginState;
+    // Kept so a refused-because-unconfirmed login can offer the resend for the
+    // account they actually tried, rather than asking them to type it again.
+    const [attemptedUsername, setAttemptedUsername] = useState('');
+    // The credentials were correct; the account just is not confirmed yet.
+    const needsActivation = !!loginState.error?.data?.needsActivation;
 
     useEffect(() => {
         return () => {
@@ -98,13 +104,30 @@ const LoginContainer = () => {
                   : loginState.error?.data?.message
           };
 
+    // ARCHON: an unconfirmed account used to be a dead end - the login was
+    // refused with no way to ask for the email again. Swap the form for the
+    // resend panel, since retyping the password will never help.
+    if (needsActivation) {
+        return (
+            <div className='mx-auto w-full max-w-2xl'>
+                <CheckYourEmail username={attemptedUsername} />
+            </div>
+        );
+    }
+
     return (
         <div className='mx-auto w-full max-w-2xl'>
             <Panel title={t('Login')}>
                 <ApiStatus state={apiState} onClose={() => loginState.reset()} />
                 {/* ARCHON: SSO login entry point */}
                 <SsoButton mode='login' />
-                <Login onSubmit={(values) => loginAccount(values)} />
+                <Login
+                    onSubmit={(values) => {
+                        setAttemptedUsername(values.username);
+
+                        return loginAccount(values);
+                    }}
+                />
             </Panel>
         </div>
     );
