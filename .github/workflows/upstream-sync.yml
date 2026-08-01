@@ -1,0 +1,240 @@
+name: Upstream sync
+
+# Pull gameplay fixes from keyteki (The Crucible Online) - but only propose them,
+# never land them. The full suite is the gate: if anything the fork depends on
+# breaks, this opens an issue instead of a pull request and nothing reaches main.
+#
+# Deliberately not `auto-merge`. "It doesn't break anything" is what the tests can
+# tell us; whether an upstream gameplay change is *wanted* here is a judgement the
+# tests cannot make, so a human always presses merge.
+
+on:
+    schedule:
+        # Mondays 07:00 UTC. Weekly is well inside upstream's rate of change and
+        # keeps each PR small enough to actually read.
+        - cron: '0 7 * * 1'
+    workflow_dispatch:
+        inputs:
+            upstream_ref:
+                description: 'Upstream commit to sync up to (default: latest master)'
+                required: false
+                type: string
+
+permissions:
+    contents: write
+    pull-requests: write
+    issues: write
+
+concurrency:
+    group: upstream-sync
+    cancel-in-progress: false
+
+jobs:
+    sync:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout source
+              uses: actions/checkout@v4
+              with:
+                  # Full history: the sync applies a diff between two upstream
+                  # commits, so the pre-image blobs have to be fetchable.
+                  fetch-depth: 0
+
+            - name: Use Node.js 22
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22.x
+                  cache: 'npm'
+
+            - name: Install dependencies
+              run: npm ci --include=optional
+
+            - name: Apply upstream changes
+              id: sync
+              # The script exits non-zero on conflict, which is a reportable
+              # outcome rather than a workflow failure - the reporting is below.
+              continue-on-error: true
+              run: |
+                  node server/scripts/upstream-sync.js \
+                    ${{ inputs.upstream_ref && format('--to {0}', inputs.upstream_ref) || '' }}
+
+            - name: Nothing to do
+              if: steps.sync.outputs.outcome == 'up-to-date'
+              run: echo "Already current with upstream. Exiting."
+
+            # ---- the gate --------------------------------------------------
+            # Same four checks as CI, in the same order, so a sync PR has cleared
+            # exactly what any other PR must clear.
+
+            - name: Typecheck client
+              id: typecheck
+              if: steps.sync.outputs.outcome == 'applied'
+              continue-on-error: true
+              run: npm run typecheck:client
+
+            - name: Lint
+              id: lint
+              if: steps.sync.outputs.outcome == 'applied'
+              continue-on-error: true
+              run: npm run lint
+
+            - name: Build client
+              id: build
+              if: steps.sync.outputs.outcome == 'applied'
+              continue-on-error: true
+              run: npm run build
+
+            - name: Test
+              id: test
+              if: steps.sync.outputs.outcome == 'applied'
+              continue-on-error: true
+              run: npm test
+
+            - name: Collect gate result
+              id: gate
+              if: steps.sync.outputs.outcome == 'applied'
+              run: |
+                  failed=""
+                  [ "${{ steps.typecheck.outcome }}" != "success" ] && failed="$failed typecheck"
+                  [ "${{ steps.lint.outcome }}" != "success" ] && failed="$failed lint"
+                  [ "${{ steps.build.outcome }}" != "success" ] && failed="$failed build"
+                  [ "${{ steps.test.outcome }}" != "success" ] && failed="$failed test"
+                  if [ -n "$failed" ]; then
+                    echo "passed=false" >> "$GITHUB_OUTPUT"
+                    echo "failed=$failed" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "passed=true" >> "$GITHUB_OUTPUT"
+                    echo "failed=" >> "$GITHUB_OUTPUT"
+                  fi
+
+            # ---- green: propose it -----------------------------------------
+
+            - name: Open a pull request
+              if: steps.sync.outputs.outcome == 'applied' && steps.gate.outputs.passed == 'true'
+              uses: peter-evans/create-pull-request@v6
+              with:
+                  branch: upstream-sync/keyteki
+                  base: main
+                  commit-message: |
+                      Sync gameplay changes from keyteki
+
+                      Upstream ${{ steps.sync.outputs.from }} -> ${{ steps.sync.outputs.to }}
+                      ${{ steps.sync.outputs.commits }} commit(s), ${{ steps.sync.outputs.files }} file(s).
+                  title: 'Upstream sync: keyteki ${{ steps.sync.outputs.commits }} commit(s)'
+                  labels: upstream-sync
+                  delete-branch: true
+                  body: |
+                      Automated sync of gameplay changes from
+                      [keyteki](https://github.com/keyteki/keyteki) (The Crucible Online).
+
+                      **Range:** `${{ steps.sync.outputs.from }}` → `${{ steps.sync.outputs.to }}`
+
+                      ```
+                      ${{ steps.sync.outputs.summary }}
+                      ```
+
+                      ### Gate
+
+                      Typecheck, lint, build and the full test suite all passed with these
+                      changes applied.
+
+                      **That means the fork still works, not that the change is right for
+                      Archon Arena.** Upstream sometimes changes gameplay behaviour on
+                      purpose. Read the commits above and decide whether this platform wants
+                      the new behaviour before merging — particularly anything touching
+                      Adaptive, chains, or first-player selection, where Archon Arena has its
+                      own rules on top.
+
+                      ---
+                      _Generated by [Claude Code](https://claude.ai/code)_
+
+            # ---- red: say so, loudly ---------------------------------------
+
+            # Anything that is not "nothing to do" and not "applied and green"
+            # needs a human. Written as a catch-all rather than a list of known
+            # bad outcomes: if the sync dies so hard it emits no outcome at all,
+            # a list would match nothing and the run would go green, which reads
+            # exactly like "upstream had no changes".
+            - name: Report a conflict, an error, or a failing gate
+              if: |
+                  steps.sync.outputs.outcome != 'up-to-date' &&
+                  (steps.sync.outputs.outcome != 'applied' || steps.gate.outputs.passed != 'true')
+              uses: actions/github-script@v7
+              env:
+                  OUTCOME: ${{ steps.sync.outputs.outcome }}
+                  FAILED: ${{ steps.gate.outputs.failed }}
+                  SUMMARY: ${{ steps.sync.outputs.summary }}
+                  FROM: ${{ steps.sync.outputs.from }}
+                  TO: ${{ steps.sync.outputs.to }}
+              with:
+                  script: |
+                      const { OUTCOME, FAILED, SUMMARY, FROM, TO } = process.env;
+
+                      const titles = {
+                          conflict: 'Upstream sync: keyteki changes will not apply cleanly',
+                          error: 'Upstream sync: the sync itself failed'
+                      };
+                      const leads = {
+                          conflict: 'The upstream diff could not be applied on top of Archon Arena.',
+                          error: 'The sync could not run. This is not an upstream code problem — it is the sync itself failing (network, or a recorded commit upstream no longer has).'
+                      };
+
+                      const title = titles[OUTCOME] ||
+                          (FAILED ? `Upstream sync: keyteki changes break${FAILED}`
+                                  : 'Upstream sync: needs attention');
+                      const lead = leads[OUTCOME] ||
+                          (FAILED ? `The upstream diff applied, but these checks failed:${FAILED}`
+                                  : `The sync finished in an unexpected state (outcome: "${OUTCOME || 'none reported'}").`);
+
+                      const body = [
+                          lead,
+                          '',
+                          `**Range:** \`${FROM}\` → \`${TO}\``,
+                          '',
+                          '```',
+                          SUMMARY || '(no summary)',
+                          '```',
+                          '',
+                          'The sync marker in `upstream-sync.json` was **not** advanced, so this',
+                          'will be retried next week and nothing has been merged. Resolve it by',
+                          'hand with `npm run sync:upstream` and see `docs/UPSTREAM.md`.',
+                          '',
+                          `[Workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+                          '',
+                          '---',
+                          '_Generated by [Claude Code](https://claude.ai/code)_'
+                      ].join('\n');
+
+                      // Reuse the open issue rather than filing a new one every Monday.
+                      const existing = await github.rest.issues.listForRepo({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          state: 'open',
+                          labels: 'upstream-sync'
+                      });
+
+                      if (existing.data.length > 0) {
+                          await github.rest.issues.createComment({
+                              owner: context.repo.owner,
+                              repo: context.repo.repo,
+                              issue_number: existing.data[0].number,
+                              body
+                          });
+                      } else {
+                          await github.rest.issues.create({
+                              owner: context.repo.owner,
+                              repo: context.repo.repo,
+                              title,
+                              labels: ['upstream-sync'],
+                              body
+                          });
+                      }
+
+            - name: Fail the run when the sync needs attention
+              if: |
+                  steps.sync.outputs.outcome != 'up-to-date' &&
+                  (steps.sync.outputs.outcome != 'applied' || steps.gate.outputs.passed != 'true')
+              run: |
+                  echo "Upstream sync needs manual attention - see the issue just filed."
+                  exit 1

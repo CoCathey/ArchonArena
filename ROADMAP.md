@@ -1634,7 +1634,9 @@ competitive advantage.
         schema change → **I2**.
 -   [ ] Security: dependency audit, auth rate limiting, OWASP pass before launch → **I5**.
 -   [ ] Load testing for game nodes + matchmaking before public launch → **N10**.
--   [ ] Upstream sync process: periodically merge keyteki card fixes (`docs/UPSTREAM.md`) → **N10**.
+-   [x] Upstream sync process: `npm run sync:upstream` plus a weekly workflow that applies
+        keyteki's gameplay changes, runs the full gate, and opens a PR only when it is green —
+        an issue when it is not. Never auto-merges (`docs/UPSTREAM.md`).
 
 ## Known defects & housekeeping
 
