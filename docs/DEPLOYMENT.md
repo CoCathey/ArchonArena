@@ -194,6 +194,31 @@ Sign out and back in for the permissions to take effect. The command is idempote
 > `deploy/healthcheck.sh` now FAILs while they exist — delete or rename them, and treat the
 > site as compromised if it was publicly reachable with `admin` intact.
 
+### Adopting migrations on a database that predates the ledger
+
+A deployment whose Postgres volume was built from `server/db/schema/` some time ago has
+everything up to that point and nothing since — and no `SchemaMigrations` ledger at all.
+`npm run migrate` refuses to guess in that state, and its message suggests
+`--baseline`. **That advice is for a database already at head. It is wrong here**, and
+following it would mark every migration as applied without running any, leaving the missing
+tables missing permanently.
+
+Work out where the database actually is, then baseline only that far:
+
+```bash
+# Is a table from a later migration present? (Seasons arrived in 37, GameReplays in 38)
+docker compose -f docker-compose.prod.yml --env-file .env.production exec -T postgres \
+  psql -U "$DB_USER" -d "$DB_NAME" -c "\dt public.*" | grep -E "Seasons|GameReplays"
+
+# Files 01-21 are the upstream ones, always already baked into the schema directory.
+npm run migrate -- --baseline-through 21
+npm run migrate
+```
+
+Every Archon-era migration (22 onwards) guards its DDL with `IF NOT EXISTS`, so the second
+command is safe even where the database already has some of them — re-applying is a no-op
+rather than an error. Verify by diffing against a fresh build if in doubt.
+
 ## 5. Deploying updates
 
 ```bash

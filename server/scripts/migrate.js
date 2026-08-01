@@ -7,6 +7,9 @@
 //   npm run migrate -- --status      show applied / pending and exit
 //   npm run migrate -- --baseline    record every migration as applied WITHOUT
 //                                    running it (see below)
+//   npm run migrate -- --baseline-through "21 - Foo.sql"
+//                                    record migrations UP TO AND INCLUDING that
+//                                    one as applied, leaving the rest pending
 //
 // Why a baseline step exists
 // --------------------------
@@ -27,6 +30,23 @@
 // Run that once per existing database (including a brand-new one built from the
 // schema directory). Afterwards, plain `npm run migrate` applies only genuinely
 // new files.
+//
+// Partial baselines
+// -----------------
+// A full `--baseline` is only correct when the database is already at head. A
+// long-running deployment usually is not: its volume was built from the schema
+// directory at some point in the past, so it has everything up to that point and
+// nothing since. Baselining it wholesale would mark migrations as applied that
+// were never run, and the missing tables would stay missing forever - the schema
+// equivalent of losing the changes.
+//
+//     npm run migrate -- --baseline-through "21 - <last one already in the DB>.sql"
+//     npm run migrate
+//
+// The Archon-era migrations (22 onwards) are written to be re-runnable - every
+// CREATE/ALTER is guarded - so the second command is safe even where the
+// database already has some of them. Files 01-21 are the upstream ones baked
+// into the schema directory, which is why they are the usual cut point.
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -102,8 +122,31 @@ async function main() {
     const dryRun = args.includes('--dry-run');
     const status = args.includes('--status');
     const baseline = args.includes('--baseline');
+    const throughIndex = args.indexOf('--baseline-through');
+    const throughArg = throughIndex >= 0 ? args[throughIndex + 1] : null;
 
     const migrations = readMigrations();
+
+    // Resolve the cut point before touching anything. Accepts the full filename
+    // or just its leading ordinal ("21"), because nobody wants to retype
+    // "21 - TournamentSeeding.sql" exactly.
+    let throughPos = -1;
+    if (throughArg !== null) {
+        throughPos = migrations.findIndex(
+            (migration) =>
+                migration.filename === throughArg ||
+                migration.filename.startsWith(`${throughArg} -`) ||
+                migration.filename.startsWith(`${throughArg} `)
+        );
+
+        if (throughPos < 0) {
+            console.error(`No migration matches "${throughArg}". Available:`);
+            for (const migration of migrations) {
+                console.error(`  ${migration.filename}`);
+            }
+            process.exit(1);
+        }
+    }
     const applied = await readLedger();
 
     const edited = findEditedMigrations(migrations, applied);
@@ -133,6 +176,28 @@ async function main() {
                     '    npm run migrate -- --baseline'
             );
         }
+        return;
+    }
+
+    if (throughPos >= 0) {
+        const seed = migrations.slice(0, throughPos + 1);
+
+        for (const migration of seed) {
+            await record(null, migration);
+        }
+
+        const remaining = migrations.length - seed.length;
+
+        console.log(
+            `Baselined ${seed.length} migration(s) as already applied, through ` +
+                `${seed[seed.length - 1].filename}.`
+        );
+        console.log(
+            remaining > 0
+                ? `${remaining} migration(s) are still pending - run \`npm run migrate\` to apply them.`
+                : 'Nothing left pending.'
+        );
+
         return;
     }
 
