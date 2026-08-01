@@ -59,6 +59,141 @@ const gitStatus = (...gitArgs) => {
 
 const readState = () => JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
 
+/**
+ * The expansions registered in one of the two constants files, at a given commit.
+ *
+ * Both files list the same sets in slightly different shapes - `id: 341` server
+ * side, `value: '341'` client side - and both spread an entry across several
+ * lines or keep it on one depending on length, so the text is flattened before
+ * matching rather than trying to write a regex that copes with both layouts.
+ *
+ * Returns a Map of id -> label. An empty Map means the file could not be read
+ * or its shape changed; callers treat that as "cannot tell", never as "no sets".
+ */
+const parseExpansions = (source) => {
+    const found = new Map();
+
+    if (!source) {
+        return found;
+    }
+
+    const flat = source.replace(/\s+/g, ' ');
+    const block = /\{([^{}]*?(?:id|value)\s*:\s*'?\d+'?[^{}]*?)\}/g;
+    let match;
+
+    while ((match = block.exec(flat)) !== null) {
+        const id = /(?:\bid|\bvalue)\s*:\s*'?(\d+)'?/.exec(match[1]);
+        const label = /\blabel\s*:\s*'([^']+)'/.exec(match[1]);
+
+        if (id && label) {
+            found.set(id[1], label[1]);
+        }
+    }
+
+    return found;
+};
+
+/** parseExpansions against a file as it stood at some upstream commit. */
+const expansionsAt = (commit, file) => {
+    const read = gitStatus('show', `${commit}:${file}`);
+
+    return read.ok ? parseExpansions(read.out) : new Map();
+};
+
+/** Card directories (`server/game/cards/14-DM`) present at a given commit. */
+const cardSetDirsAt = (commit) => {
+    const listed = gitStatus('ls-tree', '--name-only', `${commit}:server/game/cards`);
+
+    if (!listed.ok) {
+        return new Set();
+    }
+
+    return new Set(
+        listed.out
+            .split('\n')
+            .map((line) => line.trim().replace(/\/$/, ''))
+            .filter((line) => /^\d+-/.test(line))
+    );
+};
+
+/**
+ * ARCHON: whether this sync brings a new KeyForge set, and what is left to do.
+ *
+ * This is the part the sync deliberately cannot finish. A new set's *engine*
+ * side - card implementations, their tests, the card data, and the tide/token/
+ * prophecy flags - is upstream-owned and arrives on its own. Its *registration*
+ * side is not: the lobby format list, the sealed random-pick, the Expansions
+ * table and its migration, and the set icons all live in files Archon Arena has
+ * diverged on, and taking upstream's version of those would overwrite the fork.
+ *
+ * So the sync says so, in the pull request, with the list from docs/new-sets.md.
+ * The alternative is a PR that looks complete, passes every test - because no
+ * test covers a set that is not registered - and quietly ships a set players
+ * cannot pick.
+ */
+const detectNewSets = (from, to) => {
+    const before = expansionsAt(from, 'server/constants.js');
+    const after = expansionsAt(to, 'server/constants.js');
+    const beforeClient = expansionsAt(from, 'client/constants.js');
+    const afterClient = expansionsAt(to, 'client/constants.js');
+
+    // Either file registering a set we did not have counts. They are meant to
+    // agree; if upstream updates one and not the other, that is worth seeing.
+    const added = [];
+    for (const [id, label] of after) {
+        if (!before.has(id)) {
+            added.push({ id, label, where: 'server/constants.js' });
+        }
+    }
+    for (const [id, label] of afterClient) {
+        if (!beforeClient.has(id) && !added.some((entry) => entry.id === id)) {
+            added.push({ id, label, where: 'client/constants.js' });
+        }
+    }
+
+    const dirsBefore = cardSetDirsAt(from);
+    const newCardDirs = [...cardSetDirsAt(to)].filter((dir) => !dirsBefore.has(dir));
+
+    if (added.length === 0 && newCardDirs.length === 0) {
+        return null;
+    }
+
+    const names = added.length
+        ? added.map((entry) => `${entry.label} (id ${entry.id})`).join(', ')
+        : newCardDirs.join(', ');
+
+    const checklist = [
+        `### New set detected: ${names}`,
+        '',
+        added.length
+            ? `Registered upstream in: ${[...new Set(added.map((e) => e.where))].join(', ')}`
+            : 'Detected from new card directories only - upstream may not have registered it yet.',
+        newCardDirs.length ? `New card directories: ${newCardDirs.join(', ')}` : '',
+        '',
+        'The engine side of this set came across with the sync — card implementations,',
+        'their tests, the card data, and the tide/token/prophecy flags.',
+        '',
+        '**The registration side did not, and cannot.** These files are Archon Arena’s and',
+        'would be overwritten by upstream’s version, so they are left for a human',
+        '(see `docs/new-sets.md`):',
+        '',
+        '-   [ ] `client/Components/Games/GameFormats.jsx` — add the set to the lobby list',
+        '-   [ ] `client/Components/Games/NewGame.jsx` — add the key and the sealed-format check',
+        '-   [ ] `server/services/DeckService.js` — add the ExpansionId to the sealed random pick',
+        '-   [ ] `server/db/schema/99 - Data.sql` — add the `Expansions` row and bump the sequence',
+        '-   [ ] `server/db/schema/migrations/NN - <CODE>.sql` — the same insert, next number',
+        '-   [ ] `client/assets/img/idbacks/<id>.png` and `client/assets/img/<id>.png` — set icons',
+        '-   [ ] `npm run fetchdata` — import the cards once the pack file exists',
+        '',
+        'Until those land the set will not be selectable, and **no test will catch it** —',
+        'nothing covers a set that was never registered.'
+    ]
+        .filter((line) => line !== '')
+        .join('\n');
+
+    return { names, checklist };
+};
+
 const writeState = (state) => {
     fs.writeFileSync(STATE_FILE, `${JSON.stringify(state, null, 4)}\n`);
 };
@@ -87,7 +222,8 @@ const report = (outcome, detail) => {
                 `from=${result.from || ''}\n` +
                 `to=${result.to || ''}\n` +
                 `commits=${result.commitCount || 0}\n` +
-                `files=${result.fileCount || 0}\n`
+                `files=${result.fileCount || 0}\n` +
+                `newsets=${result.newSets || ''}\n`
         );
         // The body is multi-line, so it needs the heredoc form.
         fs.appendFileSync(
@@ -210,7 +346,11 @@ function main() {
 
     const fileCount = changedFiles.split('\n').length;
     const commitCount = commitLog ? commitLog.split('\n').length : 0;
-    const summary = `Upstream commits (${commitCount}):\n${commitLog}\n\nFiles (${fileCount}):\n${changedFiles}`;
+    const newSets = detectNewSets(syncedCommit, target);
+    const summary =
+        `Upstream commits (${commitCount}):\n${commitLog}\n\n` +
+        `Files (${fileCount}):\n${changedFiles}` +
+        (newSets ? `\n\n${newSets.checklist}` : '');
 
     console.log(summary);
 
@@ -221,6 +361,7 @@ function main() {
             commitCount,
             fileCount,
             summary,
+            newSets: newSets && newSets.names,
             message: 'Dry run: nothing was written.'
         });
     }
@@ -251,6 +392,7 @@ function main() {
             to: target,
             commitCount,
             fileCount,
+            newSets: newSets && newSets.names,
             summary:
                 `${summary}\n\nConflicting files:\n${conflicted || '(none marked)'}\n\n` +
                 `${applied.out}\nWorking tree now:\n${touched || '(unchanged)'}`,
@@ -281,14 +423,24 @@ function main() {
         commitCount,
         fileCount,
         summary,
+        newSets: newSets && newSets.names,
         message:
             `Applied cleanly. The changes are in the working tree and have NOT been verified - ` +
-            'run the full suite before trusting them.'
+            'run the full suite before trusting them.' +
+            (newSets
+                ? `\n\nThis sync brings a NEW SET (${newSets.names}) - see the checklist above.`
+                : '')
     });
 }
 
-try {
-    main();
-} catch (err) {
-    report('error', { message: err.stack || String(err) });
+// Only run when invoked as a script, so the parsing above can be unit-tested
+// without a git remote - see test/server/scripts/upstreamSync.spec.js.
+if (require.main === module) {
+    try {
+        main();
+    } catch (err) {
+        report('error', { message: err.stack || String(err) });
+    }
 }
+
+module.exports = { parseExpansions, detectNewSets, expansionsAt, cardSetDirsAt };

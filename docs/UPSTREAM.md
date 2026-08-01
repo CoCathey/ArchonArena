@@ -1,12 +1,20 @@
 # Upstream sync: keyteki → Archon Arena
 
 Archon Arena is built on [The Crucible Online (keyteki)](https://github.com/keyteki/keyteki).
-The gameplay engine (`server/game`), the card tests that prove it (`test/server`), the shared
-test helpers, and the card data (`master-vault-data`) are kept as close to upstream as
-possible, so card fixes and new-set support can be pulled in with minimal conflict.
+These paths are kept as close to upstream as possible, so card fixes and new-set support can
+be pulled in with minimal conflict:
 
-Everything else — the client, branding, dependencies, CI, deployment — is ours and is never
-taken from upstream.
+| Path                                         | What it carries                                                                 |
+| -------------------------------------------- | ------------------------------------------------------------------------------- |
+| `server/game`                                | The engine and every card implementation                                        |
+| `server/constants.js`, `client/constants.js` | Houses, keywords, and the expansion registry with its tide/token/prophecy flags |
+| `test/server`                                | The card and engine test suite                                                  |
+| `test/helpers`                               | The helpers those tests are built on                                            |
+| `master-vault-data`                          | Card data                                                                       |
+
+The two `constants.js` files are single files, not directories — the rest of `client/` is
+ours. Everything else — branding, dependencies, CI, deployment — is ours and is never taken
+from upstream.
 
 ## Provenance
 
@@ -32,8 +40,8 @@ is the single source of truth and is updated by the sync itself. The table above
 3. **Integration hooks are marked** with `// ARCHON:` comments, so a conflict during a sync
    lands on a line that says what it is and why.
 
-These have held. As of 2026-08-01, across the entire upstream-owned surface — `server/game`,
-`test/server`, `test/helpers`, `master-vault-data` — exactly three files carry local changes:
+These have held. As of 2026-08-01, across the entire upstream-owned surface — every path in
+the table above, both `constants.js` files included — exactly three files carry local changes:
 
 | File                                        | Why                                                                  |
 | ------------------------------------------- | -------------------------------------------------------------------- |
@@ -90,6 +98,28 @@ in the PR body before merging.
 
 After any sync, record the pass rate against the baseline in
 [`TEST-BASELINE.md`](TEST-BASELINE.md).
+
+## New sets
+
+A new KeyForge set arrives in two halves, and the sync can only do one of them.
+
+**Comes across on its own** — the card implementations (`server/game/cards/NN-CODE/`), their
+tests, the card data, any new keyword or token support in the engine, and the set's entry in
+both `constants.js` files with its tide/token/prophecy flags.
+
+**Does not, and cannot** — everything in [`new-sets.md`](new-sets.md) that lives in a file
+Archon Arena has diverged on: the lobby format list, the sealed random-pick, the `Expansions`
+row and its migration, and the set icons. Taking upstream's version of those would overwrite
+the fork.
+
+So the sync detects the new set — by diffing the expansion registry between the two upstream
+commits, and by spotting new card directories — and puts the outstanding checklist straight in
+the pull request, which is titled `NEW SET …` and labelled `new-set`.
+
+This is the one case where a green suite is actively misleading. **No test fails while a set
+is unregistered**, because there is nothing to test: the cards exist, they work, and players
+simply cannot pick them. Without the checklist a set release would look exactly like a routine
+card fix.
 
 ## Re-anchoring
 
