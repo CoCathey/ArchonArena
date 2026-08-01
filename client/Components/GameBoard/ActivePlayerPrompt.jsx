@@ -365,6 +365,9 @@ const ActivePlayerPrompt = (props) => {
             <Panel
                 title={t(props.phase + ' phase')}
                 titleClass='text-sm font-medium uppercase tracking-wide'
+                // ARCHON (N16): the board is deliberately last in the redesign,
+                // and a phase indicator genuinely belongs centred over the board.
+                titleAlign='center'
                 contentClassName='px-2 py-1.5'
                 className='!w-full !rounded-xl overflow-hidden'
             >
