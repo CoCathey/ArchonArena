@@ -33,7 +33,18 @@
         // relative, which still reads correctly in the in-app centre.
         siteUrl: '',
         blockDisposableEmail: false,
-        requireActivation: false,
+        // ARCHON: on. New accounts start unverified, cannot log in, and get a
+        // confirmation link by email. This was off, which did two things at
+        // once: it skipped the email *and* marked every new account verified,
+        // so anyone could sign up with an address they did not own and start
+        // playing immediately.
+        //
+        // Turning it on makes registration depend on outbound mail. If
+        // lobby.emailFromAddress is unset - or SES is unreachable - the
+        // registration is rolled back rather than left unusable, and the boot
+        // check in server.js warns about it. Set REQUIRE_ACTIVATION=false for
+        // a local instance that has no mail configured.
+        requireActivation: true,
         // Content-Security-Policy mode: 'enforce' | 'report-only' | 'off'.
         // Directives live in server/csp.js. Turn this down to 'report-only' if a
         // deployment needs an origin the policy does not yet allow - violations

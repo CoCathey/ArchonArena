@@ -21,7 +21,8 @@
         "lint:fix": "prettier --write --ignore-unknown '!**/*.{js,jsx,ts,tsx}' . && eslint --fix --ext=js,jsx,ts,tsx .",
         "build": "vite build --config vite.config.mjs",
         "typecheck:client": "tsc -p client/tsconfig.json --noEmit",
-        "migrate": "node server/scripts/migrate.js"
+        "migrate": "node server/scripts/migrate.js",
+        "sync:upstream": "node server/scripts/upstream-sync.js"
     },
     "lint-staged": {
         "!(*.{js,jsx,ts,tsx})": "prettier --ignore-unknown --write",

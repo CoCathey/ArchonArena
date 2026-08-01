@@ -18,6 +18,13 @@ const PatreonService = require('../services/PatreonService');
 const util = require('../util.js');
 const { rateLimit, createFailureThrottle, clientIp } = require('./rateLimit');
 const { renderHtmlEmail, renderTextEmail } = require('../services/emailTemplate');
+const {
+    ACTIVATION_VALID_DAYS,
+    buildActivationToken,
+    isActivationExpired,
+    verifyActivationToken,
+    resendCooldownRemaining
+} = require('../services/activationToken');
 
 // ARCHON: abuse limits on the authentication surface. These endpoints are
 // unauthenticated and are the first thing any credential-stuffing or
@@ -49,6 +56,39 @@ const activationRateLimit = rateLimit({
     windowMs: 60 * 60 * 1000,
     max: 30,
     message: 'Too many activation attempts. Please try again later.'
+});
+// ARCHON: a lost or spam-filtered activation mail used to be permanent - the
+// username was taken and there was no way to ask for another. Tighter than
+// the activation limit because this one sends mail.
+const resendActivationRateLimit = rateLimit({
+    name: 'resend-activation',
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    message: 'Too many activation emails requested. Please try again later.'
+});
+
+/**
+ * ARCHON: token minting, expiry and cooldown live in
+ * server/services/activationToken.js. They are shared by registration, the
+ * activate endpoint and the resend endpoint, and each of the three used to
+ * disagree with the others about the format - see that module for what broke.
+ */
+
+/** The link that lands a player on the activation page. */
+const activationUrl = (req, userId, token) =>
+    `${req.protocol}://${req.get('host')}/activation?id=${userId}&token=${token}`;
+
+/** The activation email, shared by registration and resend. */
+const activationEmail = (appName, username, url) => ({
+    appName,
+    title: 'Confirm your account',
+    paragraphs: [
+        `Someone, hopefully you, asked for an account named ${username} on ${appName}.`,
+        'Confirm it to finish signing up and start playing.',
+        `This link is valid for ${ACTIVATION_VALID_DAYS} days. After that you can ask for a new one from the login page.`
+    ],
+    action: { label: 'Confirm my account', url },
+    footer: 'If you did not request this, you can safely ignore this email.'
 });
 const tokenRateLimit = rateLimit({
     name: 'token-refresh',
@@ -401,51 +441,64 @@ module.exports.init = function (server, options) {
                 registerIp: ip
             };
 
-            if (configService.getValueForSection('lobby', 'requireActivation')) {
-                let expiration = moment().utc().add(7, 'days');
-                let formattedExpiration = expiration.format('YYYYMMDD-HH:mm:ss');
-                let hmac = crypto.createHmac(
-                    'sha512',
+            const requireActivation = configService.getValueForSection(
+                'lobby',
+                'requireActivation'
+            );
+
+            if (requireActivation) {
+                const { token, expiry } = buildActivationToken(
+                    req.body.username,
                     configService.getValueForSection('lobby', 'hmacSecret')
                 );
 
-                let activationToken = hmac
-                    .update(`ACTIVATE ${req.body.username} ${formattedExpiration}`)
-                    .digest('hex');
-
                 newUser.verified = false;
-                newUser.activationToken = activationToken;
-                newUser.activationTokenExpiry = formattedExpiration;
+                newUser.activationToken = token;
+                newUser.activationTokenExpiry = expiry;
             } else {
                 newUser.verified = true;
             }
 
             user = await userService.addUser(newUser);
 
-            if (configService.getValueForSection('lobby', 'requireActivation')) {
-                let url = `${req.protocol}://${req.get('host')}/activation?id=${user.id}&token=${
-                    newUser.activationToken
-                }`;
-                const activation = {
+            if (requireActivation) {
+                const activation = activationEmail(
                     appName,
-                    title: 'Confirm your account',
-                    paragraphs: [
-                        `Someone, hopefully you, asked for an account named ${newUser.username} on ${appName}.`,
-                        'Confirm it to finish signing up and start playing.'
-                    ],
-                    action: { label: 'Confirm my account', url },
-                    footer: 'If you did not request this, you can safely ignore this email.'
-                };
+                    newUser.username,
+                    activationUrl(req, user.id, newUser.activationToken)
+                );
 
-                await emailService.sendEmail(
+                const sent = await emailService.sendEmail(
                     user.email,
                     `${appName} - Account activation`,
                     renderTextEmail(activation),
                     renderHtmlEmail(activation)
                 );
+
+                // ARCHON: sendEmail returns false rather than throwing, so this
+                // used to report success even when nothing was sent - leaving an
+                // account that could never be verified, could never log in, and
+                // whose username was now taken, with no way to retry. Roll the
+                // account back so the name is free and the player can try again
+                // once mail is working.
+                if (!sent) {
+                    logger.error(
+                        `Could not send the activation email for ${user.username}; ` +
+                            'rolling the registration back rather than leaving an unusable account.'
+                    );
+
+                    await userService.deleteUnverifiedUser(user.id);
+
+                    return res.send({
+                        success: false,
+                        message:
+                            'We could not send your confirmation email, so your account was not created. ' +
+                            'Please try again shortly.'
+                    });
+                }
             }
 
-            res.send({ success: true });
+            res.send({ success: true, requiresActivation: !!requireActivation });
 
             try {
                 await getRandomAvatar(user);
@@ -463,11 +516,23 @@ module.exports.init = function (server, options) {
                 return res.send({ success: false, message: 'Invalid parameters' });
             }
 
-            if (!req.body.id.match(/^[a-f\d]{24}$/i)) {
+            // ARCHON: this used to test the id against /^[a-f\d]{24}$/i - a
+            // MongoDB ObjectId. The platform moved to PostgreSQL, where user
+            // ids are integers, so the check rejected every real id and NO
+            // account could ever be activated. Nobody noticed because
+            // requireActivation was off, which meant the endpoint was never
+            // reached in the first place.
+            const userId = parseInt(req.body.id, 10);
+
+            if (
+                !Number.isInteger(userId) ||
+                userId <= 0 ||
+                String(userId) !== String(req.body.id)
+            ) {
                 return res.send({ success: false, message: 'Invalid parameters' });
             }
 
-            let user = await userService.getUserById(req.body.id);
+            let user = await userService.getUserById(userId);
             if (!user) {
                 return res.send({
                     success: false,
@@ -486,25 +551,24 @@ module.exports.init = function (server, options) {
                 });
             }
 
-            let now = moment().utc();
-            if (user.activationTokenExpiry < now) {
-                logger.error('Token expired for %s', user.username);
+            if (isActivationExpired(user.activationTokenExpiry)) {
+                logger.info(`Activation token expired or unparseable for ${user.username}`);
 
                 return res.send({
                     success: false,
-                    message: 'The activation token you have provided has expired.'
+                    message:
+                        'That activation link has expired. Request a new one and we will email you another.'
                 });
             }
 
-            let hmac = crypto.createHmac(
-                'sha512',
+            const tokenMatches = verifyActivationToken(
+                user.username,
+                user.activationTokenExpiry,
+                req.body.token,
                 configService.getValueForSection('lobby', 'hmacSecret')
             );
-            let resetToken = hmac
-                .update('ACTIVATE ' + user.username + ' ' + user.activationTokenExpiry)
-                .digest('hex');
 
-            if (resetToken !== req.body.token) {
+            if (!tokenMatches) {
                 logger.error('Invalid activation token for %s', user.username);
 
                 return res.send({
@@ -527,6 +591,107 @@ module.exports.init = function (server, options) {
             }
 
             res.send({ success: true });
+        })
+    );
+
+    /**
+     * ARCHON: send the activation email again.
+     *
+     * There was no way to do this. If the mail bounced, went to spam, or the
+     * link expired, the account was stuck unverified forever with its username
+     * taken - the player's only option was to register under a different name.
+     *
+     * Two deliberate properties:
+     *
+     * - It never reveals whether the account exists, is already verified, or
+     *   is on cooldown. Every outcome is the same `success: true`, sent before
+     *   the lookup so the response time does not leak the answer either. This
+     *   endpoint would otherwise be a free username *and* verification-status
+     *   oracle over an unauthenticated route.
+     * - It regenerates the token rather than resending the old one, so the
+     *   previous link stops working. That matters when the reason for the
+     *   resend is that the first email went somewhere it should not have.
+     *   This follows from the cooldown below: the token is an HMAC over the
+     *   expiry, which is truncated to the second, so two mints inside the same
+     *   second would produce the same token. Five minutes apart, they cannot.
+     */
+    server.post(
+        '/api/account/resend-activation',
+        resendActivationRateLimit,
+        wrapAsync(async (req, res) => {
+            res.send({ success: true });
+
+            const identifier = req.body && req.body.username;
+            if (!identifier || typeof identifier !== 'string') {
+                return;
+            }
+
+            if (!configService.getValueForSection('lobby', 'requireActivation')) {
+                return;
+            }
+
+            let user = await userService.getUserByUsername(identifier);
+            if (!user) {
+                user = await userService.getUserByEmail(identifier);
+            }
+
+            if (!user || user.verified || user.disabled) {
+                logger.info('Activation resend requested for an account that cannot use one');
+
+                return;
+            }
+
+            if (user.activationTokenExpiry) {
+                const wait = resendCooldownRemaining(user.activationTokenExpiry);
+
+                if (wait > 0) {
+                    logger.info(
+                        `Activation resend for ${user.username} is on cooldown ` +
+                            `for another ${wait.toFixed(1)} minutes`
+                    );
+
+                    return;
+                }
+            }
+
+            const { token, expiry } = buildActivationToken(
+                user.username,
+                configService.getValueForSection('lobby', 'hmacSecret')
+            );
+
+            let stored;
+            try {
+                stored = await userService.setActivationToken(user.id, token, expiry);
+            } catch (err) {
+                logger.error(`Could not re-issue an activation token for ${user.username}`, err);
+
+                return;
+            }
+
+            // Lost the race with an activation that landed in between: the
+            // account is verified now, so sending a link would be wrong.
+            if (!stored) {
+                return;
+            }
+
+            logger.info(`Re-sending the activation email for ${user.username}`);
+
+            const activation = activationEmail(
+                appName,
+                user.username,
+                activationUrl(req, user.id, token)
+            );
+
+            const sent = await emailService.sendEmail(
+                user.email,
+                `${appName} - Account activation`,
+                renderTextEmail(activation),
+                renderHtmlEmail(activation)
+            );
+
+            if (!sent) {
+                logger.error(`Could not re-send the activation email for ${user.username}`);
+            }
         })
     );
 
@@ -676,10 +841,17 @@ module.exports.init = function (server, options) {
                 return res.send({ success: false, message: 'Invalid username/password' });
             }
 
+            // The password was already checked above, so saying the account
+            // exists but is unconfirmed tells the caller nothing they did not
+            // already prove they knew. `needsActivation` lets the login page
+            // offer a resend instead of leaving them at a dead end.
             if (!user.verified) {
                 return res.send({
                     success: false,
-                    message: 'You must verifiy your account before trying to log in'
+                    needsActivation: true,
+                    message:
+                        'Your account has not been confirmed yet. Check your email for the ' +
+                        'confirmation link.'
                 });
             }
 
@@ -1001,7 +1173,15 @@ module.exports.init = function (server, options) {
             let safeUser = updatedUser.getWireSafeDetails();
             let authToken;
 
-            if (!safeUser.disabled && !safeUser.verified) {
+            // ARCHON: this read `!safeUser.verified` - inverted. A profile save
+            // is meant to hand back a fresh token because the claims in the old
+            // one (the username, most obviously) may have just changed; minting
+            // one for an *unverified* account is exactly backwards. It was
+            // harmless only by accident: requireActivation was off so everyone
+            // was verified and the branch never ran, and the client ignores the
+            // token anyway. Now that unverified accounts genuinely exist, make
+            // the condition say what it meant.
+            if (!safeUser.disabled && safeUser.verified) {
                 authToken = jwt.sign(safeUser, configService.getValue('secret'), {
                     expiresIn: '5m'
                 });

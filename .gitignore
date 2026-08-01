@@ -28,6 +28,10 @@ coverage
 # "Configure Xcode project" step.
 !mobile/app.json
 !mobile/eas.json
+# ARCHON: how far we have pulled in from keyteki. It has to be tracked - it is
+# the sync's memory, and an ignored one would silently never advance, so every
+# run would re-propose the same upstream changes forever.
+!upstream-sync.json
 server/events.txt
 .DS_Store
 config/local*

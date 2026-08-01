@@ -24,6 +24,11 @@
         // player who forgets their password cannot recover their account.
         emailFromAddress: 'EMAIL_FROM_ADDRESS',
         emailReplyTo: 'EMAIL_REPLY_TO',
+        // __format json so REQUIRE_ACTIVATION=false arrives as the boolean
+        // false. A bare string mapping would hand the config the string
+        // "false", which is truthy, and the override would do the opposite of
+        // what whoever set it intended.
+        requireActivation: { __name: 'REQUIRE_ACTIVATION', __format: 'json' },
         // Public origin for absolute links in notification email.
         siteUrl: 'SITE_URL',
         awsSesRegion: 'AWS_SES_REGION',

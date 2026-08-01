@@ -359,13 +359,64 @@ class UserService extends EventEmitter {
     async activateUser(user) {
         try {
             await db.query(
-                'UPDATE "Users" SET "ActivationToken" = NULL, "ActivationExpiry" = NULL, "Verified" = true WHERE "Id" = $1',
+                // ARCHON: this named "ActivationExpiry", which is not a column
+                // on Users - the column is "ActivationTokenExpiry". Every
+                // activation therefore threw and reported a generic failure.
+                'UPDATE "Users" SET "ActivationToken" = NULL, "ActivationTokenExpiry" = NULL, ' +
+                    '"Verified" = true WHERE "Id" = $1',
                 [user.id]
             );
         } catch (err) {
             logger.error('Failed to activate user', err);
 
             throw new Error('Error activating user');
+        }
+    }
+
+    /**
+     * ARCHON: re-issue an activation token, for the resend endpoint.
+     *
+     * Guarded on "Verified" = false so a resend can never reopen an account
+     * that is already activated, however stale the caller's view of the user
+     * is. Returns whether a row was actually updated.
+     */
+    async setActivationToken(userId, token, tokenExpiry) {
+        try {
+            const rows = await db.query(
+                'UPDATE "Users" SET "ActivationToken" = $1, "ActivationTokenExpiry" = $2 ' +
+                    'WHERE "Id" = $3 AND "Verified" = false RETURNING "Id"',
+                [token, tokenExpiry, userId]
+            );
+
+            return !!(rows && rows.length > 0);
+        } catch (err) {
+            logger.error('Failed to set activation token', err);
+
+            throw new Error('Error setting activation token');
+        }
+    }
+
+    /**
+     * ARCHON: undo a registration whose activation email could not be sent.
+     *
+     * Deliberately narrow: it will only remove an account that is still
+     * unverified and has an activation token outstanding, so it can never be
+     * turned into a way to delete a real player. A brand-new account has no
+     * decks, games or ratings attached, so there is nothing to cascade.
+     */
+    async deleteUnverifiedUser(userId) {
+        try {
+            const rows = await db.query(
+                'DELETE FROM "Users" WHERE "Id" = $1 AND "Verified" = false ' +
+                    'AND "ActivationToken" IS NOT NULL RETURNING "Id"',
+                [userId]
+            );
+
+            return !!(rows && rows.length > 0);
+        } catch (err) {
+            logger.error('Failed to roll back an unverified registration', err);
+
+            return false;
         }
     }
 

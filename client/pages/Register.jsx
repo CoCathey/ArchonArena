@@ -1,10 +1,11 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { Formik } from 'formik';
 import * as yup from 'yup';
 import { Button, Input, Label, toast } from '@heroui/react';
 
 import AlertPanel from '../Components/Site/AlertPanel.jsx';
+import CheckYourEmail from '../Components/Site/CheckYourEmail.jsx';
 import Panel from '../Components/Site/Panel.jsx';
 import Link from '../Components/Navigation/Link.jsx';
 import SsoButton from '../Components/Site/SsoButton.jsx';
@@ -21,25 +22,41 @@ const Register = () => {
     const [registerAccount, registerState] = useRegisterAccountMutation();
     const [loginAccount] = useLoginAccountMutation();
     const submitting = useRef(false);
+    // Set when the server tells us the new account needs confirming; swaps the
+    // form out for the check-your-email panel.
+    const [pending, setPending] = useState(null);
 
     // ARCHON: after a successful registration, log the new account straight
-    // in and drop them into the setup wizard. If the server requires email
-    // verification first, the auto-login is refused and we fall back to the
-    // old "verify then log in" flow.
+    // in and drop them into the setup wizard - unless the server says the
+    // account needs email confirmation first.
+    //
+    // That case used to be handled by *attempting* the auto-login, letting it
+    // fail, and then telling the player "you can now proceed to login" - which
+    // was simply untrue, because login refuses an unverified account. We now
+    // branch on the server's `requiresActivation` instead of guessing from a
+    // failure, so the two paths cannot disagree.
     const onSubmit = async (values) => {
         if (submitting.current) {
             return;
         }
         submitting.current = true;
 
+        let registration;
         try {
-            await registerAccount({
+            registration = await registerAccount({
                 username: values.username,
                 password: values.password,
                 email: values.email
             }).unwrap();
         } catch {
             // errorBar below shows the server's message
+            submitting.current = false;
+
+            return;
+        }
+
+        if (registration?.requiresActivation) {
+            setPending({ username: values.username, email: values.email });
             submitting.current = false;
 
             return;
@@ -106,6 +123,14 @@ const Register = () => {
             .oneOf([yup.ref('password'), null], t('The passwords you have entered do not match'))
     });
     const initialValues = { username: '', email: '', password: '', password1: '' };
+
+    if (pending) {
+        return (
+            <div className='mx-auto w-full max-w-2xl'>
+                <CheckYourEmail username={pending.username} email={pending.email} />
+            </div>
+        );
+    }
 
     return (
         <div className='mx-auto w-full max-w-2xl'>
