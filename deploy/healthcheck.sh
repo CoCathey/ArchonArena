@@ -228,18 +228,44 @@ for var in SECRET HMAC_SECRET DB_USER DB_PASSWORD; do
         bad "$var is empty or missing" "edit /opt/archonarena/.env.production, then: $DC up -d lobby node-0"
     fi
 done
-# Transactional email. Without a sender address the app silently drops every
-# activation and password-reset mail, so a player who forgets their password is
-# locked out permanently. This is a FAIL on a public site, not a warning.
+# Transactional email. How bad a gap here is depends on whether verification is
+# required: with it on, registration DEPENDS on a send succeeding (a failure
+# rolls the account back), so broken mail means the site accepts no new accounts
+# at all - not merely that password reset is unavailable.
+#
+# REQUIRE_ACTIVATION unset or empty means the default, which is on.
+if grep -qE "^REQUIRE_ACTIVATION=false" .env.production 2>/dev/null; then
+    activation_on=0
+else
+    activation_on=1
+fi
+
+if [ "$activation_on" -eq 1 ]; then
+    email_consequence="NO ACCOUNT CAN BE REGISTERED (verification is required) and no password reset can be sent"
+    # Only worth offering when it would actually change anything.
+    email_optout="   —   or set REQUIRE_ACTIVATION=false to keep sign-ups open without email"
+else
+    email_consequence="no password reset can be sent - a player who forgets their password is locked out permanently"
+    email_optout=""
+fi
+
 if grep -qE "^EMAIL_FROM_ADDRESS=.+" .env.production 2>/dev/null; then
-    ok "EMAIL_FROM_ADDRESS set (activation + password reset can send)"
+    ok "EMAIL_FROM_ADDRESS set"
+    # NOT a warning: the SESv2 client has no default region and the send fails
+    # outright with "Region is missing". This used to say the SDK falls back to
+    # a default, which is simply untrue and would send you looking elsewhere.
     if grep -qE "^AWS_SES_REGION=.+" .env.production 2>/dev/null; then
         ok "AWS_SES_REGION set"
+        # Configured is not the same as working. Only an actual send proves that,
+        # and a health check must not send mail on every run.
+        ok "email configured - prove it sends with: $DC exec lobby npm run check:email -- you@example.com"
     else
-        warn "AWS_SES_REGION empty - SES falls back to the SDK default region" "set AWS_SES_REGION in /opt/archonarena/.env.production"
+        bad "AWS_SES_REGION empty - SES cannot send without a region, so $email_consequence" "set AWS_SES_REGION (the region your SES identity is verified in) in /opt/archonarena/.env.production, then: $DC up -d lobby"
     fi
 else
-    bad "EMAIL_FROM_ADDRESS empty or missing - NO password reset or activation email can be sent" "set EMAIL_FROM_ADDRESS (a verified SES identity) in /opt/archonarena/.env.production, then: $DC up -d lobby"
+    # config/production.json5 hardcodes a sender, so the app's own startup guard
+    # sees one and stays silent. This file is the only place the gap shows.
+    bad "EMAIL_FROM_ADDRESS empty or missing - $email_consequence" "set EMAIL_FROM_ADDRESS (a verified SES identity) in /opt/archonarena/.env.production, then: $DC up -d lobby${email_optout}"
 fi
 
 if grep -qE "^DOK_API_KEY=.+" .env.production 2>/dev/null; then
