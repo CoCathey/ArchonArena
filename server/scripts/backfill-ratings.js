@@ -46,10 +46,15 @@ async function main() {
         process.exit(1);
     }
 
-    // Exactly the population the live hook would have rated: finished, two
-    // players, a winner, and no RatingHistory yet. Whether it is *actually*
-    // ratable (excluded win reason, unrated tournament) is processGame's call,
-    // not ours - duplicating those rules here would let the two drift apart.
+    // Games the live hook should have rated and did not: finished, two players,
+    // a winner, no RatingHistory - minus the two populations that are
+    // *permanently* unratable by design, so this list stays actionable rather
+    // than accumulating games that will never rate no matter how often it runs.
+    // That matters because the health check alarms on it being non-empty.
+    //
+    // processGame remains the authority on whether any given game rates; these
+    // filters only decide what is worth reporting. If they ever disagree, the
+    // game is simply reported and then declines to rate, which is handled.
     const candidates = await db.query(
         'SELECT g."Id", g."GameId", g."FinishedAt", g."GameFormat", g."WinReason" ' +
             'FROM "Games" g ' +
@@ -57,8 +62,16 @@ async function main() {
             'AND g."WinnerId" IS NOT NULL ' +
             'AND (SELECT count(*) FROM "GamePlayers" gp WHERE gp."GameId" = g."Id") = 2 ' +
             'AND NOT EXISTS (SELECT 1 FROM "RatingHistory" rh WHERE rh."GameId" = g."Id") ' +
+            // Rematches and similar are excluded from rating on purpose.
+            'AND (g."WinReason" IS NULL OR NOT (g."WinReason" = ANY($1))) ' +
+            // A game in an event whose organiser marked it unrated never
+            // touches the ladder, by design.
+            'AND NOT EXISTS (' +
+            'SELECT 1 FROM "TournamentMatchGames" tmg ' +
+            'JOIN "Tournaments" t ON t."Id" = tmg."TournamentId" ' +
+            'WHERE tmg."GameUuid" = g."GameId" AND t."RatedGames" = false) ' +
             'ORDER BY g."FinishedAt" ASC',
-        []
+        [config.excludedWinReasons || []]
     );
 
     const games = limit && limit > 0 ? candidates.slice(0, limit) : candidates;

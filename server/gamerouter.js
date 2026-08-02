@@ -262,15 +262,52 @@ class GameRouter extends EventEmitter {
 
                 break;
             case 'GAMEWIN':
-                // ARCHON: rate the game once its result is persisted. Best
-                // effort and idempotent; never blocks the game flow. The
-                // lobby also listens so tournament matches auto-report.
+                // ARCHON: persist the result, then save the replay and rate the
+                // game. Best effort and idempotent; never blocks the game flow.
+                // The lobby also listens so tournament matches auto-report.
+                //
+                // Saving the replay and rating the game are INDEPENDENT
+                // consequences of a game finishing, and are run that way. They
+                // used to be chained - `update -> saveReplay -> processGame` -
+                // which quietly made rating conditional on the replay working.
+                // A deployment whose database was missing "GameReplays" hit
+                // exactly that: saveReplay rejected, the chain skipped straight
+                // to the catch, and a month of games finished normally without
+                // ever reaching the ladder. Nothing was broken about rating.
+                //
+                // Rating still runs after `update`, because it reads the rows
+                // that writes. Only the replay dependency is removed.
                 Promise.resolve(this.gameService.update(message.arg.game))
                     .then(() =>
-                        this.gameService.saveReplay(message.arg.game.gameId, message.arg.replay)
+                        Promise.allSettled([
+                            this.gameService.saveReplay(
+                                message.arg.game.gameId,
+                                message.arg.replay
+                            ),
+                            this.ratingService.processGame(message.arg.game.gameId)
+                        ])
                     )
-                    .then(() => this.ratingService.processGame(message.arg.game.gameId))
-                    .catch((err) => logger.error('Failed to save/rate finished game', err));
+                    .then(([replay, rating]) => {
+                        // Reported separately so the log names which one failed.
+                        // "Failed to save/rate" told you neither.
+                        if (replay.status === 'rejected') {
+                            logger.error(
+                                `Failed to save the replay for game ${message.arg.game.gameId}`,
+                                replay.reason
+                            );
+                        }
+                        if (rating.status === 'rejected') {
+                            logger.error(
+                                `Failed to rate game ${message.arg.game.gameId}`,
+                                rating.reason
+                            );
+                        }
+                    })
+                    .catch((err) =>
+                        // Only `update` reaches here now. If that failed there is
+                        // no persisted game to replay or rate in the first place.
+                        logger.error('Failed to persist finished game', err)
+                    );
 
                 this.emit('onGameWin', message.arg.game);
                 break;

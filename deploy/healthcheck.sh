@@ -173,7 +173,10 @@ fi
 # not have yet. The ledger makes that answerable instead of a guess.
 ledger="$(psql_q $'SELECT COUNT(*) FROM information_schema.tables WHERE table_name=\'SchemaMigrations\'')"
 if [ "${ledger:-0}" -eq 0 ] 2>/dev/null; then
-    bad "no migration ledger - schema state is untracked" "$DC exec lobby npm run migrate -- --baseline"
+    # NOT --baseline: on a database that is genuinely behind the code, that
+    # marks every migration applied without running any and the missing tables
+    # stay missing. --status first, then baseline only as far as it has got.
+    bad "no migration ledger - schema state is untracked" "$DC exec lobby npm run migrate -- --status   (then --baseline-through <file>, see docs/DEPLOYMENT.md)"
 else
     applied="$(psql_q 'SELECT COUNT(*) FROM "SchemaMigrations"')"
     onDisk="$(ls -1 server/db/schema/migrations/*.sql 2>/dev/null | wc -l | tr -d '[:space:]')"
@@ -182,6 +185,24 @@ else
     else
         bad "${applied}/${onDisk} migrations applied - the database is behind the code" "$DC exec lobby npm run migrate"
     fi
+fi
+
+# Finished games that should have rated and did not. This is the check that was
+# missing when a broken replay save silently stopped the ladder for a month:
+# every other signal was green, because nothing else was wrong.
+#
+# Runs the backfill in its default dry-run mode rather than repeating its query
+# here, so there is one definition of "should have rated" instead of two that
+# can drift. Read-only.
+unrated_out="$($DC exec -T lobby npm run backfill:ratings 2>/dev/null)"
+if echo "$unrated_out" | grep -q 'No unrated finished games'; then
+    ok "all finished games are rated"
+elif echo "$unrated_out" | grep -qE '[0-9]+ finished game\(s\) have no rating rows'; then
+    unrated_n="$(echo "$unrated_out" | grep -oE '^[0-9]+ finished game' | grep -oE '^[0-9]+')"
+    bad "${unrated_n:-some} finished game(s) were never rated" "$DC exec lobby npm run backfill:ratings          # dry run, then add -- --commit"
+else
+    # Could not tell - do not claim either way.
+    warn "could not check for unrated games" "run: $DC exec lobby npm run backfill:ratings"
 fi
 
 users="$(psql_q 'SELECT COUNT(*) FROM "Users"')"
