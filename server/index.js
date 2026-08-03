@@ -52,20 +52,41 @@ function assertSecureSecrets() {
  * to start would turn a closed front door into an outage.
  */
 function warnIfVerificationCannotWork() {
-    if (!configService.getValueForSection('lobby', 'requireActivation')) {
+    const EmailService = require('./services/EmailService');
+    // describeConfiguration is the single authority on whether this deployment
+    // can send - shared with `npm run check:email` and the health check, so they
+    // cannot drift into telling you different things.
+    const configuration = new EmailService(configService).describeConfiguration();
+    const required = !!configService.getValueForSection('lobby', 'requireActivation');
+
+    for (const warning of configuration.warnings) {
+        logger.warn(`Email configuration: ${warning}`);
+    }
+
+    if (configuration.ready) {
         return;
     }
 
-    if (configService.getValueForSection('lobby', 'emailFromAddress')) {
-        return;
+    const detail = `Transport is "${configuration.transport}". ${configuration.problems.join(' ')}`;
+
+    if (required) {
+        logger.error(
+            `Email is not configured, and verification is required: ${detail} ` +
+                'NO NEW ACCOUNT CAN BE REGISTERED until this is fixed, because a registration ' +
+                'whose confirmation mail cannot be sent is rolled back. Set ' +
+                'REQUIRE_ACTIVATION=false to keep sign-ups open without email.'
+        );
+    } else {
+        logger.warn(
+            `Email is not configured: ${detail} ` +
+                'Verification is off so sign-ups still work, but no password reset can be sent - ' +
+                'a player who forgets their password has no way back into their account.'
+        );
     }
 
-    logger.error(
-        'Email verification is required (lobby.requireActivation) but no sender address is ' +
-            'configured (lobby.emailFromAddress / EMAIL_FROM_ADDRESS). No new account can be ' +
-            'registered until this is set. Set REQUIRE_ACTIVATION=false if this instance is ' +
-            'deliberately running without email.'
-    );
+    // Being configured is not the same as working, and only a send proves the
+    // difference. Say so here rather than let a quiet boot imply otherwise.
+    logger.info('Verify email actually sends with: npm run check:email -- you@example.com');
 }
 
 async function runServer() {

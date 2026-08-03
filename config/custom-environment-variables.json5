@@ -24,6 +24,16 @@
         // player who forgets their password cannot recover their account.
         emailFromAddress: 'EMAIL_FROM_ADDRESS',
         emailReplyTo: 'EMAIL_REPLY_TO',
+        // 'auto' | 'smtp' | 'ses'. Rarely needed - leaving it unset picks SMTP
+        // when SMTP_HOST is set and SES otherwise.
+        emailTransport: 'EMAIL_TRANSPORT',
+        smtpHost: 'SMTP_HOST',
+        // __format json so these arrive as a number and a boolean. A bare string
+        // mapping would hand the config "587" and "false", and "false" is truthy.
+        smtpPort: { __name: 'SMTP_PORT', __format: 'json' },
+        smtpUser: 'SMTP_USER',
+        smtpPassword: 'SMTP_PASSWORD',
+        smtpSecure: { __name: 'SMTP_SECURE', __format: 'json' },
         // __format json so REQUIRE_ACTIVATION=false arrives as the boolean
         // false. A bare string mapping would hand the config the string
         // "false", which is truthy, and the override would do the opposite of

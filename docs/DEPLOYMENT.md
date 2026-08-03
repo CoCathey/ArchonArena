@@ -42,110 +42,133 @@ Delete any Porkbun "parked domain" ALIAS/CNAME records on the apex first — the
 Wait for `dig +short archonarena.com` to return the server IP before first boot, because
 Let's Encrypt validates over the domain.
 
-## 3. Transactional email (AWS SES)
+## 3. Transactional email
 
 **Do this before opening sign-ups.** Email verification is on by default
 (`lobby.requireActivation`), so registration depends on outbound mail: if a send fails the
-account is rolled back rather than left unusable, which means a site with broken email takes
-**no new accounts at all**. Password reset depends on it either way — without it, a player
-who forgets their password has no route back into their account.
+account is rolled back, which means a site with broken email takes **no new accounts at all**.
+Password reset depends on it either way — without it, a player who forgets their password has
+no route back into their account.
 
 If you are not ready, that is fine, but make it a decision: set `REQUIRE_ACTIVATION=false`
 in `.env.production`, accepting that people can play under addresses they do not own until
 you turn it back on.
 
-### 3.1 Verify the domain
+There are two transports. `lobby.emailTransport` defaults to `auto`, which picks **SMTP** when
+`SMTP_HOST` is set and **SES** otherwise — so you configure one of the two and nothing else.
 
-In the SES console, in **one region** — `us-east-1` unless you have a reason — go to
-**Identities → Create identity → Domain**, enter `archonarena.com`, and leave **Easy DKIM**
-on with RSA_2048.
+|                    | **SMTP** (§3a)                        | **AWS SES** (§3b)                      |
+| ------------------ | ------------------------------------- | -------------------------------------- |
+| Account            | Sign up with an email address         | Needs an AWS account (card required)   |
+| Setup              | DNS records, then paste an API key    | DNS records, IAM user, sandbox request |
+| Time to first send | Under an hour                         | About a day (sandbox approval)         |
+| Cost               | Free tiers usually cover a small site | Cheapest at volume (~$0.10 per 1,000)  |
 
-SES gives you three CNAME records. Add them at Porkbun:
+**Take SMTP unless you already use AWS.** SES is meaningfully cheaper only at volumes this
+site is nowhere near.
 
-| Type  | Host                  | Answer                        | TTL |
-| ----- | --------------------- | ----------------------------- | --- |
-| CNAME | `<token1>._domainkey` | `<token1>.dkim.amazonses.com` | 600 |
-| CNAME | `<token2>._domainkey` | `<token2>.dkim.amazonses.com` | 600 |
-| CNAME | `<token3>._domainkey` | `<token3>.dkim.amazonses.com` | 600 |
+### 3a. SMTP (recommended)
 
-Porkbun appends the domain automatically, so enter only the host part shown above — a host
-of `<token>._domainkey.archonarena.com` becomes
-`<token>._domainkey.archonarena.com.archonarena.com` and will never verify.
+Works with any provider that speaks SMTP — Resend, Brevo, Postmark, Mailgun, Mailjet, a
+company relay. The steps are the same for all of them:
 
-Verification usually completes within the hour. Also add an SPF record if the apex has no
-`TXT` yet — `v=spf1 include:amazonses.com ~all` — and, once mail is flowing, a DMARC record
-at `_dmarc`: `v=DMARC1; p=none; rua=mailto:you@archonarena.com`. Neither is required for
-SES to accept a send; both materially affect whether Gmail puts your activation mail in
-the inbox or the spam folder.
+1. **Sign up** and add `archonarena.com` as a sending domain.
+2. **Verify the domain.** They give you DNS records — typically DKIM `CNAME`s and a `TXT`.
+   Add them at Porkbun.
 
-### 3.2 Leave the sandbox
+    > Porkbun appends the domain automatically. Enter the host part only: `abc._domainkey`,
+    > **not** `abc._domainkey.archonarena.com`, which becomes
+    > `abc._domainkey.archonarena.com.archonarena.com` and never verifies. This is the most
+    > common way this step fails.
 
-A new SES account is sandboxed: it can only send **to** verified addresses, and is capped at
-200 messages/day. That is enough to test with your own address and useless for a public
-site.
+    Add SPF too if the apex has no `TXT` yet — the provider will tell you the value. Neither
+    SPF nor DKIM is required for a send to be _accepted_; both strongly affect whether it
+    lands in the inbox rather than spam.
 
-**Account dashboard → Request production access.** Say what the mail is (account activation
-and password reset for a game platform), that it is transactional and triggered by the
-recipient's own action, and that there is no marketing list. Approval typically takes a day
-or so. Until it lands, the preflight below will only succeed for addresses you have verified
-individually.
+3. **Create an API key** (or SMTP credentials) and fill in `.env.production`:
 
-### 3.3 Credentials
+    ```sh
+    EMAIL_FROM_ADDRESS=noreply@archonarena.com   # must be at the verified domain
+    EMAIL_REPLY_TO=support@archonarena.com       # optional; replies to noreply@ vanish
+    SMTP_HOST=smtp.your-provider.com
+    SMTP_PORT=587
+    SMTP_USER=<username or "apikey">
+    SMTP_PASSWORD=<the API key>
+    ```
 
-Create an IAM user with programmatic access and exactly this policy — SES has no
-"send-only" managed policy, and the broad ones grant far more than sending:
+    Leave `SMTP_SECURE` blank. Implicit TLS is inferred on port 465 and STARTTLS on anything
+    else, which is what providers expect. Setting it wrong usually shows up as a connection
+    that hangs rather than an error that says so.
 
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": ["ses:SendEmail", "ses:SendRawEmail"],
-            "Resource": "*"
-        }
-    ]
-}
-```
+    Most providers want an **API key** as the password, not your account password.
 
-Then fill in `.env.production`:
+4. **Restart and prove it** — §3c.
 
-```sh
-EMAIL_FROM_ADDRESS=noreply@archonarena.com   # must be on the verified domain
-EMAIL_REPLY_TO=support@archonarena.com       # optional, but replies to noreply@ vanish
-AWS_SES_REGION=us-east-1                     # the SAME region the identity is in
-AWS_ACCESS_KEY_ID=<key id>
-AWS_SECRET_ACCESS_KEY=<secret>
-```
+### 3b. AWS SES (alternative)
 
-The region must match the identity's region. An identity verified in `us-east-1` does not
-exist in `eu-west-1`, and the send is rejected as unverified — which reads like a DNS
-problem and is not.
+Only worth it if you already have an AWS account or expect real volume.
 
-> A variable exported in the shell **overrides `--env-file`**. If the server has a stale
-> `AWS_ACCESS_KEY_ID` in root's profile or a CI runner's environment, it silently wins over
-> `.env.production` and you will debug the wrong credential. `docker compose ... config`
-> prints what the container will actually receive — trust that over the file.
+1. **Verify the domain.** SES console → **Identities → Create identity → Domain** →
+   `archonarena.com`, Easy DKIM on, RSA_2048. Note the region. Add the three CNAMEs it gives
+   you at Porkbun, with the same host-part caveat as above.
+2. **Leave the sandbox.** A new SES account can only send _to_ verified addresses and is
+   capped at 200 messages/day. **Account dashboard → Request production access**; say it is
+   transactional mail (activation and password reset) triggered by the recipient's own
+   action, with no marketing list. Roughly a day.
+3. **Credentials.** An IAM user with exactly this policy — SES has no send-only managed
+   policy and the broad ones grant far more:
 
-### 3.4 Prove it works
+    ```json
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            { "Effect": "Allow", "Action": ["ses:SendEmail", "ses:SendRawEmail"], "Resource": "*" }
+        ]
+    }
+    ```
+
+    Then in `.env.production` — leaving `SMTP_HOST` blank so SES is selected:
+
+    ```sh
+    EMAIL_FROM_ADDRESS=noreply@archonarena.com
+    AWS_SES_REGION=us-east-1     # the SAME region the identity is verified in
+    AWS_ACCESS_KEY_ID=<key id>
+    AWS_SECRET_ACCESS_KEY=<secret>
+    ```
+
+    The region must match the identity's. An identity verified in `us-east-1` does not exist
+    in `eu-west-1`, and the send is rejected as unverified — which reads like a DNS problem
+    and is not.
+
+### 3c. Prove it works
 
 ```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d lobby
 docker compose -f docker-compose.prod.yml --env-file .env.production \
   exec lobby npm run check:email -- you@example.com
 ```
 
-This sends a real message through the same config and client the app uses, prints what it
-resolved, and turns an AWS failure into the thing to go and fix. Run it after any change to
-the email settings, and again after a redeploy.
+This sends a real message through the same configuration and client the app uses, prints
+which transport it chose and what it resolved, and translates a failure into the thing to go
+and fix — bad credentials, unresolvable host, wrong port or TLS mode, unverified sender,
+SES sandbox, missing IAM permission. Run it after any change to the email settings, and
+again after a redeploy.
+
+> A variable exported in the shell **overrides `--env-file`**. If the server has a stale
+> `AWS_ACCESS_KEY_ID` or `SMTP_PASSWORD` in root's profile, it silently wins over
+> `.env.production` and you will debug the wrong credential. `docker compose ... config`
+> prints what the container will actually receive — trust that over the file.
 
 Two things it deliberately does not claim:
 
 -   **Accepted is not delivered.** Open the inbox, and check spam — activation mail in the
     spam folder costs you sign-ups exactly as effectively as mail that was never sent.
--   **A quiet boot log is not proof.** The server warns at startup when verification is on
-    with no sender address, but `config/production.json5` sets one, so in production that
-    guard is always satisfied and always silent. It cannot tell you the region or credentials
-    are missing. Only an actual send can.
+-   **A quiet boot log is not proof.** The server checks at startup whether the settings look
+    complete, and says so when they do not. It cannot know whether the provider accepts them,
+    the DNS is verified, or the key is still live. Only an actual send can.
+
+Finally, once it works, register a throwaway account on the live site and click the link.
+`check:email` proves the sender; only that proves the whole flow.
 
 ## 4. First boot
 

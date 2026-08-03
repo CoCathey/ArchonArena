@@ -70,6 +70,15 @@ services:
             # all. Run `npm run check:email` after any change here.
             - EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-}
             - EMAIL_REPLY_TO=${EMAIL_REPLY_TO:-}
+            # SMTP: any provider that speaks it. Setting SMTP_HOST is what
+            # selects this over SES; EMAIL_TRANSPORT only needs setting to
+            # override that choice.
+            - EMAIL_TRANSPORT=${EMAIL_TRANSPORT:-}
+            - SMTP_HOST=${SMTP_HOST:-}
+            - SMTP_PORT=${SMTP_PORT:-}
+            - SMTP_USER=${SMTP_USER:-}
+            - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+            - SMTP_SECURE=${SMTP_SECURE:-}
             - AWS_SES_REGION=${AWS_SES_REGION:-}
             - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
             - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}

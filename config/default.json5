@@ -26,6 +26,19 @@
         port: 4000,
         appName: 'Archon Arena',
         emailFromAddress: 'noreply@archonarena.com',
+        // ARCHON: which transport sends the mail. 'auto' (the default) picks
+        // SMTP when smtpHost is set and AWS SES otherwise, so an existing SES
+        // deployment is unaffected and a new one only fills in what it has.
+        // Force it with 'smtp' or 'ses' if the automatic choice is wrong.
+        emailTransport: 'auto',
+        // SMTP, for any provider that speaks it - Resend, Brevo, Postmark,
+        // Mailgun, a company relay. Blank host means SES is used instead.
+        // smtpSecure is inferred from the port when unset: implicit TLS on 465,
+        // STARTTLS on anything else.
+        smtpHost: '',
+        smtpPort: 587,
+        smtpUser: '',
+        smtpPassword: '',
         // ARCHON: public origin, used to build absolute links in notification
         // emails. Activation and reset mail derive this from the request, but a
         // notification raised by a background job (a paired round, a nightly

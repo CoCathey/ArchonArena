@@ -233,40 +233,42 @@ done
 # rolls the account back), so broken mail means the site accepts no new accounts
 # at all - not merely that password reset is unavailable.
 #
-# REQUIRE_ACTIVATION unset or empty means the default, which is on.
-if grep -qE "^REQUIRE_ACTIVATION=false" .env.production 2>/dev/null; then
-    activation_on=0
-else
-    activation_on=1
-fi
+# The app is asked rather than the env file re-parsed here: EmailService knows
+# which transport is in use (SMTP or SES) and what each one needs, and one
+# authority cannot drift into disagreeing with itself.
+email_state="$($DC exec -T lobby node -e "
+const ConfigService = require('./server/services/ConfigService');
+const EmailService = require('./server/services/EmailService');
+const c = new EmailService(new ConfigService()).describeConfiguration();
+const where = c.transport === 'smtp' ? (c.smtpHost || 'no host') : (c.sesRegion || 'no region');
+console.log([c.ready ? 'READY' : 'NOTREADY', c.transport, where, c.problems.join(' ')].join('|'));
+" 2>/dev/null | tail -1)"
 
-if [ "$activation_on" -eq 1 ]; then
-    email_consequence="NO ACCOUNT CAN BE REGISTERED (verification is required) and no password reset can be sent"
-    # Only worth offering when it would actually change anything.
-    email_optout="   —   or set REQUIRE_ACTIVATION=false to keep sign-ups open without email"
-else
+if grep -qE "^REQUIRE_ACTIVATION=false" .env.production 2>/dev/null; then
     email_consequence="no password reset can be sent - a player who forgets their password is locked out permanently"
     email_optout=""
+else
+    email_consequence="NO ACCOUNT CAN BE REGISTERED (verification is required) and no password reset can be sent"
+    email_optout="   —   or set REQUIRE_ACTIVATION=false to keep sign-ups open without email"
 fi
 
-if grep -qE "^EMAIL_FROM_ADDRESS=.+" .env.production 2>/dev/null; then
-    ok "EMAIL_FROM_ADDRESS set"
-    # NOT a warning: the SESv2 client has no default region and the send fails
-    # outright with "Region is missing". This used to say the SDK falls back to
-    # a default, which is simply untrue and would send you looking elsewhere.
-    if grep -qE "^AWS_SES_REGION=.+" .env.production 2>/dev/null; then
-        ok "AWS_SES_REGION set"
-        # Configured is not the same as working. Only an actual send proves that,
-        # and a health check must not send mail on every run.
-        ok "email configured - prove it sends with: $DC exec lobby npm run check:email -- you@example.com"
-    else
-        bad "AWS_SES_REGION empty - SES cannot send without a region, so $email_consequence" "set AWS_SES_REGION (the region your SES identity is verified in) in /opt/archonarena/.env.production, then: $DC up -d lobby"
-    fi
-else
-    # config/production.json5 hardcodes a sender, so the app's own startup guard
-    # sees one and stays silent. This file is the only place the gap shows.
-    bad "EMAIL_FROM_ADDRESS empty or missing - $email_consequence" "set EMAIL_FROM_ADDRESS (a verified SES identity) in /opt/archonarena/.env.production, then: $DC up -d lobby${email_optout}"
-fi
+case "$email_state" in
+    READY*)
+        email_transport="$(echo "$email_state" | cut -d'|' -f2)"
+        email_where="$(echo "$email_state" | cut -d'|' -f3)"
+        ok "email configured (${email_transport} via ${email_where})"
+        # Configured is not working. Only a send proves that, and a health check
+        # must not send mail on every run.
+        ok "prove it actually sends: $DC exec lobby npm run check:email -- you@example.com"
+        ;;
+    NOTREADY*)
+        email_problems="$(echo "$email_state" | cut -d'|' -f4)"
+        bad "email is not configured - $email_consequence" "$email_problems  See docs/DEPLOYMENT.md section 3${email_optout}"
+        ;;
+    *)
+        warn "could not determine the email configuration" "lobby may be mid-restart; re-run, or: $DC exec lobby npm run check:email -- you@example.com"
+        ;;
+esac
 
 if grep -qE "^DOK_API_KEY=.+" .env.production 2>/dev/null; then
     ok "DOK_API_KEY set (SAS + bulk deck import enabled)"
