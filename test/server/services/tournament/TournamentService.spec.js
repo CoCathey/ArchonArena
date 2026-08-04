@@ -147,6 +147,9 @@ const createFakeDb = () => {
                     row.CurrentRound = params[1];
                     row.RoundCount = params[2];
                     row.RoundStartedAt = new Date();
+                    row.RoundEndsAt = row.RoundTimerMinutes
+                        ? new Date(Date.now() + row.RoundTimerMinutes * 60 * 1000)
+                        : null;
                 }
                 return [];
             }
@@ -159,14 +162,31 @@ const createFakeDb = () => {
                 return [];
             }
 
+            // The round clock, adjusted rather than restarted.
+            if (sql.includes('SET "RoundEndsAt" = COALESCE')) {
+                const row = state.tournaments.find((entry) => entry.Id === params[0]);
+                if (row) {
+                    const from = row.RoundEndsAt ? row.RoundEndsAt.getTime() : Date.now();
+                    row.RoundEndsAt = new Date(from + params[1] * 60 * 1000);
+                }
+                return [];
+            }
+
             if (sql.includes('UPDATE "Tournaments"')) {
                 const row = state.tournaments.find((entry) => entry.Id === params[0]);
+                // Starting a round sets its deadline from the event's timer.
+                const startClock = () => {
+                    row.RoundStartedAt = new Date();
+                    row.RoundEndsAt = row.RoundTimerMinutes
+                        ? new Date(Date.now() + row.RoundTimerMinutes * 60 * 1000)
+                        : null;
+                };
                 if (row) {
                     if (sql.includes("'active'")) {
                         row.Status = 'active';
                         row.CurrentRound = 1;
                         row.RoundCount = params[1];
-                        row.RoundStartedAt = new Date();
+                        startClock();
                     } else if (sql.includes("'complete'")) {
                         row.Status = 'complete';
                         row.FinishedAt = new Date();
@@ -174,7 +194,7 @@ const createFakeDb = () => {
                         row.Status = 'cancelled';
                     } else if (sql.includes('"CurrentRound" = $2')) {
                         row.CurrentRound = params[1];
-                        row.RoundStartedAt = new Date();
+                        startClock();
                     }
                 }
                 return [];
@@ -622,7 +642,39 @@ const createFakeDb = () => {
                     match.ReportedBy = params[3];
                     match.Player1Wins = params[4];
                     match.Player2Wins = params[5];
+                    match.ResultSource = params[6];
+                    match.ConfirmedBy = params[7];
+                    match.ConfirmedAt = params[8];
+                    // Writing a result always retires any objection to the
+                    // result it replaced.
+                    match.DisputedBy = null;
+                    match.DisputedAt = null;
+                    match.DisputeNote = null;
                     match.ReportedAt = new Date();
+                }
+                return [];
+            }
+
+            if (sql.includes('SET "ConfirmedBy" = $2')) {
+                const match = state.matches.find((entry) => entry.Id === params[0]);
+                if (match) {
+                    match.ConfirmedBy = params[1];
+                    match.ConfirmedAt = new Date();
+                    match.DisputedBy = null;
+                    match.DisputedAt = null;
+                    match.DisputeNote = null;
+                }
+                return [];
+            }
+
+            if (sql.includes('SET "DisputedBy" = $2')) {
+                const match = state.matches.find((entry) => entry.Id === params[0]);
+                if (match) {
+                    match.DisputedBy = params[1];
+                    match.DisputedAt = new Date();
+                    match.DisputeNote = params[2];
+                    match.ConfirmedBy = null;
+                    match.ConfirmedAt = null;
                 }
                 return [];
             }
@@ -1613,6 +1665,242 @@ describe('TournamentService', function () {
 
             expect(match.WinnerId).toBe(match.Player2Id);
             expect(match.ResultType).toBe('forfeit');
+        });
+    });
+
+    /**
+     * Before this, any participant could type in any result on their own
+     * match and it was final - the opponent's only recourse was to find the
+     * organizer, and nothing in the record showed they had never agreed.
+     */
+    describe('result confirmation', function () {
+        // Deliberately not ids 1 and 2: the organizer is user 1, and an
+        // organizer who is also a player would be adjudicating their own
+        // match, which is the one case these rules do not cover.
+        const playerOne = { id: 10, permissions: {} };
+        const playerTwo = { id: 11, permissions: {} };
+
+        const liveMatch = async () => {
+            const created = await service.create(organizer, {
+                name: 'Confirmation',
+                format: 'swiss'
+            });
+            await service.register(created.id, playerOne);
+            await service.register(created.id, playerTwo);
+            await service.start(created.id, organizer);
+
+            return { id: created.id, match: db.state.matches[0] };
+        };
+
+        it('takes a player at their word when they report their own loss', async function () {
+            const { id, match } = await liveMatch();
+
+            const result = await service.reportResult(id, match.Id, playerTwo.id, playerOne);
+
+            expect(result.success).toBe(true);
+            expect(result.confirmed).toBe(true);
+            expect(db.state.matches[0].ConfirmedBy).toBe(playerOne.id);
+        });
+
+        it('leaves a self-reported win waiting for the opponent', async function () {
+            const { id, match } = await liveMatch();
+
+            const result = await service.reportResult(id, match.Id, playerOne.id, playerOne);
+
+            expect(result.success).toBe(true);
+            expect(result.confirmed).toBe(false);
+            // It still counts - withholding the standings would hand any
+            // sore loser a veto over the round.
+            expect(db.state.matches[0].WinnerId).toBe(playerOne.id);
+            expect(db.state.matches[0].ConfirmedAt).toBe(null);
+        });
+
+        it('lets the opponent confirm it', async function () {
+            const { id, match } = await liveMatch();
+            await service.reportResult(id, match.Id, playerOne.id, playerOne);
+
+            const confirmed = await service.confirmResult(id, match.Id, playerTwo);
+
+            expect(confirmed.success).toBe(true);
+            expect(db.state.matches[0].ConfirmedBy).toBe(playerTwo.id);
+        });
+
+        it('will not let the reporter confirm their own report', async function () {
+            const { id, match } = await liveMatch();
+            await service.reportResult(id, match.Id, playerOne.id, playerOne);
+
+            const selfConfirm = await service.confirmResult(id, match.Id, playerOne);
+
+            expect(selfConfirm.success).toBe(false);
+            expect(db.state.matches[0].ConfirmedAt).toBe(null);
+        });
+
+        it('lets the opponent dispute it without reversing anything', async function () {
+            const { id, match } = await liveMatch();
+            await service.reportResult(id, match.Id, playerOne.id, playerOne);
+
+            const disputed = await service.disputeResult(id, match.Id, playerTwo, 'I won 2-1');
+
+            expect(disputed.success).toBe(true);
+            expect(db.state.matches[0].DisputedBy).toBe(playerTwo.id);
+            expect(db.state.matches[0].DisputeNote).toBe('I won 2-1');
+            // A dispute is a claim, not a ruling: the recorded result stands
+            // until an organizer changes it.
+            expect(db.state.matches[0].WinnerId).toBe(playerOne.id);
+        });
+
+        it('clears the dispute when the organizer records the real result', async function () {
+            const { id, match } = await liveMatch();
+            await service.reportResult(id, match.Id, playerOne.id, playerOne);
+            await service.disputeResult(id, match.Id, playerTwo, 'I won 2-1');
+
+            await service.reportResult(id, match.Id, playerTwo.id, organizer);
+
+            expect(db.state.matches[0].WinnerId).toBe(playerTwo.id);
+            expect(db.state.matches[0].DisputedBy).toBe(null);
+            expect(db.state.matches[0].ConfirmedBy).toBe(organizer.id);
+        });
+
+        it('keeps outsiders out of both', async function () {
+            const { id, match } = await liveMatch();
+            await service.reportResult(id, match.Id, playerOne.id, playerOne);
+
+            expect((await service.confirmResult(id, match.Id, stranger)).success).toBe(false);
+            expect((await service.disputeResult(id, match.Id, stranger, 'x')).success).toBe(false);
+        });
+
+        it('has nothing to confirm before a result exists', async function () {
+            const { id, match } = await liveMatch();
+
+            expect((await service.confirmResult(id, match.Id, playerTwo)).success).toBe(false);
+            expect((await service.disputeResult(id, match.Id, playerTwo, 'x')).success).toBe(false);
+        });
+
+        it('treats an organizer entry as adjudicated on the spot', async function () {
+            const { id, match } = await liveMatch();
+
+            await service.reportResult(id, match.Id, playerOne.id, organizer);
+
+            expect(db.state.matches[0].ConfirmedBy).toBe(organizer.id);
+        });
+
+        it('reports confirmation state on the detail payload', async function () {
+            const { id, match } = await liveMatch();
+            await service.reportResult(id, match.Id, playerOne.id, playerOne);
+
+            const detail = await service.getDetail(id, playerTwo);
+            const row = detail.matches.find((entry) => entry.id === match.Id);
+
+            expect(row.confirmed).toBe(false);
+            expect(row.reportedBy).toBe(playerOne.id);
+        });
+    });
+
+    /**
+     * The round clock used to be a picture of a clock, while pairing the next
+     * round refuses to run with a result missing. One player closing their
+     * laptop stopped the event permanently.
+     */
+    describe('round clock', function () {
+        it('gives the round a deadline from the event timer', async function () {
+            const id = await createSwiss(2, { roundTimerMinutes: 50 });
+            await service.start(id, organizer);
+
+            const row = db.state.tournaments[0];
+
+            expect(row.RoundEndsAt).toBeTruthy();
+            expect(row.RoundEndsAt.getTime()).toBeGreaterThan(Date.now() + 49 * 60 * 1000);
+        });
+
+        it('leaves the deadline unset when the event has no timer', async function () {
+            const id = await createSwiss(2);
+            await service.start(id, organizer);
+
+            expect(db.state.tournaments[0].RoundEndsAt).toBe(null);
+        });
+
+        it('extends the current round without restarting it', async function () {
+            const id = await createSwiss(2, { roundTimerMinutes: 50 });
+            await service.start(id, organizer);
+
+            const before = db.state.tournaments[0].RoundEndsAt.getTime();
+            const extended = await service.adjustRoundClock(id, organizer, 5);
+
+            expect(extended.success).toBe(true);
+            expect(db.state.tournaments[0].RoundEndsAt.getTime()).toBe(before + 5 * 60 * 1000);
+        });
+
+        it('only the organizer can move the clock', async function () {
+            const id = await createSwiss(2, { roundTimerMinutes: 50 });
+            await service.start(id, organizer);
+
+            expect((await service.adjustRoundClock(id, stranger, 5)).success).toBe(false);
+        });
+
+        it('awards an unfinished match to whoever leads on games', async function () {
+            const id = await createSwiss(2, { bestOf: 3 });
+            await service.start(id, organizer);
+
+            const match = db.state.matches[0];
+            match.Player1Wins = 1;
+            match.Player2Wins = 0;
+
+            const resolved = await service.resolveUnfinished(id, organizer);
+
+            expect(resolved.success).toBe(true);
+            expect(resolved.resolved).toBe(1);
+            expect(db.state.matches[0].WinnerId).toBe(match.Player1Id);
+            expect(db.state.matches[0].ResultType).toBe('time');
+        });
+
+        it('makes a level unfinished match a draw', async function () {
+            const id = await createSwiss(2, { bestOf: 3 });
+            await service.start(id, organizer);
+
+            await service.resolveUnfinished(id, organizer);
+
+            expect(db.state.matches[0].ResultType).toBe('double-loss');
+            expect(db.state.matches[0].WinnerId).toBe(null);
+        });
+
+        it('unblocks the next round', async function () {
+            const id = await createSwiss(4, { roundCount: 2 });
+            await service.start(id, organizer);
+
+            // One table reports; the other never does.
+            const first = db.state.matches.filter((match) => match.Round === 1)[0];
+            await service.reportResult(id, first.Id, first.Player1Id, organizer);
+
+            expect((await service.nextRound(id, organizer)).success).toBe(false);
+
+            await service.resolveUnfinished(id, organizer);
+
+            expect((await service.nextRound(id, organizer)).success).toBe(true);
+        });
+
+        it('will not invent a bracket winner from a level match', async function () {
+            const created = await service.create(organizer, {
+                name: 'Cut',
+                format: 'single-elim'
+            });
+            for (let index = 0; index < 4; index++) {
+                await service.register(created.id, { id: index + 1 });
+            }
+            await service.start(created.id, organizer);
+
+            const resolved = await service.resolveUnfinished(created.id, organizer);
+
+            // Somebody has to advance, and it is not the clock's call.
+            expect(resolved.success).toBe(true);
+            expect(resolved.resolved).toBe(0);
+            expect(resolved.undecidable.length).toBe(2);
+        });
+
+        it('only the organizer can call time', async function () {
+            const id = await createSwiss(2);
+            await service.start(id, organizer);
+
+            expect((await service.resolveUnfinished(id, stranger)).success).toBe(false);
         });
     });
 

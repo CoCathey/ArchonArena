@@ -774,7 +774,9 @@ class TournamentService {
                 'm."P1SourceMatchId", m."P1SourceIsLoser", m."P2SourceMatchId", ' +
                 'm."P2SourceIsLoser", m."Player1Wins", m."Player2Wins", m."BestOf", ' +
                 'm."ResultType", m."P1BannedDeckId", m."P2BannedDeckId", m."P1DeckId", ' +
-                'm."P2DeckId", u1."Username" AS "Player1", u2."Username" AS "Player2" ' +
+                'm."P2DeckId", m."ReportedBy", m."ConfirmedBy", m."ConfirmedAt", ' +
+                'm."DisputedBy", m."DisputeNote", ' +
+                'u1."Username" AS "Player1", u2."Username" AS "Player2" ' +
                 'FROM "TournamentMatches" m ' +
                 'LEFT JOIN "Users" u1 ON u1."Id" = m."Player1Id" ' +
                 'LEFT JOIN "Users" u2 ON u2."Id" = m."Player2Id" ' +
@@ -912,6 +914,10 @@ class TournamentService {
                 joinCode: canManage ? tournament.JoinCode : undefined,
                 roundTimerMinutes: tournament.RoundTimerMinutes,
                 roundStartedAt: tournament.RoundStartedAt,
+                // The authoritative deadline, so an extension the organizer
+                // granted is the same number on every screen rather than each
+                // client re-deriving it from the round's start.
+                roundEndsAt: tournament.RoundEndsAt,
                 checkInOpen: !!tournament.CheckInOpenedAt,
                 // ARCHON (N9): the kiosk code is the organizer's to print.
                 checkInCode: canManage ? tournament.CheckInCode : undefined,
@@ -990,6 +996,13 @@ class TournamentService {
                 p2BannedDeckId: match.P2BannedDeckId,
                 p1DeckId: match.P1DeckId,
                 p2DeckId: match.P2DeckId,
+                reportedBy: match.ReportedBy,
+                // A decided match with confirmed false is one player's
+                // account of it; the opponent has been asked and has not
+                // answered yet.
+                confirmed: !!match.ConfirmedAt,
+                disputedBy: match.DisputedBy,
+                disputeNote: match.DisputeNote,
                 games: gamesByMatch[match.Id] || []
             })),
             standings
@@ -2110,7 +2123,10 @@ class TournamentService {
         await this.db.query(
             'UPDATE "Tournaments" SET "Status" = \'active\', "CurrentRound" = 1, ' +
                 '"RoundCount" = $2, "StartedAt" = now() AT TIME ZONE \'utc\', ' +
-                '"RoundStartedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
+                '"RoundStartedAt" = now() AT TIME ZONE \'utc\', ' +
+                '"RoundEndsAt" = CASE WHEN "RoundTimerMinutes" > 0 ' +
+                "THEN (now() AT TIME ZONE 'utc') + (\"RoundTimerMinutes\" * interval '1 minute') " +
+                'ELSE NULL END WHERE "Id" = $1',
             [tournamentId, roundCount]
         );
 
@@ -2211,6 +2227,135 @@ class TournamentService {
         return parseInt(rows[0].Unreported, 10) === 0;
     }
 
+    /**
+     * ARCHON: resolve every still-open match in the current round at once.
+     *
+     * The round clock used to be decorative - stored, drawn, and never acted
+     * on - while pairing the next round refuses to run with a result missing.
+     * Put together, one player who shuts their laptop mid-round stopped the
+     * event for everyone, and the organizer's only recourse was to award each
+     * abandoned match by hand.
+     *
+     * This is the "time in the round" call every tournament makes out loud:
+     * whoever is ahead on games takes the match, and a genuine tie is a draw
+     * that neither player wins. In a bracket a draw is not a legal outcome -
+     * somebody has to advance - so there the organizer is told which matches
+     * they must still decide themselves rather than having one picked for them.
+     *
+     * @param {'leader'|'double-loss'} tieBreak what to do with a level match
+     */
+    async resolveUnfinished(tournamentId, actor, { tieBreak = 'double-loss' } = {}) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament) {
+            return { success: false, message: 'No such tournament' };
+        }
+
+        if (!(await this.canManage(actor, tournament))) {
+            return { success: false, message: 'Only the organizer can resolve open matches' };
+        }
+
+        if (tournament.Status !== 'active') {
+            return { success: false, message: 'Tournament is not active' };
+        }
+
+        const matches = await this.getMatches(tournamentId);
+        const open = matches.filter(
+            (match) =>
+                match.Round === tournament.CurrentRound &&
+                !match.WinnerId &&
+                !match.ResultType &&
+                match.Player1Id &&
+                match.Player2Id
+        );
+
+        const resolved = [];
+        const undecidable = [];
+
+        for (const match of open) {
+            const p1Wins = match.Player1Wins || 0;
+            const p2Wins = match.Player2Wins || 0;
+
+            if (p1Wins === p2Wins) {
+                // Level on games. A bracket has to produce somebody to
+                // advance, so it is not ours to call.
+                if (match.Bracket || tieBreak === 'leader') {
+                    undecidable.push(match.Id);
+                    continue;
+                }
+
+                await this.completeMatch(tournament, match, {
+                    winnerId: null,
+                    resultType: 'double-loss',
+                    reporterId: actor.id,
+                    p1Wins,
+                    p2Wins
+                });
+                resolved.push(match.Id);
+                continue;
+            }
+
+            await this.completeMatch(tournament, match, {
+                winnerId: p1Wins > p2Wins ? match.Player1Id : match.Player2Id,
+                resultType: 'time',
+                reporterId: actor.id,
+                p1Wins,
+                p2Wins
+            });
+            resolved.push(match.Id);
+        }
+
+        logger.info(
+            `Tournament ${tournamentId} round ${tournament.CurrentRound}: ` +
+                `${resolved.length} match(es) resolved on time by user ${actor.id}` +
+                (undecidable.length ? `, ${undecidable.length} left for the organizer` : '')
+        );
+
+        return {
+            success: true,
+            resolved: resolved.length,
+            undecidable
+        };
+    }
+
+    /**
+     * Extend (or shorten) the current round's clock by a number of minutes.
+     * Stored on the event so every client agrees, and so an extension made
+     * before a restart is still there afterwards.
+     */
+    async adjustRoundClock(tournamentId, actor, minutes) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament) {
+            return { success: false, message: 'No such tournament' };
+        }
+
+        if (!(await this.canManage(actor, tournament))) {
+            return { success: false, message: 'Only the organizer can change the round clock' };
+        }
+
+        if (tournament.Status !== 'active') {
+            return { success: false, message: 'Tournament is not active' };
+        }
+
+        const delta = parseInt(minutes, 10);
+
+        if (!Number.isFinite(delta) || delta === 0) {
+            return { success: false, message: 'Give a number of minutes to add or remove' };
+        }
+
+        // Extending a round that never had a clock starts one from now,
+        // which is what an organizer who just typed "+10 minutes" means.
+        await this.db.query(
+            'UPDATE "Tournaments" SET "RoundEndsAt" = ' +
+                "COALESCE(\"RoundEndsAt\", now() AT TIME ZONE 'utc') + ($2 * interval '1 minute') " +
+                'WHERE "Id" = $1',
+            [tournamentId, delta]
+        );
+
+        return { success: true };
+    }
+
     async nextRound(tournamentId, actor) {
         const tournament = await this.getTournamentRow(tournamentId);
 
@@ -2251,7 +2396,7 @@ class TournamentService {
             }
 
             await this.db.query(
-                'UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
+                'UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE \'utc\', "RoundEndsAt" = CASE WHEN "RoundTimerMinutes" > 0 THEN (now() AT TIME ZONE \'utc\') + ("RoundTimerMinutes" * interval \'1 minute\') ELSE NULL END WHERE "Id" = $1',
                 [tournamentId, round]
             );
 
@@ -2285,7 +2430,7 @@ class TournamentService {
         }
 
         await this.db.query(
-            'UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
+            'UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE \'utc\', "RoundEndsAt" = CASE WHEN "RoundTimerMinutes" > 0 THEN (now() AT TIME ZONE \'utc\') + ("RoundTimerMinutes" * interval \'1 minute\') ELSE NULL END WHERE "Id" = $1',
             [tournamentId, round]
         );
 
@@ -2317,7 +2462,7 @@ class TournamentService {
         }
 
         await this.db.query(
-            'UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
+            'UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE \'utc\', "RoundEndsAt" = CASE WHEN "RoundTimerMinutes" > 0 THEN (now() AT TIME ZONE \'utc\') + ("RoundTimerMinutes" * interval \'1 minute\') ELSE NULL END WHERE "Id" = $1',
             [tournament.Id, target]
         );
 
@@ -2377,7 +2522,10 @@ class TournamentService {
 
         await this.db.query(
             'UPDATE "Tournaments" SET "Stage" = \'playoff\', "CurrentRound" = $2, ' +
-                '"RoundCount" = $3, "RoundStartedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
+                '"RoundCount" = $3, "RoundStartedAt" = now() AT TIME ZONE \'utc\', ' +
+                '"RoundEndsAt" = CASE WHEN "RoundTimerMinutes" > 0 ' +
+                "THEN (now() AT TIME ZONE 'utc') + (\"RoundTimerMinutes\" * interval '1 minute') " +
+                'ELSE NULL END WHERE "Id" = $1',
             [tournamentId, tournament.CurrentRound + 1, maxRound]
         );
 
@@ -2402,10 +2550,29 @@ class TournamentService {
     /**
      * Mark a match complete and cascade bracket consequences.
      */
+    /**
+     * Write a decided result.
+     *
+     * `confirmed` says whether the result stands as agreed fact rather than
+     * one player's account. It defaults to true because every caller except a
+     * player reporting their own win is either an adjudicator (organizer,
+     * judge), a system consequence (a drop forfeiting open matches), or the
+     * platform reporting a game it ran itself. `confirmedBy` names the human
+     * who vouched for it, and is null when the answer is "the platform did".
+     */
     async completeMatch(
         tournament,
         match,
-        { winnerId, resultType, reporterId, p1Wins, p2Wins, resultSource }
+        {
+            winnerId,
+            resultType,
+            reporterId,
+            p1Wins,
+            p2Wins,
+            resultSource,
+            confirmed = true,
+            confirmedBy
+        }
     ) {
         const player1Wins =
             p1Wins !== undefined && p1Wins !== null
@@ -2420,9 +2587,16 @@ class TournamentService {
                 ? matchWinsNeeded(match.BestOf)
                 : match.Player2Wins || 0;
 
+        // ARCHON: writing a result always clears any previous dispute. A
+        // dispute is an objection to a specific recorded result; once that
+        // result has been replaced there is nothing left to object to, and
+        // leaving the flag up would keep the match on the organizer's desk
+        // forever after they had already dealt with it.
         await this.db.query(
             'UPDATE "TournamentMatches" SET "WinnerId" = $2, "ResultType" = $3, "ReportedBy" = $4, ' +
                 '"Player1Wins" = $5, "Player2Wins" = $6, "ResultSource" = $7, ' +
+                '"ConfirmedBy" = $8, "ConfirmedAt" = $9, ' +
+                '"DisputedBy" = NULL, "DisputedAt" = NULL, "DisputeNote" = NULL, ' +
                 '"ReportedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
             [
                 match.Id,
@@ -2434,7 +2608,9 @@ class TournamentService {
                 // ARCHON (N9): 'paper' marks a result the platform did not
                 // witness. An organizer auditing a disputed standing needs to
                 // know which rows are claims and which are records.
-                resultSource === 'paper' ? 'paper' : 'online'
+                resultSource === 'paper' ? 'paper' : 'online',
+                confirmed ? (confirmedBy === undefined ? reporterId || null : confirmedBy) : null,
+                confirmed ? new Date() : null
             ]
         );
 
@@ -2692,14 +2868,124 @@ class TournamentService {
             await this.clearDownstream(tournament, match);
         }
 
+        // ARCHON: whose word this result stands on.
+        //
+        // An organizer or judge is the adjudicator, so their entry is final.
+        // A player reporting their own LOSS needs no second signature - people
+        // do not falsely concede. A player reporting their own WIN is the case
+        // that needs the opponent, and it is the only case that ever mattered:
+        // before this, one player could type in a win and the other had no way
+        // to say otherwise except finding a human.
+        //
+        // The unconfirmed result still counts (see the migration for why), so
+        // the round is never held hostage - it is simply marked as one player's
+        // account rather than an agreed fact.
+        const reportedOwnLoss = isParticipant && winnerId !== actor.id;
+        const confirmed = isManager || reportedOwnLoss;
+
         await this.completeMatch(tournament, match, {
             winnerId,
             resultType: 'played',
             reporterId: actor.id,
             p1Wins,
             p2Wins,
-            resultSource: isPaper ? 'paper' : 'online'
+            resultSource: isPaper ? 'paper' : 'online',
+            confirmed,
+            confirmedBy: actor.id
         });
+
+        return { success: true, confirmed };
+    }
+
+    /**
+     * The opponent agrees with a reported result.
+     *
+     * Only the player who did NOT report it can confirm - a second click by
+     * the reporter would be them agreeing with themselves, which is what the
+     * confirmation exists to rule out.
+     */
+    async confirmResult(tournamentId, matchId, actor) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament) {
+            return { success: false, message: 'No such tournament' };
+        }
+
+        const match = await this.getMatchRow(tournamentId, matchId);
+
+        if (!match) {
+            return { success: false, message: 'No such match' };
+        }
+
+        if (!match.WinnerId && !match.ResultType) {
+            return { success: false, message: 'There is no result to confirm yet' };
+        }
+
+        const isParticipant = actor.id === match.Player1Id || actor.id === match.Player2Id;
+
+        if (!isParticipant) {
+            return { success: false, message: 'Only the players in this match can confirm it' };
+        }
+
+        if (match.ReportedBy === actor.id) {
+            return {
+                success: false,
+                message: 'Your opponent has to confirm the result you reported'
+            };
+        }
+
+        await this.db.query(
+            'UPDATE "TournamentMatches" SET "ConfirmedBy" = $2, ' +
+                '"ConfirmedAt" = now() AT TIME ZONE \'utc\', ' +
+                '"DisputedBy" = NULL, "DisputedAt" = NULL, "DisputeNote" = NULL ' +
+                'WHERE "Id" = $1',
+            [match.Id, actor.id]
+        );
+
+        return { success: true };
+    }
+
+    /**
+     * The opponent says the recorded result is wrong.
+     *
+     * This deliberately does NOT reverse anything. A dispute is a claim, not a
+     * ruling, and letting either player un-report a result by objecting would
+     * just move the abuse to the other side. It raises a flag the organizer can
+     * see and act on, and unlocks the match for them to correct.
+     */
+    async disputeResult(tournamentId, matchId, actor, note) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament) {
+            return { success: false, message: 'No such tournament' };
+        }
+
+        const match = await this.getMatchRow(tournamentId, matchId);
+
+        if (!match) {
+            return { success: false, message: 'No such match' };
+        }
+
+        if (!match.WinnerId && !match.ResultType) {
+            return { success: false, message: 'There is no result to dispute yet' };
+        }
+
+        const isParticipant = actor.id === match.Player1Id || actor.id === match.Player2Id;
+
+        if (!isParticipant) {
+            return { success: false, message: 'Only the players in this match can dispute it' };
+        }
+
+        if (match.ReportedBy === actor.id) {
+            return { success: false, message: 'You reported this result yourself' };
+        }
+
+        await this.db.query(
+            'UPDATE "TournamentMatches" SET "DisputedBy" = $2, ' +
+                '"DisputedAt" = now() AT TIME ZONE \'utc\', "DisputeNote" = $3, ' +
+                '"ConfirmedBy" = NULL, "ConfirmedAt" = NULL WHERE "Id" = $1',
+            [match.Id, actor.id, (note || '').toString().slice(0, 500) || null]
+        );
 
         return { success: true };
     }

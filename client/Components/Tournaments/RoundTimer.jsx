@@ -1,12 +1,28 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+/** Timestamps come back from Postgres without a zone; they are UTC. */
+const asUtc = (value) => {
+    if (!value) {
+        return NaN;
+    }
+
+    const text = typeof value === 'string' ? value : String(value);
+
+    return new Date(text.endsWith('Z') ? text : `${text}Z`).getTime();
+};
+
 /**
- * ARCHON: live round clock. Counts down from the round start against
- * the event's timer; turns amber under five minutes and red at zero
- * (rounds do not end themselves - the TO decides how to close them).
+ * ARCHON: live round clock. Counts down to the round's deadline; turns
+ * amber under five minutes and red at zero (rounds do not end themselves
+ * - the TO decides how to close them, and can extend the clock).
+ *
+ * `roundEndsAt` is the event's stored deadline and wins when it is set,
+ * so an extension shows up here rather than every client insisting on
+ * start + timer. The derived value remains as the fallback for events
+ * paired before deadlines were recorded.
  */
-const RoundTimer = ({ roundStartedAt, roundTimerMinutes }) => {
+const RoundTimer = ({ roundStartedAt, roundTimerMinutes, roundEndsAt }) => {
     const { t } = useTranslation();
     const [now, setNow] = useState(() => Date.now());
 
@@ -16,21 +32,17 @@ const RoundTimer = ({ roundStartedAt, roundTimerMinutes }) => {
         return () => clearInterval(interval);
     }, []);
 
-    if (!roundStartedAt || !roundTimerMinutes) {
+    const deadline = roundEndsAt
+        ? asUtc(roundEndsAt)
+        : roundStartedAt && roundTimerMinutes
+        ? asUtc(roundStartedAt) + roundTimerMinutes * 60 * 1000
+        : NaN;
+
+    if (Number.isNaN(deadline)) {
         return null;
     }
 
-    const startedAt = new Date(
-        roundStartedAt.endsWith && !roundStartedAt.endsWith('Z')
-            ? `${roundStartedAt}Z`
-            : roundStartedAt
-    ).getTime();
-
-    if (Number.isNaN(startedAt)) {
-        return null;
-    }
-
-    const remainingMs = startedAt + roundTimerMinutes * 60 * 1000 - now;
+    const remainingMs = deadline - now;
     const overtime = remainingMs <= 0;
     const absolute = Math.abs(remainingMs);
     const minutes = Math.floor(absolute / 60000);

@@ -9,7 +9,9 @@ const resultBadges = {
     bye: 'bye',
     forfeit: 'forfeit',
     'no-show': 'no-show',
-    'double-loss': 'double loss'
+    'double-loss': 'double loss',
+    // Decided by the round clock rather than by finishing the match.
+    time: 'time'
 };
 
 /**
@@ -27,6 +29,18 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
 
     const isParticipant = user && (user.id === match.player1Id || user.id === match.player2Id);
     const decided = !!match.winnerId || !!match.resultType;
+
+    // This match has a result somebody else reported and I have not answered.
+    // A result the platform itself produced (an online game, a forfeit from a
+    // drop) has no reporter and needs nobody's signature.
+    const needsMyAnswer =
+        isParticipant &&
+        decided &&
+        !match.confirmed &&
+        !match.disputedBy &&
+        !!match.reportedBy &&
+        match.reportedBy !== user.id &&
+        tournament.status === 'active';
     const canReport =
         tournament.status === 'active' &&
         match.player1Id &&
@@ -123,6 +137,25 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
                         {t(resultBadges[match.resultType] || match.resultType)}
                     </span>
                 )}
+                {match.disputedBy ? (
+                    <span
+                        className='rounded border border-red-500/50 bg-red-500/10 px-1.5 text-xs font-semibold text-red-400'
+                        title={match.disputeNote || t('The other player says this result is wrong')}
+                    >
+                        {t('disputed')}
+                    </span>
+                ) : (
+                    decided &&
+                    match.player2Id &&
+                    !match.confirmed && (
+                        <span
+                            className='rounded border border-amber-400/50 bg-amber-400/10 px-1.5 text-xs text-amber-300'
+                            title={t('Reported by one player; the other has not agreed yet')}
+                        >
+                            {t('unconfirmed')}
+                        </span>
+                    )
+                )}
                 {lobbyGame && !decided && (
                     <button
                         type='button'
@@ -139,6 +172,47 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
                     </button>
                 )}
                 <span className='ml-auto flex flex-wrap items-center gap-1'>
+                    {/* The opponent's answer to a result somebody else typed
+                        in. Only shown to the player who did not report it -
+                        agreeing with yourself is what confirmation is for. */}
+                    {needsMyAnswer && (
+                        <>
+                            <HeroButton
+                                size='sm'
+                                variant='primary'
+                                className='!h-6 !px-2 text-xs'
+                                isDisabled={actionPending}
+                                onPress={() =>
+                                    act(`matches/${match.id}/confirm`, {}, t('Result confirmed'))
+                                }
+                            >
+                                {t('Confirm result')}
+                            </HeroButton>
+                            <HeroButton
+                                size='sm'
+                                variant='tertiary'
+                                className='!h-6 !px-2 text-xs'
+                                isDisabled={actionPending}
+                                onPress={() => {
+                                    const note = window.prompt(
+                                        t('What actually happened? The organizer will see this.')
+                                    );
+
+                                    if (note === null) {
+                                        return;
+                                    }
+
+                                    act(
+                                        `matches/${match.id}/dispute`,
+                                        { note },
+                                        t('The organizer has been notified')
+                                    );
+                                }}
+                            >
+                                {t('Dispute')}
+                            </HeroButton>
+                        </>
+                    )}
                     {canReport &&
                         !scores &&
                         [
@@ -310,12 +384,92 @@ const RoundsPanel = ({ tournament, matches, user, act, actionPending, onPrint })
         roundNumbers.reverse();
     }
 
+    // What is actually holding the round up, and what the organizer has to
+    // look at. Both were previously invisible: the only signal that the round
+    // could not advance was the error message when they tried.
+    const currentMatches = rounds[tournament.currentRound] || [];
+    const openMatches = currentMatches.filter(
+        (match) => match.player1Id && match.player2Id && !match.winnerId && !match.resultType
+    );
+    const disputed = matches.filter((match) => match.disputedBy);
+    const showRoundTools =
+        tournament.canManage && tournament.status === 'active' && currentMatches.length > 0;
+
     return (
         <Panel
             title={t('Rounds')}
             titleClass='flex items-center justify-between'
             headerTextClassName='flex-1'
         >
+            {disputed.length > 0 && tournament.canManage && (
+                <div className='mb-3 rounded-md border border-red-500/50 bg-red-500/10 p-2 text-sm'>
+                    <div className='font-semibold text-red-400'>
+                        {t('{{count}} disputed result needs you', { count: disputed.length })}
+                    </div>
+                    <ul className='mt-1 space-y-0.5 text-xs text-muted'>
+                        {disputed.map((match) => (
+                            <li key={match.id}>
+                                {t('Round {{round}}', { round: match.round })}: {match.player1}{' '}
+                                {t('vs')} {match.player2}
+                                {match.disputeNote && ` - "${match.disputeNote}"`}
+                            </li>
+                        ))}
+                    </ul>
+                    <div className='mt-1 text-xs text-muted'>
+                        {t('Record the correct result on the match to clear it.')}
+                    </div>
+                </div>
+            )}
+            {showRoundTools && (
+                <div className='mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border/70 bg-surface-secondary/40 p-2 text-sm'>
+                    <span className='text-muted'>
+                        {openMatches.length === 0
+                            ? t('Every match in this round is in.')
+                            : t('{{count}} match still to report', {
+                                  count: openMatches.length
+                              })}
+                    </span>
+                    <span className='ml-auto flex flex-wrap gap-2'>
+                        <HeroButton
+                            size='sm'
+                            variant='tertiary'
+                            className='!h-7 !px-2 text-xs'
+                            isDisabled={actionPending}
+                            onPress={() => act('round-clock', { minutes: 5 }, t('Round extended'))}
+                        >
+                            {t('+5 min')}
+                        </HeroButton>
+                        {openMatches.length > 0 && (
+                            <HeroButton
+                                size='sm'
+                                variant='primary'
+                                className='!h-7 !px-2 text-xs'
+                                isDisabled={actionPending}
+                                onPress={() => {
+                                    if (
+                                        !window.confirm(
+                                            t(
+                                                'Time in the round: decide all {{count}} open match(es) on the current game score? Level matches become a draw.',
+                                                { count: openMatches.length }
+                                            )
+                                        )
+                                    ) {
+                                        return;
+                                    }
+
+                                    act(
+                                        'resolve-unfinished',
+                                        {},
+                                        t('Open matches resolved on time')
+                                    );
+                                }}
+                            >
+                                {t('Time in the round')}
+                            </HeroButton>
+                        )}
+                    </span>
+                </div>
+            )}
             {roundNumbers.length === 0 ? (
                 <div className='text-sm text-muted'>
                     {t('Pairings appear when the tournament starts')}

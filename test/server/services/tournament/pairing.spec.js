@@ -112,6 +112,81 @@ describe('pairSwissRound', function () {
         expect(solo.pairings).toEqual([]);
         expect(solo.bye).toBe(1);
     });
+
+    it('reports which pairs are repeats when it has to allow them', function () {
+        const { pairings, rematches } = pairSwissRound([
+            player(1, 2, [2, 3, 4]),
+            player(2, 1, [1, 3, 4]),
+            player(3, 1, [1, 2, 4]),
+            player(4, 0, [1, 2, 3])
+        ]);
+
+        expect(pairings.length).toBe(2);
+        // Every pair here is a repeat, and the organizer is told so
+        // rather than finding out when the players sit down.
+        expect(rematches.length).toBe(2);
+    });
+
+    it('reports no repeats on a clean pairing', function () {
+        const { rematches, exhausted } = pairSwissRound([
+            player(1, 1, []),
+            player(2, 1, []),
+            player(3, 0, []),
+            player(4, 0, [])
+        ]);
+
+        expect(rematches).toEqual([]);
+        expect(exhausted).toBe(false);
+    });
+
+    // The search is exhaustive backtracking, which has no natural bound.
+    // Pairing runs inside the lobby process, so a round that takes
+    // "however long it takes" is a stalled server, not a slow pairing.
+    it('pairs a large late-round field promptly', function () {
+        const size = 64;
+        const players = Array.from({ length: size }, (_, index) => {
+            // Each player has met the eight nearest players in standing
+            // order, which is roughly what eight Swiss rounds produce.
+            const opponents = [];
+            for (let step = 1; step <= 8; step++) {
+                opponents.push(((index + step) % size) + 1);
+                opponents.push(((index - step + size) % size) + 1);
+            }
+
+            return player(index + 1, Math.floor((size - index) / 2), opponents);
+        });
+
+        const started = Date.now();
+        const { pairings } = pairSwissRound(players);
+        const elapsed = Date.now() - started;
+
+        expect(pairings.length).toBe(size / 2);
+        expect(pairings.flat().sort((a, b) => a - b)).toEqual(
+            Array.from({ length: size }, (_, index) => index + 1)
+        );
+        expect(elapsed).toBeLessThan(2000);
+    });
+
+    it('still returns a complete pairing when the search budget runs out', function () {
+        // Forced through the budget path directly: whatever the search
+        // did or did not manage, every player must still be seated.
+        const size = 16;
+        const players = Array.from({ length: size }, (_, index) =>
+            player(
+                index + 1,
+                0,
+                // Everyone has played everyone below them, leaving a very
+                // constrained graph.
+                Array.from({ length: index }, (_, other) => other + 1)
+            )
+        );
+
+        const { pairings, bye } = pairSwissRound(players);
+
+        expect(bye).toBe(null);
+        expect(pairings.length).toBe(size / 2);
+        expect(new Set(pairings.flat()).size).toBe(size);
+    });
 });
 
 describe('pairEliminationRound', function () {
@@ -146,7 +221,7 @@ describe('pairEliminationRound', function () {
 });
 
 describe('computeStandings', function () {
-    it('ranks by points then strength of schedule', function () {
+    it("ranks by points then opponents' match-win percentage", function () {
         const players = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }];
         const matches = [
             { player1: 1, player2: 4, winner: 1, round: 1 },
@@ -158,14 +233,36 @@ describe('computeStandings', function () {
         const standings = computeStandings(players, matches);
 
         expect(standings[0]).toMatchObject({ id: 1, points: 2, rank: 1 });
-        // 2 and 3 both have 1 point; 2 beat 3 but SOS decides:
-        // 2 played {3,1} (1+2=3 SOS), 3 played {2,4} (1+0=1 SOS)
-        expect(standings[1]).toMatchObject({ id: 2, points: 1, sos: 3, rank: 2 });
-        expect(standings[2]).toMatchObject({ id: 3, points: 1, sos: 1, rank: 3 });
+
+        // 2 and 3 both finish 1-1. 2 faced {3 (1-1), 1 (2-0)} -> (0.5+1)/2.
+        // 3 faced {2 (1-1), 4 (0-2, floored to 1/3)} -> (0.5+1/3)/2.
+        const second = standings[1];
+        const third = standings[2];
+
+        expect(second.id).toBe(2);
+        expect(second.opponentMatchWinRate).toBeCloseTo(0.75, 6);
+        expect(third.id).toBe(3);
+        expect(third.opponentMatchWinRate).toBeCloseTo((0.5 + 1 / 3) / 2, 6);
         expect(standings[3]).toMatchObject({ id: 4, points: 0, rank: 4 });
     });
 
-    it('counts byes as points but ranks played wins above them on ties', function () {
+    it('floors any single opponent at a third of a win', function () {
+        // 2 lost every match. Without the floor 1's OMW% would be 0 -
+        // below a player whose opponent merely went 1-3, which would
+        // punish 1 for a draw they did not choose.
+        const players = [{ id: 1 }, { id: 2 }];
+        const matches = [
+            { player1: 1, player2: 2, winner: 1, round: 1 },
+            { player1: 1, player2: 2, winner: 1, round: 2 }
+        ];
+
+        const standings = computeStandings(players, matches);
+        const one = standings.find((entry) => entry.id === 1);
+
+        expect(one.opponentMatchWinRate).toBeCloseTo(1 / 3, 6);
+    });
+
+    it('keeps byes out of the opponent averages but counts them as wins', function () {
         const players = [{ id: 1 }, { id: 2 }, { id: 3 }];
         const matches = [
             { player1: 1, player2: null, winner: null, round: 1 }, // bye
@@ -173,15 +270,21 @@ describe('computeStandings', function () {
         ];
 
         const standings = computeStandings(players, matches);
+        const byePlayer = standings.find((entry) => entry.id === 1);
+        const winner = standings.find((entry) => entry.id === 2);
 
-        const first = standings.find((entry) => entry.id === 2);
-        const second = standings.find((entry) => entry.id === 1);
+        expect(byePlayer.points).toBe(1);
+        expect(winner.points).toBe(1);
 
-        expect(first.points).toBe(1);
-        expect(second.points).toBe(1);
-        // 2's win came from play; SOS may be 0 for both (1 has no
-        // opponents; 2's opponent has 0 points), so byes break the tie
-        expect(first.rank).toBeLessThan(second.rank);
+        // The bye put nobody in the opponent list, so there is nothing to
+        // average and no opponent to be credited for.
+        expect(byePlayer.opponents).toEqual([]);
+        expect(byePlayer.opponentMatchWinRate).toBe(0);
+
+        // 2 beat somebody, even somebody winless, so their OMW% is the
+        // floor - which outranks having faced nobody at all.
+        expect(winner.opponentMatchWinRate).toBeCloseTo(1 / 3, 6);
+        expect(winner.rank).toBeLessThan(byePlayer.rank);
     });
 
     it('ignores matches for unknown players', function () {
@@ -194,36 +297,57 @@ describe('computeStandings', function () {
         expect(standings[0]).toMatchObject({
             id: 1,
             points: 0,
-            sos: 0,
             byes: 0,
             opponents: [],
+            opponentMatchWinRate: 0,
             rank: 1
         });
     });
 
-    it('breaks points+sos ties by extended strength of schedule', function () {
-        // 1 and 4 both beat a single 0-point opponent (SOS 0 for both),
-        // but 1's opponent faced stronger opposition than 4's.
-        const players = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }, { id: 6 }];
+    it('breaks points and OMW% ties by the player’s own game-win percentage', function () {
+        // 1 and 3 both go 1-0 against a single 0-1 opponent, so their
+        // OMW% is identical (both floored). 1 won 2-0 where 3 won 2-1.
+        const players = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }];
         const matches = [
-            { player1: 1, player2: 2, winner: 1, round: 1 },
-            { player1: 4, player2: 3, winner: 4, round: 1 },
-            { player1: 5, player2: 6, winner: 5, round: 1 },
-            { player1: 5, player2: 2, winner: 5, round: 2 },
-            { player1: 6, player2: 3, winner: 6, round: 2 }
+            { player1: 1, player2: 2, winner: 1, round: 1, p1Wins: 2, p2Wins: 0 },
+            { player1: 3, player2: 4, winner: 3, round: 1, p1Wins: 2, p2Wins: 1 }
         ];
 
         const standings = computeStandings(players, matches);
         const one = standings.find((entry) => entry.id === 1);
-        const four = standings.find((entry) => entry.id === 4);
+        const three = standings.find((entry) => entry.id === 3);
 
-        expect(one.points).toBe(four.points);
-        expect(one.sos).toBe(four.sos);
-        expect(one.extendedSos).not.toBe(four.extendedSos);
+        expect(one.points).toBe(three.points);
+        expect(one.opponentMatchWinRate).toBeCloseTo(three.opponentMatchWinRate, 6);
+        expect(one.gameWinRate).toBeCloseTo(1, 6);
+        expect(three.gameWinRate).toBeCloseTo(2 / 3, 6);
+        expect(one.rank).toBeLessThan(three.rank);
+    });
 
-        const better = one.extendedSos > four.extendedSos ? one : four;
-        const worse = better === one ? four : one;
-        expect(better.rank).toBeLessThan(worse.rank);
+    it("breaks a further tie by opponents' game-win percentage", function () {
+        // 1 and 3 each beat a single opponent 2-0, and both those
+        // opponents go on to finish 1-1 - so points, OMW% and GW% are all
+        // identical. The only difference left is how many *games* those
+        // opponents won: 2 sweeps its other match, 4 drops a game.
+        const players = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }, { id: 6 }];
+        const matches = [
+            { player1: 1, player2: 2, winner: 1, round: 1, p1Wins: 2, p2Wins: 0 },
+            { player1: 3, player2: 4, winner: 3, round: 1, p1Wins: 2, p2Wins: 0 },
+            { player1: 2, player2: 5, winner: 2, round: 2, p1Wins: 2, p2Wins: 0 },
+            { player1: 4, player2: 6, winner: 4, round: 2, p1Wins: 2, p2Wins: 1 }
+        ];
+
+        const standings = computeStandings(players, matches);
+        const one = standings.find((entry) => entry.id === 1);
+        const three = standings.find((entry) => entry.id === 3);
+
+        expect(one.points).toBe(three.points);
+        expect(one.opponentMatchWinRate).toBeCloseTo(three.opponentMatchWinRate, 6);
+        expect(one.gameWinRate).toBeCloseTo(three.gameWinRate, 6);
+        // Both are clear of the floor, so the difference actually shows.
+        expect(one.opponentGameWinRate).toBeCloseTo(0.5, 6);
+        expect(three.opponentGameWinRate).toBeCloseTo(0.4, 6);
+        expect(one.rank).toBeLessThan(three.rank);
     });
 
     it('tracks match records, series game counts and double losses', function () {

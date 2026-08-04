@@ -54,6 +54,21 @@ function foldOrder(players) {
 }
 
 /**
+ * How many candidate pairs the rematch-free search may examine before it
+ * gives up and allows rematches.
+ *
+ * The search is exhaustive backtracking over perfect matchings, which is
+ * super-exponential in the worst case. In practice it answers in
+ * microseconds, because a Swiss field has only ever played a handful of
+ * opponents each and the first candidate almost always works. The budget
+ * exists for the case where it does not: a rematch-free matching that is
+ * hard to find, or one that does not exist but only reveals that deep in
+ * the tree. Pairing runs inside the lobby process, so "eventually" is not
+ * an acceptable answer there - a bounded, slightly worse pairing is.
+ */
+const PAIRING_SEARCH_BUDGET = 200000;
+
+/**
  * Pair a Swiss round.
  *
  * Players are sorted by points (then stable by input order, which the
@@ -62,10 +77,11 @@ function foldOrder(players) {
  * Pairing then proceeds top-down preferring same-score opponents,
  * avoiding rematches via backtracking; if no rematch-free perfect
  * matching exists (small or late events), rematches are allowed as a
- * last resort.
+ * last resort and reported in `rematches`.
  *
  * @param {Array} players active (non-dropped) players
- * @returns {{ pairings: Array<[idA, idB]>, bye: id|null }}
+ * @returns {{ pairings: Array<[idA, idB]>, bye: id|null,
+ *   rematches: Array<[idA, idB]>, exhausted: boolean }}
  */
 function pairSwissRound(players) {
     const sorted = [...players].sort((a, b) => b.points - a.points);
@@ -83,11 +99,14 @@ function pairSwissRound(players) {
         toPair = sorted.filter((player) => player.id !== bye);
     }
 
-    const havePlayed = (a, b) => (a.opponents || []).includes(b.id);
+    const played = new Map(players.map((player) => [player.id, new Set(player.opponents || [])]));
+    const havePlayed = (a, b) => played.get(a.id)?.has(b.id) || false;
 
     // Backtracking search for a rematch-free matching, preferring
-    // opponents closest in standing order.
-    const searchPairings = (remaining, allowRematch) => {
+    // opponents closest in standing order. `budget` is shared across the
+    // whole search by reference; running it down aborts rather than
+    // returning a wrong answer, and the caller falls back.
+    const searchPairings = (remaining, allowRematch, budget) => {
         if (remaining.length === 0) {
             return [];
         }
@@ -95,6 +114,11 @@ function pairSwissRound(players) {
         const [first, ...rest] = remaining;
 
         for (let index = 0; index < rest.length; index++) {
+            if (budget.left <= 0) {
+                return null;
+            }
+            budget.left--;
+
             const candidate = rest[index];
 
             if (!allowRematch && havePlayed(first, candidate)) {
@@ -102,7 +126,7 @@ function pairSwissRound(players) {
             }
 
             const nextRemaining = rest.filter((_, i) => i !== index);
-            const solution = searchPairings(nextRemaining, allowRematch);
+            const solution = searchPairings(nextRemaining, allowRematch, budget);
 
             if (solution !== null) {
                 return [[first.id, candidate.id], ...solution];
@@ -112,9 +136,22 @@ function pairSwissRound(players) {
         return null;
     };
 
-    const pairings = searchPairings(toPair, false) || searchPairings(toPair, true) || [];
+    const budget = { left: PAIRING_SEARCH_BUDGET };
+    let pairings = searchPairings(toPair, false, budget);
+    const exhausted = pairings === null && budget.left <= 0;
 
-    return { pairings, bye };
+    if (pairings === null) {
+        // Either no rematch-free matching exists, or finding one would
+        // cost more than the budget allows. Both mean the same thing to
+        // the round: pair anyway, and say which pairs are repeats so the
+        // organizer can see it rather than discover it at the table.
+        pairings = searchPairings(toPair, true, { left: Infinity }) || [];
+    }
+
+    const byId = new Map(players.map((player) => [player.id, player]));
+    const rematches = pairings.filter(([a, b]) => havePlayed(byId.get(a), byId.get(b)));
+
+    return { pairings, bye, rematches, exhausted };
 }
 
 /**
@@ -509,13 +546,39 @@ function roundRobinSchedule(players) {
 }
 
 /**
+ * The floor applied to any single opponent's win percentage before it is
+ * averaged into a tiebreaker.
+ *
+ * Without it, drawing the player who went 0-5 and dropped would wreck
+ * your tiebreakers through no fault of your own - you cannot choose your
+ * opponents, so a system that punishes you for theirs is measuring the
+ * wrong thing. One third is the long-standing TCG convention.
+ */
+const MIN_OPPONENT_WIN_RATE = 1 / 3;
+
+/**
  * Standings from completed matches.
  *
- * Points (match wins; byes and walkovers included), then strength of
- * schedule (sum of opponents' points), then extended strength of
- * schedule (sum of opponents' SoS), then fewest byes so a played win
- * outranks a received one. Also reports match records and series game
- * counts for display.
+ * Order is match points, then the three standard TCG tiebreakers:
+ *
+ *   1. **OMW%** - opponents' match-win percentage. The average of each
+ *      opponent's match-win rate, every one floored at 33%. This is the
+ *      "was your road hard" measure, and it is a *percentage* rather than
+ *      a sum of opponents' points for a reason: once players have byes,
+ *      drops and unequal match counts, a sum silently rewards whoever
+ *      happened to face busier opponents.
+ *   2. **GW%** - your own game-win percentage, which separates a 2-0
+ *      match win from a 2-1 in best-of-three events.
+ *   3. **OGW%** - opponents' game-win percentage, same floor.
+ *
+ * Byes are excluded from the opponent averages (you cannot be credited
+ * or punished for a round you did not play), but they do count as a match
+ * win for your own points and record. Players who dropped stay in the
+ * calculation with their final record, because the games they played
+ * really happened and their opponents earned those results.
+ *
+ * Fewest byes remains as the last resort, so a played win outranks a
+ * received one when everything else is identical.
  *
  * @param {Array<{id}>} players
  * @param {Array<{player1, player2, winner, round, p1Wins, p2Wins,
@@ -582,48 +645,85 @@ function computeStandings(players, matches) {
         }
     }
 
+    // Each player's own rates first - the opponent averages are built
+    // from these. A bye counts as a match win here, the same way it counts
+    // for points: it is a round the player was awarded. What byes are kept
+    // out of is the *opponent* averages below, and they are, because a bye
+    // never puts anyone in `opponents`.
+    const rateOf = (id) => {
+        const own = stats[id];
+
+        if (!own) {
+            return { matchRate: 0, gameRate: 0 };
+        }
+
+        const decidedMatches = own.wins + own.losses;
+        const games = own.gameWins + own.gameLosses;
+
+        return {
+            matchRate: decidedMatches > 0 ? own.wins / decidedMatches : 0,
+            gameRate: games > 0 ? own.gameWins / games : 0
+        };
+    };
+
+    const ratesById = {};
+    for (const player of players) {
+        ratesById[player.id] = rateOf(player.id);
+    }
+
+    const averageOpponent = (opponents, pick) => {
+        if (opponents.length === 0) {
+            // Nobody played yet, or every round so far was a bye. Zero
+            // rather than the floor: this is "no information", and
+            // handing it a third of a win would outrank players who
+            // actually beat somebody weak.
+            return 0;
+        }
+
+        const total = opponents.reduce((sum, opponent) => {
+            const rate = ratesById[opponent] ? pick(ratesById[opponent]) : 0;
+
+            return sum + Math.max(rate, MIN_OPPONENT_WIN_RATE);
+        }, 0);
+
+        return total / opponents.length;
+    };
+
     const entries = players.map((player) => {
         const own = stats[player.id];
-        const sos = own.opponents.reduce(
-            (total, opponent) => total + (stats[opponent]?.points || 0),
-            0
-        );
+        const rates = ratesById[player.id];
 
         return {
             id: player.id,
             points: own.points,
-            sos,
             byes: own.byes,
             opponents: own.opponents,
             wins: own.wins,
             losses: own.losses,
             gameWins: own.gameWins,
-            gameLosses: own.gameLosses
+            gameLosses: own.gameLosses,
+            matchWinRate: rates.matchRate,
+            gameWinRate: rates.gameRate,
+            opponentMatchWinRate: averageOpponent(own.opponents, (rate) => rate.matchRate),
+            opponentGameWinRate: averageOpponent(own.opponents, (rate) => rate.gameRate)
         };
     });
 
-    // Extended SoS needs every entry's SoS first.
-    const sosById = {};
-    for (const entry of entries) {
-        sosById[entry.id] = entry.sos;
-    }
-
-    for (const entry of entries) {
-        entry.extendedSos = entry.opponents.reduce(
-            (total, opponent) => total + (sosById[opponent] || 0),
-            0
-        );
-    }
-
     entries.sort(
         (a, b) =>
-            b.points - a.points || b.sos - a.sos || b.extendedSos - a.extendedSos || a.byes - b.byes
+            b.points - a.points ||
+            b.opponentMatchWinRate - a.opponentMatchWinRate ||
+            b.gameWinRate - a.gameWinRate ||
+            b.opponentGameWinRate - a.opponentGameWinRate ||
+            a.byes - b.byes
     );
 
     return entries.map((entry, index) => ({ ...entry, rank: index + 1 }));
 }
 
 module.exports = {
+    MIN_OPPONENT_WIN_RATE,
+    PAIRING_SEARCH_BUDGET,
     suggestedSwissRounds,
     matchWinsNeeded,
     foldOrder,

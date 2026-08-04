@@ -36,6 +36,16 @@ CREATE TABLE IF NOT EXISTS public."TournamentMatches"
     "P2BannedDeckId" integer,
     "P1DeckId" integer,
     "P2DeckId" integer,
+    -- Result integrity (migration 49). A decided match with ConfirmedBy
+    -- NULL was reported by one player and not yet agreed by the other;
+    -- DisputedBy means the other player says it is wrong. Both are for
+    -- the organizer to see - an unconfirmed result still counts, because
+    -- withholding the standings would give any sore loser a veto.
+    "ConfirmedBy" integer,
+    "ConfirmedAt" timestamp without time zone,
+    "DisputedBy" integer,
+    "DisputedAt" timestamp without time zone,
+    "DisputeNote" text COLLATE pg_catalog."default",
     CONSTRAINT "PK_TournamentMatches" PRIMARY KEY ("Id"),
     CONSTRAINT "FK_TournamentMatches_Tournaments" FOREIGN KEY ("TournamentId")
         REFERENCES public."Tournaments" ("Id") MATCH SIMPLE
@@ -48,7 +58,15 @@ CREATE TABLE IF NOT EXISTS public."TournamentMatches"
     CONSTRAINT "FK_TournamentMatches_Player2" FOREIGN KEY ("Player2Id")
         REFERENCES public."Users" ("Id") MATCH SIMPLE
         ON UPDATE NO ACTION
-        ON DELETE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT "FK_TournamentMatches_ConfirmedBy" FOREIGN KEY ("ConfirmedBy")
+        REFERENCES public."Users" ("Id") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL,
+    CONSTRAINT "FK_TournamentMatches_DisputedBy" FOREIGN KEY ("DisputedBy")
+        REFERENCES public."Users" ("Id") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL
 )
 
 TABLESPACE pg_default;
@@ -57,3 +75,8 @@ CREATE INDEX IF NOT EXISTS "IX_TournamentMatches_Tournament_Round"
     ON public."TournamentMatches" USING btree
     ("TournamentId" ASC NULLS LAST, "Round" ASC NULLS LAST)
     TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS "IX_TournamentMatches_Disputed"
+    ON public."TournamentMatches" USING btree ("TournamentId" ASC NULLS LAST)
+    TABLESPACE pg_default
+    WHERE "DisputedBy" IS NOT NULL;
