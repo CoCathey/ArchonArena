@@ -6,9 +6,10 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
     test: {
         include: ['test/**/*.test.ts'],
-        // The live-server end-to-end run needs a server to talk to; it is opt-in
-        // via `npx vitest run test/e2e.live-server.test.ts`.
-        exclude: ['test/e2e.live-server.test.ts', 'node_modules/**'],
+        exclude: ['node_modules/**'],
+        // The live-server end-to-end test needs a running stack. It gates itself
+        // on AA_E2E=1 (see its header) rather than being excluded here, so that
+        // naming it explicitly still runs it.
         environment: 'node'
     }
 });
