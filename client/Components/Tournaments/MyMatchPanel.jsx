@@ -51,6 +51,16 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
     const opponentId = myMatch.player1Id === user.id ? myMatch.player2Id : myMatch.player1Id;
     const opponent = players.find((player) => player.userId === opponentId);
     const decided = !!myMatch.winnerId || !!myMatch.resultType;
+
+    // A result somebody else typed in that I have not answered. Results the
+    // platform produced itself (an online game, a forfeit from a drop) carry no
+    // reporter and need nobody's signature.
+    const needsMyAnswer =
+        decided &&
+        !myMatch.confirmed &&
+        !myMatch.disputedBy &&
+        !!myMatch.reportedBy &&
+        myMatch.reportedBy !== user.id;
     const won = myMatch.winnerId === user.id;
     const myWins = myMatch.player1Id === user.id ? myMatch.player1Wins : myMatch.player2Wins;
     const theirWins = myMatch.player1Id === user.id ? myMatch.player2Wins : myMatch.player1Wins;
@@ -180,6 +190,56 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                     )}
                 </span>
             </div>
+            {/* ARCHON: the other player wrote down a result and this is the
+                first place you would look for it. Without this, "You lost this
+                match" was the end of the conversation as far as the platform
+                was concerned. */}
+            {needsMyAnswer && (
+                <div className='mt-2 flex flex-wrap items-center gap-2 border-t border-border/40 pt-2'>
+                    <span className='text-sm text-amber-300'>
+                        {t('{{name}} reported this result. Does that match your game?', {
+                            name: opponent?.username || t('Your opponent')
+                        })}
+                    </span>
+                    <span className='ml-auto flex gap-2'>
+                        <HeroButton
+                            size='sm'
+                            variant='primary'
+                            onPress={() =>
+                                act(`matches/${myMatch.id}/confirm`, {}, t('Result confirmed'))
+                            }
+                        >
+                            {t('Yes, confirm')}
+                        </HeroButton>
+                        <HeroButton
+                            size='sm'
+                            variant='tertiary'
+                            onPress={() => {
+                                const note = window.prompt(
+                                    t('What actually happened? The organizer will see this.')
+                                );
+
+                                if (note === null) {
+                                    return;
+                                }
+
+                                act(
+                                    `matches/${myMatch.id}/dispute`,
+                                    { note },
+                                    t('The organizer has been notified')
+                                );
+                            }}
+                        >
+                            {t('No, dispute it')}
+                        </HeroButton>
+                    </span>
+                </div>
+            )}
+            {myMatch.disputedBy === user.id && (
+                <div className='mt-2 border-t border-border/40 pt-2 text-sm text-muted'>
+                    {t('You disputed this result. The organizer will sort it out.')}
+                </div>
+            )}
             {triadStep === 'ban' && (
                 <div className='mt-2 border-t border-border/40 pt-2'>
                     <div className='mb-1 text-xs uppercase tracking-wide text-muted'>

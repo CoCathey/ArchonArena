@@ -43,9 +43,16 @@ RatingService.processGame
 
 -   **Pure pairing core** (`pairing.js`), same discipline as the Elo calculator:
     the correctness-critical math is I/O-free and exhaustively tested. Swiss uses
-    score-group-preferring backtracking that guarantees a rematch-free perfect
-    matching whenever one exists, with byes to the lowest-standing player who
-    hasn't had one, and a folded (top half vs bottom half) seeded round 1.
+    score-group-preferring backtracking that finds a rematch-free perfect
+    matching whenever one exists within a bounded search, with byes to the
+    lowest-standing player who hasn't had one, and a folded (top half vs bottom
+    half) seeded round 1. The search is exhaustive backtracking over perfect
+    matchings — super-exponential in the worst case — and it runs inside the
+    lobby process, so it carries an explicit work budget
+    (`PAIRING_SEARCH_BUDGET`). Exceeding it degrades to allowing rematches
+    rather than running long, and the pairs that repeat come back in
+    `rematches` so the organizer learns it from the pairing rather than from
+    two players at a table.
 -   **Bracket templates**: elimination formats generate the _entire_ bracket at
     start — every slot exists with "winner of X"/"loser of Y" source references
     (`P1SourceMatchId`/`P1SourceIsLoser`), byes resolved through both brackets at
@@ -59,11 +66,26 @@ RatingService.processGame
 -   **Best-of series**: matches carry `BestOf`, `Player1Wins`, `Player2Wins`;
     online series auto-create the next game on each GAMEWIN until clinched;
     manual reporting takes a winner + loser-wins count.
--   **Standings**: points → strength of schedule → extended SoS → fewest byes,
-    plus W-L records and game counts. Final placements: bracket players rank by
-    elimination wave (ties share placement — 3rd/3rd, 5th…8th), everyone else by
-    standings; stamped into `TournamentPlayers.FinalRank` and served as player
-    history (`/api/tournaments/history/:username`).
+-   **Standings**: match points, then the three standard TCG tiebreakers —
+    **OMW%** (opponents' match-win percentage, each opponent floored at 33%),
+    **GW%** (own game-win percentage), **OGW%** (opponents' game-win percentage,
+    same floor) — with fewest byes as the last resort. Byes are excluded from
+    the opponent averages (there is no opponent to average) but count as a match
+    win for the player's own record; players who dropped stay in the calculation
+    with their final record, because their opponents earned those results.
+
+    These replaced a sum of opponents' points ("strength of schedule"). A sum is
+    only meaningful when everyone has played the same number of matches, and the
+    moment byes, drops or an uneven round enter — exactly when tiebreakers
+    decide something — it silently rewards whoever happened to face busier
+    opponents. The 33% floor is what stops your tiebreakers being wrecked by
+    drawing the player who went 0-5 and left, which you had no say in.
+
+    Final placements: bracket players rank by elimination wave (ties share
+    placement — 3rd/3rd, 5th…8th), everyone else by standings; stamped into
+    `TournamentPlayers.FinalRank` and served as player history
+    (`/api/tournaments/history/:username`).
+
 -   **Registration operations** (tournament-platform-style): player caps with FIFO
     waitlists and automatic promotion, private events with 8-char join codes,
     TO-opened check-in with optional shed-no-shows at start, per-event deck
@@ -71,6 +93,33 @@ RatingService.processGame
     start, decklist visibility control, scheduled start times, staff (judges)
     who share full event control, manual/rating/random/registration seeding,
     round timers with a live clock, announcements, printable pairings.
+-   **Result integrity** (`ConfirmedBy`/`DisputedBy`, migration 49): a reported
+    result now records whose word it stands on. Reporting your own **loss** is
+    taken at face value; reporting your own **win** lands unconfirmed and the
+    opponent is asked to confirm or dispute. Organizers and judges are the
+    adjudicators, so their entries are final; so are results the platform
+    witnessed itself (a game played here) and system consequences (a drop
+    forfeiting open matches) — there is nobody's word to take.
+
+    An unconfirmed result still counts toward standings and still lets the round
+    advance. Holding the event until both players click would hand any sore
+    loser a veto, which is a worse failure than the one being fixed; what the
+    flag buys is that disagreement becomes _visible_ — the organizer sees a
+    disputed match instead of hearing about it at the awards ceremony. A dispute
+    never reverses anything by itself (it is a claim, not a ruling), and any
+    fresh result written over the match clears it.
+
+-   **Round clock with teeth** (`RoundEndsAt`, migration 49): the deadline is
+    stored on the event rather than each client deriving it from
+    `RoundStartedAt + RoundTimerMinutes`, so an extension is one edit everyone
+    sees. `adjustRoundClock` moves it; `resolveUnfinished` is the "time in the
+    round" call — every still-open match is decided on its current game score,
+    the leader taking it and a level match becoming a draw. Bracket matches are
+    exempt from the draw case (somebody has to advance) and are handed back to
+    the organizer to decide. Before this, the clock was decorative and
+    `nextRound` refused to pair while any result was missing, so one player who
+    closed their laptop stopped the event for everyone.
+
 -   **Penalty tools**: forfeit and no-show awards, double loss (non-bracket),
     result corrections locked once later bracket results are built on them
     (downstream slots are cleared and re-propagated otherwise), auto-forfeit of
@@ -119,6 +168,15 @@ RatingService.processGame
 
 ## Database
 
+Migration `49 - TournamentResultIntegrity.sql`:
+
+-   `TournamentMatches` + ConfirmedBy/ConfirmedAt, DisputedBy/DisputedAt,
+    DisputeNote, plus a partial index on the disputed rows (finding what needs
+    the organizer is the most common query while an event runs). Existing
+    decided results are backfilled as confirmed by whoever reported them, so a
+    finished event does not reappear as a wall of unresolved disputes.
+-   `Tournaments` + RoundEndsAt.
+
 Migration `32 - TournamentsV2.sql` (over `27 - Tournaments.sql`):
 
 -   `Tournaments` + StartTime, PlayerCap, BestOf, PlayoffBestOf, CutTo, Stage,
@@ -151,10 +209,10 @@ Migration `33 - KeyForgeConditions.sql`:
 -   `POST /api/tournaments` — create (any logged-in user).
 -   `POST /api/tournaments/:id/{register,register-deck,drop,update,
 open-check-in,check-in,seeds,staff/add,staff/remove,start,next-round,cut,
-finish,cancel}`
+finish,cancel,resolve-unfinished,round-clock}`
 -   `POST /api/tournaments/:id/register-triad-decks`
--   `POST /api/tournaments/:id/matches/:matchId/{result,award,double-loss,
-open-game,triad-ban,triad-pick}`
+-   `POST /api/tournaments/:id/matches/:matchId/{result,confirm,dispute,award,
+double-loss,open-game,triad-ban,triad-pick}`
 
 ## Settings
 
@@ -166,14 +224,22 @@ per-event.
 
 -   `pairing.spec.js`: Swiss invariants, fold order, seed placement, single/double
     elim templates (waves, sources, bye cascades incl. losers bracket), round
-    robin coverage, standings tiebreakers (extended SoS), series math.
+    robin coverage, the tiebreaker chain (OMW% including the 33% floor, GW%,
+    OGW%, byes excluded from opponent averages), the search budget (a 64-player
+    late round pairs promptly; a heavily constrained field still seats everyone),
+    series math.
 -   `TournamentService.spec.js` (in-memory db): validation, caps/waitlists,
     private events + list visibility, check-in + shed-no-shows, deck registration
     with SAS bounds + start blocking + deck lock, staff authorization, lifecycle
     per format, double-elim end-to-end incl. grand-final reset, playoff cut,
     series score validation, bracket correction locking, penalties, drop
     forfeits, online automation (needing-games/attach/record incl. idempotency),
-    final ranks + history, detail flags.
+    final ranks + history, detail flags, result confirmation (own-loss trusted,
+    own-win pending, opponent confirm/dispute, reporter cannot self-confirm,
+    outsiders excluded, a fresh result clearing the dispute), and the round
+    clock (deadline set from the timer, extension without restarting the round,
+    unfinished matches resolved on game score, a level match drawn, a bracket
+    match handed back, and the next round unblocked afterwards).
 -   `RatingService.spec.js`: unrated events never rate; rated events boost K.
 
 ## Future considerations

@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS public."Tournaments"
     "JoinCode" text COLLATE pg_catalog."default",
     "RoundTimerMinutes" integer,
     "RoundStartedAt" timestamp without time zone,
+    -- When the current round is due to end (migration 49). Stored rather
+    -- than recomputed per client, so that extending a round is one edit
+    -- everybody sees instead of a number each page works out for itself.
+    "RoundEndsAt" timestamp without time zone,
     "CheckInOpenedAt" timestamp without time zone,
     "RatedGames" boolean NOT NULL DEFAULT false,
     "RequireDeckRegistration" boolean NOT NULL DEFAULT false,
