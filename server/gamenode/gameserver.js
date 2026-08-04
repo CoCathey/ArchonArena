@@ -313,27 +313,34 @@ class GameServer {
             // Deliberately swallowed; the recording is best-effort.
         }
 
-        // ARCHON (N1): optional broadcast delay. Spectators - and only
-        // spectators - can be held back by a configured number of seconds so an
-        // event can be streamed without the stream becoming a side channel back
-        // to the table. The two players are never delayed.
+        for (const player of Object.values(game.getPlayersAndSpectators())) {
+            this.deliverStateTo(game, player);
+        }
+    }
+
+    /**
+     * Deliver one player their current state, honouring the spectator delay.
+     *
+     * ARCHON (N1): optional broadcast delay. Spectators - and only spectators -
+     * can be held back by a configured number of seconds so an event can be
+     * streamed without the stream becoming a side channel back to the table.
+     * The two players are never delayed.
+     */
+    deliverStateTo(game, player) {
+        if (player.left || player.disconnectedAt || !player.socket) {
+            return;
+        }
+
+        const state = game.getState(player.name);
         const delayMs = Math.max(0, Number(game.spectatorDelaySeconds) || 0) * 1000;
 
-        for (const player of Object.values(game.getPlayersAndSpectators())) {
-            if (player.left || player.disconnectedAt || !player.socket) {
-                continue;
-            }
+        if (delayMs > 0 && game.isSpectator(player)) {
+            this.queueDelayedState(game, player.name, state, delayMs);
 
-            let state = game.getState(player.name);
-
-            if (delayMs > 0 && game.isSpectator(player)) {
-                this.queueDelayedState(game, player.name, state, delayMs);
-
-                continue;
-            }
-
-            this.sendStateTo(game, player, state);
+            return;
         }
+
+        this.sendStateTo(game, player, state);
     }
 
     /**
@@ -345,13 +352,25 @@ class GameServer {
      * have not seen yet and their board would desynchronise.
      */
     sendStateTo(game, player, state) {
-        let stateToSend = state;
+        // ARCHON: say on the wire whether this is a complete snapshot or a
+        // delta. The diff baseline is per player and is reset whenever they
+        // connect, reconnect, disconnect or leave, so both go down the same
+        // event and the two are not distinguishable by inspection.
+        //
+        // Clients used to infer it - "I am holding no board, so this must be a
+        // full one" - and that inference is wrong precisely when the reset
+        // happened on this side of the connection: a second tab or the phone
+        // app connecting as the same user resets the baseline for a client that
+        // still holds a board. Handing a whole game state to a delta patcher
+        // does not fail loudly; jsondiffpatch@0.4 loops forever on the first
+        // string it meets, which locks the browser tab outright. See
+        // docs/design/game-state-sync.md.
+        const full = !game.jsonForUsers[player.name];
+        const stateToSend = full
+            ? state
+            : jsondiffpatch.diff(game.jsonForUsers[player.name], state);
 
-        if (game.jsonForUsers[player.name]) {
-            stateToSend = jsondiffpatch.diff(game.jsonForUsers[player.name], state);
-        }
-
-        player.socket.send('gamestate', stateToSend);
+        player.socket.send('gamestate', stateToSend, { full });
 
         game.jsonForUsers[player.name] = jsondiffpatch.clone(state);
     }
@@ -635,6 +654,15 @@ class GameServer {
             return;
         }
 
+        // ARCHON: a player holds one socket and one diff baseline, both keyed by
+        // name, so a second live connection for the same user takes over both -
+        // another tab, the phone app, or a reconnect that beat the old socket's
+        // ping timeout. The displaced client was left holding an open socket
+        // that would never be sent anything again: its board silently stopped
+        // updating and only a refresh brought it back. Close it instead, so it
+        // sees a disconnect and can reconnect or say that it is offline.
+        const supersededSocket = player.socket;
+
         player.lobbyId = player.id;
         player.id = socket.id;
         player.connectionSucceeded = true;
@@ -648,6 +676,18 @@ class GameServer {
 
         player.socket = socket;
         game.jsonForUsers[player.name] = undefined;
+
+        if (supersededSocket && supersededSocket.id !== socket.id) {
+            logger.info(
+                `user '${socket.user.username}' opened a second game connection, closing the first`
+            );
+
+            // The player already points at the new socket, so this close runs
+            // through onSocketDisconnected's `player.id !== socket.id` guard and
+            // cannot mark the player disconnected or tear the game down.
+            supersededSocket.tIsClosing = true;
+            supersededSocket.disconnect();
+        }
 
         if (!game.isSpectator(player) && !player.disconnectedAt) {
             game.addAlert('info', '{0} has connected to the game server', player);
@@ -735,6 +775,39 @@ class GameServer {
         }
     }
 
+    /**
+     * ARCHON: send a player a complete snapshot of the board, on request.
+     *
+     * A client that suspects its board has drifted - a delta that would not
+     * apply, or a socket the OS suspended in the background that may have
+     * missed updates - used to have exactly one way to ask for a clean copy:
+     * drop the connection, because reconnecting is what resets the diff
+     * baseline. That works, but it takes the board off screen for a round trip
+     * and races the outgoing socket against the incoming one. This does the
+     * same thing over the live connection.
+     */
+    onResync(socket) {
+        const game = this.findGameForUser(socket.user.username);
+        if (!game) {
+            return;
+        }
+
+        const player = game.playersAndSpectators[socket.user.username];
+
+        // Ignore a socket that has already been superseded: resetting the
+        // baseline on its behalf would desynchronise the client that actually
+        // holds the player's connection.
+        if (!player || player.socket !== socket) {
+            return;
+        }
+
+        game.jsonForUsers[player.name] = undefined;
+
+        this.runAndCatchErrors(game, () => {
+            this.deliverStateTo(game, player);
+        });
+    }
+
     onGameMessage(socket, command, ...args) {
         let game = this.findGameForUser(socket.user.username);
 
@@ -744,6 +817,10 @@ class GameServer {
 
         if (command === 'leavegame') {
             return this.onLeaveGame(socket);
+        }
+
+        if (command === 'resync') {
+            return this.onResync(socket);
         }
 
         if (!game[command] || !(game[command] instanceof Function)) {
