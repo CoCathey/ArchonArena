@@ -20,6 +20,11 @@ import { setAuthTokens } from '../slices/authSlice';
 
 let lobbySocket;
 let gameSocket;
+// The game the live `gameSocket` belongs to. Kept here rather than read back out
+// of the store: `gamesActions.handoffReceived` overwrites `games.gameId` with
+// the incoming handoff's id, so by the time the handoff handler could look, the
+// store can no longer tell "the game we are already playing" from "a new one".
+let gameSocketGameId;
 const patcher = jsondiffpatch.create({
     objectHash: (obj, index) => {
         return obj.uuid || obj.name || obj.id || obj._id || '$$index:' + index;
@@ -121,6 +126,9 @@ export const socketMiddleware = (store) => (next) => (action) => {
                     ? `//${handoff.address}`
                     : `//${window.location.hostname}`;
 
+            // Captured before `handoffReceived` lands, which overwrites it.
+            const connectedGameId = gameSocketGameId;
+
             store.dispatch(gamesActions.handoffReceived(handoff));
 
             if (handoff.port && !standardPorts.includes(handoff.port)) {
@@ -130,16 +138,32 @@ export const socketMiddleware = (store) => (next) => (action) => {
             store.dispatch(
                 setAuthTokens({
                     token: handoff.authToken,
-                    refreshToken: state.auth.refreshToken,
+                    refreshToken: store.getState().auth.refreshToken,
                     user: handoff.user
                 })
             );
 
-            if (gameSocket && state.games.gameId !== handoff.gameId) {
+            // ARCHON: the lobby re-sends the handoff on every lobby (re)connect
+            // while a game is running, so most handoffs are for the game we are
+            // already playing. Rebuilding the game socket for those did real
+            // damage: closing it cleared `lobby.currentGame`, which swapped the
+            // board out for the pending-game screen with no way back but a
+            // refresh, and the outgoing socket's late `disconnect` raced the
+            // replacement's first state. Keep the connection we have; just make
+            // sure it is trying.
+            if (gameSocket && connectedGameId === handoff.gameId) {
+                if (!gameSocket.connected) {
+                    gameSocket.connect();
+                }
+
+                return;
+            }
+
+            if (gameSocket) {
                 store.dispatch(gameCloseRequested());
             }
 
-            store.dispatch(gameConnectRequested(url, handoff.name));
+            store.dispatch(gameConnectRequested(url, handoff.name, handoff.gameId));
         });
 
         lobbySocket.on('authfailed', () => {
@@ -196,9 +220,9 @@ export const socketMiddleware = (store) => (next) => (action) => {
     }
 
     if (gameConnectRequested.match(action)) {
-        const { url, name } = action.payload;
-        const currentState = store.getState();
-        gameSocket = io(url, {
+        const { url, name, gameId } = action.payload;
+        gameSocketGameId = gameId;
+        const socket = io(url, {
             path: `/${name}/socket.io`,
             reconnection: true,
             reconnectionDelay: 1000,
@@ -209,70 +233,151 @@ export const socketMiddleware = (store) => (next) => (action) => {
             // recover. Safe now that a post-connect `connect_error` no longer
             // reports a failed handoff to the lobby (see the handler below).
             reconnectionAttempts: 20,
-            auth: {
-                token: currentState.auth.token || undefined
+            // ARCHON: read at handshake time, not socket-construction time. The
+            // node's handoff JWTs last five minutes, and a reconnect can happen
+            // long after that; a fixed `auth` object would keep re-presenting an
+            // expired token and every attempt would be refused. Rebuilding the
+            // socket on each lobby handoff used to hide this by accident — it
+            // was the only thing that got a fresh token to the handshake — and
+            // now that a handoff for the game in progress keeps the connection,
+            // the token has to reach it this way instead.
+            auth: (cb) => {
+                cb({ token: store.getState().auth.token || undefined });
             }
         });
+
+        gameSocket = socket;
+
+        // ARCHON: every handler below ignores events from a socket that is no
+        // longer the live one. A replaced socket keeps firing while it closes -
+        // and its `reconnect_*` listeners sit on a Manager that socket.io shares
+        // between connections to the same node, so they outlive it entirely. A
+        // late `disconnect` from the outgoing socket used to wipe the board the
+        // incoming socket had just delivered.
+        const isCurrent = () => gameSocket === socket;
 
         store.dispatch(
             gamesActions.socketConnecting({
                 host: `${url}/${name}`,
-                socket: gameSocket
+                socket: socket
             })
         );
 
-        gameSocket.on('pong', (responseTime) => {
+        socket.on('pong', (responseTime) => {
+            if (!isCurrent()) {
+                return;
+            }
+
             store.dispatch(gamesActions.responseTimeReceived(responseTime));
         });
 
-        gameSocket.on('connect', () => {
+        socket.on('connect', () => {
             // ARCHON: remember that we reached the node at least once so a later
             // reconnection blip isn't misreported as a failed handoff.
-            gameSocket.tHasConnected = true;
-            store.dispatch(gamesActions.socketConnected({ socket: gameSocket }));
+            socket.tHasConnected = true;
+
+            if (!isCurrent()) {
+                return;
+            }
+
+            store.dispatch(gamesActions.socketConnected({ socket: socket }));
         });
 
-        gameSocket.on('connect_error', () => {
+        socket.on('connect_error', () => {
+            if (!isCurrent()) {
+                return;
+            }
+
             // ARCHON: only tell the lobby the handoff failed if we NEVER managed
             // to connect to the game node. A `connect_error` fired after a
             // successful connect is a transient reconnection blip (socket.io
             // keeps retrying) — reporting it made the node run `failedConnect`
             // on a live game, marking it finished and leaving the player staring
             // at a board whose buttons (e.g. the mulligan prompt) did nothing.
-            if (lobbySocket && !gameSocket.tHasConnected) {
+            if (lobbySocket && !socket.tHasConnected) {
                 lobbySocket.emit('connectfailed');
             }
             store.dispatch(gamesActions.socketConnectError());
         });
 
-        gameSocket.on('disconnect', () => {
+        socket.on('disconnect', () => {
+            if (!isCurrent()) {
+                return;
+            }
+
             store.dispatch(gamesActions.socketDisconnected());
             store.dispatch(lobbyActions.gameSocketDisconnected());
         });
 
-        gameSocket.io.on('reconnect_attempt', () => {
+        socket.io.on('reconnect_attempt', () => {
+            if (!isCurrent()) {
+                return;
+            }
+
             store.dispatch(gamesActions.socketReconnecting());
         });
 
-        gameSocket.io.on('reconnect', () => {
+        socket.io.on('reconnect', () => {
+            if (!isCurrent()) {
+                return;
+            }
+
             store.dispatch(gamesActions.socketReconnected());
         });
 
-        gameSocket.io.on('reconnect_failed', () => {
+        socket.io.on('reconnect_failed', () => {
+            if (!isCurrent()) {
+                return;
+            }
+
             store.dispatch(gamesActions.socketConnectFailed());
         });
 
-        gameSocket.on('gamestate', (game) => {
+        socket.on('gamestate', (game, meta) => {
+            if (!isCurrent()) {
+                return;
+            }
+
             const latestState = store.getState();
             let gameState;
 
-            if (latestState.lobby.rootState) {
-                gameState = patcher.patch(jsondiffpatch.clone(latestState.lobby.rootState), game);
-                store.dispatch(lobbyActions.setRootState(gameState));
-            } else {
+            // ARCHON: the node says which of the two this is. Guessing from
+            // whether we happen to hold a board is wrong whenever the node reset
+            // its diff baseline while this socket stayed up (a second tab or the
+            // phone app connecting as the same user does exactly that), and
+            // getting it wrong is not a soft failure: jsondiffpatch loops
+            // forever when handed a whole game state as a delta, hanging the
+            // tab. `meta` is absent only when talking to a node older than this
+            // change, where the old guess is still the best available.
+            const isFullState = meta ? !!meta.full : !latestState.lobby.rootState;
+
+            if (isFullState) {
                 gameState = game;
-                store.dispatch(lobbyActions.setRootState(game));
+            } else if (!latestState.lobby.rootState) {
+                // A delta with nothing to apply it to. Ask for a clean copy
+                // rather than adopting the delta as though it were a board.
+                socket.emit('game', 'resync');
+
+                return;
+            } else {
+                try {
+                    gameState = patcher.patch(
+                        jsondiffpatch.clone(latestState.lobby.rootState),
+                        game
+                    );
+                } catch (error) {
+                    // A delta that will not apply means our board has drifted
+                    // from the node's. Keep showing the last good one and ask
+                    // for a fresh snapshot instead of rendering something wrong.
+                    // eslint-disable-next-line no-console
+                    console.warn('Could not apply game state delta, resyncing', error);
+                    socket.emit('game', 'resync');
+
+                    return;
+                }
             }
+
+            store.dispatch(lobbyActions.setRootState(gameState));
 
             store.dispatch(
                 lobbyActions.messageReceived({
@@ -285,7 +390,11 @@ export const socketMiddleware = (store) => (next) => (action) => {
             );
         });
 
-        gameSocket.on('cleargamestate', () => {
+        socket.on('cleargamestate', () => {
+            if (!isCurrent()) {
+                return;
+            }
+
             const currentState = store.getState();
             // The game socket's `cleargamestate` for a finished game can arrive
             // *after* the lobby socket has already published a new pending
@@ -322,8 +431,18 @@ export const socketMiddleware = (store) => (next) => (action) => {
             // sees the leave — leaving the user "stuck" in the game until
             // they refresh.
             const socketToClose = gameSocket;
-            setTimeout(() => socketToClose.close(), 0);
+            setTimeout(() => {
+                // Only the socket's own listeners: the shared Manager's are
+                // guarded by `isCurrent()` instead, because removing them would
+                // also strip the replacement socket's.
+                socketToClose.removeAllListeners();
+                socketToClose.close();
+            }, 0);
+            // Clearing this first is what makes the outgoing socket's handlers
+            // no-ops from here on, including anything it fires while closing.
+            gameSocket = undefined;
         }
+        gameSocketGameId = undefined;
         store.dispatch(gamesActions.socketClosed());
         store.dispatch(lobbyActions.gameSocketClosed());
     }

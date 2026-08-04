@@ -13,8 +13,8 @@ export const lobbyLeaveGameRequested = createAction('lobby/leaveGameRequested', 
     payload: { gameId }
 }));
 
-export const gameConnectRequested = createAction('game/connectRequested', (url, name) => ({
-    payload: { url, name }
+export const gameConnectRequested = createAction('game/connectRequested', (url, name, gameId) => ({
+    payload: { url, name, gameId }
 }));
 export const gameCloseRequested = createAction('game/closeRequested');
 export const gameSendMessage = createAction('game/sendMessage', (message, ...args) => ({

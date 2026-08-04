@@ -1627,6 +1627,18 @@ competitive advantage.
         given ~2 min to recover; "Leave Game" now also leaves over the lobby
         socket so a stranded player can always escape and the lobby tears the game
         down on the node instead of leaving a ghost.
+-   [x] **Game-state sync** (`docs/design/game-state-sync.md`): the node now says on
+        the wire whether a `gamestate` is a whole board or a delta, instead of leaving
+        clients to infer it — an inference that broke whenever the node reset its diff
+        baseline while a client's socket stayed up (a second tab, or the phone app and
+        the web app signed in together), and that failed by hanging the browser tab
+        outright, since jsondiffpatch loops forever when handed a board as a delta. The
+        lobby's per-reconnect handoff no longer rebuilds a live game socket (which used
+        to swap the board out for the pending-game screen with no way back but a
+        refresh); a socket the node supersedes is closed rather than silently starved;
+        and both clients can ask for a fresh board over the live connection (`resync`)
+        instead of dropping it, so the mobile app no longer falls back to
+        "Connecting to the game…" on every blip and every return from the background.
 -   [x] Gameplay regression suite kept green on every PR (the full card suite runs in CI).
 -   [x] **In-app bug reports** (BugReportService, migration 34) with an admin triage page —
         the beta feedback channel.
