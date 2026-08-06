@@ -384,6 +384,12 @@ class DeckService {
                 return isSort ? '"Expansion"' : 'e."ExpansionId"';
             case 'winRate':
                 return '"WinRate"';
+            // The client's SAS column is keyed 'sasRating', and an unrecognised
+            // sort silently became LastUpdated - which is how sorting by SAS
+            // ended up ordering by date and then being re-sorted per page.
+            case 'sasRating':
+            case 'sas':
+                return '"SasRating"';
             case 'isAlliance':
                 return '"IsAlliance"';
             default:
@@ -451,16 +457,28 @@ class DeckService {
         try {
             decks = await db.query(
                 'SELECT *, CASE WHEN "WinCount" + "LoseCount" = 0 THEN 0 ELSE (CAST("WinCount" AS FLOAT) / ("WinCount" + "LoseCount")) * 100 END AS "WinRate" FROM ( ' +
-                    'SELECT d.*, u."Username", e."ExpansionId" as "Expansion", (SELECT COUNT(*) FROM "Decks" WHERE "Name" = d."Name") AS DeckCount, ' +
+                    'SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", (SELECT COUNT(*) FROM "Decks" WHERE "Name" = d."Name") AS DeckCount, ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
+                    // ARCHON: SAS joined HERE rather than attached to the page
+                    // afterwards. It used to be decorated onto the rows the API
+                    // had already fetched, which meant the database could not
+                    // order by it: a request to sort by SAS fell through to
+                    // LastUpdated, and the client re-sorted the fifteen rows it
+                    // happened to receive. "Highest SAS" showed the best deck on
+                    // page one, not the best deck you own. LEFT so a deck with
+                    // no cached score is still listed.
                     'FROM "Decks" d ' +
                     'JOIN "Users" u ON u."Id" = "UserId" ' +
                     'JOIN "Expansions" e on e."Id" = d."ExpansionId" ' +
+                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
                     'WHERE "UserId" = $1 ' +
                     filter +
                     ') sq ' +
-                    `ORDER BY ${sortColumn} ${sortDir} ` +
+                    // NULLS LAST in both directions: an unscored deck is not a
+                    // zero-SAS deck, and sorting ascending should not open with
+                    // every deck DoK has never rated.
+                    `ORDER BY ${sortColumn} ${sortDir} NULLS LAST ` +
                     'LIMIT $2 ' +
                     'OFFSET $3',
                 params
@@ -1668,7 +1686,10 @@ class DeckService {
             uuid: deck.Uuid,
             verified: deck.Verified,
             wins: deck.WinCount,
-            winRate: deck.WinRate
+            winRate: deck.WinRate,
+            // Present when the row came from a query that joins DeckSas.
+            // attachStats fills this in for the paths that do not.
+            sasRating: deck.SasRating != null ? deck.SasRating : undefined
         };
     }
 }

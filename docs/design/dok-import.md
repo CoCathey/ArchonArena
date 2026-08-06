@@ -47,16 +47,22 @@ rather than a workaround.
         default 500) is hit.
     -   Decks the user already owns (`DeckService.getOwnedDeckUuids`) are subtracted, and
         the remainder is returned.
-2.  **Import** — the client (`DokImport.jsx`) imports each returned uuid through the
-    ordinary `POST /api/decks` path (Master Vault fetch + `deckService.create`, which
-    already dedupes and fires SAS enrichment), a few in parallel, with a live progress
-    bar.
+2.  **Import** — prepare hands the remaining uuids to a server-side job, and a sweep in
+    the lobby imports them a few at a time through the ordinary `deckService.create`
+    path (Master Vault fetch, dedupe, SAS enrichment). The client polls the job and is
+    free to close the modal.
 
 Splitting prepare (server, one set of DoK round-trips) from import (client loop over the
 proven single-deck endpoint) keeps the whole feature **stateless** — no background jobs,
 no in-memory progress that dies on restart or across lobby processes — and means one
 battle-tested import path serves both single and bulk imports. A bulk import cannot
 produce a deck that a single import could not, because it is the same code.
+
+**The statelessness half of that paragraph no longer holds**, and it is left standing
+because the decision it records is one worth being able to find. The import step is now a
+persisted job; step 2 above describes what replaced it, and "The import runs on the
+server now" below says what changed. The shared-import-path half is untouched, and is
+still the reason a bulk-imported deck and a pasted one are the same deck.
 
 ## The key is used transiently and never stored
 
@@ -75,6 +81,159 @@ Storing it **encrypted** is a reasonable follow-up. It needs a key-management st
 first (where the encryption key lives, how it rotates, what happens on restore from
 backup), and that is a piece of infrastructure this repo does not have yet. When it
 exists, an opt-in "remember my DoK key" checkbox turns re-sync into a single button.
+
+## The import runs on the server now
+
+The import loop used to live in the browser: prepare returned uuids and `DokImport.jsx`
+posted them back to `POST /api/decks` a few at a time. Master Vault meters deck fetches
+hard enough that a 257-deck collection takes minutes, which made the import a property of
+a modal staying open for minutes. Closing it, following a link, or letting a phone sleep
+the tab ended the import wherever it had got to.
+
+That is the ordinary outcome, not an unlucky one, and the distinction is the whole
+argument. A player who abandons a five-second job is behaving strangely; a player who
+will not sit and watch a five-minute one is behaving normally. The feature was asking for
+attention it had no right to.
+
+The damage was smaller than it sounds and worse than it looks. Decks that had landed
+stayed landed, and re-running prepare subtracts them, so a second attempt did resume in
+effect — but only for a player who knew to try again, and nothing told them whether the
+import had finished or died, because the progress bar left with the modal. "Did that
+work?" is not a question a collection import should leave anybody holding.
+
+So the loop moved to the server and became a row. Prepare is unchanged in shape: it still
+lists the collection synchronously with the player's key, still subtracts the decks they
+already own. What it does with the remainder is different — instead of handing uuids back
+to the browser it creates a job holding them. A sweep in the lobby claims the oldest due
+job and imports a few of its decks per pass, through the same `deckService.create` a
+single paste uses. The client polls `GET /api/decks/import/status` and may close the
+modal, navigate away, or come back tomorrow; `POST /api/decks/import/cancel` exists for a
+player who changes their mind, which is now a deliberate act rather than a side effect of
+dismissing a dialog.
+
+Pacing improves as a side effect, and by more than the move looks like it should. Ten
+browsers each spacing their own requests politely still arrive at one origin as ten times
+one browser's traffic, and no browser can see the other nine. Master Vault meters the
+origin. One worker with one queue is the only place that rate is a number anybody can
+hold, let alone tune.
+
+### The key is still never stored, and nothing had to be careful about it
+
+Deferring work usually means storing the credential the work needs, and that would have
+been fatal here — the section above spends several paragraphs on why a DoK key must not
+be written down, and a background importer that needed one would have forced exactly the
+thing that section refuses.
+
+It does not need one, for a reason worth stating plainly because the entire design hangs
+off it. The key authenticates one question: which decks this player owns on DoK.
+Importing a deck asks a different service an unrelated question, and Master Vault has
+never heard of Decks of KeyForge, let alone its API keys — it would not know what to do
+with one if the job carried it. So the only thing the listing step produces that the
+import step consumes is uuids, and a uuid is a public identifier that appears in the
+deck's own URL.
+
+The job therefore holds uuids and nothing else, and the key falls out of scope when the
+prepare request returns, exactly as it did when the import ran in the browser. This is
+not a rule anyone has to keep remembering: there is no key column on `DeckImportJobs` to
+populate, so a later change cannot start storing one by accident — it would first have to
+decide to add somewhere to put it.
+
+### Why the state is in Postgres
+
+An in-memory job would have been less code and the wrong shape for the failure this
+change exists to fix. The lobby restarts on every deploy. A job living in a process dies
+with it, and the player it belonged to is precisely the player who closed the modal
+because we told them they could: no page open, no progress bar, no way to tell an import
+that finished from one that evaporated. That is the original bug with a longer fuse and a
+better excuse.
+
+**This reverses the "stateless, no background jobs" decision recorded above**, and the
+reversal deserves an honest account, because the earlier reasoning was not wrong.
+Statelessness is close to free when the work is short: a request that can carry the whole
+job needs no cursor to persist, no restart to survive, and leaves no row in a state
+nobody expects. What changed is not the principle but the measurement. This job is not
+short. At minutes per collection the browser stopped being a place work could safely
+live, and the price of statelessness stopped being "one fewer table" and became "the
+import breaks whenever a player behaves reasonably". The work outgrew the argument.
+
+### One live job per user is a database constraint
+
+Two live jobs for one player would work the same collection twice: racing on the same
+decks, each counting the other's imports as its own progress, and between them doubling
+that player's draw on the Master Vault budget every other importing player is queued
+behind. So `DeckImportJobs` carries a unique index on `"UserId"`, partial to
+`"Status" IN ('pending', 'running')`.
+
+It is an index rather than a check in `DeckImportJobService` because the service cannot
+enforce it. "Does this user already have a job?" followed by "then insert one" is two
+statements, and two processes interleave them as readily as one runs them in order — an
+application-level check is a check that both callers pass at once. Being partial also
+supplies the release condition for free: finishing or cancelling a job drops it out of
+the index, so completed imports pile up as history without ever blocking the next one.
+`createJob` cancels before it inserts for exactly that reason, and if the cancel fails the
+index refuses the insert and the player is told their import could not start — the right
+answer, and a much better one than two jobs racing.
+
+### The circuit breaker tells a bad deck from a bad moment
+
+`deckService.create` fails in two quite different ways and the sweep has to tell them
+apart. A deck from an expansion the engine does not implement, or one the player already
+has, is a fact about that deck: it will fail identically forever. So the cursor advances
+past it, the reason is counted into `Reasons`, and the collection carries on. One
+unimportable deck must not wedge the two hundred behind it.
+
+An `upstream_rate_limited` error is not a fact about the deck at all. It is a fact about
+the minute we asked in, and the deck it interrupted was never read. So it ends the batch
+**without advancing the cursor**, and the job is parked by setting `PausedUntil`, which
+takes it out of the sweep's claim query until the backoff expires. The throttled deck is
+the first one attempted when the job is next claimed. That is the point of not advancing:
+a cursor that stepped over it would quietly drop a deck the player owns from their
+collection on the grounds that Master Vault was busy, and nothing downstream would ever
+notice, because a skipped deck and an absent deck look identical.
+
+Backoff doubles per consecutive failure from `backoffBaseMs` (a minute) to `backoffMaxMs`
+(half an hour), and the cap matters more than the curve. Somebody is waiting on this job
+even though they are no longer watching it, so a backoff that keeps doubling through the
+night would turn a minute of Master Vault being unhappy into an import that never
+visibly resumes. A batch that succeeds clears the counter, because the upstream answering
+is the only evidence that matters and a failure count left over from an outage half an
+hour ago would park a job that is plainly fine.
+
+### Files
+
+-   `server/services/deckimport/DeckImportJobService.js` — the job's whole lifecycle:
+    `createJob`, `claimNextJob`, `recordProgress`, `pauseJob`, `finishJob`,
+    `cancelActive`, `backoffMs`. `claimNextJob` is a single
+    `UPDATE ... WHERE "Id" = (SELECT ... FOR UPDATE SKIP LOCKED)` so that two lobby
+    processes claim different jobs instead of both working one. Best effort throughout in
+    the repo's usual sense — it logs and returns a sentinel, because a failed query here
+    must not throw into a lobby tick or into the status poll a player is watching.
+-   `server/db/schema/57 - DeckImportJobs.sql` and
+    `server/db/schema/migrations/53 - DeckImportJobs.sql` — the table, the partial
+    live-job index above, and the `("Status", "CreatedAt")` index the claim query walks.
+    The file's comments carry the column-level reasoning: why `Username` is denormalised,
+    why `Uuids` is one write-once blob, and why there is no key column.
+-   `server/lobby.js` — `runDeckImportSweep`, which is only the clock and the batch.
+    Which decks remain, how fast to pull them and whether the job is parked all live in
+    the row and the service, the same division as `runCatalogCrawl`. It logs a job
+    finishing or being parked and stays quiet about ordinary batches, because a log that
+    narrates every five decks of a 250-deck import is a log nobody reads.
+-   `config/default.json5` → `deckImport` and `server/services/settings/registry.js` →
+    `deckImport` — `enabled`, `decksPerTick`, `requestSpacingMs`, `sweepIntervalSeconds`,
+    the backoff bounds, and `maxJobDecks`. Admin-tunable for the reason the catalog's
+    knobs are: the occasion for reaching for them is usually that Master Vault is unhappy
+    with us, and that is not a moment to need a redeploy. Unlike the crawl, `enabled`
+    defaults **on** — this is the machinery behind a button players already press, not an
+    outbound job nobody asked for, so an instance that upgrades must not quietly lose
+    collection import to an unset flag.
+-   `server/api/decks.js` — `POST /api/decks/import/dok/prepare` (unchanged up to the
+    point where it creates a job instead of returning uuids),
+    `POST /api/decks/import/queue` for the CSV and pasted-link routes, which arrive
+    already holding uuids, `GET /api/decks/import/status`, and
+    `POST /api/decks/import/cancel`.
+-   `client/Components/Decks/DokImport.jsx` — polls the job instead of driving it, and
+    `client/redux/api.js` → `queueDeckImport`, `getDeckImportStatus`, `cancelDeckImport`.
+-   `test/server/services/deckimport/DeckImportJobService.spec.js`.
 
 ## Rate limiting is per key, not per process
 
@@ -186,7 +345,9 @@ and the same import loop, so keeping the second one costs a file input.
 -   `POST /api/decks/import/dok/prepare` is rate-limited per user. That limit now exists
     to stop the site hammering DoK on one user's behalf, not to protect our own SAS
     budget — per-key windows already handle the latter.
--   The client import runs at concurrency 3 to be gentle on Master Vault.
+-   The import itself is paced by the lobby sweep rather than by the browser
+    (`decksPerTick`, `requestSpacingMs`), which is both gentler on Master Vault and a rate
+    that exists as a number somewhere instead of being whatever the open tabs add up to.
 
 ## Config (`dok` section, admin-tunable)
 
@@ -227,8 +388,13 @@ flow.
     `reserveOutboundSlot` window.
 -   `server/services/DeckService.js` — `getOwnedDeckUuids`.
 -   `server/api/decks.js` — `POST /api/decks/import/dok/prepare` and its rate limit.
--   `client/Components/Decks/DokImport.jsx` — both routes in (key, CSV/paste) and the
-    shared import loop; wired into `pages/Decks.jsx` and `pages/Onboarding.jsx`.
+-   `client/Components/Decks/DokImport.jsx` — both routes in (key, CSV/paste), now
+    handing off to the background job rather than looping itself; wired into
+    `pages/Decks.jsx` and `pages/Onboarding.jsx`.
 -   `client/redux/api.js` — `prepareDokImport`.
 -   `config/default.json5` → `dok` — every knob.
 -   `test/server/services/dok/DokService.spec.js`.
+
+The background import's own files — the job service, its table, the lobby sweep, the
+`deckImport` config and the status endpoints — are listed under "The import runs on the
+server now" above.

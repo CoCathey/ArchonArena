@@ -294,6 +294,59 @@ const REGISTRY = {
             }
         }
     },
+    // ARCHON: the background worker behind bulk collection import.
+    deckImport: {
+        title: 'Collection Import',
+        description:
+            "Importing a whole Decks of KeyForge collection runs as a job the lobby works a few decks at a time, so it survives the player closing the modal. These knobs are the pace it pulls decks from Master Vault, and that pace is shared rather than per-player: the worker uses the same origin as every player importing a single deck by hand, and Master Vault meters the origin. Turning them up buys a faster bulk import at the cost of somebody else's deck link being refused.",
+        fields: {
+            enabled: {
+                type: 'boolean',
+                label: 'Import collections in the background',
+                default: true
+            },
+            decksPerTick: {
+                type: 'number',
+                label: 'Decks imported per sweep',
+                min: 1,
+                max: 50,
+                default: 5
+            },
+            requestSpacingMs: {
+                type: 'number',
+                label: 'Wait between deck imports within a sweep (ms)',
+                min: 100,
+                max: 60000,
+                default: 400
+            },
+            // No failure-threshold knob here, unlike the catalog crawl. A job
+            // parks on the FIRST Master Vault rate limit, so there is no
+            // threshold to tune - and a setting labelled "failures in a row
+            // before a job backs off" that changes nothing is worse than no
+            // setting, because an operator reaches for it precisely when the
+            // import is misbehaving and will believe they have adjusted it.
+            sweepIntervalSeconds: {
+                type: 'number',
+                label: 'Work each import job every (seconds)',
+                min: 5,
+                max: 3600,
+                default: 10
+            }
+            // The backoff curve (backoffBaseMs / backoffMaxMs) is deliberately
+            // NOT editable here. It is the site's protection against Master
+            // Vault, and the moment anyone would reach for it is the middle of
+            // a rate-limiting incident - which is exactly when shortening a
+            // backoff turns "Master Vault is throttling us" into "Master Vault
+            // has blocked this address", taking ordinary deck import with it.
+            // The knob for an operator in that situation is `enabled`.
+            //
+            // maxJobDecks is not editable either, for a different reason: it
+            // bounds how many uuids go into one row's JSON blob, so it is a
+            // statement about what the table is shaped to hold rather than
+            // about pacing. What actually limits a player's import is
+            // dok.maxImportDecks, which they hit first.
+        }
+    },
     tournament: {
         title: 'Tournaments',
         description:

@@ -14,6 +14,7 @@ const sharedNotificationService = require('./services/notifications');
 const tournamentNotifications = require('./services/notifications/tournamentNotifications');
 const DokService = require('./services/dok/DokService');
 const CatalogService = require('./services/catalog/CatalogService');
+const DeckImportJobService = require('./services/deckimport/DeckImportJobService');
 const UserService = require('./services/UserService');
 const ConfigService = require('./services/ConfigService');
 // ARCHON: native tournaments create/report lobby games automatically
@@ -53,6 +54,10 @@ class Lobby {
         // ARCHON: Master Vault name -> uuid index. The lobby holds it only to
         // run the crawl below; searching it is an API concern.
         this.catalogService = options.catalogService || new CatalogService(this.configService);
+        // ARCHON: bulk collection import as a resumable job. The lobby holds it
+        // to run the sweep below; creating and reporting jobs is an API concern.
+        this.deckImportService =
+            options.deckImportService || new DeckImportJobService(this.configService);
         this.router = options.router || new GameRouter(this.configService);
 
         this.router.on('onGameClosed', this.onGameClosed.bind(this));
@@ -138,6 +143,19 @@ class Lobby {
         this.catalogSweep = setInterval(() => this.runCatalogCrawl(), 60 * 1000);
         if (this.catalogSweep && this.catalogSweep.unref) {
             this.catalogSweep.unref();
+        }
+
+        // ARCHON: collection import worker. Ticks far more often than the other
+        // sweeps because a tick is local work plus a handful of paced requests,
+        // and a player is watching the progress bar it moves. The cadence it
+        // actually runs at is read from config on each tick, the way the crawl's
+        // is: the reason an operator reaches for it is that Master Vault is
+        // unhappy with us, and a value baked into setInterval would not take
+        // effect until the lobby was restarted.
+        this.lastDeckImportSweepMs = 0;
+        this.deckImportSweep = setInterval(() => this.runDeckImportSweep(), 5 * 1000);
+        if (this.deckImportSweep && this.deckImportSweep.unref) {
+            this.deckImportSweep.unref();
         }
 
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
@@ -299,6 +317,195 @@ class Lobby {
             }
         } catch (err) {
             logger.error('Master Vault catalog crawl failed', err);
+        }
+    }
+
+    sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    /**
+     * ARCHON: import a few decks of one player's collection, then stop.
+     *
+     * This loop used to live in the browser. The server listed the collection
+     * and handed back uuids; the client posted them back a deck at a time. That
+     * made the import a property of a modal being open - and since Master Vault
+     * meters hard enough that 250 decks takes minutes, closing the modal or
+     * following a link part-way through was the ordinary outcome rather than
+     * the exceptional one. The import died wherever it had got to, with nothing
+     * recording which decks had landed, so the retry started from the top.
+     *
+     * Moving it here also paces Master Vault far better than the client could,
+     * however politely each client behaved. Ten browsers each spacing their own
+     * requests still arrive at one origin as ten times one browser's traffic,
+     * and no browser can see the other nine; one worker with one queue is the
+     * only place that rate is a number anyone can hold.
+     *
+     * The lobby contributes the clock and the batch. Everything that has to
+     * survive a restart - the remaining uuids, the cursor, the counts, the
+     * circuit breaker - is a row, so a deploy mid-import costs at most the
+     * decks in flight.
+     *
+     * Silence is deliberate: a sweep that imported 5 decks of 250 says nothing.
+     * Only finishing a job or parking one is worth a line, because a log that
+     * narrates every batch of a long import is a log nobody reads.
+     */
+    async runDeckImportSweep() {
+        if (!this.deckImportService) {
+            return;
+        }
+
+        try {
+            if (!this.deckImportService.isEnabled()) {
+                return;
+            }
+
+            const config = this.deckImportService.getConfig();
+            // An unset or zero cadence means "every tick", not "never": the
+            // switch for stopping this work is `enabled`, and a worker silently
+            // parked by a stray 0 looks to the player like an import that hung.
+            const seconds = Math.max(0, Number(config.sweepIntervalSeconds) || 0);
+            const now = Date.now();
+
+            if (now - this.lastDeckImportSweepMs < seconds * 1000) {
+                return;
+            }
+
+            this.lastDeckImportSweepMs = now;
+
+            const job = await this.deckImportService.claimNextJob();
+
+            if (!job) {
+                return;
+            }
+
+            const uuids = this.deckImportService.parseUuids(job);
+            const reasons = this.deckImportService.parseReasons(job);
+            const spacingMs = Number(config.requestSpacingMs) || 0;
+            const cursor = Math.max(0, job.Cursor || 0);
+            const batch = uuids.slice(cursor, cursor + this.deckImportService.getDecksPerTick());
+
+            let imported = job.Imported || 0;
+            let alreadyOwned = job.AlreadyOwned || 0;
+            let failed = job.Failed || 0;
+            // Decks this batch actually dealt with, which is what the cursor
+            // advances by. A rate limit leaves the deck it interrupted unread,
+            // so it is deliberately not counted.
+            let consumed = 0;
+            let throttled = null;
+
+            // Failure reasons are aggregated per job: the player reads them once
+            // as a summary ("12 decks are from an unsupported expansion"), and
+            // the same refusal repeated 200 times is one line, not 200.
+            const countReason = (reason) => {
+                reasons[reason] = (reasons[reason] || 0) + 1;
+            };
+
+            for (const uuid of batch) {
+                // Between decks, never before the first: the spacing exists to
+                // stagger requests, and the first one of a batch has nothing to
+                // be staggered from.
+                if (consumed > 0 && spacingMs > 0) {
+                    await this.sleep(spacingMs);
+                }
+
+                let result = null;
+                let error = null;
+
+                try {
+                    result = await this.deckService.create(
+                        { id: job.UserId, username: job.Username },
+                        { uuid, username: job.Username }
+                    );
+                } catch (err) {
+                    // ARCHON: a 429 is not this deck's fault, it is the origin
+                    // telling us to stop, so the batch ends here and the cursor
+                    // stays on the deck we never read. Skipping past it would
+                    // silently lose a deck the player owns to a failure that had
+                    // nothing to do with it, and carrying on through the rest of
+                    // the batch would spend more requests from an address Master
+                    // Vault has just asked to be quiet.
+                    if (err && err.code === 'upstream_rate_limited') {
+                        throttled = err.message || 'Master Vault is rate limiting deck imports';
+
+                        break;
+                    }
+
+                    error = err;
+                }
+
+                if (error) {
+                    failed++;
+                    countReason(error.message || 'Import failed');
+                } else if (result && result.success) {
+                    imported++;
+                } else {
+                    // A resolved refusal is business, not breakage: this player
+                    // already owns the deck, or it is from an expansion the
+                    // engine does not implement. Already-owned is counted apart
+                    // from failures because re-running an import over a
+                    // collection that is mostly already here is the normal case,
+                    // and calling that 200 failures reads as a broken feature.
+                    const message = (result && result.message) || 'Import failed';
+
+                    if (/already exists/i.test(message)) {
+                        alreadyOwned++;
+                    } else {
+                        failed++;
+                        countReason(message);
+                    }
+                }
+
+                consumed++;
+            }
+
+            const progress = {
+                cursor: cursor + consumed,
+                imported,
+                alreadyOwned,
+                failed,
+                reasons
+            };
+
+            if (throttled) {
+                const failures = (job.ConsecutiveFailures || 0) + 1;
+                const backoff = this.deckImportService.backoffMs(failures);
+
+                await this.deckImportService.pauseJob(job.Id, {
+                    ...progress,
+                    // Measured from the refusal rather than from the top of the
+                    // sweep: the batch that got here spent real time being
+                    // paced, and that time is not part of the backoff.
+                    untilMs: Date.now() + backoff,
+                    error: throttled,
+                    consecutiveFailures: failures
+                });
+
+                logger.info(
+                    `Deck import job ${job.Id} (${job.Username}) paused for ` +
+                        `${Math.round(backoff / 1000)}s at deck ${progress.cursor} of ` +
+                        `${uuids.length}: Master Vault is rate limiting`
+                );
+
+                return;
+            }
+
+            await this.deckImportService.recordProgress(job.Id, progress);
+
+            // >= rather than ===: a job whose uuid list is empty, or whose
+            // cursor is somehow past the end, must still retire. Waiting for an
+            // exact landing would leave it claimable forever, and a job nobody
+            // can finish is a job that blocks this player's next import.
+            if (progress.cursor >= uuids.length) {
+                await this.deckImportService.finishJob(job.Id, 'done');
+
+                logger.info(
+                    `Deck import job ${job.Id} (${job.Username}) finished: ${imported} imported, ` +
+                        `${alreadyOwned} already owned, ${failed} failed`
+                );
+            }
+        } catch (err) {
+            logger.error('Deck import sweep failed', err);
         }
     }
 

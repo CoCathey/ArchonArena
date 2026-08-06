@@ -1,37 +1,18 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton } from '@heroui/react';
+import { useDispatch } from 'react-redux';
 
-import { usePrepareDokImportMutation, useSaveDeckMutation } from '../../redux/api';
+import {
+    api,
+    useCancelDeckImportMutation,
+    useGetDeckImportStatusQuery,
+    usePrepareDokImportMutation,
+    useQueueDeckImportMutation
+} from '../../redux/api';
+import { TAG_TYPES } from '../../redux/apiTags';
 
-// ARCHON: pacing for a whole-collection import.
-//
-// Master Vault meters deck fetches, and it meters them hard. This importer
-// originally fired decks at concurrency 3 with no spacing, no retry and no
-// way to stop: a 257-deck sync imported exactly 3 - one per worker - and then
-// failed the remaining 254 in a few seconds, because nothing noticed the
-// refusals or slowed down for them. Worse, burning the rest of the list at
-// full tilt is precisely what deepens a rate limit.
-//
-// So requests are paced on ONE shared clock rather than per worker (otherwise
-// concurrency silently multiplies the rate), a refusal widens the spacing for
-// everybody and the deck is retried rather than lost, and a success narrows it
-// again slowly so one hiccup does not leave 200 decks crawling. If Master
-// Vault keeps refusing after all that, the run stops and says so - decks
-// already imported are skipped server-side next time, so stopping early costs
-// nothing but the wait.
-const IMPORT_CONCURRENCY = 2;
-const BASE_SPACING_MS = 300;
-const MAX_SPACING_MS = 10000;
-const MAX_DECK_ATTEMPTS = 4;
-const ABORT_AFTER_EXHAUSTED = 3;
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const isRateLimited = (payload) =>
-    payload?.code === 'upstream_rate_limited' || /rate limit/i.test(payload?.message || '');
-
-const isAlreadyOwned = (payload) => /already exists/i.test(payload?.message || '');
+const POLL_MS = 2500;
 
 // Master Vault deck ids are UUIDs. This finds them in anything the player
 // pastes or uploads: a Decks of KeyForge CSV export (its first column is
@@ -53,6 +34,8 @@ const extractUuids = (text) => {
     return uuids;
 };
 
+const isLive = (job) => !!job && (job.status === 'pending' || job.status === 'running');
+
 /**
  * ARCHON: bulk-import a whole KeyForge collection.
  *
@@ -66,213 +49,93 @@ const extractUuids = (text) => {
  *  - A DoK CSV export or pasted deck links, for anyone who would rather not
  *    hand over a key at all.
  *
- * Both routes end in the same place: a list of Master Vault uuids imported
- * through the ordinary single-deck endpoint, a few at a time, so the proven
- * import path (Master Vault fetch + SAS enrichment) stays the only one.
- * Decks already owned are skipped server-side, so re-running only adds new
- * decks.
+ * Both routes hand a list of Master Vault ids to a server-side job and then
+ * only watch it. The import used to run here, in the browser, which meant
+ * closing this dialog abandoned it part-done - and since Master Vault paces
+ * imports to minutes for a real collection, closing the dialog was the normal
+ * case rather than the exception. Now the work survives navigation, a reload,
+ * and a lobby restart, and this component is just a progress view.
  *
  * @param {{ onDone?: () => void, compact?: boolean }} props
  */
 const DokImport = ({ onDone, compact }) => {
     const { t } = useTranslation();
+    const dispatch = useDispatch();
     const fileInput = useRef(null);
 
     const [apiKey, setApiKey] = useState('');
     const [pasted, setPasted] = useState('');
-    const [phase, setPhase] = useState('idle'); // idle | preparing | importing | done
+    const [queueing, setQueueing] = useState(false);
     const [message, setMessage] = useState(null);
-    const [progress, setProgress] = useState({ done: 0, total: 0 });
-    const [summary, setSummary] = useState(null);
 
-    const [saveDeck] = useSaveDeckMutation();
     const [prepareDokImport] = usePrepareDokImportMutation();
+    const [queueDeckImport] = useQueueDeckImportMutation();
+    const [cancelDeckImport] = useCancelDeckImportMutation();
 
-    const runImport = async (uuids, { alreadyOwned = 0 } = {}) => {
-        setPhase('importing');
-        setProgress({ done: 0, total: uuids.length });
+    // Poll only while there is something to watch. An idle dialog should not
+    // sit there querying every couple of seconds for a job nobody started.
+    const [pollingInterval, setPollingInterval] = useState(0);
+    const { data: status, refetch } = useGetDeckImportStatusQuery(undefined, { pollingInterval });
 
-        let cursor = 0;
-        let done = 0;
-        let imported = 0;
-        let already = alreadyOwned;
-        let failed = 0;
-        let spacingMs = BASE_SPACING_MS;
-        let nextSlotAt = 0;
-        let exhausted = 0;
-        let stopped = false;
-        const reasons = new Map();
+    const job = status?.job || null;
+    const live = isLive(job);
 
-        const noteReason = (why) => reasons.set(why, (reasons.get(why) || 0) + 1);
+    useEffect(() => {
+        setPollingInterval(live ? POLL_MS : 0);
+    }, [live]);
 
-        // One clock for every worker. Pacing each worker separately would mean
-        // the real request rate was spacing x concurrency, which is how the
-        // "gentle" original managed to be a burst.
-        const takeSlot = async () => {
-            const now = Date.now();
-            const at = Math.max(now, nextSlotAt);
-            nextSlotAt = at + spacingMs;
+    // Each imported deck is a new row in the player's collection, and the deck
+    // list behind this dialog is showing a stale copy until it hears about it.
+    const importedCount = job?.imported ?? 0;
+    useEffect(() => {
+        if (importedCount > 0) {
+            dispatch(api.util.invalidateTags([{ type: TAG_TYPES.DECKS, id: 'LIST' }]));
+            onDone?.();
+        }
+    }, [importedCount, dispatch, onDone]);
 
-            if (at > now) {
-                await sleep(at - now);
-            }
-        };
-
-        // The API layer rejects 200 + {success:false}, so ordinary refusals
-        // arrive as exceptions. Normalise both into one payload rather than
-        // duplicating the classification down two branches.
-        const importOne = async (uuid) => {
-            try {
-                const result = await saveDeck({ uuid }).unwrap();
-
-                return result.success ? { ok: true } : { ok: false, payload: result };
-            } catch (err) {
-                return { ok: false, payload: err?.data || {} };
-            }
-        };
-
-        const worker = async () => {
-            while (!stopped && cursor < uuids.length) {
-                const uuid = uuids[cursor++];
-
-                for (let attempt = 1; ; attempt++) {
-                    await takeSlot();
-
-                    if (stopped) {
-                        return;
-                    }
-
-                    const { ok, payload } = await importOne(uuid);
-
-                    if (ok) {
-                        imported++;
-                        // Recover slowly. Snapping straight back to the base
-                        // spacing after one success just re-earns the limit.
-                        spacingMs = Math.max(BASE_SPACING_MS, Math.round(spacingMs * 0.9));
-                        break;
-                    }
-
-                    if (isAlreadyOwned(payload)) {
-                        already++;
-                        break;
-                    }
-
-                    if (isRateLimited(payload)) {
-                        if (attempt < MAX_DECK_ATTEMPTS) {
-                            spacingMs = Math.min(MAX_SPACING_MS, Math.max(spacingMs * 2, 1000));
-                            await sleep(spacingMs * attempt);
-                            continue;
-                        }
-
-                        // This deck used up its retries. A few of those in a
-                        // run means Master Vault is not going to relent inside
-                        // this sitting, and continuing only deepens the limit.
-                        failed++;
-                        noteReason(t('Master Vault is rate limiting deck imports'));
-
-                        if (++exhausted >= ABORT_AFTER_EXHAUSTED) {
-                            stopped = true;
-                        }
-
-                        break;
-                    }
-
-                    failed++;
-                    noteReason(payload?.message || t('Master Vault would not return the deck'));
-                    break;
-                }
-
-                done++;
-                setProgress({ done, total: uuids.length });
-            }
-        };
-
-        await Promise.all(
-            Array.from({ length: Math.min(IMPORT_CONCURRENCY, uuids.length) }, () => worker())
-        );
-
-        setPhase('done');
-        setSummary({
-            imported,
-            already,
-            failed,
-            total: uuids.length + alreadyOwned,
-            stopped,
-            // Most common first: with 250 failures the player wants the one
-            // sentence that explains them, not a list of 250.
-            reasons: [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
-        });
-        onDone?.();
-    };
-
-    const syncFromDok = async () => {
+    const startSync = async () => {
         setMessage(null);
-        setSummary(null);
-        setPhase('preparing');
+        setQueueing(true);
 
-        let result;
         try {
-            result = await prepareDokImport(apiKey.trim()).unwrap();
+            const result = await prepareDokImport(apiKey.trim()).unwrap();
+
+            if (!result.success) {
+                setMessage(result.message || t('Could not read that collection.'));
+            } else if (result.queued === 0) {
+                setMessage(
+                    t('Nothing new to import — every deck on that account is already here.')
+                );
+            } else if (result.truncated) {
+                setMessage(
+                    t(
+                        'Importing {{count}} decks. More are waiting — sync again once this finishes.',
+                        {
+                            count: result.queued
+                        }
+                    )
+                );
+            } else if (result.partial) {
+                setMessage(
+                    t(
+                        'Decks of KeyForge stopped responding partway through, so this is only part of your collection. Sync again to pick up the rest.'
+                    )
+                );
+            }
         } catch (err) {
-            setPhase('idle');
             setMessage(
                 err?.data?.message ||
                     t('Could not reach Decks of KeyForge. Please try again in a moment.')
             );
-
-            return;
+        } finally {
+            setQueueing(false);
+            refetch();
         }
-
-        if (!result.success) {
-            setPhase('idle');
-            setMessage(result.message || t('Could not read that collection.'));
-
-            return;
-        }
-
-        // Both of these mean "there is more where this came from", and both are
-        // genuinely fixed by syncing again: the server skips what we already
-        // own as it pages, so the next run starts where this one stopped.
-        if (result.truncated) {
-            setMessage(
-                t(
-                    'Importing {{count}} decks now — more are waiting. Sync again when this finishes.',
-                    {
-                        count: result.toImport.length
-                    }
-                )
-            );
-        } else if (result.partial) {
-            setMessage(
-                t(
-                    'Decks of KeyForge stopped responding partway through, so this is only part of your collection. Sync again to pick up the rest.'
-                )
-            );
-        }
-
-        if (result.toImport.length === 0) {
-            setPhase('done');
-            setSummary({
-                imported: 0,
-                already: result.ownedCount,
-                failed: 0,
-                total: result.total
-            });
-
-            return;
-        }
-
-        // The server already told us which decks we own; counting them here
-        // keeps the summary honest without re-importing them to find out.
-        runImport(
-            result.toImport.map((deck) => deck.uuid),
-            { alreadyOwned: result.ownedCount }
-        );
     };
 
-    const importFrom = (text) => {
+    const startQueue = async (text) => {
         setMessage(null);
-        setSummary(null);
 
         const uuids = extractUuids(text || '');
         if (uuids.length === 0) {
@@ -285,7 +148,32 @@ const DokImport = ({ onDone, compact }) => {
             return;
         }
 
-        runImport(uuids);
+        setQueueing(true);
+
+        try {
+            const result = await queueDeckImport(uuids).unwrap();
+
+            if (!result.success) {
+                setMessage(result.message || t('Could not queue those decks.'));
+            } else if (result.queued === 0) {
+                setMessage(t('Nothing new to import — you already have all of those decks.'));
+            }
+        } catch (err) {
+            setMessage(err?.data?.message || t('Could not queue those decks.'));
+        } finally {
+            setQueueing(false);
+            refetch();
+        }
+    };
+
+    const stopImport = async () => {
+        try {
+            await cancelDeckImport().unwrap();
+        } catch {
+            // Nothing to tell the player: the next poll shows the real state.
+        } finally {
+            refetch();
+        }
     };
 
     const onFile = async (event) => {
@@ -296,14 +184,14 @@ const DokImport = ({ onDone, compact }) => {
         }
 
         try {
-            importFrom(await file.text());
+            startQueue(await file.text());
         } catch {
             setMessage(t('Could not read that file.'));
         }
     };
 
-    const busy = phase === 'preparing' || phase === 'importing';
-    const percent = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+    const busy = queueing || live;
+    const percent = job && job.total > 0 ? Math.round((job.done / job.total) * 100) : 0;
 
     return (
         <div className={compact ? 'space-y-2' : 'space-y-3'}>
@@ -325,20 +213,27 @@ const DokImport = ({ onDone, compact }) => {
                         <summary className='cursor-pointer text-sm font-semibold text-foreground'>
                             {t('How do I get a key?')}
                         </summary>
+                        {/* The page that issues the key, as its own control
+                            rather than a phrase inside step 1. Underlined
+                            because the link colour alone did not read as a link
+                            against this surface, and this is the one thing in
+                            the panel a first-timer has to click. */}
+                        <a
+                            className='mt-2 inline-flex items-center gap-1 font-semibold text-primary underline underline-offset-2 hover:text-primary/80'
+                            href='https://decksofkeyforge.com/about/sellers-and-devs'
+                            target='_blank'
+                            rel='noopener noreferrer'
+                        >
+                            {t('Open the Decks of KeyForge API key page')}
+                            <span aria-hidden='true'>↗</span>
+                        </a>
                         <ol className='mt-2 list-decimal space-y-1 pl-5'>
                             <li>
-                                {t('Log in to Decks of KeyForge, then open')}{' '}
-                                <a
-                                    className='text-primary hover:text-primary/80'
-                                    href='https://decksofkeyforge.com/about/sellers-and-devs'
-                                    target='_blank'
-                                    rel='noopener noreferrer'
-                                >
-                                    {t('Sellers and Devs')}
-                                </a>
-                                {t('. You must be logged in, or no key button appears.')}
+                                {t(
+                                    'Log in to Decks of KeyForge first — the key button does not appear until you are.'
+                                )}
                             </li>
-                            <li>{t('Press "Generate API Key".')}</li>
+                            <li>{t('On that page, press "Generate API Key".')}</li>
                             <li>
                                 {t(
                                     'Copy it straight away — Decks of KeyForge shows a key only in the moment it is created, and has no way to show it to you again later.'
@@ -368,12 +263,12 @@ const DokImport = ({ onDone, compact }) => {
                 <p className='text-xs text-muted'>
                     {t('Generate a key on')}{' '}
                     <a
-                        className='text-primary hover:text-primary/80'
+                        className='font-semibold text-primary underline underline-offset-2 hover:text-primary/80'
                         href='https://decksofkeyforge.com/about/sellers-and-devs'
                         target='_blank'
                         rel='noopener noreferrer'
                     >
-                        {t('Decks of KeyForge → Sellers and Devs')}
+                        {t('Decks of KeyForge → Sellers and Devs ↗')}
                     </a>
                     {t(' while logged in, and copy it straight away — it is shown only once.')}
                 </p>
@@ -391,9 +286,9 @@ const DokImport = ({ onDone, compact }) => {
                 />
                 <HeroButton
                     variant='primary'
-                    isPending={phase === 'preparing'}
+                    isPending={queueing}
                     isDisabled={busy || !apiKey.trim()}
-                    onPress={syncFromDok}
+                    onPress={startSync}
                 >
                     {t('Sync collection')}
                 </HeroButton>
@@ -436,18 +331,18 @@ const DokImport = ({ onDone, compact }) => {
                     size='sm'
                     variant='tertiary'
                     isDisabled={busy || !pasted.trim()}
-                    onPress={() => importFrom(pasted)}
+                    onPress={() => startQueue(pasted)}
                 >
                     {t('Import pasted')}
                 </HeroButton>
             </div>
 
-            {phase === 'preparing' && (
+            {queueing && (
                 <p className='text-xs text-muted'>{t('Reading your collection from DoK…')}</p>
             )}
 
-            {phase === 'importing' && (
-                <div className='space-y-1'>
+            {live && (
+                <div className='space-y-1 rounded-md border border-border/60 bg-surface-secondary/50 px-3 py-2'>
                     <div className='h-2 w-full overflow-hidden rounded-full bg-surface-secondary'>
                         <div
                             className='h-full rounded-full bg-amber-400 transition-all'
@@ -456,18 +351,31 @@ const DokImport = ({ onDone, compact }) => {
                     </div>
                     <p className='text-xs text-muted'>
                         {t('Importing {{done}} of {{total}} decks…', {
-                            done: progress.done,
-                            total: progress.total
+                            done: job.done,
+                            total: job.total
                         })}
                     </p>
+                    {/* The whole point of moving this to the server. */}
+                    <p className='text-xs text-muted'>
+                        {job.pausedUntil
+                            ? t(
+                                  'Master Vault is throttling us, so the import is waiting before it tries again. You can close this — it carries on without you.'
+                              )
+                            : t('You can close this window; the import carries on without you.')}
+                    </p>
+                    <div className='flex justify-end'>
+                        <HeroButton size='sm' variant='tertiary' onPress={stopImport}>
+                            {t('Stop importing')}
+                        </HeroButton>
+                    </div>
                 </div>
             )}
 
-            {phase === 'done' && summary && (
+            {job && !live && job.done > 0 && (
                 <div className='rounded-md border border-border/60 bg-surface-secondary/50 px-3 py-2 text-sm'>
-                    {summary.imported > 0 ? (
+                    {job.imported > 0 ? (
                         <p className='font-semibold text-green-400'>
-                            {t('Imported {{count}} new deck(s).', { count: summary.imported })}
+                            {t('Imported {{count}} new deck(s).', { count: job.imported })}
                         </p>
                     ) : (
                         <p className='font-semibold text-foreground'>
@@ -475,34 +383,26 @@ const DokImport = ({ onDone, compact }) => {
                         </p>
                     )}
                     <p className='text-xs text-muted'>
-                        {t('{{total}} found, {{already}} already imported.', {
-                            total: summary.total,
-                            already: summary.already
+                        {t('{{total}} queued, {{already}} already imported.', {
+                            total: job.total,
+                            already: job.alreadyOwned
                         })}
-                        {summary.failed > 0 &&
-                            ' ' +
-                                t('{{failed}} could not be imported.', { failed: summary.failed })}
+                        {job.failed > 0 &&
+                            ' ' + t('{{failed}} could not be imported.', { failed: job.failed })}
+                        {job.status === 'cancelled' && ' ' + t('Stopped before it finished.')}
                     </p>
 
                     {/* A bare failure count tells a player nothing they can act
                         on. The reason is what says whether to wait and re-run
                         or to stop trying. */}
-                    {summary.reasons?.length > 0 && (
+                    {job.reasons?.length > 0 && (
                         <ul className='mt-1 space-y-0.5 text-xs text-muted'>
-                            {summary.reasons.map(([why, count]) => (
+                            {job.reasons.map(([why, count]) => (
                                 <li key={why}>
                                     {count} × {why}
                                 </li>
                             ))}
                         </ul>
-                    )}
-
-                    {summary.stopped && (
-                        <p className='mt-2 text-xs text-amber-400'>
-                            {t(
-                                'Stopped early because Master Vault kept refusing. Your imported decks are saved — wait a few minutes and sync again to carry on from here.'
-                            )}
-                        </p>
                     )}
                 </div>
             )}

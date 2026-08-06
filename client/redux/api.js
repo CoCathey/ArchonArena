@@ -772,6 +772,23 @@ export const api = createApi({
                 params: { q, expansion, limit }
             })
         }),
+        // ARCHON: the collection import runs on the server as a resumable job,
+        // so these three are the whole client side of it - hand over a list of
+        // uuids, watch the job, abandon it if you change your mind. Closing the
+        // modal is no longer an action that cancels anything.
+        queueDeckImport: builder.mutation({
+            query: (uuids) => ({
+                url: '/decks/import/queue',
+                method: 'POST',
+                body: { uuids }
+            })
+        }),
+        getDeckImportStatus: builder.query({
+            query: () => ({ url: '/decks/import/status' })
+        }),
+        cancelDeckImport: builder.mutation({
+            query: () => ({ url: '/decks/import/cancel', method: 'POST' })
+        }),
         saveAllianceDeck: builder.mutation({
             query: (deck) => ({
                 url: '/decks/alliance',
@@ -1090,6 +1107,9 @@ export const {
     useSaveDeckMutation,
     usePrepareDokImportMutation,
     useSearchDeckCatalogQuery,
+    useQueueDeckImportMutation,
+    useGetDeckImportStatusQuery,
+    useCancelDeckImportMutation,
     useSaveAllianceDeckMutation,
     useGetStandaloneDecksQuery,
     useRefreshAccoladesMutation,
