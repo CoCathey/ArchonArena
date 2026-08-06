@@ -13,6 +13,7 @@ import {
     lobbyStartGameRequested
 } from '../../redux/socketActions';
 import PendingGamePlayers from './PendingGamePlayers';
+import { getPendingGameJoinAlert } from './pendingGameAlerts';
 import { Constants } from '../../constants';
 
 import PlayerJoinedMp3 from '../../assets/sound/player-joined.mp3';
@@ -61,29 +62,27 @@ const PendingGame = () => {
         }
 
         const players = Object.values(currentGame.players).length;
+        const alert = getPendingGameJoinAlert({
+            game: currentGame,
+            username: user.username,
+            previousPlayerCount: playerCount
+        });
 
-        if (
-            notification.current &&
-            playerCount === 1 &&
-            players === 2 &&
-            currentGame.owner === user.username
-        ) {
+        if (alert && notification.current) {
             const promise = notification.current?.play();
 
             if (promise !== undefined) {
                 promise.catch(() => {}).then(() => {});
             }
 
-            const otherPlayer = Object.values(currentGame.players).find(
-                (p) => p.name !== user.username
-            );
-
-            showNotification({
-                body: `${otherPlayer.name} has joined your game`,
-                // The pending-game player summary exposes `avatar`/`name`, not
-                // `username`; using username produced /img/avatar/undefined.png.
-                icon: `/img/avatar/${otherPlayer.avatar}.png`
-            });
+            if (alert.notify) {
+                showNotification({
+                    body: alert.body,
+                    // The pending-game player summary exposes `avatar`/`name`, not
+                    // `username`; using username produced /img/avatar/undefined.png.
+                    icon: `/img/avatar/${alert.opponent.avatar}.png`
+                });
+            }
         }
 
         setPlayerCount(players);
