@@ -89,6 +89,18 @@ const POOL_BY_FORMAT = {
 };
 
 /**
+ * ARCHON: the only pools that exist, derived from the mapping above rather than
+ * written out again, so adding a format cannot silently invent a pool.
+ *
+ * Enforced on the admin write paths, which previously stored whatever string
+ * the caller sent. A "normal" pool already exists in older databases because
+ * the rating code used to store the raw game format (migration 50 folds those
+ * back in); an unvalidated admin endpoint would let one straight back, giving a
+ * player a second Amber rating that no game can ever add to.
+ */
+const RATING_POOLS = [...new Set(Object.values(POOL_BY_FORMAT))];
+
+/**
  * Orchestrates rating updates from finished games.
  *
  * Triggered from the lobby layer after GameService.update() persists a
@@ -423,6 +435,13 @@ class RatingService {
      * trail of how the rating actually evolved through games.
      */
     async adminSetRating(username, pool, rating, gamesPlayed) {
+        if (!RATING_POOLS.includes(pool || 'archon')) {
+            return {
+                success: false,
+                message: `Unknown pool "${pool}". Valid pools: ${RATING_POOLS.join(', ')}.`
+            };
+        }
+
         const userId = await this.findUserIdByUsername(username);
 
         if (!userId) {
@@ -458,6 +477,13 @@ class RatingService {
      * RatingHistory stays for auditability.
      */
     async adminResetRatings(username, pool) {
+        if (pool && !RATING_POOLS.includes(pool)) {
+            return {
+                success: false,
+                message: `Unknown pool "${pool}". Valid pools: ${RATING_POOLS.join(', ')}.`
+            };
+        }
+
         const userId = await this.findUserIdByUsername(username);
 
         if (!userId) {
@@ -1131,16 +1157,28 @@ class RatingService {
 
         const eloConfig = normalizeConfig(config.elo);
 
-        return (rows || []).map((row) => ({
-            pool: row.Pool,
-            rating: row.Rating,
-            gamesPlayed: row.GamesPlayed,
-            provisional: row.GamesPlayed < eloConfig.provisionalGames,
-            rank: parseInt(row.Rank, 10),
-            totalRated: parseInt(row.TotalRated, 10),
-            wins: parseInt(row.Wins, 10) || 0,
-            losses: parseInt(row.Losses, 10) || 0
-        }));
+        return (
+            (rows || [])
+                // Only real pools reach a client. A database written before the
+                // pool mapping existed still holds rows named after game formats
+                // ('normal' and friends), and every UI renders whatever it is
+                // given - the web app falls back to the raw pool name - so those
+                // rows surfaced as a phantom second Amber rating with a rank of
+                // "#1 of 0". Migration 50 clears them out; filtering here means
+                // the web app, the mobile app and any API consumer agree even on
+                // a database where it has not been run yet.
+                .filter((row) => RATING_POOLS.includes(row.Pool))
+                .map((row) => ({
+                    pool: row.Pool,
+                    rating: row.Rating,
+                    gamesPlayed: row.GamesPlayed,
+                    provisional: row.GamesPlayed < eloConfig.provisionalGames,
+                    rank: parseInt(row.Rank, 10),
+                    totalRated: parseInt(row.TotalRated, 10),
+                    wins: parseInt(row.Wins, 10) || 0,
+                    losses: parseInt(row.Losses, 10) || 0
+                }))
+        );
     }
 
     /**
@@ -1480,4 +1518,5 @@ class RatingService {
 
 module.exports = RatingService;
 module.exports.computeDecay = computeDecay;
+module.exports.RATING_POOLS = RATING_POOLS;
 module.exports.computeSeasonReset = computeSeasonReset;
