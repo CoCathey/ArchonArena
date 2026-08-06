@@ -450,6 +450,31 @@ describe('DokService', function () {
     });
 
     describe('rate limiting', function () {
+        // Everyone runs at DoK's free tier. Config may lower it; nothing
+        // may raise it, because these windows are per lobby process and the
+        // tier a key actually holds is DoK's business rather than our config's.
+        it('clamps a configured limit down to the free tier', function () {
+            config.maxRequestsPerMinute = 250;
+
+            expect(service.getRateLimit()).toBe(25);
+        });
+
+        it('still lets an operator go below the free tier', function () {
+            config.maxRequestsPerMinute = 5;
+
+            expect(service.getRateLimit()).toBe(5);
+        });
+
+        it('refuses a 26th request in a minute even when config says 250', function () {
+            config.maxRequestsPerMinute = 250;
+
+            for (let i = 0; i < 25; i++) {
+                expect(service.reserveRequestSlot('a-key')).toBe(true);
+            }
+
+            expect(service.reserveRequestSlot('a-key')).toBe(false);
+        });
+
         it('reserves up to the configured number of requests per minute', function () {
             config.maxRequestsPerMinute = 3;
 

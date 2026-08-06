@@ -154,9 +154,13 @@
         requestTimeoutMs: 10000,
         refreshDays: 30, // SAS scores change between AERC versions; refetch this often
         maxImportDecks: 500, // safety cap on a single bulk import
-        // DoK's per-minute request cap for the site-wide Api-Key. Free tier
-        // is 25/min; patron tiers raise it (50 / 100 / 250). Change this to
-        // match your DoK subscription (also editable in admin settings).
+        // Per-minute cap applied to every DoK key this site sends - the site's
+        // own and each player's. 25 is DoK's free tier and is enforced as a
+        // CEILING in code: this value can only lower it. Patron tiers allow
+        // more, but these windows are per lobby process, so two lobbies each
+        // trusting a configured 250 would send 500 - and whether a key really
+        // has that tier is DoK's business, not ours. Raising it is a code
+        // change (DOK_FREE_TIER_RPM), made by someone who has checked.
         maxRequestsPerMinute: 25
     },
 

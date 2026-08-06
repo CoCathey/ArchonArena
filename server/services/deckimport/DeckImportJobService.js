@@ -97,6 +97,19 @@ class DeckImportJobService {
             new Set((Array.isArray(uuids) ? uuids : []).filter((uuid) => typeof uuid === 'string'))
         ).slice(0, cap);
 
+        // ARCHON: checked BEFORE cancelActive, not after. "Username" is NOT
+        // NULL, so passing null guaranteed a constraint violation - and the
+        // cancel had already run, so a caller with a missing username destroyed
+        // the player's in-flight import and got a null back that the API
+        // reported as success. Refusing up front leaves the existing job alone.
+        if (!userId || !username) {
+            logger.warn(
+                `Refusing to create a deck import job without a user (${userId}) and username`
+            );
+
+            return null;
+        }
+
         await this.cancelActive(userId);
 
         try {
@@ -106,7 +119,7 @@ class DeckImportJobService {
                     '"AlreadyOwned", "Failed", "Reasons", "CreatedAt", "UpdatedAt") VALUES ' +
                     "($1, $2, 'pending', $3, 0, 0, 0, 0, '{}', " +
                     "now() AT TIME ZONE 'utc', now() AT TIME ZONE 'utc') RETURNING *",
-                [userId, username || null, JSON.stringify(list)]
+                [userId, username, JSON.stringify(list)]
             );
 
             return (rows && rows[0]) || null;
@@ -185,15 +198,38 @@ class DeckImportJobService {
      * PausedUntil is the circuit breaker: a job Master Vault has rate-limited
      * is invisible to this query until its backoff expires.
      */
+    // How long a claim is good for. UpdatedAt is the lease clock: the claim
+    // itself stamps it and every batch re-stamps it, so a job somebody is
+    // actively working always looks fresh.
+    getClaimLeaseSeconds() {
+        const seconds = parseInt(this.getConfig().claimLeaseSeconds, 10);
+
+        return Number.isFinite(seconds) && seconds > 0 ? seconds : 120;
+    }
+
     async claimNextJob() {
         try {
             const rows = await this.db.query(
                 'UPDATE "DeckImportJobs" SET "Status" = \'running\', ' +
                     '"UpdatedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = (' +
                     'SELECT "Id" FROM "DeckImportJobs" ' +
-                    "WHERE \"Status\" IN ('pending', 'running') " +
+                    // ARCHON: a 'running' job is only claimable once its lease
+                    // has gone stale. FOR UPDATE SKIP LOCKED alone does not
+                    // make a claim exclusive - the row lock dies with the
+                    // statement, not with the batch - so a second sweep
+                    // starting while the first was still awaiting Master Vault
+                    // claimed the SAME job, requested every deck twice, and
+                    // then overwrote the first run's absolute counters with its
+                    // own. Measured: five decks imported, the row reporting
+                    // "0 imported, 5 already owned", and double the traffic
+                    // aimed at the origin this feature exists to be gentle to.
+                    // Reclaiming a stale one is still required, or a lobby that
+                    // died mid-batch would strand its job forever.
+                    'WHERE ("Status" = \'pending\' OR ("Status" = \'running\' ' +
+                    "AND \"UpdatedAt\" <= now() AT TIME ZONE 'utc' - ($1 || ' seconds')::interval)) " +
                     'AND ("PausedUntil" IS NULL OR "PausedUntil" <= now() AT TIME ZONE \'utc\') ' +
-                    'ORDER BY "CreatedAt" ASC LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *'
+                    'ORDER BY "CreatedAt" ASC LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *',
+                [String(this.getClaimLeaseSeconds())]
             );
 
             return (rows && rows[0]) || null;
@@ -309,6 +345,22 @@ class DeckImportJobService {
         } = {}
     ) {
         const until = Number(untilMs);
+        // ARCHON: UTC wall clock, as a string, deliberately.
+        //
+        // "PausedUntil" is `timestamp without time zone` and every other
+        // timestamp in this table is written by SQL as now() AT TIME ZONE
+        // 'utc'. This is the one written from JavaScript, and handing
+        // node-postgres a Date serialises it with the PROCESS's offset, which
+        // the column then silently discards. West of UTC that stores a time
+        // already in the past, so the claim query sees an expired backoff and
+        // resumes hammering the origin that just rate-limited us - the exact
+        // failure the column exists to prevent. East of UTC it parks the job
+        // for hours and the player's import looks hung. Measured at four hours
+        // early in America/New_York and two hours late in Europe/Berlin.
+        // Containers run UTC, which is why this hid.
+        const pausedUntil = Number.isFinite(until)
+            ? new Date(until).toISOString().slice(0, 19).replace('T', ' ')
+            : null;
 
         try {
             await this.db.query(
@@ -324,7 +376,7 @@ class DeckImportJobService {
                     this.toCount(failed),
                     JSON.stringify(reasons || {}),
                     this.toCount(consecutiveFailures),
-                    Number.isFinite(until) ? new Date(until) : null,
+                    pausedUntil,
                     error || null
                 ]
             );

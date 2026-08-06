@@ -113,6 +113,7 @@ describe('DeckImportJobService', function () {
 
             await service.createJob({
                 userId: 42,
+                username: 'player',
                 uuids: [uuid(1), uuid(2), uuid(3), uuid(4), uuid(5)]
             });
 
@@ -128,6 +129,7 @@ describe('DeckImportJobService', function () {
 
             await service.createJob({
                 userId: 42,
+                username: 'player',
                 uuids: Array.from({ length: 1200 }, (_unused, i) => uuid(i))
             });
 
@@ -140,6 +142,7 @@ describe('DeckImportJobService', function () {
         it('drops duplicates and anything that is not a uuid string', async function () {
             await service.createJob({
                 userId: 42,
+                username: 'player',
                 uuids: [uuid(1), uuid(1), null, 12345, uuid(2), undefined]
             });
 
@@ -147,7 +150,7 @@ describe('DeckImportJobService', function () {
         });
 
         it('still creates a job for a collection with nothing left to import', async function () {
-            await service.createJob({ userId: 42, uuids: [] });
+            await service.createJob({ userId: 42, username: 'player', uuids: [] });
 
             expect(JSON.parse(callsMatching('INSERT INTO')[0][1][2])).toEqual([]);
         });
@@ -155,7 +158,9 @@ describe('DeckImportJobService', function () {
         it('returns null rather than throwing when the insert fails', async function () {
             db.query.mockRejectedValue(new Error('db down'));
 
-            await expect(service.createJob({ userId: 42, uuids: [uuid(1)] })).resolves.toBeNull();
+            await expect(
+                service.createJob({ userId: 42, username: 'player', uuids: [uuid(1)] })
+            ).resolves.toBeNull();
         });
     });
 
@@ -229,11 +234,18 @@ describe('DeckImportJobService', function () {
         });
 
         // A lobby that died mid-batch leaves its job marked running with
-        // nobody working it; filtering on 'pending' would strand it forever.
-        it('considers a job left running by a dead lobby, not only pending ones', async function () {
+        // nobody working it, so 'pending' alone would strand it forever - but
+        // claiming any running job let a second sweep grab one already being
+        // worked. The lease is what tells those two apart.
+        it('considers a job left running by a dead lobby, once its lease is stale', async function () {
             await service.claimNextJob();
 
-            expect(db.query.mock.calls[0][0]).toContain("\"Status\" IN ('pending', 'running')");
+            const [sql, params] = db.query.mock.calls[0];
+
+            expect(sql).toContain('"Status" = \'pending\'');
+            expect(sql).toContain('"Status" = \'running\'');
+            expect(sql).toContain('"UpdatedAt" <=');
+            expect(params).toEqual(['120']);
         });
 
         it('leaves a rate-limited job alone until its backoff expires', async function () {
@@ -377,7 +389,10 @@ describe('DeckImportJobService', function () {
             // sweep reclaims it once the backoff expires.
             expect(sql).not.toContain('"Status"');
             expect(params.slice(0, 7)).toEqual([7, 9, 7, 2, 0, '{}', 2]);
-            expect(params[7].getTime()).toBe(1700000000000);
+            // A UTC wall clock string, not a Date - see pauseJob.
+            expect(params[7]).toBe(
+                new Date(1700000000000).toISOString().slice(0, 19).replace('T', ' ')
+            );
             expect(params[8]).toContain('rate limiting');
         });
 
@@ -462,5 +477,80 @@ describe('DeckImportJobService', function () {
             expect(service.backoffMs(2)).toBe(120000);
             expect(service.backoffMs(99)).toBe(1800000);
         });
+    });
+});
+
+// The defects a concurrency review found in the first cut of this service.
+describe('DeckImportJobService concurrency and time handling', function () {
+    let db;
+    let config;
+    let service;
+
+    const configService = () => ({
+        getValue: (key) => (key === 'deckImport' ? config : undefined)
+    });
+    const settingsService = { getSection: () => ({}) };
+
+    beforeEach(function () {
+        config = { enabled: true };
+        db = { query: vi.fn().mockResolvedValue([]) };
+        service = new DeckImportJobService(configService(), db, settingsService);
+    });
+
+    // FOR UPDATE SKIP LOCKED does not make a claim exclusive: the row lock ends
+    // with the statement, not with the batch. Without a lease, a second sweep
+    // starting while the first awaited Master Vault claimed the same job,
+    // fetched every deck twice and clobbered the first run's counters.
+    it('only reclaims a running job once its lease has gone stale', async function () {
+        await service.claimNextJob();
+
+        const [sql, params] = db.query.mock.calls[0];
+
+        expect(sql).toContain('"Status" = \'pending\'');
+        expect(sql).toContain('"UpdatedAt" <=');
+        expect(sql).toContain("seconds')::interval");
+        expect(params).toEqual(['120']);
+    });
+
+    it('lets the lease be shortened by config', async function () {
+        config.claimLeaseSeconds = 30;
+
+        await service.claimNextJob();
+
+        expect(db.query.mock.calls[0][1]).toEqual(['30']);
+    });
+
+    // PausedUntil is the one timestamp written from JS into a `timestamp
+    // without time zone` column that SQL compares against UTC. A Date is
+    // serialised with the process offset, so west of UTC the backoff was
+    // already expired on write and the worker resumed hammering the origin
+    // that had just rate-limited it.
+    it('writes the backoff as a UTC wall clock, not a local one', async function () {
+        const untilMs = Date.UTC(2026, 0, 2, 3, 4, 5);
+
+        await service.pauseJob(1, { untilMs, error: 'slow down', consecutiveFailures: 1 });
+
+        const [, params] = db.query.mock.calls[0];
+
+        expect(params).toContain('2026-01-02 03:04:05');
+    });
+
+    it('stores no backoff at all when given a nonsense time', async function () {
+        await service.pauseJob(1, { untilMs: undefined });
+
+        expect(db.query.mock.calls[0][1]).toContain(null);
+    });
+
+    // createJob supersedes the live job before inserting, so failing after that
+    // point destroys an import and returns null - which the API reported as
+    // success.
+    it('refuses a job with no username instead of cancelling the live one', async function () {
+        expect(await service.createJob({ userId: 1, uuids: ['a'] })).toBeNull();
+        expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it('refuses a job with no user', async function () {
+        expect(await service.createJob({ username: 'p', uuids: ['a'] })).toBeNull();
+        expect(db.query).not.toHaveBeenCalled();
     });
 });

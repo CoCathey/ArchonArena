@@ -319,6 +319,19 @@ module.exports.init = function (server) {
                 uuids: result.decks.map((deck) => deck.uuid)
             });
 
+            // ARCHON: a job that was not created is a failed import, not a
+            // successful one with nothing to watch. Reporting success here left
+            // the modal saying "Importing 200 decks" over a job that did not
+            // exist, polling nothing, forever - and createJob supersedes the
+            // previous job before it inserts, so the player could be left with
+            // neither the new import nor the one they already had.
+            if (!job) {
+                return res.send({
+                    success: false,
+                    message: 'Could not start the import. Please try again in a moment.'
+                });
+            }
+
             res.send({
                 success: true,
                 total: result.decks.length + (result.skipped || 0),
@@ -369,6 +382,13 @@ module.exports.init = function (server) {
                 username: req.user.username,
                 uuids: toImport
             });
+
+            if (!job) {
+                return res.send({
+                    success: false,
+                    message: 'Could not start the import. Please try again in a moment.'
+                });
+            }
 
             res.send({
                 success: true,
