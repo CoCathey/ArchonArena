@@ -1157,16 +1157,28 @@ class RatingService {
 
         const eloConfig = normalizeConfig(config.elo);
 
-        return (rows || []).map((row) => ({
-            pool: row.Pool,
-            rating: row.Rating,
-            gamesPlayed: row.GamesPlayed,
-            provisional: row.GamesPlayed < eloConfig.provisionalGames,
-            rank: parseInt(row.Rank, 10),
-            totalRated: parseInt(row.TotalRated, 10),
-            wins: parseInt(row.Wins, 10) || 0,
-            losses: parseInt(row.Losses, 10) || 0
-        }));
+        return (
+            (rows || [])
+                // Only real pools reach a client. A database written before the
+                // pool mapping existed still holds rows named after game formats
+                // ('normal' and friends), and every UI renders whatever it is
+                // given - the web app falls back to the raw pool name - so those
+                // rows surfaced as a phantom second Amber rating with a rank of
+                // "#1 of 0". Migration 50 clears them out; filtering here means
+                // the web app, the mobile app and any API consumer agree even on
+                // a database where it has not been run yet.
+                .filter((row) => RATING_POOLS.includes(row.Pool))
+                .map((row) => ({
+                    pool: row.Pool,
+                    rating: row.Rating,
+                    gamesPlayed: row.GamesPlayed,
+                    provisional: row.GamesPlayed < eloConfig.provisionalGames,
+                    rank: parseInt(row.Rank, 10),
+                    totalRated: parseInt(row.TotalRated, 10),
+                    wins: parseInt(row.Wins, 10) || 0,
+                    losses: parseInt(row.Losses, 10) || 0
+                }))
+        );
     }
 
     /**
