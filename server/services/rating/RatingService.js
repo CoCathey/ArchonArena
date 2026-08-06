@@ -89,6 +89,18 @@ const POOL_BY_FORMAT = {
 };
 
 /**
+ * ARCHON: the only pools that exist, derived from the mapping above rather than
+ * written out again, so adding a format cannot silently invent a pool.
+ *
+ * Enforced on the admin write paths, which previously stored whatever string
+ * the caller sent. A "normal" pool already exists in older databases because
+ * the rating code used to store the raw game format (migration 50 folds those
+ * back in); an unvalidated admin endpoint would let one straight back, giving a
+ * player a second Amber rating that no game can ever add to.
+ */
+const RATING_POOLS = [...new Set(Object.values(POOL_BY_FORMAT))];
+
+/**
  * Orchestrates rating updates from finished games.
  *
  * Triggered from the lobby layer after GameService.update() persists a
@@ -423,6 +435,13 @@ class RatingService {
      * trail of how the rating actually evolved through games.
      */
     async adminSetRating(username, pool, rating, gamesPlayed) {
+        if (!RATING_POOLS.includes(pool || 'archon')) {
+            return {
+                success: false,
+                message: `Unknown pool "${pool}". Valid pools: ${RATING_POOLS.join(', ')}.`
+            };
+        }
+
         const userId = await this.findUserIdByUsername(username);
 
         if (!userId) {
@@ -458,6 +477,13 @@ class RatingService {
      * RatingHistory stays for auditability.
      */
     async adminResetRatings(username, pool) {
+        if (pool && !RATING_POOLS.includes(pool)) {
+            return {
+                success: false,
+                message: `Unknown pool "${pool}". Valid pools: ${RATING_POOLS.join(', ')}.`
+            };
+        }
+
         const userId = await this.findUserIdByUsername(username);
 
         if (!userId) {
@@ -1480,4 +1506,5 @@ class RatingService {
 
 module.exports = RatingService;
 module.exports.computeDecay = computeDecay;
+module.exports.RATING_POOLS = RATING_POOLS;
 module.exports.computeSeasonReset = computeSeasonReset;
