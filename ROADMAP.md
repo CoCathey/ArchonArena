@@ -859,7 +859,17 @@ they already know.
 -   **Knows the game, new to the platform** → skip the rules entirely; show importing decks,
     starting a game, Quick Match, what Amber is, and where tournaments live.
 -   **Knows both** → straight through the existing wizard to a first game.
--   Build the Learn hub (`/learn`) on the same tutorial engine so any lesson can be replayed
+-   [x] **The Learn-to-Play walkthrough itself** (`/learn`). Ghost Galaxy's two-player starter
+        set demo game, replayed step by step with the Radiant and Onyx learning decks: 92 steps
+        across all 13 turns, each one spotlighting the cards it is about on a board laid out
+        exactly like the real one, with the card's full rules text pulled in beside the prose.
+        Every rule the official booklet teaches is taught at the moment it first matters, and a
+        closing chapter covers the platform (importing decks, Quick Match, manual mode, the game
+        log). Runs client-side with no account, resumes from where the reader stopped, and steps
+        backwards. `test/client/learnTutorial.spec.js` pins it to the walkthrough's own
+        checkpoints — hand sizes, Æmber totals, key costs, which card is drawn when — and to the
+        invariant that no step invents a card.
+-   Build the rest of the Learn hub on the same tutorial engine so any lesson can be replayed
     later, not only at sign-up.
 -   Store the answers on the account so the tutorial can be resumed and re-offered.
 
@@ -872,6 +882,13 @@ pairs well with **F9** (a bot as the tutorial's sparring partner).
 -   A player who knows the game but not the platform is never shown rules content.
 -   Every step is skippable, and the whole tutorial is replayable from `/learn`.
 -   The tutorial runs on the real engine — no second rules implementation that can drift from it.
+    **Deviation, deliberate:** the Learn-to-Play walkthrough above does _not_ run on the game
+    engine. It has to work for a signed-out visitor with no deck, no game node and no socket, and
+    it has to step backwards, none of which the engine can do. What it uses instead is a scripted
+    board (`client/Components/Learn/tutorialEngine.js`) that only moves state through helpers —
+    it cannot assign a hand or an Æmber total, so a drifting step fails its spec rather than
+    quietly teaching the wrong thing. The in-game tutorial for a player's _first real game_
+    (the "new to the game" task above) should still run on the engine.
 
 #### N12 — Patreon supporter program
 

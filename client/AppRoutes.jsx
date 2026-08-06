@@ -9,6 +9,8 @@ import BlockList from './pages/BlockList';
 import Decks from './pages/Decks';
 import ForgotPassword from './pages/ForgotPassword';
 import HowToPlay from './pages/HowToPlay';
+// ARCHON (N11): the Learn hub and its interactive Learn-to-Play tutorial
+import Learn from './pages/Learn';
 import Lobby from './pages/Lobby';
 import Login from './pages/LoginContainer';
 import Logout from './pages/Logout';
@@ -194,15 +196,7 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/stats' element={<Stats />} />
             <Route path='/tournaments' element={<Tournaments />} />
             <Route path='/tournaments/:id' element={<TournamentDetail />} />
-            <Route
-                path='/learn'
-                element={
-                    <Placeholder
-                        title='Learn'
-                        description='Guides, strategy content, and interactive learning tools are planned. For now, check How To Play under Other.'
-                    />
-                }
-            />
+            <Route path='/learn' element={<Learn />} />
             <Route path='/watch' element={<Watch />} />
             <Route path='/welcome' element={<Onboarding />} />
             <Route path='/community/friends' element={<Friends />} />
