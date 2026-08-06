@@ -233,6 +233,67 @@ const REGISTRY = {
             }
         }
     },
+    // ARCHON: the Master Vault name index behind deck search.
+    catalog: {
+        title: 'Deck Catalog',
+        description:
+            "The Master Vault index that lets players find a deck by name instead of pasting a link. Crawling is off by default: it walks somebody else's API from the same address as user-facing deck import, so turning it on is an operator's decision, and these knobs are how you keep it polite. Searching an index that already exists costs Master Vault nothing and is controlled separately.",
+        fields: {
+            enabled: {
+                type: 'boolean',
+                label: 'Crawl Master Vault to index new decks',
+                default: false
+            },
+            searchEnabled: {
+                type: 'boolean',
+                label: 'Players may search the catalog by deck name',
+                default: true
+            },
+            // pageSize is deliberately NOT editable here. The crawl cursor is a
+            // page NUMBER, and page N only means the same decks forever while
+            // the page size never changes. Editing it mid-crawl re-aims the
+            // cursor at a different offset, and because the cursor only ever
+            // moves forward the decks in between are skipped permanently - an
+            // invisible hole in a table whose whole point is that you cannot
+            // tell what is missing from it. Changing it belongs with a cursor
+            // reset, which is a deploy, not a checkbox.
+            pagesPerRun: {
+                type: 'number',
+                label: 'Pages fetched per crawl run',
+                min: 1,
+                max: 100,
+                default: 10
+            },
+            requestDelayMs: {
+                type: 'number',
+                label: 'Wait between Master Vault requests (ms)',
+                min: 500,
+                max: 60000,
+                default: 3000
+            },
+            maxConsecutiveFailures: {
+                type: 'number',
+                label: 'Failures in a row before the crawl backs off',
+                min: 1,
+                max: 20,
+                default: 3
+            },
+            crawlIntervalMinutes: {
+                type: 'number',
+                label: 'Start a crawl run every (minutes)',
+                min: 1,
+                max: 1440,
+                default: 15
+            },
+            maxSearchResults: {
+                type: 'number',
+                label: 'Most results a single name search returns',
+                min: 5,
+                max: 200,
+                default: 50
+            }
+        }
+    },
     tournament: {
         title: 'Tournaments',
         description:

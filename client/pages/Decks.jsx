@@ -9,6 +9,7 @@ import DeckList from '../Components/Decks/DeckList';
 import ViewDeck from '../Components/Decks/ViewDeck';
 import ImportDeck from '../Components/Decks/ImportDeck';
 import DokImport from '../Components/Decks/DokImport';
+import DeckSearch from '../Components/Decks/DeckSearch';
 import ApiStatus from '../Components/Site/ApiStatus';
 import { useDeleteDecksMutation } from '../redux/api';
 import { cardsActions } from '../redux/slices/cardsSlice';
@@ -129,7 +130,15 @@ const DecksComponent = () => {
                             <div className='flex items-center gap-3'>
                                 <span className='h-px flex-1 bg-border/60' />
                                 <span className='text-xs uppercase tracking-wide text-muted'>
-                                    {t('or add a single deck')}
+                                    {t('or find one deck')}
+                                </span>
+                                <span className='h-px flex-1 bg-border/60' />
+                            </div>
+                            <DeckSearch />
+                            <div className='flex items-center gap-3'>
+                                <span className='h-px flex-1 bg-border/60' />
+                                <span className='text-xs uppercase tracking-wide text-muted'>
+                                    {t('or paste a deck link')}
                                 </span>
                                 <span className='h-px flex-1 bg-border/60' />
                             </div>

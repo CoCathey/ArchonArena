@@ -741,12 +741,22 @@ export const api = createApi({
             invalidatesTags: [{ type: TAG_TYPES.DECKS, id: DECKS_LIST_ID }]
         }),
         // ARCHON: bulk import from Decks of KeyForge - lists the collection to
-        // import; the client then imports each uuid via saveDeck.
+        // import; the client then imports each uuid via saveDeck. Takes the
+        // user's own DoK API key, which the server uses for the one request and
+        // never stores.
         prepareDokImport: builder.mutation({
-            query: (dokUsername) => ({
+            query: (dokApiKey) => ({
                 url: '/decks/import/dok/prepare',
                 method: 'POST',
-                body: { dokUsername }
+                body: { dokApiKey }
+            })
+        }),
+        // ARCHON: find decks by name in the Master Vault catalog, for players
+        // who know what their deck is called but not its uuid.
+        searchDeckCatalog: builder.query({
+            query: ({ q, expansion, limit }) => ({
+                url: '/decks/catalog/search',
+                params: { q, expansion, limit }
             })
         }),
         saveAllianceDeck: builder.mutation({
@@ -1064,6 +1074,7 @@ export const {
     useDeleteDecksMutation,
     useSaveDeckMutation,
     usePrepareDokImportMutation,
+    useSearchDeckCatalogQuery,
     useSaveAllianceDeckMutation,
     useGetStandaloneDecksQuery,
     useRefreshAccoladesMutation,
