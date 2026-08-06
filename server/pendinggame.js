@@ -26,6 +26,9 @@ class PendingGame {
         this.owner = owner;
         this.players = {};
         this.previousWinner = details.previousWinner;
+        // Set by the matchmaker (never by a player creating a game), so the
+        // client can tell "your opponent arrived" from "we found you one".
+        this.quickMatch = !!details.quickMatch;
         this.showHand = details.showHand;
         this.spectators = {};
         this.started = false;
@@ -376,6 +379,7 @@ class PendingGame {
             owner: this.owner.username,
             players: playerSummaries,
             previousWinner: this.previousWinner,
+            quickMatch: this.quickMatch,
             showHand: this.showHand,
             started: this.started,
             swap: this.swap,

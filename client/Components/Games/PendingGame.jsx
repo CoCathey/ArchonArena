@@ -13,10 +13,11 @@ import {
     lobbyStartGameRequested
 } from '../../redux/socketActions';
 import PendingGamePlayers from './PendingGamePlayers';
+import { getPendingGameJoinAlert } from './pendingGameAlerts';
 import { Constants } from '../../constants';
 
-import ChargeMp3 from '../../assets/sound/charge.mp3';
-import ChargeOgg from '../../assets/sound/charge.ogg';
+import PlayerJoinedMp3 from '../../assets/sound/player-joined.mp3';
+import PlayerJoinedOgg from '../../assets/sound/player-joined.ogg';
 
 function showNotification(notification) {
     if (!window.Notification || Notification.permission !== 'granted') {
@@ -61,29 +62,27 @@ const PendingGame = () => {
         }
 
         const players = Object.values(currentGame.players).length;
+        const alert = getPendingGameJoinAlert({
+            game: currentGame,
+            username: user.username,
+            previousPlayerCount: playerCount
+        });
 
-        if (
-            notification.current &&
-            playerCount === 1 &&
-            players === 2 &&
-            currentGame.owner === user.username
-        ) {
+        if (alert && notification.current) {
             const promise = notification.current?.play();
 
             if (promise !== undefined) {
                 promise.catch(() => {}).then(() => {});
             }
 
-            const otherPlayer = Object.values(currentGame.players).find(
-                (p) => p.name !== user.username
-            );
-
-            showNotification({
-                body: `${otherPlayer.name} has joined your game`,
-                // The pending-game player summary exposes `avatar`/`name`, not
-                // `username`; using username produced /img/avatar/undefined.png.
-                icon: `/img/avatar/${otherPlayer.avatar}.png`
-            });
+            if (alert.notify) {
+                showNotification({
+                    body: alert.body,
+                    // The pending-game player summary exposes `avatar`/`name`, not
+                    // `username`; using username produced /img/avatar/undefined.png.
+                    icon: `/img/avatar/${alert.opponent.avatar}.png`
+                });
+            }
         }
 
         setPlayerCount(players);
@@ -321,8 +320,8 @@ const PendingGame = () => {
     return (
         <>
             <audio ref={notification}>
-                <source src={ChargeMp3} type='audio/mpeg' />
-                <source src={ChargeOgg} type='audio/ogg' />
+                <source src={PlayerJoinedMp3} type='audio/mpeg' />
+                <source src={PlayerJoinedOgg} type='audio/ogg' />
             </audio>
 
             <Panel title={currentGame.name} titleClass='text-base font-semibold tracking-wide'>
