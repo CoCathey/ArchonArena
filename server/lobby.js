@@ -355,6 +355,25 @@ class Lobby {
             return;
         }
 
+        // ARCHON: one sweep body at a time in this process.
+        //
+        // The cadence gate stamps lastDeckImportSweepMs before awaiting Master
+        // Vault, so it spaces sweep STARTS only - a batch slower than the
+        // cadence had the next tick begin on top of it. Both runs then claimed
+        // the same job, requested every deck twice, and the later run's
+        // absolute counters overwrote the earlier one's, so five imported decks
+        // could be recorded as "0 imported, 5 already owned". Not exotic
+        // either: a tick is decksPerTick decks plus their spacing, so any
+        // per-deck cost over about 1.7s overruns the default 10s cadence -
+        // which is exactly when Master Vault is slow, and doubling our request
+        // rate is the worst available response to that. The claim lease is the
+        // cross-process half of this; the flag is the cheap in-process half.
+        if (this.deckImportSweepRunning) {
+            return;
+        }
+
+        this.deckImportSweepRunning = true;
+
         try {
             if (!this.deckImportService.isEnabled()) {
                 return;
@@ -506,6 +525,11 @@ class Lobby {
             }
         } catch (err) {
             logger.error('Deck import sweep failed', err);
+        } finally {
+            // finally, not the end of try: a sweep that threw must still
+            // release the flag, or one bad tick stops every import on this
+            // lobby until it restarts.
+            this.deckImportSweepRunning = false;
         }
     }
 

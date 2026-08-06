@@ -212,11 +212,18 @@ const REGISTRY = {
                 max: 60000,
                 default: 10000
             },
+            // Lowerable, not raisable: 25 is DoK's free tier and the service
+            // clamps to it regardless of what is stored here, so a higher
+            // number would be a setting that silently does nothing. Patron
+            // tiers allow more, but the windows enforcing this are per lobby
+            // process, and whether a key really has that tier is DoK's business
+            // rather than ours - so spending it takes a code change by someone
+            // who has checked, not a slider moved during an incident.
             maxRequestsPerMinute: {
                 type: 'number',
-                label: 'DoK requests per minute (25 free tier; 50/100/250 for patron tiers)',
+                label: 'DoK requests per minute (25 is the free-tier cap and the maximum here)',
                 min: 1,
-                max: 250,
+                max: 25,
                 default: 25
             },
             sweepEnabled: {

@@ -15,6 +15,10 @@ const logger = require('../../log');
 // map would keep a row for every player who ever imported, forever.
 const outboundRequestTimes = new Map();
 
+// Decks of KeyForge's free-tier cap. Every key this site sends is held to it -
+// see getRateLimit for why it is a ceiling and not a default.
+const DOK_FREE_TIER_RPM = 25;
+
 function keyIdFor(apiKey) {
     return crypto.createHash('sha256').update(String(apiKey)).digest('hex').slice(0, 16);
 }
@@ -118,11 +122,31 @@ class DokService {
         return !!this.getConfig().enabled;
     }
 
-    // DoK's per-minute request cap (25 free; 50/100/250 for patron tiers).
+    /**
+     * ARCHON: everyone runs at DoK's free tier, 25 requests per minute, and
+     * this is a CEILING rather than a default.
+     *
+     * DoK publishes 25/min free with 50/100/250 for patron tiers, and their own
+     * rules ask plainly that the API not be spammed - their site has been taken
+     * down by misuse of it before. A configured value above the free tier is
+     * therefore a promise about somebody else's service that this deployment
+     * cannot keep on its own: the per-key windows here are per PROCESS, so two
+     * lobbies each believing they may send 250/min send 500, and the tier a key
+     * actually has is DoK's business, not a number in our config.
+     *
+     * So config may lower this and may not raise it. If a patron tier is ever
+     * worth using, raising DOK_FREE_TIER_RPM is the one-line change - made
+     * deliberately, by someone who has checked the subscription, rather than by
+     * an admin nudging a slider during an incident.
+     */
     getRateLimit() {
         const limit = parseInt(this.getConfig().maxRequestsPerMinute, 10);
 
-        return Number.isFinite(limit) && limit > 0 ? limit : 25;
+        if (!Number.isFinite(limit) || limit <= 0) {
+            return DOK_FREE_TIER_RPM;
+        }
+
+        return Math.min(limit, DOK_FREE_TIER_RPM);
     }
 
     // Non-blocking: reserve one request against this minute's budget for the
