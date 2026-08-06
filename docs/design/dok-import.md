@@ -124,6 +124,33 @@ server correctly stays off. The two features have genuinely different prerequisi
 gating them on the same check would have made the more widely usable one unavailable to
 the deployments most likely to want it.
 
+## The trap this creates for the operator
+
+DoK issues **one key per account**, and generating a new one voids the previous one the
+instant it is created. That is fine for a player, who has one key and one use for it. It
+is a trap for whoever runs the server, because `DOK_API_KEY` — the credential that buys
+SAS for every player — is very likely to have come from that person's own DoK account. If
+they then follow this feature's own instructions and generate a key to sync their
+collection, they have just revoked the site's key, and SAS quietly stops working for
+everybody. The failure is not obviously connected to the action that caused it, which is
+what makes it worth writing down.
+
+This was not hypothetical: it happened on the first production deploy of this feature, and
+surfaced as `healthcheck.sh` reporting `DoK rejected the API key (HTTP 403)`.
+
+Three things now guard it, none of them a code change to the import path itself, because
+the behaviour is DoK's and cannot be worked around:
+
+-   The in-app instructions say to **copy the key already shown** and to press Generate
+    only if there is none, rather than telling everyone to generate one.
+-   `.env.production.example` explains that this key and any key pasted into the sync box
+    must be the same string, and suggests a DoK account dedicated to the server so an
+    operator syncing their own decks cannot take site-wide SAS down with them.
+-   The healthcheck's fix hint names key regeneration as the likely cause instead of
+    advising a regenerate — which is the very action that causes it — and gives a probe
+    that distinguishes a rejected key from Cloudflare blocking the host, since both
+    present as `403`.
+
 ## CSV and pasted links stay
 
 The same component still accepts a DoK "Download Decks Spreadsheet" CSV (whose first

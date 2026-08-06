@@ -287,7 +287,7 @@ if grep -qE "^DOK_API_KEY=.+" .env.production 2>/dev/null; then
     # now CSV/paste based and needs no DoK API at all).
     case "$dok_probe" in
         200 | 404) ok "Decks of KeyForge (SAS endpoint) reachable, API key accepted (probe: $dok_probe)" ;;
-        401 | 403) bad "DoK rejected the API key (HTTP $dok_probe)" "regenerate the key on your DoK profile and update DOK_API_KEY in .env.production, then: $DC up -d lobby" ;;
+        401 | 403) bad "DoK rejected the API key (HTTP $dok_probe)" "most likely cause: DoK issues ONE key per account and generating a new one voids the old instantly, so generating a key for a collection sync (or anywhere else) kills the site key. Copy the key currently shown on your DoK profile into DOK_API_KEY in .env.production - do NOT generate another - then: $DC up -d lobby. If DoK shows the same key you already have, this may be Cloudflare blocking the VPS rather than a bad key; check the response body: $DC exec -T lobby node -e \"fetch('https://decksofkeyforge.com/public-api/v3/decks/00000000-0000-0000-0000-000000000000',{headers:{'Api-Key':process.env.DOK_API_KEY||''}}).then(async r=>console.log(r.status,(await r.text()).slice(0,300)))\"" ;;
         429) warn "DoK rate limit hit during probe (HTTP 429)" "harmless if enrichment just ran; re-check in a minute" ;;
         *) warn "cannot reach decksofkeyforge.com from the lobby ($dok_probe)" "only affects SAS scores; check VPS outbound: $DC exec lobby ping -c1 decksofkeyforge.com" ;;
     esac
