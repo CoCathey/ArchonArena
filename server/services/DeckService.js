@@ -623,7 +623,21 @@ class DeckService {
         } catch (error) {
             logger.error(`Unable to import deck ${deck.uuid}`, error);
 
-            throw new Error('Invalid response from Api. Please try again later.');
+            // ARCHON: say WHICH upstream failure this was. Master Vault meters
+            // hard, and a bulk import that cannot tell "you are going too fast"
+            // from "this deck is broken" has no way to back off - it just burns
+            // through the rest of the collection failing, which is how a
+            // 257-deck sync imported 3 and reported 251 unexplained failures.
+            const rateLimited = error.statusCode === 429;
+            const importError = new Error(
+                rateLimited
+                    ? 'Master Vault is rate limiting deck imports. Please wait a moment and try again.'
+                    : 'Invalid response from Api. Please try again later.'
+            );
+            importError.code = rateLimited ? 'upstream_rate_limited' : 'upstream_error';
+            importError.statusCode = error.statusCode;
+
+            throw importError;
         }
 
         if (!deckResponse || !deckResponse._linked || !deckResponse.data) {

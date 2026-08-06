@@ -151,10 +151,18 @@ module.exports.init = function (server) {
             } catch (error) {
                 logger.error('Failed to import deck', error);
 
+                // ARCHON: pass the failure KIND through, not just prose. A bulk
+                // import has to be able to tell "slow down" from "this deck is
+                // no good" - the first is worth waiting out, the second never
+                // will be, and treating them alike means retrying what cannot
+                // succeed while giving up on what would have.
                 return res.send({
                     success: false,
+                    code: error.code || 'import_failed',
                     message:
-                        'An error occurred importing your deck.  Please check the Url or try again later.'
+                        error.code === 'upstream_rate_limited'
+                            ? error.message
+                            : 'An error occurred importing your deck.  Please check the Url or try again later.'
                 });
             }
 
