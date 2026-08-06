@@ -50,6 +50,17 @@
         apiKey: 'DOK_API_KEY'
     },
 
+    patreon: {
+        // __format json so PATREON_ENABLED=false arrives as the boolean false
+        // rather than the string "false", which is truthy.
+        enabled: { __name: 'PATREON_ENABLED', __format: 'json' },
+        clientId: 'PATREON_CLIENT_ID',
+        clientSecret: 'PATREON_CLIENT_SECRET',
+        callbackUrl: 'PATREON_CALLBACK_URL',
+        campaignId: 'PATREON_CAMPAIGN_ID',
+        campaignUrl: 'PATREON_CAMPAIGN_URL'
+    },
+
     auth: {
         oidc: {
             enabled: 'OIDC_ENABLED',

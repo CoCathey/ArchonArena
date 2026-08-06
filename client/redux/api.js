@@ -245,18 +245,40 @@ export const api = createApi({
                 method: 'POST'
             })
         }),
+        // ARCHON (N12): is Patreon configured on this deployment, and where is
+        // the campaign page. Public - the client renders no Patreon UI at all
+        // when it comes back disabled.
+        getPatreonStatus: builder.query({
+            query: () => '/account/patreon/status'
+        }),
+        // The caller's own pledge status and entitled tiers.
+        getPatreonMembership: builder.query({
+            query: () => '/account/patreon/me',
+            providesTags: [TAG_TYPES.PATREON]
+        }),
+        // Returns the Patreon authorization URL to navigate to. Built by the
+        // server so the client id and scopes live in one place, and so the
+        // one-shot `state` can be bound to a signed cookie.
+        startPatreonLink: builder.mutation({
+            query: () => ({
+                url: '/account/patreon/link/start',
+                method: 'POST'
+            })
+        }),
         linkPatreon: builder.mutation({
-            query: (code) => ({
+            query: ({ code, state }) => ({
                 url: '/account/linkPatreon',
                 method: 'POST',
-                body: { code }
-            })
+                body: { code, state }
+            }),
+            invalidatesTags: [TAG_TYPES.PATREON]
         }),
         unlinkPatreon: builder.mutation({
             query: () => ({
                 url: '/account/unlinkPatreon',
                 method: 'POST'
-            })
+            }),
+            invalidatesTags: [TAG_TYPES.PATREON]
         }),
         // ARCHON: OIDC (Keybringer) linked identities for account settings
         getOidcIdentities: builder.query({
@@ -952,6 +974,10 @@ export const {
     useActivateAccountMutation,
     useResendActivationMutation,
     useVerifyAuthenticationMutation,
+    // ARCHON (N12): Patreon supporter linking
+    useGetPatreonStatusQuery,
+    useGetPatreonMembershipQuery,
+    useStartPatreonLinkMutation,
     useLinkPatreonMutation,
     useGetOidcIdentitiesQuery,
     useGetOidcStatusQuery,
