@@ -28,6 +28,7 @@ import { authActions } from '../../redux/slices/authSlice';
 import { isPatreonUnlinked, PatreonStatus } from '../../types';
 import Avatar from '../Site/Avatar';
 import ProfileLocation from './ProfileLocation';
+import ProfileBio from './ProfileBio';
 import ProfileRankCard from './ProfileRankCard';
 import Panel from '../Site/Panel';
 
@@ -228,6 +229,8 @@ const ProfileMain = ({ user, formProps, section }) => {
                 </Panel>
                 {/* ARCHON: location for rankings (Phase 6) */}
                 <ProfileLocation />
+                {/* ARCHON (I3): optional short bio, shown on the public profile */}
+                <ProfileBio />
                 <Panel type='default' compactHeader title={t('Avatar')}>
                     <div className='flex items-center gap-3'>
                         {!formProps.errors.avatar && localAvatar ? (

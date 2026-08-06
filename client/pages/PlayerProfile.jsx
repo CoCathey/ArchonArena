@@ -119,6 +119,12 @@ const PlayerProfile = () => {
                         </div>
                     </div>
                 </div>
+                {/* ARCHON (I3): optional short bio */}
+                {profile.bio && (
+                    <p className='mt-3 whitespace-pre-wrap text-sm text-foreground'>
+                        {profile.bio}
+                    </p>
+                )}
                 {/* ARCHON (N5): report from the surface where the problem
                     appears. Below the header row rather than inside it, so the
                     form has the full panel width when it opens. */}

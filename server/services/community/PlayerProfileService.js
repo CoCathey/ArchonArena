@@ -16,6 +16,8 @@
  * IP, password state or linked-identity data. Disabled accounts do not resolve,
  * matching the member directory and the leaderboards.
  */
+const BIO_MAX_LENGTH = 280;
+
 class PlayerProfileService {
     constructor(db = require('../../db')) {
         this.db = db;
@@ -32,7 +34,7 @@ class PlayerProfileService {
         }
 
         const rows = await this.db.query(
-            'SELECT "Id", "Username", "Settings_Avatar", "Country", "State", "Registered" ' +
+            'SELECT "Id", "Username", "Settings_Avatar", "Country", "State", "Bio", "Registered" ' +
                 'FROM "Users" WHERE lower("Username") = lower($1) ' +
                 'AND "Disabled" IS NOT TRUE AND "Verified" IS TRUE',
             [username]
@@ -54,10 +56,29 @@ class PlayerProfileService {
             avatar: user.Settings_Avatar,
             country: user.Country,
             state: user.State,
+            bio: user.Bio || null,
             joined: user.Registered,
             clubs,
             recentGames
         };
+    }
+
+    /** The bio as the account owner would edit it (no public/disabled gating). */
+    async getBio(userId) {
+        const rows = await this.db.query('SELECT "Bio" FROM "Users" WHERE "Id" = $1', [userId]);
+
+        return (rows && rows[0] && rows[0].Bio) || null;
+    }
+
+    async setBio(userId, bio) {
+        const normalizedBio = bio ? String(bio).trim().slice(0, BIO_MAX_LENGTH) || null : null;
+
+        await this.db.query('UPDATE "Users" SET "Bio" = $1 WHERE "Id" = $2', [
+            normalizedBio,
+            userId
+        ]);
+
+        return { success: true, bio: normalizedBio };
     }
 
     async getClubs(userId) {

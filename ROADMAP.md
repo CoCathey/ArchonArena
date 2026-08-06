@@ -202,7 +202,12 @@ not new systems, and it makes the whole site feel connected.
 -   [x] Remaining link sites done: lobby game list, pending game, tournament players /
         standings / "Your Match", game history, club member lists. Every username outside the
         game board now links to its profile.
--   [ ] Optional short bio, editable from the account page.
+-   [x] Optional short bio, editable from the account page (`Users.Bio`, migration 51,
+        `PlayerProfileService.getBio`/`setBio`, `GET`/`PUT /api/account/bio`). Capped at
+        280 characters server-side, so the client's counter can never disagree with what
+        actually gets saved; empty and whitespace-only values are stored as `NULL` rather
+        than an empty string, matching how `State` already distinguishes "not set" from
+        "set to nothing". Rendered on the public profile only when present.
 
 **Acceptance criteria**
 
@@ -1467,7 +1472,7 @@ much stronger deck pays less.
         migration 31) and shortcuts to in-person tournaments and clubs.
 -   [x] **Friends v1**: requests by username, accept/decline/cancel/remove, mutual-request
         auto-accept, online presence dots (server/services/community/FriendService).
--   [ ] Rich public player profiles: avatar, bio, location, ratings, badges, favourite decks,
+-   [x] **Rich public player profiles**: avatar, bio, location, ratings, badges, favourite decks,
         match history summary → **I3**.
 -   [x] **Club leaderboards, approval-based joins, ownership transfer** (migration 44).
 -   [x] **Teams** (competitive): rosters distinct from clubs, team events, and a team ladder

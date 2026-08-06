@@ -10,6 +10,7 @@ describe('PlayerProfileService', function () {
         Settings_Avatar: 'player1',
         Country: 'US',
         State: 'TX',
+        Bio: null,
         Registered: new Date('2026-01-15T00:00:00Z'),
         ...overrides
     });
@@ -117,6 +118,68 @@ describe('PlayerProfileService', function () {
 
             expect(profile.clubs).toEqual([]);
             expect(profile.recentGames).toEqual([]);
+        });
+
+        it('includes the bio when set, and null when not', async function () {
+            prime({ user: userRow({ Bio: 'Plays Brobnar, mostly by accident.' }) });
+
+            expect((await service.getProfile('player1')).bio).toBe(
+                'Plays Brobnar, mostly by accident.'
+            );
+
+            prime({ user: userRow({ Bio: null }) });
+
+            expect((await service.getProfile('player1')).bio).toBeNull();
+        });
+    });
+
+    describe('getBio', function () {
+        it('returns the stored bio', async function () {
+            db.query.mockImplementation(async () => [{ Bio: 'Hello there' }]);
+
+            expect(await service.getBio(7)).toBe('Hello there');
+        });
+
+        it('returns null when no bio is set', async function () {
+            db.query.mockImplementation(async () => [{ Bio: null }]);
+
+            expect(await service.getBio(7)).toBeNull();
+        });
+    });
+
+    describe('setBio', function () {
+        it('trims and stores the bio', async function () {
+            const result = await service.setBio(7, '  Hello there  ');
+
+            expect(result).toEqual({ success: true, bio: 'Hello there' });
+            expect(db.query).toHaveBeenCalledWith(expect.stringContaining('UPDATE "Users"'), [
+                'Hello there',
+                7
+            ]);
+        });
+
+        it('truncates to the maximum length rather than rejecting', async function () {
+            const long = 'x'.repeat(400);
+
+            const result = await service.setBio(7, long);
+
+            expect(result.bio).toHaveLength(280);
+        });
+
+        it('clears the bio when given an empty value', async function () {
+            const result = await service.setBio(7, '');
+
+            expect(result).toEqual({ success: true, bio: null });
+            expect(db.query).toHaveBeenCalledWith(expect.stringContaining('UPDATE "Users"'), [
+                null,
+                7
+            ]);
+        });
+
+        it('stores null unchanged', async function () {
+            const result = await service.setBio(7, null);
+
+            expect(result).toEqual({ success: true, bio: null });
         });
     });
 });
