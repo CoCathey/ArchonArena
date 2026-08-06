@@ -338,17 +338,29 @@ const DokImport = ({ onDone, compact }) => {
                                 </a>
                                 {t('. You must be logged in, or no key button appears.')}
                             </li>
-                            <li>{t('Under "Generate your API Key", press the button.')}</li>
                             <li>
                                 {t(
-                                    'Copy the key straight away — Decks of KeyForge shows it once and cannot show it again.'
+                                    'Under "Generate your API Key": if a key is already shown, copy that one. Only press the button if you have no key yet.'
+                                )}
+                            </li>
+                            <li>
+                                {t(
+                                    'If you did generate one, copy it straight away — Decks of KeyForge shows a new key once and cannot show it again.'
                                 )}
                             </li>
                             <li>{t('Paste it below and press Sync collection.')}</li>
                         </ol>
+                        {/* ARCHON: this warning is not boilerplate. DoK issues
+                            ONE key per account and generating a new one voids
+                            the old one instantly, so anyone who reuses their DoK
+                            account for something else - most obviously the site
+                            operator, whose DOK_API_KEY funds SAS for every
+                            player - breaks that other thing by generating a key
+                            here. The steps above now say copy-before-generate
+                            for the same reason. */}
                         <p className='mt-2'>
                             {t(
-                                'Generating a key invalidates any previous one, so make a new key only if you have lost the old one. Your key lists the decks you have marked as owned on Decks of KeyForge — including private ones — so only give it to sites you trust.'
+                                'Generating a key immediately invalidates your previous one, and Decks of KeyForge only issues one per account — so if that key is in use anywhere else, generating a new one here will break it. Your key lists the decks you have marked as owned on Decks of KeyForge, including private ones, so only give it to sites you trust.'
                             )}
                         </p>
                     </details>
