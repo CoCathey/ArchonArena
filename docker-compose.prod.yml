@@ -94,6 +94,17 @@ services:
             - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
             - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-}
             - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI:-}
+            # ARCHON (N12): Patreon supporter linking. Unset means off - the
+            # site renders no Patreon UI and touches no supporter roles.
+            # PATREON_CAMPAIGN_ID is not optional once the others are set:
+            # without it a pledge to any creator on Patreon counts as a pledge
+            # here. See docs/design/patreon.md.
+            - PATREON_ENABLED=${PATREON_ENABLED:-}
+            - PATREON_CLIENT_ID=${PATREON_CLIENT_ID:-}
+            - PATREON_CLIENT_SECRET=${PATREON_CLIENT_SECRET:-}
+            - PATREON_CAMPAIGN_ID=${PATREON_CAMPAIGN_ID:-}
+            - PATREON_CALLBACK_URL=${PATREON_CALLBACK_URL:-}
+            - PATREON_CAMPAIGN_URL=${PATREON_CAMPAIGN_URL:-}
         command: ['node', '.']
 
     node-0:
