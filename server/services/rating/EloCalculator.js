@@ -1,5 +1,9 @@
 const { DEFAULT_ELO_CONFIG } = require('./eloDefaults');
 
+// A KeyForge game is won by forging three keys (player.keys is red/blue/yellow),
+// and the margin tiers are expressed against that.
+const WINNING_KEYS = 3;
+
 /**
  * Pure rating calculator for Archon Arena's SAS-adjusted Elo.
  *
@@ -94,19 +98,50 @@ function expectedScore(playerRating, opponentRating, sasDifferential, config) {
 }
 
 /**
- * Margin-of-victory multiplier for a finished game. The key differential is
- * clamped into 1..3: a game can end with the loser ahead on keys (concede /
- * timeout while winning the race), which still counts as the narrowest
- * margin rather than an out-of-range lookup.
+ * ARCHON: the margin tier for a finished game, measured on the LOSER.
  *
- * @param {number} winnerKeys
- * @param {number} loserKeys
+ * keyDiffMultipliers is labelled 1 = 3-2, 2 = 3-1, 3 = 3-0: the tiers assume a
+ * winner who finished on three keys, and what varies between them is how close
+ * the loser got. Deriving the tier from `winnerKeys - loserKeys` only agrees
+ * with that when the winner actually forged three - which is every win BY KEYS
+ * and no other kind.
+ *
+ * A concession ends the game before the winner forges their third key, so the
+ * subtraction quietly demoted those games a tier or two: conceding to someone
+ * on two keys with none of your own scored as a 3-1 rather than the 3-0 it
+ * plainly was, and a player being beaten comprehensively earned their opponent
+ * LESS by giving up early than by playing it out. Timeouts had the same
+ * problem for the same reason.
+ *
+ * Measuring `3 - loserKeys` fixes both and changes nothing about a normal win:
+ * when the winner has three keys the two expressions are identical, so only
+ * games that ended some other way move. How the game ended is expressed by
+ * resultTypeMultipliers, which is the correct lever for "a concession is worth
+ * less" and is left alone here.
+ *
+ * Clamped into 1..3: the loser can finish on more keys than the winner (a
+ * concession while ahead on the race), which is the narrowest margin rather
+ * than an out-of-range lookup.
+ *
+ * A missing count reads as none forged, which is what the old subtraction did
+ * with it too - so this is not a new assumption, and in practice the count is
+ * always written before a game is rated.
+ *
+ * @param {number} loserKeys keys the losing player finished with
+ */
+function keyDifferential(loserKeys) {
+    return Math.max(1, Math.min(3, WINNING_KEYS - (Number(loserKeys) || 0)));
+}
+
+/**
+ * Margin-of-victory multiplier for a finished game.
+ *
+ * @param {number} keyDiff the margin tier, 1..3 (see keyDifferential)
  * @param {string} resultType one of config.resultTypeMultipliers keys
  * @param {object} config normalized elo config
  */
-function movMultiplier(winnerKeys, loserKeys, resultType, config) {
-    const keyDiff = Math.max(1, Math.min(3, winnerKeys - loserKeys));
-    const keyMultiplier = config.keyDiffMultipliers[keyDiff];
+function movMultiplier(keyDiff, resultType, config) {
+    const keyMultiplier = config.keyDiffMultipliers[Math.max(1, Math.min(3, keyDiff))];
     const resultMultiplier =
         config.resultTypeMultipliers[resultType] ?? config.resultTypeMultipliers.keys;
 
@@ -144,8 +179,11 @@ function kFactorFor(gamesPlayed, rating, config) {
  * @param {object} game
  * @param {object} game.winner { rating, gamesPlayed, deckSas }
  * @param {object} game.loser  { rating, gamesPlayed, deckSas }
- * @param {number} game.winnerKeys keys forged by the winner at game end
- * @param {number} game.loserKeys  keys forged by the loser at game end
+ * @param {number} [game.loserKeys] keys forged by the loser at game end; the
+ *                 margin tier is measured from this alone, and the winner's
+ *                 keys are deliberately not an input (see keyDifferential)
+ * @param {number} [game.keyDiff] a pre-computed margin tier, used in place of
+ *                 loserKeys when replaying a stored result
  * @param {string} [game.resultType] 'keys' | 'concede' | 'timeout' (or any
  *                 configured type); defaults to 'keys'
  * @param {boolean} [game.isTournament] tournament games move ratings more
@@ -156,7 +194,7 @@ function kFactorFor(gamesPlayed, rating, config) {
  */
 function calculateGameResult(game, configOverrides = {}) {
     const config = normalizeConfig(configOverrides);
-    const { winner, loser, winnerKeys, loserKeys } = game;
+    const { winner, loser, loserKeys } = game;
     const resultType = game.resultType || 'keys';
 
     // Only apply the SAS handicap when BOTH decks have a known SAS. Treating a
@@ -173,7 +211,11 @@ function calculateGameResult(game, configOverrides = {}) {
     const winnerExpected = expectedScore(winner.rating, loser.rating, sasDiff, config);
     const loserExpected = 1 - winnerExpected;
 
-    const mov = movMultiplier(winnerKeys, loserKeys, resultType, config);
+    // A caller replaying a historical game has the stored differential and not
+    // the raw key counts, so it may pass keyDiff directly; everyone rating a
+    // live game passes the keys and the tier is derived from the loser's.
+    const keyDiff = game.keyDiff != null ? game.keyDiff : keyDifferential(loserKeys);
+    const mov = movMultiplier(keyDiff, resultType, config);
     const tournamentMultiplier = game.isTournament ? config.tournamentKMultiplier : 1;
 
     const winnerK =
@@ -204,8 +246,10 @@ function calculateGameResult(game, configOverrides = {}) {
 }
 
 module.exports = {
+    WINNING_KEYS,
     normalizeConfig,
     expectedScore,
+    keyDifferential,
     movMultiplier,
     kFactorFor,
     calculateGameResult

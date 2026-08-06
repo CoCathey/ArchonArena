@@ -43,10 +43,16 @@ const DEFAULT_ELO_CONFIG = {
     // Set to 0 to ignore deck power entirely.
     sasWeight: 4,
 
-    // Margin-of-victory multipliers keyed by key differential
-    // (winner keys - loser keys, clamped to 1..3). A 3-0 forge-out moves
-    // ratings more than a narrow 3-2 win. Applied to both players so the
+    // Margin-of-victory multipliers keyed by key differential. A 3-0 forge-out
+    // moves ratings more than a narrow 3-2 win. Applied to both players so the
     // exchange stays zero-sum.
+    //
+    // The tier is how close the LOSER got - 1 = 3-2, 2 = 3-1, 3 = 3-0 - and is
+    // measured as 3 minus the loser's keys, NOT as winner minus loser. The two
+    // agree on every win by keys, and only the loser-based one is right when
+    // the game ended before the winner forged their third (see
+    // EloCalculator.keyDifferential). How the game ended is priced separately,
+    // by resultTypeMultipliers below.
     keyDiffMultipliers: {
         1: 1.0,
         2: 1.1,

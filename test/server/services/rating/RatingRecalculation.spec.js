@@ -250,6 +250,66 @@ describe('RatingService.recalculateRatings', function () {
             expect(sql).toContain('TournamentMatchGames');
         });
 
+        // ARCHON: KeyDiff used to be stored as winnerKeys - loserKeys, which
+        // under-rated every concession (the winner had not forged their third
+        // key yet). Replaying the stored number would reproduce the mistake
+        // faithfully - and undoing exactly this is what the tool is for - so
+        // the margin is re-derived from the loser's recorded key count.
+        describe('the margin tier', function () {
+            const concededAtTwoNil = { KeyDiff: 2, ResultType: 'concede' };
+
+            const replayWinnerRating = async (overrides) => {
+                historyRows = [historyRow({ ...concededAtTwoNil, ...overrides })];
+                ratingRows = [
+                    { UserId: 1, Pool: 'archon', Rating: 1200, GamesPlayed: 1, Username: 'alice' }
+                ];
+
+                const result = await service.recalculateRatings();
+
+                return result.movers.find((m) => m.username === 'alice')?.after ?? 1200;
+            };
+
+            it('asks for the loser key count alongside the history row', async function () {
+                historyRows = [historyRow()];
+
+                await service.recalculateRatings();
+
+                const [sql] = db.query.mock.calls.find(([text]) =>
+                    text.includes('FROM "RatingHistory"')
+                );
+
+                expect(sql).toContain('"GamePlayers"');
+                expect(sql).toContain('AS "LoserKeys"');
+            });
+
+            it('re-derives the tier from the loser keys, over the stored value', async function () {
+                const repaired = await replayWinnerRating({ LoserKeys: 0 }); // a 3-0
+                const asStored = await replayWinnerRating({}); // the stored 3-1
+
+                expect(repaired).toBeGreaterThan(asStored);
+            });
+
+            it('falls back to the stored tier when the key count is gone', async function () {
+                const pruned = await replayWinnerRating({ LoserKeys: null });
+                const asStored = await replayWinnerRating({});
+
+                expect(pruned).toBe(asStored);
+            });
+
+            // The common case has to be untouched: for a win by keys the winner
+            // did forge three, so both readings already agreed.
+            it('does not move a win by keys', async function () {
+                const fromKeys = await replayWinnerRating({
+                    KeyDiff: 2,
+                    ResultType: 'keys',
+                    LoserKeys: 1
+                });
+                const fromStored = await replayWinnerRating({ KeyDiff: 2, ResultType: 'keys' });
+
+                expect(fromKeys).toBe(fromStored);
+            });
+        });
+
         it('accumulates across several games in a pool', async function () {
             historyRows = [
                 historyRow({ GameId: 1, CreatedAt: '2026-07-01T10:00:00Z' }),
