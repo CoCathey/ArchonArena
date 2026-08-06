@@ -19,6 +19,44 @@ const dokService = new DokService(configService);
 const CatalogService = require('../services/catalog/CatalogService');
 const catalogService = new CatalogService(configService);
 
+// ARCHON: collection imports run as a resumable server-side job so closing the
+// modal no longer abandons them half-done (docs/design/dok-import.md).
+const DeckImportJobService = require('../services/deckimport/DeckImportJobService');
+const deckImportService = new DeckImportJobService(configService);
+
+const UUID_PATTERN =
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/**
+ * A job row as the client needs it: totals, progress, and the failure reasons
+ * ranked so the UI can show the one sentence that explains 200 failures rather
+ * than a list of 200. Returns null for "this user has never run an import",
+ * which the UI treats as an empty state rather than an error.
+ */
+function mapImportJob(job) {
+    if (!job) {
+        return null;
+    }
+
+    const reasons = deckImportService.parseReasons(job);
+
+    return {
+        id: job.Id,
+        status: job.Status,
+        total: deckImportService.parseUuids(job).length,
+        done: job.Cursor,
+        imported: job.Imported,
+        alreadyOwned: job.AlreadyOwned,
+        failed: job.Failed,
+        reasons: Object.entries(reasons)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3),
+        pausedUntil: job.PausedUntil,
+        lastError: job.LastError,
+        updatedAt: job.UpdatedAt
+    };
+}
+
 // ARCHON: the DoK collection-import "prepare" step can drive many outbound
 // requests. Those now spend the *user's* DoK quota rather than the site's, so
 // this cap is about protecting DoK from us hammering them on a user's behalf
@@ -271,14 +309,99 @@ module.exports.init = function (server) {
                 });
             }
 
+            // Hand the uuids to a server-side job rather than back to the
+            // browser. The listing needed the key; importing does not - Master
+            // Vault has never heard of it - so the job carries uuids only and
+            // the key goes out of scope here, exactly as before.
+            const job = await deckImportService.createJob({
+                userId: req.user.id,
+                username: req.user.username,
+                uuids: result.decks.map((deck) => deck.uuid)
+            });
+
             res.send({
                 success: true,
                 total: result.decks.length + (result.skipped || 0),
                 ownedCount: result.skipped || 0,
                 truncated: !!result.truncated,
                 partial: !!result.partial,
-                toImport: result.decks
+                queued: result.decks.length,
+                job: mapImportJob(job)
             });
+        })
+    );
+
+    // ARCHON: queue an arbitrary list of Master Vault ids - the CSV upload and
+    // the paste box. Same job machinery as the DoK sync, so every route into a
+    // bulk import gets the same pacing, resumability and progress.
+    server.post(
+        '/api/decks/import/queue',
+        passport.authenticate('jwt', { session: false }),
+        dokPrepareLimit,
+        wrapAsync(async function (req, res) {
+            const uuids = Array.isArray(req.body.uuids)
+                ? req.body.uuids.filter((uuid) => UUID_PATTERN.test(String(uuid || '')))
+                : [];
+
+            if (uuids.length === 0) {
+                return res.send({ success: false, message: 'No deck ids to import.' });
+            }
+
+            // Drop what they already own here rather than making the worker
+            // discover it one 'Deck already exists' at a time.
+            const ownedUuids = new Set(await deckService.getOwnedDeckUuids(req.user.id));
+            const toImport = [...new Set(uuids.map((uuid) => uuid.toLowerCase()))].filter(
+                (uuid) => !ownedUuids.has(uuid)
+            );
+
+            if (toImport.length === 0) {
+                return res.send({
+                    success: true,
+                    total: uuids.length,
+                    ownedCount: uuids.length,
+                    queued: 0,
+                    job: null
+                });
+            }
+
+            const job = await deckImportService.createJob({
+                userId: req.user.id,
+                username: req.user.username,
+                uuids: toImport
+            });
+
+            res.send({
+                success: true,
+                total: uuids.length,
+                ownedCount: uuids.length - toImport.length,
+                queued: toImport.length,
+                job: mapImportJob(job)
+            });
+        })
+    );
+
+    // Progress for the import that is running, or the summary of the last one
+    // that finished - a player who closed the modal mid-import needs to be able
+    // to reopen it and find out what happened.
+    server.get(
+        '/api/decks/import/status',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async function (req, res) {
+            const job =
+                (await deckImportService.getActiveJob(req.user.id)) ||
+                (await deckImportService.getLatestJob(req.user.id));
+
+            res.send({ success: true, job: mapImportJob(job) });
+        })
+    );
+
+    server.post(
+        '/api/decks/import/cancel',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async function (req, res) {
+            const cancelled = await deckImportService.cancelActive(req.user.id);
+
+            res.send({ success: true, cancelled });
         })
     );
 

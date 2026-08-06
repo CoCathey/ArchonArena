@@ -202,6 +202,44 @@
         // substringSearch: true
     },
 
+    // Server-side collection import: the resumable job behind "import my whole
+    // Decks of KeyForge collection", and the pace at which the lobby worker is
+    // allowed to pull those decks out of Master Vault.
+    //
+    // Everything here is pacing, and the one thing that matters about it is
+    // that the worker is not alone. It leaves from the same address as every
+    // user-facing single-deck import, and Master Vault meters the origin rather
+    // than the job - so a request this sweep spends is a request some player
+    // pasting a deck link is refused. The defaults are therefore deliberately
+    // slower than Master Vault would tolerate: nobody sits watching a
+    // collection import tick over, and somebody is always watching the single
+    // deck they just pasted.
+    //
+    // Listing the collection is not paced here at all. That happens
+    // synchronously against Decks of KeyForge while the job is being created,
+    // under the player's own DoK key, and the key is discarded rather than
+    // stored - the job holds uuids, and Master Vault has no notion of a DoK key.
+    deckImport: {
+        // On unless an operator turns it off - the inverse of the catalog
+        // crawl's default, because this is the machinery behind a button
+        // players already press rather than an outbound job nobody asked for.
+        enabled: true,
+        decksPerTick: 5,
+        requestSpacingMs: 400,
+        // Circuit breaker. There is deliberately no failure THRESHOLD here, as
+        // the catalog crawl has: a 429 parks the job on the first occurrence,
+        // because it is not a symptom to be tolerated a few times, it is the
+        // origin telling us to stop. The count only sizes the wait, doubling
+        // from a minute up to half an hour - capped lower than the crawl's,
+        // because a player is watching this one.
+        backoffBaseMs: 60000,
+        backoffMaxMs: 1800000,
+        // Hard ceiling on a single job's uuid list, well above the
+        // dok.maxImportDecks cap a player actually hits.
+        maxJobDecks: 1000,
+        sweepIntervalSeconds: 10
+    },
+
     gameNode: {
         name: 'test1',
         host: 'localhost',
