@@ -161,7 +161,17 @@
         // trusting a configured 250 would send 500 - and whether a key really
         // has that tier is DoK's business, not ours. Raising it is a code
         // change (DOK_FREE_TIER_RPM), made by someone who has checked.
-        maxRequestsPerMinute: 25
+        maxRequestsPerMinute: 25,
+        // ARCHON: remembered collections. A player may ask us to keep their DoK
+        // key (sealed - see server/services/crypto/secretBox.js) and refresh
+        // their collection on this cadence. The sweep only LISTS collections
+        // and queues jobs; the deck-import worker does the Master Vault work,
+        // so raising these lengthens that worker's queue rather than making
+        // anything arrive sooner.
+        autoSyncEnabled: true,
+        autoSyncIntervalHours: 24,
+        autoSyncSweepMinutes: 15,
+        autoSyncPerRun: 3
     },
 
     // Master Vault deck catalog: an index of every deck that exists - uuid,

@@ -1,14 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton } from '@heroui/react';
+import moment from 'moment';
 import { useDispatch } from 'react-redux';
 
 import {
     api,
     useCancelDeckImportMutation,
+    useForgetDokLinkMutation,
     useGetDeckImportStatusQuery,
+    useGetDokLinkQuery,
     usePrepareDokImportMutation,
-    useQueueDeckImportMutation
+    useQueueDeckImportMutation,
+    useSyncDokNowMutation
 } from '../../redux/api';
 import { TAG_TYPES } from '../../redux/apiTags';
 
@@ -68,9 +72,16 @@ const DokImport = ({ onDone, compact }) => {
     const [queueing, setQueueing] = useState(false);
     const [message, setMessage] = useState(null);
 
+    const [remember, setRemember] = useState(true);
+
     const [prepareDokImport] = usePrepareDokImportMutation();
     const [queueDeckImport] = useQueueDeckImportMutation();
     const [cancelDeckImport] = useCancelDeckImportMutation();
+    const [syncDokNow] = useSyncDokNowMutation();
+    const [forgetDokLink] = useForgetDokLinkMutation();
+
+    const { data: linkData, refetch: refetchLink } = useGetDokLinkQuery();
+    const link = linkData?.link;
 
     // Poll only while there is something to watch. An idle dialog should not
     // sit there querying every couple of seconds for a job nobody started.
@@ -99,7 +110,11 @@ const DokImport = ({ onDone, compact }) => {
         setQueueing(true);
 
         try {
-            const result = await prepareDokImport(apiKey.trim()).unwrap();
+            const result = await prepareDokImport({
+                dokApiKey: apiKey.trim(),
+                remember,
+                autoSync: remember
+            }).unwrap();
 
             if (!result.success) {
                 setMessage(result.message || t('Could not read that collection.'));
@@ -130,7 +145,45 @@ const DokImport = ({ onDone, compact }) => {
             );
         } finally {
             setQueueing(false);
+            setApiKey('');
             refetch();
+            refetchLink();
+        }
+    };
+
+    // Sync from the key we already hold, so a linked player never has to go and
+    // find it again - which matters more than usual here, because DoK cannot
+    // show them a key they have already generated.
+    const syncNow = async () => {
+        setMessage(null);
+        setQueueing(true);
+
+        try {
+            const result = await syncDokNow().unwrap();
+
+            if (!result.success) {
+                setMessage(result.message || t('Could not sync your collection.'));
+            } else if (result.queued === 0) {
+                setMessage(t('Already up to date — nothing new on Decks of KeyForge.'));
+            }
+        } catch (err) {
+            setMessage(err?.data?.message || t('Could not sync your collection.'));
+        } finally {
+            setQueueing(false);
+            refetch();
+            refetchLink();
+        }
+    };
+
+    const forgetKey = async () => {
+        setMessage(null);
+
+        try {
+            await forgetDokLink().unwrap();
+        } catch {
+            // The next status read shows the truth either way.
+        } finally {
+            refetchLink();
         }
     };
 
@@ -274,6 +327,47 @@ const DokImport = ({ onDone, compact }) => {
                 </p>
             )}
 
+            {/* ARCHON: the linked state, when we are holding a key. Shown above
+                the paste field because for a linked player "sync now" is the
+                whole interaction and re-pasting is the exception - DoK cannot
+                show them a key they already generated, so asking for one again
+                means generating a replacement and voiding the stored one. */}
+            {link?.hasKey && !link?.keyRejected && (
+                <div className='flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-surface-secondary/50 px-3 py-2'>
+                    <p className='text-sm text-muted'>
+                        {link.lastSyncAt
+                            ? t('Decks of KeyForge linked — last synced {{when}}.', {
+                                  when: moment(link.lastSyncAt).fromNow()
+                              })
+                            : t('Decks of KeyForge linked — not synced yet.')}
+                    </p>
+                    <div className='flex gap-2'>
+                        <HeroButton
+                            size='sm'
+                            variant='primary'
+                            isPending={queueing}
+                            isDisabled={busy}
+                            onPress={syncNow}
+                        >
+                            {t('Sync now')}
+                        </HeroButton>
+                        <HeroButton size='sm' variant='tertiary' onPress={forgetKey}>
+                            {t('Forget key')}
+                        </HeroButton>
+                    </div>
+                </div>
+            )}
+
+            {/* A stored key that DoK has refused can never start working again,
+                so this asks for a new one rather than offering a retry. */}
+            {link?.keyRejected && (
+                <div className='rounded-md border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-300'>
+                    {t(
+                        'Decks of KeyForge rejected your stored key, so automatic syncing has stopped. Generate a new key and paste it below — remember that generating one replaces any previous key.'
+                    )}
+                </div>
+            )}
+
             <div className='flex flex-wrap items-center gap-2'>
                 <input
                     type='password'
@@ -293,6 +387,18 @@ const DokImport = ({ onDone, compact }) => {
                     {t('Sync collection')}
                 </HeroButton>
             </div>
+
+            {/* Opt-in, and off is a real option: pasting a key to import once
+                must not quietly enrol somebody in us keeping their credential. */}
+            <label className='flex items-center gap-2 text-xs text-muted'>
+                <input
+                    type='checkbox'
+                    checked={remember}
+                    disabled={busy}
+                    onChange={(event) => setRemember(event.target.checked)}
+                />
+                {t('Remember my key (encrypted) and keep my collection synced automatically')}
+            </label>
 
             <div className='my-1 flex items-center gap-3'>
                 <span className='h-px flex-1 bg-border/60' />

@@ -170,3 +170,80 @@ describe('Lobby.runDeckImportSweep', function () {
         await expect(lobby.runDeckImportSweep()).resolves.toBeUndefined();
     });
 });
+
+// The auto-sync sweep, held against a real DokLinkService for the same reason
+// as above: the interval and the method have already been wired apart twice in
+// this feature's history.
+describe('Lobby.runDokAutoSync', function () {
+    const DokLinkService = require('../../server/services/dok/DokLinkService');
+
+    let logged;
+
+    const makeLobby = (dokLinkService, dokImportEnabled = true) => ({
+        dokLinkService,
+        dokService: { isImportEnabled: () => dokImportEnabled },
+        configService: { getValue: () => ({}) },
+        lastDokAutoSyncMs: 0,
+        runDokAutoSync: Lobby.prototype.runDokAutoSync
+    });
+
+    const linkService = (overrides = {}) =>
+        Object.assign(
+            new DokLinkService(
+                { getValue: (k) => (k === 'secret' ? 's' : {}) },
+                {
+                    dokService: {},
+                    deckService: {},
+                    userService: { findDokAutoSyncDue: vi.fn().mockResolvedValue([]) },
+                    deckImportService: {}
+                }
+            ),
+            overrides
+        );
+
+    beforeEach(function () {
+        logged = { info: [], error: [] };
+        const logger = require('../../server/log');
+        vi.spyOn(logger, 'info').mockImplementation((m) => logged.info.push(m));
+        vi.spyOn(logger, 'error').mockImplementation((m) => logged.error.push(m));
+    });
+
+    afterEach(function () {
+        vi.restoreAllMocks();
+    });
+
+    it('is a method the lobby actually defines', function () {
+        expect(typeof Lobby.prototype.runDokAutoSync).toBe('function');
+    });
+
+    it('calls a sync method the real DokLinkService defines', async function () {
+        const service = linkService();
+        const syncDue = vi.spyOn(service, 'syncDue').mockResolvedValue({ synced: 1, queued: 3 });
+
+        await makeLobby(service).runDokAutoSync();
+
+        expect(syncDue).toHaveBeenCalled();
+        expect(logged.error).toEqual([]);
+    });
+
+    // Collection import being off is the switch that should stop this too -
+    // there is nothing to sync into.
+    it('does nothing while DoK import is switched off', async function () {
+        const service = linkService();
+        const syncDue = vi.spyOn(service, 'syncDue').mockResolvedValue({ synced: 0, queued: 0 });
+
+        await makeLobby(service, false).runDokAutoSync();
+
+        expect(syncDue).not.toHaveBeenCalled();
+    });
+
+    it('never lets a failing sync escape into the lobby tick', async function () {
+        const service = linkService();
+        vi.spyOn(service, 'syncDue').mockRejectedValue(new Error('boom'));
+
+        const lobby = makeLobby(service);
+
+        await expect(lobby.runDokAutoSync()).resolves.toBeUndefined();
+        expect(logged.error.length).toBe(1);
+    });
+});

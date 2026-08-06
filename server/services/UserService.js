@@ -6,12 +6,55 @@ const logger = require('../log');
 const User = require('../models/User');
 const db = require('../db');
 const { expand } = require('../Array');
+const SecretBox = require('./crypto/secretBox');
 
 class UserService extends EventEmitter {
     constructor(configService) {
         super();
 
         this.configService = configService;
+        // ARCHON: the same seal the DoK key uses, applied to the Patreon token
+        // as well. It is the same kind of value - a live credential for
+        // somebody else's account that has to come back out in plaintext - and
+        // leaving two standards in one table was the wrong half of a decision.
+        // SecretBox passes unrecognised values straight through, so tokens
+        // stored before this are read exactly as before and are sealed the next
+        // time they are written. No rewrite migration, and nothing to undo if
+        // the site secret ever changes: an unreadable token relinks.
+        // Tolerant of a config service that is a stub or absent: this class is
+        // constructed in a lot of places, and a missing secret already means
+        // "decline to seal anything", which is the correct answer here too.
+        this.secretBox = new SecretBox(
+            typeof configService?.getValue === 'function' ? configService.getValue('secret') : null
+        );
+    }
+
+    /**
+     * ARCHON: the stored Patreon token, sealed or legacy plaintext.
+     *
+     * Returns undefined rather than throwing on anything unreadable - a token
+     * written under a site secret that has since been rotated, or a row damaged
+     * some other way. This is on the path that builds every user object, so a
+     * throw here would be a login failure rather than a lost supporter badge,
+     * and relinking Patreon is a button. Losing the badge is the recoverable
+     * outcome; losing the account is not.
+     */
+    readPatreonToken(stored) {
+        if (!stored) {
+            return undefined;
+        }
+
+        const token = this.secretBox.decrypt(stored);
+
+        if (!token) {
+            return undefined;
+        }
+
+        try {
+            return JSON.parse(token);
+        } catch {
+            return undefined;
+        }
     }
 
     async doesUserExist(username) {
@@ -186,7 +229,7 @@ class UserService extends EventEmitter {
                 user.settings.optionSettings.showAccolades !== undefined
                     ? user.settings.optionSettings.showAccolades
                     : true,
-                user.patreon ? JSON.stringify(user.patreon) : null,
+                user.patreon ? this.secretBox.encrypt(JSON.stringify(user.patreon)) : null,
                 user.settings.customBackground,
                 user.id
             ]);
@@ -624,6 +667,97 @@ class UserService extends EventEmitter {
         ]);
     }
 
+    /**
+     * ARCHON: the player's stored Decks of KeyForge link (docs/design/dok-import.md).
+     *
+     * The key arrives already sealed - this service writes what it is given and
+     * never sees a plaintext credential, so there is exactly one place that
+     * decides how the secret is protected. Storing a key clears any previous
+     * rejection: a new key is the answer to "the old one stopped working", and
+     * leaving the flag set would keep the schedule stopped for a key that is
+     * fine.
+     */
+    async setDokLink(userId, { sealedApiKey, autoSync }) {
+        await db.query(
+            'UPDATE "Users" SET "DokApiKey" = $1, "DokAutoSync" = $2, ' +
+                '"DokKeyRejectedAt" = NULL WHERE "Id" = $3',
+            [sealedApiKey || null, !!autoSync, userId]
+        );
+    }
+
+    async getDokLink(userId) {
+        const rows = await db.query(
+            'SELECT "DokApiKey", "DokAutoSync", "DokLastSyncAt", "DokKeyRejectedAt" ' +
+                'FROM "Users" WHERE "Id" = $1',
+            [userId]
+        );
+        const row = rows && rows[0];
+
+        if (!row) {
+            return null;
+        }
+
+        return {
+            sealedApiKey: row.DokApiKey || null,
+            hasKey: !!row.DokApiKey,
+            autoSync: !!row.DokAutoSync,
+            lastSyncAt: row.DokLastSyncAt,
+            keyRejectedAt: row.DokKeyRejectedAt
+        };
+    }
+
+    /** Forget the key entirely. Turning the schedule off is not enough - a
+     *  player asking us to forget their credential means remove it. */
+    async clearDokLink(userId) {
+        await db.query(
+            'UPDATE "Users" SET "DokApiKey" = NULL, "DokAutoSync" = false, ' +
+                '"DokKeyRejectedAt" = NULL WHERE "Id" = $1',
+            [userId]
+        );
+    }
+
+    async markDokSynced(userId) {
+        await db.query(
+            'UPDATE "Users" SET "DokLastSyncAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
+            [userId]
+        );
+    }
+
+    /**
+     * DoK has refused this key. The key is dropped as well as flagged: it can
+     * never start working again (DoK voided it the moment a new one was
+     * generated), so keeping it only risks it being tried again by some later
+     * code path. The timestamp is what the UI reads to ask for a new one.
+     */
+    async markDokKeyRejected(userId) {
+        await db.query(
+            'UPDATE "Users" SET "DokApiKey" = NULL, ' +
+                '"DokKeyRejectedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $1',
+            [userId]
+        );
+    }
+
+    /**
+     * Players whose collection is due a refresh, least recently synced first.
+     * Never-synced accounts sort ahead of everyone (NULLS FIRST), so linking an
+     * account gets you a sync rather than a wait.
+     */
+    async findDokAutoSyncDue(olderThan, limit) {
+        const rows = await db.query(
+            'SELECT "Id", "Username", "DokApiKey" FROM "Users" ' +
+                'WHERE "DokAutoSync" AND "DokApiKey" IS NOT NULL AND "DokKeyRejectedAt" IS NULL ' +
+                'AND ("DokLastSyncAt" IS NULL OR "DokLastSyncAt" <= $1) ' +
+                'ORDER BY "DokLastSyncAt" ASC NULLS FIRST LIMIT $2',
+            [olderThan, limit]
+        );
+
+        return (rows || []).map((row) => ({
+            id: row.Id,
+            username: row.Username,
+            sealedApiKey: row.DokApiKey
+        }));
+    }
+
     async anonymizeUser(user, options = {}) {
         const client = await db.startTransaction();
         const anonymizedUsername = options.username || `deleted-user-${user.id}`;
@@ -632,7 +766,10 @@ class UserService extends EventEmitter {
         try {
             await db.queryTran(
                 client,
-                'UPDATE "Users" SET "Username" = $1, "Email" = $2, "Password" = NULL, "Verified" = false, "Disabled" = true, "Settings_Avatar" = NULL, "Settings_CustomBackground" = NULL, "PatreonToken" = NULL, "ResetToken" = NULL, "TokenExpires" = NULL, "ActivationToken" = NULL, "ActivationTokenExpiry" = NULL, "RegisterIp" = NULL WHERE "Id" = $3',
+                // DokApiKey belongs on this list for the same reason PatreonToken
+                // does: it is a live credential for somebody else's account, and
+                // a deleted user's must not outlive them.
+                'UPDATE "Users" SET "Username" = $1, "Email" = $2, "Password" = NULL, "Verified" = false, "Disabled" = true, "Settings_Avatar" = NULL, "Settings_CustomBackground" = NULL, "PatreonToken" = NULL, "DokApiKey" = NULL, "DokAutoSync" = false, "ResetToken" = NULL, "TokenExpires" = NULL, "ActivationToken" = NULL, "ActivationTokenExpiry" = NULL, "RegisterIp" = NULL WHERE "Id" = $3',
                 [anonymizedUsername, anonymizedEmail, user.id]
             );
 
@@ -721,7 +858,7 @@ class UserService extends EventEmitter {
             },
             verified: dbUser.Verified,
             disabled: dbUser.Disabled,
-            patreon: dbUser.PatreonToken && JSON.parse(dbUser.PatreonToken),
+            patreon: this.readPatreonToken(dbUser.PatreonToken),
             resetToken: dbUser.ResetToken,
             tokenExpires: dbUser.TokenExpires,
             activationToken: dbUser.ActivationToken,

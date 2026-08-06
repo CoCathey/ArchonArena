@@ -398,3 +398,72 @@ flow.
 The background import's own files — the job service, its table, the lobby sweep, the
 `deckImport` config and the status endpoints — are listed under "The import runs on the
 server now" above.
+
+## Remembering the key
+
+A player may ask us to keep their Decks of KeyForge key so their collection
+refreshes itself, with a **Sync now** button for when they do not want to wait.
+This reverses the "the key is never stored" decision recorded above, and it was
+reversed deliberately rather than drifted into: buying a deck happens far more
+often than anyone wants to go and find an API key, and DoK cannot show a player
+a key they have already generated, so "just paste it again" is a worse ask here
+than it looks.
+
+Three things shape how it is stored.
+
+**It is sealed, not stored.** `server/services/crypto/secretBox.js` is
+AES-256-GCM with a key derived from the site secret. GCM rather than an
+unauthenticated mode because a leaked database is exactly the threat, and
+tampering should be a decryption failure rather than a silently altered value.
+The stored form is `v1.<iv>.<tag>.<ciphertext>`, so a later scheme can live
+beside this one — and anything not in that form is passed through unchanged,
+which is what let `Users.PatreonToken` move onto the same seal without a rewrite
+migration over rows that may no longer be decryptable. Tokens written before the
+change still read; they are sealed the next time they are written.
+
+Rotating the site secret makes stored secrets unreadable, and that is a
+survivable outcome by design: an unreadable DoK key is dropped and the player is
+asked for a new one, an unreadable Patreon token costs a supporter badge until
+they relink. Neither throws, because both sit on paths (a status poll, building
+every user object) where a throw would be a broken page or a failed login.
+
+**A rejection is terminal, not a retry.** DoK issues one key per account and
+generating a new one voids the previous instantly, so a stored key dies whenever
+the player generates another anywhere — something that has already happened once
+on this deployment, taking the site's own `DOK_API_KEY` with it. `DokService`
+therefore reports a machine-readable `errorCode` alongside its prose, and a
+`key_rejected` stops the schedule, drops the dead key and sets
+`Users.DokKeyRejectedAt`, which is what the import dialog reads to ask for a new
+one. Matching on the wording would have made that distinction a property of an
+error message somebody will reword. Retrying a refused key can never succeed and
+only spends a rate limit finding out.
+
+**Auto-sync is opt-in and does not import anything itself.** The checkbox is
+separate from using a key, so pasting one to import once does not enrol anybody
+in us keeping their credential. The sweep does only the cheap half — list the
+collection, subtract what is owned, queue a job — and the deck-import worker
+does the Master Vault work, so however many collections are listed, Master Vault
+still sees one paced queue with one circuit breaker. Listing more collections
+per run would lengthen that queue rather than make anything arrive sooner, which
+is why `dok.autoSyncPerRun` is small.
+
+Every DoK key the site sends, its own and each player's, is held to the free
+tier's 25 requests a minute. That is a ceiling in code rather than a
+configurable default: the windows enforcing it are per lobby process, so two
+lobbies each trusting a configured patron tier would send double it, and which
+tier a key really has is DoK's business rather than our config's.
+
+### Files
+
+-   `server/services/crypto/secretBox.js` — the seal, with the plaintext
+    passthrough that makes adopting it migration-free.
+-   `server/services/dok/DokLinkService.js` — storing, unsealing, syncing, and
+    the rejection handling.
+-   `server/db/schema/58 - DokAccountLink.sql` and
+    `server/db/schema/migrations/54 - DokAccountLink.sql`.
+-   `server/services/UserService.js` — the link columns, and the Patreon token
+    on the same seal.
+-   `server/lobby.js` — `runDokAutoSync`.
+-   `server/api/decks.js` — the link, sync and forget endpoints.
+-   `client/Components/Decks/DokImport.jsx` — the opt-in, Sync now, Forget key,
+    and the rejected-key state.

@@ -758,10 +758,10 @@ export const api = createApi({
         // user's own DoK API key, which the server uses for the one request and
         // never stores.
         prepareDokImport: builder.mutation({
-            query: (dokApiKey) => ({
+            query: ({ dokApiKey, remember, autoSync }) => ({
                 url: '/decks/import/dok/prepare',
                 method: 'POST',
-                body: { dokApiKey }
+                body: { dokApiKey, remember, autoSync }
             })
         }),
         // ARCHON: find decks by name in the Master Vault catalog, for players
@@ -788,6 +788,17 @@ export const api = createApi({
         }),
         cancelDeckImport: builder.mutation({
             query: () => ({ url: '/decks/import/cancel', method: 'POST' })
+        }),
+        // ARCHON: the remembered DoK account. The key is never returned by any
+        // of these - only whether one is held and whether DoK last refused it.
+        getDokLink: builder.query({
+            query: () => ({ url: '/decks/import/dok/link' })
+        }),
+        syncDokNow: builder.mutation({
+            query: () => ({ url: '/decks/import/dok/sync', method: 'POST' })
+        }),
+        forgetDokLink: builder.mutation({
+            query: () => ({ url: '/decks/import/dok/link', method: 'DELETE' })
         }),
         saveAllianceDeck: builder.mutation({
             query: (deck) => ({
@@ -1110,6 +1121,9 @@ export const {
     useQueueDeckImportMutation,
     useGetDeckImportStatusQuery,
     useCancelDeckImportMutation,
+    useGetDokLinkQuery,
+    useSyncDokNowMutation,
+    useForgetDokLinkMutation,
     useSaveAllianceDeckMutation,
     useGetStandaloneDecksQuery,
     useRefreshAccoladesMutation,

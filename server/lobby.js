@@ -15,6 +15,7 @@ const tournamentNotifications = require('./services/notifications/tournamentNoti
 const DokService = require('./services/dok/DokService');
 const CatalogService = require('./services/catalog/CatalogService');
 const DeckImportJobService = require('./services/deckimport/DeckImportJobService');
+const DokLinkService = require('./services/dok/DokLinkService');
 const UserService = require('./services/UserService');
 const ConfigService = require('./services/ConfigService');
 // ARCHON: native tournaments create/report lobby games automatically
@@ -156,6 +157,25 @@ class Lobby {
         this.deckImportSweep = setInterval(() => this.runDeckImportSweep(), 5 * 1000);
         if (this.deckImportSweep && this.deckImportSweep.unref) {
             this.deckImportSweep.unref();
+        }
+
+        // ARCHON: refresh remembered Decks of KeyForge collections. This only
+        // LISTS collections and queues jobs; the deck-import sweep above is
+        // what actually talks to Master Vault, so auto-sync inherits its pacing
+        // and its circuit breaker instead of becoming a second importer with
+        // its own opinions about how fast is polite.
+        this.dokLinkService =
+            options.dokLinkService ||
+            new DokLinkService(this.configService, {
+                dokService: this.dokService,
+                deckService: this.deckService,
+                userService: this.userService,
+                deckImportService: this.deckImportService
+            });
+        this.lastDokAutoSyncMs = 0;
+        this.dokAutoSyncSweep = setInterval(() => this.runDokAutoSync(), 60 * 1000);
+        if (this.dokAutoSyncSweep && this.dokAutoSyncSweep.unref) {
+            this.dokAutoSyncSweep.unref();
         }
 
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
@@ -530,6 +550,65 @@ class Lobby {
             // release the flag, or one bad tick stops every import on this
             // lobby until it restarts.
             this.deckImportSweepRunning = false;
+        }
+    }
+
+    /**
+     * ARCHON: refresh the collections of players who asked us to remember their
+     * Decks of KeyForge key.
+     *
+     * This does the cheap half of an import - list the collection, subtract
+     * what they already own, queue a job - and nothing else. The decks are
+     * fetched by runDeckImportSweep, so however many collections are listed
+     * here, Master Vault still sees one paced queue.
+     *
+     * Deliberately a handful of players per run, least recently synced first.
+     * The work this creates is not the listing, it is the queue behind it, and
+     * a sweep that enrolled fifty collections at once would just make every
+     * player's import slower without anyone's finishing sooner.
+     *
+     * A key DoK has rejected takes itself out of the rotation inside syncDue,
+     * so a dead credential costs one request once rather than one per cycle
+     * forever.
+     */
+    async runDokAutoSync() {
+        if (!this.dokLinkService || !this.dokService || !this.dokService.isImportEnabled()) {
+            return;
+        }
+
+        if (this.dokAutoSyncRunning) {
+            return;
+        }
+
+        try {
+            const config = this.configService.getValue('dok') || {};
+
+            if (config.autoSyncEnabled === false) {
+                return;
+            }
+
+            const minutes = Math.max(1, Number(config.autoSyncSweepMinutes) || 15);
+            const now = Date.now();
+
+            if (now - this.lastDokAutoSyncMs < minutes * 60 * 1000) {
+                return;
+            }
+
+            this.lastDokAutoSyncMs = now;
+            this.dokAutoSyncRunning = true;
+
+            const result = await this.dokLinkService.syncDue();
+
+            if (result && result.queued > 0) {
+                logger.info(
+                    `DoK auto-sync queued ${result.queued} new deck(s) across ` +
+                        `${result.synced} collection(s)`
+                );
+            }
+        } catch (err) {
+            logger.error('DoK auto-sync sweep failed', err);
+        } finally {
+            this.dokAutoSyncRunning = false;
         }
     }
 

@@ -24,6 +24,16 @@ const catalogService = new CatalogService(configService);
 const DeckImportJobService = require('../services/deckimport/DeckImportJobService');
 const deckImportService = new DeckImportJobService(configService);
 
+// ARCHON: a remembered DoK account, so a collection can keep itself current.
+const UserService = require('../services/UserService');
+const DokLinkService = require('../services/dok/DokLinkService');
+const dokLinkService = new DokLinkService(configService, {
+    dokService,
+    deckService,
+    userService: new UserService(configService),
+    deckImportService
+});
+
 const UUID_PATTERN =
     /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -258,88 +268,33 @@ module.exports.init = function (server) {
 
             logger.info(`DoK collection import: user ${req.user.username} preparing import`);
 
-            // Read what they already have BEFORE listing, and let the service
-            // skip those decks as it pages. The safety cap then bounds decks
-            // that still need importing rather than decks DoK reported, which
-            // is what makes re-running a capped sync pick up where it left off
-            // instead of returning the same first batch forever.
-            const ownedUuids = new Set(await deckService.getOwnedDeckUuids(req.user.id));
-
-            let result;
-            try {
-                result = await dokService.listMyDecks(dokApiKey, { skipUuids: ownedUuids });
-            } catch (err) {
-                // listMyDecks is designed never to throw; if it somehow does,
-                // log loudly and answer cleanly instead of a bare 500.
-                logger.error(
-                    `DoK collection import prepare failed for user ${req.user.username}`,
-                    err
-                );
-
-                return res.send({
-                    success: false,
-                    message: 'Something went wrong talking to Decks of KeyForge. Please try again.'
-                });
-            }
-
-            logger.info(
-                `DoK collection import: user ${req.user.username} -> ` +
-                    `configured=${result.configured !== false} error=${!!result.error} ` +
-                    `new=${result.decks.length} owned=${result.skipped || 0} ` +
-                    `truncated=${!!result.truncated} partial=${!!result.partial}`
+            // The same path an automatic sync takes, so a pasted key and a
+            // remembered one cannot drift apart in how they list, dedupe,
+            // queue or report.
+            const result = await dokLinkService.syncWithKey(
+                { id: req.user.id, username: req.user.username },
+                dokApiKey
             );
 
-            if (result.error) {
-                return res.send({
-                    success: false,
-                    message: result.errorDetail
-                        ? `Decks of KeyForge request failed: ${result.errorDetail}`
-                        : 'Could not reach Decks of KeyForge. Please try again in a moment.'
-                });
+            if (!result.success) {
+                return res.send(result);
             }
 
-            // Nothing new AND nothing recognised means the key gave us an empty
-            // collection. Nothing new but decks already owned is a successful
-            // no-op sync, which is what every run after the first one looks like.
-            if (!result.decks.length && !result.skipped) {
-                return res.send({
-                    success: false,
-                    message:
-                        'That key returned no decks. Check the key, and that your decks are marked as owned on Decks of KeyForge.'
-                });
-            }
-
-            // Hand the uuids to a server-side job rather than back to the
-            // browser. The listing needed the key; importing does not - Master
-            // Vault has never heard of it - so the job carries uuids only and
-            // the key goes out of scope here, exactly as before.
-            const job = await deckImportService.createJob({
-                userId: req.user.id,
-                username: req.user.username,
-                uuids: result.decks.map((deck) => deck.uuid)
-            });
-
-            // ARCHON: a job that was not created is a failed import, not a
-            // successful one with nothing to watch. Reporting success here left
-            // the modal saying "Importing 200 decks" over a job that did not
-            // exist, polling nothing, forever - and createJob supersedes the
-            // previous job before it inserts, so the player could be left with
-            // neither the new import nor the one they already had.
-            if (!job) {
-                return res.send({
-                    success: false,
-                    message: 'Could not start the import. Please try again in a moment.'
+            // Storing is opt-in and separate from using: pasting a key to
+            // import once must not quietly enrol somebody in keeping their
+            // credential on our server.
+            let remembered = false;
+            if (req.body.remember) {
+                remembered = await dokLinkService.rememberKey(req.user.id, dokApiKey, {
+                    autoSync: req.body.autoSync !== false
                 });
             }
 
             res.send({
-                success: true,
-                total: result.decks.length + (result.skipped || 0),
-                ownedCount: result.skipped || 0,
-                truncated: !!result.truncated,
-                partial: !!result.partial,
-                queued: result.decks.length,
-                job: mapImportJob(job)
+                ...result,
+                remembered,
+                job: mapImportJob(result.job),
+                link: await dokLinkService.getLinkStatus(req.user.id)
             });
         })
     );
@@ -412,6 +367,48 @@ module.exports.init = function (server) {
                 (await deckImportService.getLatestJob(req.user.id));
 
             res.send({ success: true, job: mapImportJob(job) });
+        })
+    );
+
+    // ARCHON: the stored Decks of KeyForge link. The key itself is never
+    // returned - only whether we hold one, and whether DoK last refused it.
+    server.get(
+        '/api/decks/import/dok/link',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async function (req, res) {
+            const link = await dokLinkService.getLinkStatus(req.user.id);
+
+            res.send({ success: true, link });
+        })
+    );
+
+    // Sync now, using the key we already hold, so a player who has linked an
+    // account never has to find it again.
+    server.post(
+        '/api/decks/import/dok/sync',
+        passport.authenticate('jwt', { session: false }),
+        dokPrepareLimit,
+        wrapAsync(async function (req, res) {
+            const result = await dokLinkService.syncUser({
+                id: req.user.id,
+                username: req.user.username
+            });
+
+            if (!result.success) {
+                return res.send(result);
+            }
+
+            res.send({ ...result, job: mapImportJob(result.job) });
+        })
+    );
+
+    server.delete(
+        '/api/decks/import/dok/link',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async function (req, res) {
+            await dokLinkService.forget(req.user.id);
+
+            res.send({ success: true, link: await dokLinkService.getLinkStatus(req.user.id) });
         })
     );
 

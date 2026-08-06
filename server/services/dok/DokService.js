@@ -287,16 +287,26 @@ class DokService {
 
             if (!response.ok) {
                 let hint = '';
+                // ARCHON: a machine-readable reason alongside the prose. An
+                // automatic sync has to tell "this key is dead" from "DoK had a
+                // bad minute": the first must stop the schedule and ask the
+                // player for a new key, the second must simply be tried again.
+                // Matching on the wording would make that distinction a
+                // property of an error message somebody will reword one day.
+                let errorCode = 'upstream_error';
+
                 if (response.status === 401 || response.status === 403) {
                     hint = ' (API key rejected)';
+                    errorCode = 'key_rejected';
                 } else if (response.status === 404) {
                     hint = ' (endpoint not found)';
                 } else if (response.status === 429) {
                     hint = ' (DoK rate limit)';
+                    errorCode = 'rate_limited';
                 }
                 logger.warn(`DoK my-decks API returned ${response.status} for page ${page}`);
 
-                return { error: `HTTP ${response.status}${hint}` };
+                return { error: `HTTP ${response.status}${hint}`, errorCode };
             }
 
             const body = await response.json();
@@ -390,6 +400,9 @@ class DokService {
                         configured: true,
                         error: true,
                         errorDetail: pageResult.error,
+                        // Carried up so an automatic sync can stop for a dead
+                        // key and retry for anything else.
+                        errorCode: pageResult.errorCode || 'upstream_error',
                         decks: []
                     };
                 }
