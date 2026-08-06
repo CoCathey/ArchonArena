@@ -1350,8 +1350,13 @@ much stronger deck pays less.
         drops (self or TO), round pairing gated on complete results, finish/cancel.
 -   [x] Result flow: participants report open results, organizer can correct; byes
         auto-win; table numbers per pairing for IRL play.
--   [x] Standings: points → strength-of-schedule → extended SoS → fewest byes, with
-        W-L records and game counts; live on the event page.
+-   [x] Standings: match points → **OMW%** → **GW%** → **OGW%** → fewest byes, with
+        W-L records and game counts; live on the event page. These are the standard TCG
+        tiebreakers, each opponent floored at 33% so a draw against somebody who went 0-5
+        and dropped cannot wreck a tiebreak you had no say in, byes excluded from the
+        opponent averages, dropped players still counted at their final record. They
+        replaced sums of opponents' points, which only mean anything while every player
+        has played the same number of matches — i.e. never, once byes and drops exist.
 -   [x] Public pages: tournament list + create form, event page with players, per-round
         pairings, reporting buttons, standings, TO controls.
 -   [x] **Online automation:** auto-created lobby games per pairing (reserved for the paired
@@ -1391,6 +1396,22 @@ much stronger deck pays less.
         (`Decks.AlliancePods`) — the rules were previously uncheckable for want of the data.
 -   [x] **Archon Adaptive Bo3**: own decks, swapped decks, then a chain bid for the decider.
 -   [x] **Round-pairing notifications** — in-app and email, deduplicated per player per round (**N2**).
+-   [x] **Result integrity** (migration 49): reporting your own loss is taken at face value;
+        reporting your own win waits on the opponent, who can confirm or dispute it. Judges
+        and platform-witnessed games are final. An unconfirmed result still counts and the
+        round still advances — the alternative hands any sore loser a veto — but the
+        disagreement is now visible to the organizer instead of surfacing at the awards
+        ceremony. Previously either player could type in any result and the other had no
+        recourse inside the platform at all.
+-   [x] **A round clock that cannot deadlock the event** (migration 49): the deadline is
+        stored (so an extension is one edit everyone sees, not a number each client derives),
+        and "time in the round" decides every open match on its current game score — leader
+        takes it, level is a draw, bracket matches go back to the organizer because somebody
+        has to advance. Before this the timer was decorative while pairing refused to run
+        with a result missing, so one player closing their laptop stopped the event.
+-   [x] **Bounded pairing search**: the rematch-avoiding backtracking now carries an explicit
+        work budget and degrades to allowing (and reporting) rematches rather than running
+        unboundedly inside the lobby process.
 
 ## Phase 8 — Modern UI
 
@@ -1627,6 +1648,18 @@ competitive advantage.
         given ~2 min to recover; "Leave Game" now also leaves over the lobby
         socket so a stranded player can always escape and the lobby tears the game
         down on the node instead of leaving a ghost.
+-   [x] **Game-state sync** (`docs/design/game-state-sync.md`): the node now says on
+        the wire whether a `gamestate` is a whole board or a delta, instead of leaving
+        clients to infer it — an inference that broke whenever the node reset its diff
+        baseline while a client's socket stayed up (a second tab, or the phone app and
+        the web app signed in together), and that failed by hanging the browser tab
+        outright, since jsondiffpatch loops forever when handed a board as a delta. The
+        lobby's per-reconnect handoff no longer rebuilds a live game socket (which used
+        to swap the board out for the pending-game screen with no way back but a
+        refresh); a socket the node supersedes is closed rather than silently starved;
+        and both clients can ask for a fresh board over the live connection (`resync`)
+        instead of dropping it, so the mobile app no longer falls back to
+        "Connecting to the game…" on every blip and every return from the background.
 -   [x] Gameplay regression suite kept green on every PR (the full card suite runs in CI).
 -   [x] **In-app bug reports** (BugReportService, migration 34) with an admin triage page —
         the beta feedback channel.

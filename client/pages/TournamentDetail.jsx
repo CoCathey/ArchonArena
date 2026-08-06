@@ -289,6 +289,7 @@ const TournamentDetail = () => {
                         <RoundTimer
                             roundStartedAt={tournament.roundStartedAt}
                             roundTimerMinutes={tournament.roundTimerMinutes}
+                            roundEndsAt={tournament.roundEndsAt}
                         />
                     )}
                     {startTimeLabel && tournament.status === 'registration' && (

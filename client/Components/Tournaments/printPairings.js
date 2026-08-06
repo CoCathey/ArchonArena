@@ -8,6 +8,9 @@ const escapeHtml = (value) =>
         (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])
     );
 
+/** Tiebreakers to one decimal - they separate players by fractions. */
+const percent = (rate) => `${((rate || 0) * 100).toFixed(1)}%`;
+
 export default function printPairings(tournament, matches, round, standings) {
     const printWindow = window.open('', '_blank', 'width=800,height=900');
 
@@ -34,7 +37,9 @@ export default function printPairings(tournament, matches, round, standings) {
         .map(
             (entry) =>
                 `<tr><td>${entry.rank}</td><td>${escapeHtml(entry.username)}</td>` +
-                `<td>${entry.wins}-${entry.losses}</td><td>${entry.points}</td><td>${entry.sos}</td></tr>`
+                `<td>${entry.wins}-${entry.losses}</td><td>${entry.points}</td>` +
+                `<td>${percent(entry.opponentMatchWinRate)}</td>` +
+                `<td>${percent(entry.gameWinRate)}</td></tr>`
         )
         .join('');
 
@@ -58,7 +63,7 @@ export default function printPairings(tournament, matches, round, standings) {
 <table><tbody>${rows}</tbody></table>
 ${
     standingRows
-        ? `<h2>Standings</h2><table><thead><tr><th>#</th><th>Player</th><th>Record</th><th>Points</th><th>SOS</th></tr></thead><tbody>${standingRows}</tbody></table>`
+        ? `<h2>Standings</h2><table><thead><tr><th>#</th><th>Player</th><th>Record</th><th>Points</th><th>OMW%</th><th>GW%</th></tr></thead><tbody>${standingRows}</tbody></table>`
         : ''
 }
 <script>window.onload = function () { window.print(); };</script>

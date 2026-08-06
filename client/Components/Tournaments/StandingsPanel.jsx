@@ -21,6 +21,13 @@ const Trophy = ({ place }) => (
 Trophy.displayName = 'StandingsTrophy';
 
 /**
+ * Tiebreakers to one decimal place. They routinely separate players by
+ * fractions of a percent, so rounding to whole numbers would show two
+ * players as tied on the number that is in fact splitting them.
+ */
+const percent = (rate) => `${((rate || 0) * 100).toFixed(1)}%`;
+
+/**
  * ARCHON: live standings (or final placements once the event is done):
  * rank, record, points, tiebreakers, and the registered deck with SAS
  * when the event shows decklists.
@@ -48,15 +55,23 @@ const StandingsPanel = ({ tournament, standings, players, currentUsername }) => 
                             <th className='px-2 py-1.5 text-right'>{t('Points')}</th>
                             <th
                                 className='px-2 py-1.5 text-right'
-                                title={t('Strength of schedule')}
+                                title={t(
+                                    "Opponents' match-win percentage - the average of your opponents' win rates, each counted as at least 33%. Byes are not included."
+                                )}
                             >
-                                {t('SOS')}
+                                {t('OMW%')}
                             </th>
                             <th
                                 className='px-2 py-1.5 text-right'
-                                title={t('Extended strength of schedule')}
+                                title={t('Your own game-win percentage across every game played')}
                             >
-                                {t('xSOS')}
+                                {t('GW%')}
+                            </th>
+                            <th
+                                className='px-2 py-1.5 text-right'
+                                title={t("Opponents' game-win percentage, same 33% minimum")}
+                            >
+                                {t('OGW%')}
                             </th>
                             {showDeckColumn && <th className='px-2 py-1.5'>{t('Deck')}</th>}
                         </tr>
@@ -113,11 +128,14 @@ const StandingsPanel = ({ tournament, standings, players, currentUsername }) => 
                                     <td className='px-2 py-1.5 text-right font-bold text-amber-300'>
                                         {entry.points}
                                     </td>
-                                    <td className='px-2 py-1.5 text-right text-muted'>
-                                        {entry.sos}
+                                    <td className='px-2 py-1.5 text-right tabular-nums text-muted'>
+                                        {percent(entry.opponentMatchWinRate)}
                                     </td>
-                                    <td className='px-2 py-1.5 text-right text-muted'>
-                                        {entry.extendedSos}
+                                    <td className='px-2 py-1.5 text-right tabular-nums text-muted'>
+                                        {percent(entry.gameWinRate)}
+                                    </td>
+                                    <td className='px-2 py-1.5 text-right tabular-nums text-muted'>
+                                        {percent(entry.opponentGameWinRate)}
                                     </td>
                                     {showDeckColumn && (
                                         <td className='max-w-40 truncate px-2 py-1.5 text-muted'>

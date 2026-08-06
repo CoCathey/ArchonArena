@@ -77,9 +77,10 @@ function reset(server, oldGame) {
     const newGame = bootstrap(server, oldGame.scenarioPath, oldGame.id);
 
     // Carry over the per-user diff baseline so the next sendGameState is a
-    // diff from the client's current rootState (not a raw full state, which
-    // the client would incorrectly try to apply as a diff and corrupt the
-    // board).
+    // diff from the client's current rootState rather than a whole board.
+    // (Sending a whole board is no longer a correctness problem — it is
+    // marked as one on the wire since docs/design/game-state-sync.md — but a
+    // diff is still the smaller thing to send to a client that is up to date.)
     for (const [name, baseline] of Object.entries(oldGame.jsonForUsers || {})) {
         newGame.jsonForUsers[name] = baseline;
     }

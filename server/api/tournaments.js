@@ -161,6 +161,18 @@ module.exports.init = function (server) {
         tournamentService.cutToPlayoff(parseInt(req.params.id, 10), req.user)
     );
 
+    // ARCHON: "time in the round" - decide every match still open, so one
+    // absent player cannot hold the event open indefinitely.
+    action('/api/tournaments/:id/resolve-unfinished', (req) =>
+        tournamentService.resolveUnfinished(parseInt(req.params.id, 10), req.user, {
+            tieBreak: req.body.tieBreak
+        })
+    );
+
+    action('/api/tournaments/:id/round-clock', (req) =>
+        tournamentService.adjustRoundClock(parseInt(req.params.id, 10), req.user, req.body.minutes)
+    );
+
     action('/api/tournaments/:id/matches/:matchId/result', (req) =>
         tournamentService.reportResult(
             parseInt(req.params.id, 10),
@@ -173,6 +185,25 @@ module.exports.init = function (server) {
                 // ARCHON (N9): 'paper' for a result played across a table.
                 source: req.body.source
             }
+        )
+    );
+
+    // ARCHON: the opponent's half of a reported result - agree with it, or
+    // say it is wrong and put it in front of the organizer.
+    action('/api/tournaments/:id/matches/:matchId/confirm', (req) =>
+        tournamentService.confirmResult(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user
+        )
+    );
+
+    action('/api/tournaments/:id/matches/:matchId/dispute', (req) =>
+        tournamentService.disputeResult(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user,
+            req.body.note
         )
     );
 
