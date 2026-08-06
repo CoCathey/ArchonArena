@@ -23,6 +23,7 @@ import {
     ready,
     reap,
     reshuffle,
+    setPhase,
     stealAmber,
     takeArchives,
     activate,
@@ -91,6 +92,7 @@ export const TutorialSteps = [
         body: [
             'This tutorial uses the two decks that come in the KeyForge two-player starter set: the **Radiant Learning Deck** and the **Onyx Learning Deck**. You will play as Radiant; Onyx is your opponent.',
             'Each deck has 18 cards, split evenly between three **houses**. Radiant plays Mars, Sanctum and Star Alliance. Onyx plays Brobnar, Ekwidon and Unfathomable.',
+            'Each learning deck is 20 cards in the box: the 18 you play with, the identity card, and a chain tracker. Chains are a handicap mechanic used in competitive play — the starter set leaves them out, and so does this tutorial.',
             'A real KeyForge deck is 36 cards and is unique — no two decks in the world are the same. The learning decks are half-size and fixed, which is what makes a scripted walkthrough like this one possible.'
         ],
         highlight: [stat(R, 'identity'), stat(O, 'identity')]
@@ -154,7 +156,7 @@ export const TutorialSteps = [
         body: [
             'Players alternate turns until someone wins. Every turn runs through the same five steps, always in this order:',
             '**1 Forge a key** — if you have enough Æmber, you must forge.\n**2 Choose a house** — pick one of your three houses for the turn.\n**3 Play, discard and use cards** — of that house only.\n**4 Ready cards** — turn your used cards upright again.\n**5 Draw cards** — refill your hand to six.',
-            'That strip above the board tracks which step is happening. Watch it as you click through — it never changes order.'
+            'The strip above the board tracks which of the five steps is happening; it lights up as soon as the first turn begins. Watch it as you click through — the order never changes.'
         ],
         highlight: ['turnsteps']
     },
@@ -201,7 +203,8 @@ export const TutorialSteps = [
         title: 'Artifacts and the artifact row',
         body: [
             'Artifacts enter play **exhausted** — sideways — and sit in their own row behind the creatures. They stay in play from turn to turn until something removes them.',
-            'A card being exhausted means it has already been used and cannot be used again until it readies. Because Incubation Chamber entered play exhausted, Radiant cannot use its ability this turn.'
+            'A card being exhausted means it has already been used and cannot be used again until it readies. Because Incubation Chamber entered play exhausted, Radiant cannot use its ability this turn.',
+            'On the board an exhausted card is drawn turned on its side, exactly as you would turn it on a table. Whenever you need to read one, the copy in the panel below is always upright — and hovering or tapping any card on the board brings it up there.'
         ],
         rule: 'Creatures and artifacts enter play exhausted, and an exhausted card cannot be used.',
         highlight: [card(R, 'incubation-chamber'), zone(R, 'artifacts')]
@@ -322,7 +325,8 @@ export const TutorialSteps = [
         chapter: 'Turn 3 · Radiant',
         title: 'Reading a creature card',
         body: [
-            'Radiant plays the Sanctum creature **Champion Anaphiel**. Look at the numbers on it: the large number in the bottom-left is **power** (6) — how much damage it deals and how much it can take. The shield beside it is **armor** (1), which prevents that much incoming damage each turn.',
+            'Radiant plays the Sanctum creature **Champion Anaphiel**. It enters play exhausted, so on the board it is lying on its side; read it from the upright copy in the panel below.',
+            'The number in a creature’s bottom-left corner is its **power** (6 here) — how much damage it deals and how much it can take. The shield in the bottom-right corner is **armor** (1), which prevents that much incoming damage each turn.',
             '**Taunt** on its card means its neighbours in the battleline cannot be attacked while it is there.'
         ],
         rule: 'Power is both a creature’s damage and its health. Armor prevents that much damage each turn.',
@@ -357,7 +361,7 @@ export const TutorialSteps = [
         chapter: 'Turn 3 · Radiant',
         title: 'Fighting',
         body: [
-            'Using a ready creature to **fight** exhausts it and picks one enemy creature to attack. Both creatures deal damage equal to their power **at the same time** — so even a creature that dies still hits back.',
+            'Sergeant Zakiel’s ability finishes by letting that readied creature fight. To **fight**, exhaust a ready creature and pick one enemy creature to attack. Both creatures deal damage equal to their power **at the same time** — so even a creature that dies still hits back.',
             'Radiant attacks **Headhunter** with Champion Anaphiel. Anaphiel deals 6 damage to Headhunter, whose power is 5, so Headhunter is destroyed and goes on top of Onyx’s discard pile.',
             'Headhunter simultaneously deals 5 damage back. Anaphiel has 1 armor, so it takes 4 — damage counters that stay on it until something heals them.'
         ],
@@ -726,7 +730,7 @@ export const TutorialSteps = [
         body: [
             'Onyx exhausts **Gemcoat Vendor** to use its Action ability: *Steal 1{A}. Deal 1 damage to Gemcoat Vendor.*',
             '**Steal** takes Æmber from your opponent’s pool straight into yours — unlike capture, it is immediately yours. Radiant goes to 2{A}, Onyx to 2{A}, and Gemcoat Vendor takes 1 damage from its own ability.',
-            'Remember that 1 damage. It matters four turns from now.'
+            'Remember that 1 damage. It matters three turns from now.'
         ],
         rule: 'Steal moves Æmber from your opponent’s pool into yours. Capture moves it onto a creature.',
         highlight: [card(O, 'gemcoat-vendor'), stat(R, 'amber'), stat(O, 'amber')],
@@ -874,7 +878,7 @@ export const TutorialSteps = [
         title: 'Traits',
         body: [
             'Radiant plays **Yxl the Iron Captain**, whose *Play: Each friendly Ironyx creature captures 2{A}.* fires immediately.',
-            'The italic words under a creature’s name are **traits** — Martian, Ironyx, Knight, Giant. Traits have no rules of their own; they exist so other cards can refer to them. Yxl itself has the Ironyx trait, so Yxl captures 2{A} from Onyx.'
+            'The italic words at the top of a creature’s text box are its **traits** — Martian, Ironyx, Knight, Giant. Traits have no rules of their own; they exist so that other cards can refer to them. Yxl itself has the Ironyx trait, so Yxl captures 2{A} from Onyx.'
         ],
         rule: 'Traits do nothing by themselves. They are labels other cards look for.',
         highlight: [card(R, 'yxl-the-iron-captain'), stat(O, 'amber')],
@@ -963,10 +967,11 @@ export const TutorialSteps = [
             reap(s, R, 'yxl-the-iron-captain');
             reap(s, R, 'myx-the-tallminded');
             readyAll(s, R);
+            setPhase(s, 'Draw cards');
             draw(s, R, 1);
             reshuffle(s, R, ['gorm-of-omm', 'destroy-them-all']);
             draw(s, R, 1);
-            note(s, 'Radiant draws Raiding Knight, reshuffles, and draws Gorm of Omm');
+            note(s, 'Radiant draws Raiding Knight and Gorm of Omm');
         }
     },
 
@@ -1020,6 +1025,7 @@ export const TutorialSteps = [
             play(s, O, 'grenade-snib');
             play(s, O, 'crogg-the-clumsy');
             readyAll(s, O);
+            setPhase(s, 'Draw cards');
             draw(s, O, 2);
             reshuffle(s, O, [
                 'valdr',
@@ -1139,6 +1145,7 @@ export const TutorialSteps = [
             'On Archon Arena you would type this in the game chat beside the board — the same chat that logs every action of the game.',
         apply: (s) => {
             readyAll(s, R);
+            setPhase(s, 'Draw cards');
             draw(s, R, 1);
             reshuffle(s, R, ['zap']);
             draw(s, R, 1);
@@ -1171,7 +1178,7 @@ export const TutorialSteps = [
         title: 'Headhunter swings',
         body: [
             '**Headhunter**, at 10 power thanks to Blood of Titans, attacks **Myx, the Tallminded** (5 power). Myx is destroyed; Headhunter takes 5 damage and survives comfortably.',
-            'Headhunter’s *After Fight: Gain 1{A}* then triggers, taking Onyx to 5{A}. With Myx gone, Onyx’s key cost drops back towards normal.'
+            'Headhunter’s *After Fight: Gain 1{A}* then triggers, taking Onyx to 5{A}. Myx was the only thing taxing Onyx’s keys, so with it gone their key cost drops straight back to 6{A}.'
         ],
         highlight: [card(O, 'headhunter'), card(R, 'myx-the-tallminded'), stat(O, 'keyCost')],
         apply: (s) => {
@@ -1254,6 +1261,20 @@ export const TutorialSteps = [
             'The official walkthrough ends here on purpose — the rest is the part you learn by playing.'
         ],
         highlight: []
+    },
+    {
+        chapter: 'Turn 13 · Radiant',
+        title: 'Three keywords that never came up',
+        body: [
+            'Three keywords are printed on cards in these decks but never triggered in this game. Each one is explained in brackets on the card itself, which is true of every KeyForge keyword — you never have to remember one.',
+            '**Elusive** (Mother Northelle, The Old Tinker) — the first time this creature is attacked each turn, no damage is dealt to it.\n**Skirmish** (Explo-rover) — when you use this creature to fight, it takes no damage in return.\n**Assault N** (Tactical Officer Moon) — before this creature attacks, it deals N damage to the creature it is attacking.',
+            'There are more keywords across the full card pool, and one thing makes them all manageable: the reminder text is on the card, every time.'
+        ],
+        highlight: [
+            card(R, 'mother-northelle'),
+            card(R, 'explo-rover'),
+            card(R, 'tactical-officer-moon')
+        ]
     },
 
     // ------------------------------------------------------- the platform

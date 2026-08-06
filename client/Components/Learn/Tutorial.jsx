@@ -3,6 +3,7 @@ import { Button } from '@heroui/react';
 import classNames from 'classnames';
 
 import Panel from '../Site/Panel';
+import Link from '../Navigation/Link';
 import RichText from './RichText';
 import TutorialBoard, { highlightedCardIds } from './TutorialBoard';
 import TutorialCard from './TutorialCard';
@@ -253,13 +254,21 @@ const Tutorial = () => {
                             <span className='text-[11px] text-muted'>
                                 Tip: the ← and → keys move between steps.
                             </span>
-                            <Button
-                                variant='primary'
-                                onPress={() => goTo(index + 1)}
-                                isDisabled={index >= total - 1}
-                            >
-                                {index >= total - 1 ? 'Finished' : 'Next'}
-                            </Button>
+                            {/* The last step is where a reader is most ready to
+                                play, so it ends in a door rather than a disabled
+                                button. */}
+                            {index >= total - 1 ? (
+                                <Link
+                                    href='/play'
+                                    className='inline-flex items-center rounded-md bg-[color:var(--brand)] px-4 py-2 text-sm font-semibold text-[color:var(--brand-strong)] no-underline hover:brightness-105'
+                                >
+                                    Find a game
+                                </Link>
+                            ) : (
+                                <Button variant='primary' onPress={() => goTo(index + 1)}>
+                                    Next
+                                </Button>
+                            )}
                         </div>
                     </Panel>
 

@@ -51,7 +51,6 @@ const createPlayer = (deck) => ({
 /** A fresh board: both decks boxed up, nothing on the table yet. */
 export const createInitialState = () => ({
     turn: 0,
-    turnLabel: 'Setup',
     activePlayer: null,
     phase: null,
     winner: null,
@@ -121,10 +120,6 @@ export const housesOf = (permanent) => {
     return houses;
 };
 
-export const hasTaunt = (permanent) =>
-    (TutorialCards[permanent.id]?.keywords || []).includes('taunt') ||
-    permanent.upgrades.includes('protect-the-weak');
-
 /**
  * The current cost of a key, worked out from the board rather than stored, so
  * the number on screen is always the one the rules would produce.
@@ -168,7 +163,6 @@ const logOwned = (state, side, message) => note(state, `${state.players[side].na
 export const beginTurn = (state, side, turn) => {
     state.turn = turn;
     state.activePlayer = side;
-    state.turnLabel = `Turn ${turn}`;
     // Clear both, not just the new active player: a house is only active during
     // the turn it was chosen, and leaving the opponent's lit reads as if two
     // houses were active at once.

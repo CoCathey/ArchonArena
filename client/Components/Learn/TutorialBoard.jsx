@@ -81,8 +81,8 @@ const CardRow = ({
                                     side={side}
                                     permanent={typeof entry === 'string' ? undefined : entry}
                                     width='100%'
-                                    highlighted={highlight.cards.has(cardId) || zoneHighlighted}
-                                    dimmed={dimOthers}
+                                    highlighted={highlight.cards.has(cardId)}
+                                    dimmed={dimOthers && !zoneHighlighted}
                                     onInspect={onInspect}
                                 />
                             </div>
@@ -94,15 +94,17 @@ const CardRow = ({
     );
 };
 
-const Pile = ({ title, count, highlighted, tone = 'default' }) => (
+const Pile = ({ title, count, highlighted }) => (
     <div
         title={title}
         className={classNames(
             'flex min-w-11 flex-col items-center gap-0.5 rounded border px-1.5 py-1 transition-all',
-            {
-                'border-border/60 bg-surface-secondary/40': tone === 'default',
-                'border-[color:var(--brand)] bg-[color:var(--brand)]/15': highlighted
-            }
+            // A ternary, not two object keys: both sets carry a border colour,
+            // so listing them together lets stylesheet order decide the winner
+            // and the highlight silently loses.
+            highlighted
+                ? 'border-[color:var(--brand)] bg-[color:var(--brand)]/15'
+                : 'border-border/60 bg-surface-secondary/40'
         )}
     >
         <span className='text-[9px] tracking-wide text-muted uppercase'>{title}</span>
@@ -291,11 +293,13 @@ export const highlightedCardIds = (targets = []) =>
 
 const TutorialBoard = ({ state, highlight, onInspect }) => {
     const lit = parseHighlight(highlight);
-    const dimRadiant = lit.radiant.cards.size > 0 || lit.onyx.cards.size > 0;
+    // Dim the rest of the board only when a specific card is spotlit; a zone
+    // highlight rings the row itself, which is quieter than ringing ten cards.
+    const dimOthers = lit.radiant.cards.size > 0 || lit.onyx.cards.size > 0;
     const rowProps = (side) => ({
         side,
         highlight: lit[side],
-        dimOthers: dimRadiant,
+        dimOthers,
         onInspect: (cardId) => onInspect?.({ side, cardId })
     });
 

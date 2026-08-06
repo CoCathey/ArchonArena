@@ -106,6 +106,18 @@ describe('Learn tutorial script', () => {
         }
     });
 
+    it('leaves the turn-step strip on the step the narration is describing', () => {
+        // Every completed turn ends in its draw step. Turn 13 is the forge that
+        // ends the walkthrough, so it stops at step 1.
+        for (let turn = 1; turn <= 12; turn++) {
+            const last = states.filter((state) => state.turn === turn).pop();
+
+            expect(last?.phase, `turn ${turn} should end on the draw step`).toBe('Draw cards');
+        }
+
+        expect(states[states.length - 1].phase).toBe('Forge a key');
+    });
+
     it('only highlights board targets that make sense', () => {
         for (const step of TutorialSteps) {
             for (const target of step.highlight || []) {
