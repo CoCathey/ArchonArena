@@ -11,6 +11,22 @@ const POOL_LABELS = {
 };
 
 /**
+ * The stored key differential is a margin TIER (1..3), not a subtraction, so
+ * showing the bare number invites the wrong reading - "margin: 3" after
+ * conceding to someone on two keys looks like a claim nobody was three keys
+ * ahead. Rendered as the scoreline the tier stands for it says the true thing:
+ * as one-sided as a 3-0.
+ *
+ * Clamped because rows written before the tier was measured on the loser can
+ * hold 0 or a negative, and the rating engine clamped those the same way.
+ */
+const keyMarginLabel = (keyDiff) => {
+    const tier = Math.max(1, Math.min(3, keyDiff));
+
+    return `3-${3 - tier}`;
+};
+
+/**
  * ARCHON: post-game result — what the finished game did to your Amber.
  *
  * The rating engine is the reason the platform exists, and until now it was
@@ -130,7 +146,7 @@ const GameResultPanel = ({ gameId, username, winner }) => {
 
             <div className='mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5 text-xs text-muted'>
                 {you.keyDiff != null && (
-                    <span>{t('Key margin: {{keys}}', { keys: you.keyDiff })}</span>
+                    <span>{t('Key margin: {{keys}}', { keys: keyMarginLabel(you.keyDiff) })}</span>
                 )}
                 {/* The SAS gap is what makes this Elo variant KeyForge-specific:
                     winning up in deck power pays more than winning down. */}

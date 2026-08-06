@@ -1,6 +1,7 @@
 const {
     normalizeConfig,
     expectedScore,
+    keyDifferential,
     movMultiplier,
     kFactorFor,
     calculateGameResult
@@ -80,27 +81,55 @@ describe('EloCalculator', function () {
         });
     });
 
-    describe('movMultiplier', function () {
-        it('scales with key differential', function () {
-            expect(movMultiplier(3, 2, 'keys', config)).toBe(1.0);
-            expect(movMultiplier(3, 1, 'keys', config)).toBe(1.1);
-            expect(movMultiplier(3, 0, 'keys', config)).toBe(1.25);
+    describe('keyDifferential', function () {
+        it('reads the margin off the loser, not off the gap between the players', function () {
+            expect(keyDifferential(2)).toBe(1); // 3-2
+            expect(keyDifferential(1)).toBe(2); // 3-1
+            expect(keyDifferential(0)).toBe(3); // 3-0
         });
 
-        it('clamps a concede while behind to the narrowest margin', function () {
-            // Loser conceded while ahead on keys: treat as keyDiff 1
-            expect(movMultiplier(1, 2, 'concede', config)).toBe(
-                config.keyDiffMultipliers[1] * config.resultTypeMultipliers.concede
-            );
+        it('clamps a loser who finished ahead to the narrowest margin', function () {
+            // Conceding while winning the key race is unusual but legal.
+            expect(keyDifferential(3)).toBe(1);
+            expect(keyDifferential(9)).toBe(1);
+        });
+
+        it('treats a missing key count as none forged', function () {
+            expect(keyDifferential(null)).toBe(3);
+            expect(keyDifferential(undefined)).toBe(3);
+        });
+    });
+
+    describe('movMultiplier', function () {
+        it('scales with key differential', function () {
+            expect(movMultiplier(1, 'keys', config)).toBe(1.0);
+            expect(movMultiplier(2, 'keys', config)).toBe(1.1);
+            expect(movMultiplier(3, 'keys', config)).toBe(1.25);
+        });
+
+        it('clamps an out-of-range differential into the table', function () {
+            expect(movMultiplier(0, 'keys', config)).toBe(config.keyDiffMultipliers[1]);
+            expect(movMultiplier(-2, 'keys', config)).toBe(config.keyDiffMultipliers[1]);
+            expect(movMultiplier(7, 'keys', config)).toBe(config.keyDiffMultipliers[3]);
         });
 
         it('applies the result type multiplier', function () {
             const discounted = normalizeConfig({ resultTypeMultipliers: { timeout: 0.5 } });
-            expect(movMultiplier(3, 0, 'timeout', discounted)).toBeCloseTo(1.25 * 0.5, 10);
+            expect(movMultiplier(3, 'timeout', discounted)).toBeCloseTo(1.25 * 0.5, 10);
         });
 
         it('falls back to the keys multiplier for unknown result types', function () {
-            expect(movMultiplier(3, 0, 'mystery', config)).toBe(1.25);
+            expect(movMultiplier(3, 'mystery', config)).toBe(1.25);
+        });
+
+        // How the game ended is priced by resultTypeMultipliers alone. If a
+        // concession should be worth less than a forge-out, that is the knob -
+        // the margin tier must not quietly do it a second time.
+        it('prices a concession by result type only, not by a demoted margin', function () {
+            expect(movMultiplier(3, 'concede', config)).toBe(movMultiplier(3, 'keys', config));
+
+            const discounted = normalizeConfig({ resultTypeMultipliers: { concede: 0.8 } });
+            expect(movMultiplier(3, 'concede', discounted)).toBeCloseTo(1.25 * 0.8, 10);
         });
     });
 
@@ -138,7 +167,6 @@ describe('EloCalculator', function () {
             const result = calculateGameResult({
                 winner: { rating: 1200, deckSas: 60, ...established },
                 loser: { rating: 1200, deckSas: 60, ...established },
-                winnerKeys: 3,
                 loserKeys: 0
             });
 
@@ -146,11 +174,65 @@ describe('EloCalculator', function () {
             expect(result.loser.newRating).toBe(1180);
         });
 
+        // ARCHON: the reported bug. A player who concedes on the back foot ends
+        // the game before the winner forges their third key, and the margin
+        // used to be read as winnerKeys - loserKeys - so conceding at 2-0 rated
+        // as a 3-1 and at 1-0 as a 3-2. The loser could shrink their opponent's
+        // gain by giving up, which is precisely backwards.
+        it('rates a concession by how close the loser got, not by the winner keys', function () {
+            const even = {
+                winner: { rating: 1200, deckSas: 60, ...established },
+                loser: { rating: 1200, deckSas: 60, ...established }
+            };
+
+            const forgedOut = calculateGameResult({ ...even, loserKeys: 0, resultType: 'keys' });
+            const concededAtZero = calculateGameResult({
+                ...even,
+                loserKeys: 0,
+                resultType: 'concede'
+            });
+            const concededAtOne = calculateGameResult({
+                ...even,
+                loserKeys: 1,
+                resultType: 'concede'
+            });
+
+            // Conceding without a key is a 3-0, whether the winner had reached
+            // three keys yet or not.
+            expect(concededAtZero.winner.change).toBe(forgedOut.winner.change);
+            expect(concededAtZero.winner.change).toBe(20);
+            // And one key back from that is a 3-1, not a 3-2.
+            expect(concededAtOne.movMultiplier).toBe(
+                DEFAULT_ELO_CONFIG.keyDiffMultipliers[2] *
+                    DEFAULT_ELO_CONFIG.resultTypeMultipliers.concede
+            );
+        });
+
+        // The recalculation replay has the stored margin tier and not the raw
+        // key counts, so it passes the tier straight in.
+        it('accepts a pre-computed margin tier in place of the key count', function () {
+            const even = {
+                winner: { rating: 1200, deckSas: 60, ...established },
+                loser: { rating: 1200, deckSas: 60, ...established }
+            };
+
+            expect(calculateGameResult({ ...even, keyDiff: 3 }).winner.change).toBe(
+                calculateGameResult({ ...even, loserKeys: 0 }).winner.change
+            );
+            expect(calculateGameResult({ ...even, keyDiff: 1 }).winner.change).toBe(
+                calculateGameResult({ ...even, loserKeys: 2 }).winner.change
+            );
+            // An explicit tier wins over the key count - a caller that has both
+            // is replaying a stored result, and the stored tier is the truth.
+            expect(calculateGameResult({ ...even, keyDiff: 1, loserKeys: 0 }).movMultiplier).toBe(
+                DEFAULT_ELO_CONFIG.keyDiffMultipliers[1]
+            );
+        });
+
         it('applies the tournament K multiplier to both players', function () {
             const game = {
                 winner: { rating: 1200, deckSas: 60, ...established },
                 loser: { rating: 1200, deckSas: 60, ...established },
-                winnerKeys: 3,
                 loserKeys: 0
             };
 
@@ -171,13 +253,11 @@ describe('EloCalculator', function () {
             const mid = calculateGameResult({
                 winner: { rating: 1500, deckSas: 60, ...established },
                 loser: { rating: 1300, deckSas: 60, ...established },
-                winnerKeys: 3,
                 loserKeys: 2
             });
             const top = calculateGameResult({
                 winner: { rating: 2500, deckSas: 60, ...established },
                 loser: { rating: 2300, deckSas: 60, ...established },
-                winnerKeys: 3,
                 loserKeys: 2
             });
 
@@ -190,7 +270,6 @@ describe('EloCalculator', function () {
             const result = calculateGameResult({
                 winner: { rating: 1345, deckSas: 71, ...established },
                 loser: { rating: 1522, deckSas: 64, ...established },
-                winnerKeys: 3,
                 loserKeys: 1
             });
 
@@ -203,8 +282,8 @@ describe('EloCalculator', function () {
                 winner: { rating: 1200, deckSas: 60, ...established },
                 loser: { rating: 1200, deckSas: 60, ...established }
             };
-            const narrow = calculateGameResult({ ...base, winnerKeys: 3, loserKeys: 2 });
-            const sweep = calculateGameResult({ ...base, winnerKeys: 3, loserKeys: 0 });
+            const narrow = calculateGameResult({ ...base, loserKeys: 2 });
+            const sweep = calculateGameResult({ ...base, loserKeys: 0 });
 
             expect(sweep.winner.change).toBeGreaterThan(narrow.winner.change);
         });
@@ -213,13 +292,11 @@ describe('EloCalculator', function () {
             const strongerDeckWin = calculateGameResult({
                 winner: { rating: 1200, deckSas: 90, ...established },
                 loser: { rating: 1200, deckSas: 55, ...established },
-                winnerKeys: 3,
                 loserKeys: 1
             });
             const evenDeckWin = calculateGameResult({
                 winner: { rating: 1200, deckSas: 70, ...established },
                 loser: { rating: 1200, deckSas: 70, ...established },
-                winnerKeys: 3,
                 loserKeys: 1
             });
 
@@ -230,13 +307,11 @@ describe('EloCalculator', function () {
             const upset = calculateGameResult({
                 winner: { rating: 1200, deckSas: 55, ...established },
                 loser: { rating: 1200, deckSas: 90, ...established },
-                winnerKeys: 3,
                 loserKeys: 2
             });
             const even = calculateGameResult({
                 winner: { rating: 1200, deckSas: 70, ...established },
                 loser: { rating: 1200, deckSas: 70, ...established },
-                winnerKeys: 3,
                 loserKeys: 2
             });
 
@@ -247,7 +322,6 @@ describe('EloCalculator', function () {
             const result = calculateGameResult({
                 winner: { rating: 1200, deckSas: 60, gamesPlayed: 2 },
                 loser: { rating: 1200, deckSas: 60, gamesPlayed: 200 },
-                winnerKeys: 3,
                 loserKeys: 2
             });
 
@@ -262,7 +336,6 @@ describe('EloCalculator', function () {
             const result = calculateGameResult({
                 winner: { rating: 100, deckSas: 60, ...established },
                 loser: { rating: 110, deckSas: 60, ...established },
-                winnerKeys: 3,
                 loserKeys: 0
             });
 
@@ -273,7 +346,6 @@ describe('EloCalculator', function () {
             const result = calculateGameResult({
                 winner: { rating: 1200, ...established },
                 loser: { rating: 1200, ...established },
-                winnerKeys: 3,
                 loserKeys: 2
             });
 
@@ -285,7 +357,6 @@ describe('EloCalculator', function () {
                 {
                     winner: { rating: 1200, deckSas: 60, ...established },
                     loser: { rating: 1200, deckSas: 60, ...established },
-                    winnerKeys: 3,
                     loserKeys: 0
                 },
                 { kFactor: 16, keyDiffMultipliers: { 3: 1.0 } }

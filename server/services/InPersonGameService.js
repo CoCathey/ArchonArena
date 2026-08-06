@@ -264,9 +264,9 @@ class InPersonGameService {
         const winnerKeys = winnerId === game.Player1Id ? player1Keys : player2Keys;
         const loserKeys = winnerId === game.Player1Id ? player2Keys : player1Keys;
 
-        // Not a rules engine - just a sanity floor. A "winner" with fewer
-        // keys than the loser is a typo somewhere, and committing it would
-        // feed the Elo engine a key differential with the wrong sign.
+        // Not a rules engine - just a sanity floor. A "winner" with fewer keys
+        // than the loser is a typo somewhere, and committing it would rate a
+        // game whose reported margin describes the wrong player.
         if (winnerKeys < loserKeys) {
             return {
                 success: false,

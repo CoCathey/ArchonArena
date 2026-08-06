@@ -116,6 +116,52 @@ describe('RatingService', function () {
             expect(winnerParams[3]).toBe(1); // games played incremented
         });
 
+        // ARCHON: conceding must not shrink what the winner earns. The margin
+        // used to be read as winnerKeys - loserKeys, so a player who gave up
+        // while their opponent was on two keys was rated as a 3-1 (+35 here)
+        // rather than the 3-0 (+40) the game actually was.
+        it('rates a concession on the loser keys, not on the gap between players', async function () {
+            primeHappyPath(
+                gameRows({
+                    winner: { WinReason: 'concede', Keys: 2 },
+                    loser: { WinReason: 'concede', Keys: 0 }
+                })
+            );
+
+            await service.processGame(GAME_UUID);
+
+            const ratingInserts = db.queryTran.mock.calls.filter(([, sql]) =>
+                (sql || '').includes('INSERT INTO "Ratings"')
+            );
+
+            // 64 * 1.25 * 0.5 = 40, the same as forging out 3-0.
+            expect(ratingInserts[0][2][2]).toBe(1240);
+            expect(ratingInserts[1][2][2]).toBe(1160);
+        });
+
+        // The stored KeyDiff is what a recalculation replays, so it has to be
+        // the tier the rating actually used and not a second, different number.
+        it('stores the margin tier it rated with', async function () {
+            primeHappyPath(
+                gameRows({
+                    winner: { WinReason: 'concede', Keys: 2 },
+                    loser: { WinReason: 'concede', Keys: 0 }
+                })
+            );
+
+            await service.processGame(GAME_UUID);
+
+            const historyInserts = db.queryTran.mock.calls.filter(([, sql]) =>
+                (sql || '').includes('INSERT INTO "RatingHistory"')
+            );
+
+            expect(historyInserts.length).toBe(2);
+            for (const [, , params] of historyInserts) {
+                expect(params[10]).toBe(3); // KeyDiff
+                expect(params[11]).toBe('concede'); // ResultType
+            }
+        });
+
         it('rates every 2 player game regardless of any former game type', async function () {
             // Game types (beginner/casual/competitive) have been removed: a
             // finished 2-player game with a winner always rates now.

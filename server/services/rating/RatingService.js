@@ -1,5 +1,5 @@
 const logger = require('../../log');
-const { calculateGameResult, normalizeConfig } = require('./EloCalculator');
+const { calculateGameResult, keyDifferential, normalizeConfig } = require('./EloCalculator');
 const { isValidCountry, regionForCountry, countriesInRegion } = require('./regions');
 
 const DEFAULT_RATING_CONFIG = {
@@ -262,6 +262,10 @@ class RatingService {
         ]);
 
         const resultType = this.resultTypeFromWinReason(game.WinReason);
+        // Derived once and both rated with AND stored, so the KeyDiff on the
+        // history row is exactly the tier the rating used - which is what makes
+        // a later recalculation replay reproduce these numbers.
+        const keyDiff = keyDifferential(loserRow.Keys);
         const result = calculateGameResult(
             {
                 winner: {
@@ -274,8 +278,7 @@ class RatingService {
                     gamesPlayed: loserRating.gamesPlayed,
                     deckSas: loserRow.SasRating
                 },
-                winnerKeys: winnerRow.Keys || 0,
-                loserKeys: loserRow.Keys || 0,
+                keyDiff: keyDiff,
                 resultType: resultType,
                 // Tournament games get a K bonus (tournamentKMultiplier)
                 isTournament: isTournament
@@ -283,7 +286,6 @@ class RatingService {
             config.elo
         );
 
-        const keyDiff = (winnerRow.Keys || 0) - (loserRow.Keys || 0);
         const configSnapshot = JSON.stringify(eloConfig);
 
         const client = await this.db.startTransaction();
@@ -910,11 +912,9 @@ class RatingService {
                         gamesPlayed: loser.gamesPlayed,
                         deckSas: game.loserSas
                     },
-                    // movMultiplier only reads the difference, and the stored
-                    // KeyDiff is exactly that - the raw key counts are not in
-                    // RatingHistory and are not needed.
-                    winnerKeys: game.keyDiff,
-                    loserKeys: 0,
+                    // The margin tier is what was stored; the raw key counts are
+                    // not in RatingHistory and are not needed to replay it.
+                    keyDiff: game.keyDiff,
                     resultType: game.resultType,
                     isTournament: game.isTournament
                 },
@@ -1071,7 +1071,7 @@ class RatingService {
         const rows = await this.db.query(
             'SELECT w."GameId", w."Pool", w."UserId" AS "WinnerId", w."OpponentId" AS "LoserId", ' +
                 'w."OwnSas" AS "WinnerSas", w."OpponentSas" AS "LoserSas", ' +
-                'w."KeyDiff", w."ResultType", w."CreatedAt", ' +
+                'w."KeyDiff", w."ResultType", w."CreatedAt", lgp."Keys" AS "LoserKeys", ' +
                 // isTournament is not stored on the history row, but it changes
                 // K via tournamentKMultiplier, so it has to be re-derived or
                 // the replay would rate every event game as casual.
@@ -1079,6 +1079,11 @@ class RatingService {
                 'JOIN "Games" g ON g."Id" = w."GameId" ' +
                 'WHERE tmg."GameUuid" = g."GameId") AS "IsTournament" ' +
                 'FROM "RatingHistory" w ' +
+                // The loser's end-of-game key count, which is where the margin
+                // tier really comes from. LEFT because a pruned game leaves the
+                // history row behind with nothing to join to.
+                'LEFT JOIN "GamePlayers" lgp ' +
+                'ON lgp."GameId" = w."GameId" AND lgp."PlayerId" = w."OpponentId" ' +
                 `${where} ` +
                 // Chronological: a replay in any other order would feed each
                 // game the wrong "rating before".
@@ -1086,19 +1091,34 @@ class RatingService {
             params
         );
 
-        return (rows || []).map((row) => ({
-            gameId: row.GameId,
-            pool: row.Pool,
-            winnerId: row.WinnerId,
-            loserId: row.LoserId,
-            winnerSas: row.WinnerSas,
-            loserSas: row.LoserSas,
-            // A missing key differential falls back to the narrowest margin
+        return (rows || []).map((row) => {
+            // A missing stored differential falls back to the narrowest margin
             // rather than to zero, which movMultiplier would clamp to 1 anyway.
-            keyDiff: row.KeyDiff == null ? 1 : row.KeyDiff,
-            resultType: row.ResultType || 'keys',
-            isTournament: !!row.IsTournament
-        }));
+            const storedTier = row.KeyDiff == null ? 1 : row.KeyDiff;
+
+            return {
+                gameId: row.GameId,
+                pool: row.Pool,
+                winnerId: row.WinnerId,
+                loserId: row.LoserId,
+                winnerSas: row.WinnerSas,
+                loserSas: row.LoserSas,
+                // Prefer the recorded key count over the stored differential.
+                //
+                // KeyDiff used to be written as winnerKeys - loserKeys, which
+                // under-rated every concession and timeout: the winner had not
+                // forged their third key yet, so the subtraction reported a
+                // narrower margin than the game actually was. Replaying the
+                // stored number would faithfully reproduce that - and undoing
+                // exactly this kind of mistake is what a recalculation is for.
+                // So the tier is re-derived from the loser's keys wherever the
+                // game rows survive, and the stored value is the fallback for
+                // the games where they do not.
+                keyDiff: row.LoserKeys == null ? storedTier : keyDifferential(row.LoserKeys),
+                resultType: row.ResultType || 'keys',
+                isTournament: !!row.IsTournament
+            };
+        });
     }
 
     /**
