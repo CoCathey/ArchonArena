@@ -138,18 +138,25 @@ what makes it worth writing down.
 This was not hypothetical: it happened on the first production deploy of this feature, and
 surfaced as `healthcheck.sh` reporting `DoK rejected the API key (HTTP 403)`.
 
-Three things now guard it, none of them a code change to the import path itself, because
-the behaviour is DoK's and cannot be worked around:
+The obvious guard — "don't generate a key, copy the one you already have" — **is not
+possible**, and the first attempt at this shipped that advice before checking. DoK has no
+endpoint that returns an existing key: `PublicApiStore` exposes only a `POST` that mints a
+new one, and `SellersAndDevs` sets `apiKey = undefined` on mount, so the page displays a
+key solely in the moment it is created. A key you did not write down is unrecoverable.
 
--   The in-app instructions say to **copy the key already shown** and to press Generate
-    only if there is none, rather than telling everyone to generate one.
--   `.env.production.example` explains that this key and any key pasted into the sync box
-    must be the same string, and suggests a DoK account dedicated to the server so an
-    operator syncing their own decks cannot take site-wide SAS down with them.
--   The healthcheck's fix hint names key regeneration as the likely cause instead of
-    advising a regenerate — which is the very action that causes it — and gives a probe
-    that distinguishes a rejected key from Cloudflare blocking the host, since both
-    present as `403`.
+So the rule has to be **generate once, then reuse that string everywhere**, and generating
+has to be treated as a rotation that must be propagated:
+
+-   The in-app instructions say to generate, copy immediately, and reuse the same key
+    anywhere else DoK is used — naming `DOK_API_KEY` explicitly, because the operator is
+    the person most likely to have a second use and least likely to connect the symptom
+    to the cause.
+-   `.env.production.example` says this key and any key pasted into the sync box must be
+    the same string, and suggests a DoK account dedicated to the server so an operator
+    rotating their personal key cannot take site-wide SAS down with them.
+-   The healthcheck's fix hint describes recovery as a rotation rather than telling the
+    operator to find a key that cannot be found, and gives a probe that distinguishes a
+    rejected key from Cloudflare blocking the host, since both present as `403`.
 
 ## CSV and pasted links stay
 

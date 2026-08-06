@@ -338,29 +338,26 @@ const DokImport = ({ onDone, compact }) => {
                                 </a>
                                 {t('. You must be logged in, or no key button appears.')}
                             </li>
+                            <li>{t('Press "Generate API Key".')}</li>
                             <li>
                                 {t(
-                                    'Under "Generate your API Key": if a key is already shown, copy that one. Only press the button if you have no key yet.'
-                                )}
-                            </li>
-                            <li>
-                                {t(
-                                    'If you did generate one, copy it straight away — Decks of KeyForge shows a new key once and cannot show it again.'
+                                    'Copy it straight away — Decks of KeyForge shows a key only in the moment it is created, and has no way to show it to you again later.'
                                 )}
                             </li>
                             <li>{t('Paste it below and press Sync collection.')}</li>
                         </ol>
-                        {/* ARCHON: this warning is not boilerplate. DoK issues
-                            ONE key per account and generating a new one voids
-                            the old one instantly, so anyone who reuses their DoK
-                            account for something else - most obviously the site
-                            operator, whose DOK_API_KEY funds SAS for every
-                            player - breaks that other thing by generating a key
-                            here. The steps above now say copy-before-generate
-                            for the same reason. */}
+                        {/* ARCHON: DoK has one key per account, no way to read
+                            an existing one back (the page clears it on mount and
+                            the only endpoint is a POST that mints a new one),
+                            and minting voids the previous key instantly. So the
+                            advice cannot be "avoid generating" - generating is
+                            the only way to hold a key at all. It has to be
+                            "generate once, then reuse that string everywhere",
+                            which matters most to whoever runs the server, since
+                            DOK_API_KEY buys SAS for every player. */}
                         <p className='mt-2'>
                             {t(
-                                'Generating a key immediately invalidates your previous one, and Decks of KeyForge only issues one per account — so if that key is in use anywhere else, generating a new one here will break it. Your key lists the decks you have marked as owned on Decks of KeyForge, including private ones, so only give it to sites you trust.'
+                                "Decks of KeyForge issues one key per account, and generating replaces the previous one immediately. If you use a DoK key anywhere else — including as this server's own DOK_API_KEY — reuse this same key there rather than generating another, or the older one will stop working. Your key lists the decks you have marked as owned on Decks of KeyForge, including private ones, so only give it to sites you trust."
                             )}
                         </p>
                     </details>
