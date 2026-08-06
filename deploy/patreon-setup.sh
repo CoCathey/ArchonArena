@@ -172,8 +172,11 @@ fi
 step "Writing $ENV_FILE"
 
 backup="$ENV_FILE.bak.$(date +%Y%m%d%H%M%S)"
+# cp -p carries the mode across: a backup holds every secret the original does,
+# so it must not land as world-readable. .gitignore covers the .bak.* pattern
+# for the same reason - it is the same leak under a different filename.
 cp -p "$ENV_FILE" "$backup" || die "could not back up $ENV_FILE"
-ok "backed up to $backup"
+ok "backed up to $backup (holds the same secrets - delete it once this works)"
 
 # Replaces the key wherever it is (set or commented out) instead of appending a
 # second definition - a duplicate would silently win or lose depending on order.
@@ -263,4 +266,7 @@ $(printf '\033[1mDone.\033[0m') Two things left, both on Patreon's side:
      "Connected - no active pledge" if you do not.
 
 Backup of the previous env file: $backup
+  It contains the same secrets as $ENV_FILE. Once the link above works:
+
+      rm $backup
 EOF

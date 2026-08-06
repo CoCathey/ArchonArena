@@ -56,5 +56,11 @@ tmp/
 
 # Production secrets - never commit
 .env.production
+# ...including the timestamped copies deploy/patreon-setup.sh leaves behind.
+# A backup holds everything the original did - DB password, SECRET, HMAC_SECRET,
+# the Patreon client secret - so an unignored one is the same leak with a
+# different filename, and it would slip past `git add -A` unnoticed.
+.env.production.bak.*
+.env.*.bak.*
 config/local*.json5
 dump.rdb
