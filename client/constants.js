@@ -259,4 +259,8 @@ for (let x = 1; x < 6; x++) {
     Constants.EnhancementBaseImages[x] = imageUrl(`enhancements/base-${x}.png`);
 }
 
-export const PatreonClientId = 'HjDP9KKd-HscTXXMs_2TNl2h_POjaEw7D-EkLv_ShRbarVO_WuKA0LWRBp9LRdLq';
+// ARCHON (N12): the Patreon client id used to be hardcoded here - and it was
+// The Crucible Online's, not ours, so the inherited link flow authorised
+// against someone else's campaign. The authorization URL is now built by the
+// server from the `patreon` config section (GET /api/account/patreon/status
+// tells the client whether to show any Patreon UI at all).

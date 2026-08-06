@@ -65,8 +65,19 @@ const accountSlice = createSlice({
                 state.loggedOut = true;
                 state.user = undefined;
             })
-            .addMatcher(api.endpoints.linkPatreon.matchFulfilled, (state) => {
+            // ARCHON (N12): the API answers 200 with { success: false } for a
+            // refused link (expired state, rejected code), so "fulfilled" alone
+            // is not success - checking it kept the callback page from
+            // reporting a failed link as a linked account.
+            .addMatcher(api.endpoints.linkPatreon.matchFulfilled, (state, action) => {
+                if (!action.payload?.success) {
+                    return;
+                }
+
                 state.accountLinked = true;
+                if (state.user) {
+                    state.user.patreon = action.payload.status;
+                }
             })
             .addMatcher(api.endpoints.unlinkPatreon.matchFulfilled, (state) => {
                 state.accountLinked = undefined;

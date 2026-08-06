@@ -18,6 +18,12 @@
         host: ''
     },
 
+    patreon: {
+        // Must also be registered as a redirect URI on the Patreon client.
+        // Override with PATREON_CALLBACK_URL on a site at another domain.
+        callbackUrl: 'https://archonarena.com/patreon'
+    },
+
     lobby: {
         appName: 'Archon Arena',
         emailFromAddress: 'noreply@archonarena.com',

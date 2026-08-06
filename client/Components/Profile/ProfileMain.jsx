@@ -12,18 +12,20 @@ import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@heroui/react';
 
-import { PatreonClientId } from '../../constants';
 import PatreonImage from '../../assets/img/Patreon_Mark_Coral.jpg';
 import {
     useDeleteAccountMutation,
     useGetOidcIdentitiesQuery,
     useGetOidcStatusQuery,
+    useGetPatreonMembershipQuery,
+    useGetPatreonStatusQuery,
     useStartOidcLinkMutation,
+    useStartPatreonLinkMutation,
     useUnlinkOidcMutation,
     useUnlinkPatreonMutation
 } from '../../redux/api';
 import { authActions } from '../../redux/slices/authSlice';
-import { PatreonStatus } from '../../types';
+import { isPatreonUnlinked, PatreonStatus } from '../../types';
 import Avatar from '../Site/Avatar';
 import ProfileLocation from './ProfileLocation';
 import ProfileRankCard from './ProfileRankCard';
@@ -55,8 +57,63 @@ const ProfileMain = ({ user, formProps, section }) => {
     const dispatch = useDispatch();
     const navigate = useNavigate();
 
-    const callbackUrl = `${window.location.origin}/patreon`;
-    const patreonUrl = `https://www.patreon.com/oauth2/authorize?response_type=code&client_id=${PatreonClientId}&redirect_uri=${callbackUrl}`;
+    // ARCHON (N12): Patreon link/unlink state. The deployment decides whether
+    // any of this renders (status.enabled), and the server builds the
+    // authorization URL - the client no longer carries a client id.
+    const { data: patreonStatus } = useGetPatreonStatusQuery();
+    const patreonEnabled = !!patreonStatus?.enabled;
+    const patreonLinked = !isPatreonUnlinked(user?.patreon);
+    const { data: patreonMembership } = useGetPatreonMembershipQuery(undefined, {
+        skip: !patreonEnabled || !patreonLinked
+    });
+    const [startPatreonLink] = useStartPatreonLinkMutation();
+
+    const onPatreonLink = async () => {
+        try {
+            const result = await startPatreonLink().unwrap();
+            if (result.success && result.url) {
+                window.location.assign(result.url);
+            } else {
+                toast.danger(result.message || t('Could not start account linking'));
+            }
+        } catch {
+            toast.danger(t('Could not start account linking'));
+        }
+    };
+
+    const onPatreonUnlink = async () => {
+        try {
+            const result = await unlinkPatreon().unwrap();
+            if (result.success) {
+                toast.success(t('Account unlinked'));
+            } else {
+                toast.danger(result.message || t('Could not unlink account'));
+            }
+        } catch {
+            toast.danger(t('Could not unlink account'));
+        }
+    };
+
+    const patreonTierNames = (patreonMembership?.tiers || [])
+        .map((tier) => tier.title)
+        .filter(Boolean)
+        .join(', ');
+
+    // Pledged -> name the tier if Patreon gave us one, so the player can see
+    // the perks they are entitled to actually landed.
+    const patreonDetail = () => {
+        if (!patreonLinked) {
+            return t('Not connected');
+        }
+
+        if (user?.patreon !== PatreonStatus.Pledged) {
+            return t('Connected - no active pledge');
+        }
+
+        return patreonTierNames
+            ? t('Supporter - {{tiers}}', { tiers: patreonTierNames })
+            : t('Supporter');
+    };
 
     // ARCHON: Keybringer (OIDC) link/unlink state
     const { data: oidcStatus } = useGetOidcStatusQuery();
@@ -307,32 +364,40 @@ const ProfileMain = ({ user, formProps, section }) => {
                         )}
                     </div>
                 )}
-                <div className='flex items-center justify-between gap-3 rounded border border-border/70 bg-surface-secondary/75 px-3 py-2'>
-                    <div className='flex items-center gap-3'>
-                        <img className='h-5' src={PatreonImage} alt={t('Patreon Logo')} />
-                        <div>
-                            <div className='text-sm text-foreground'>Patreon</div>
-                            <div className='text-xs text-muted'>
-                                {!user?.patreon || user?.patreon === PatreonStatus.Unlinked
-                                    ? t('Not connected')
-                                    : t('Connected')}
+                {/* ARCHON (N12): hidden entirely when the deployment has no
+                    Patreon credentials - a link button that dead-ends on
+                    Patreon's error page is worse than no button. An account
+                    that still holds a stale token keeps its unlink option. */}
+                {(patreonEnabled || patreonLinked) && (
+                    <div className='flex items-center justify-between gap-3 rounded border border-border/70 bg-surface-secondary/75 px-3 py-2'>
+                        <div className='flex items-center gap-3'>
+                            <img className='h-5' src={PatreonImage} alt={t('Patreon Logo')} />
+                            <div>
+                                <div className='text-sm text-foreground'>Patreon</div>
+                                <div className='text-xs text-muted'>{patreonDetail()}</div>
+                                {!patreonLinked && patreonStatus?.campaignUrl && (
+                                    <a
+                                        className='text-xs text-primary hover:underline'
+                                        href={patreonStatus.campaignUrl}
+                                        rel='noopener noreferrer'
+                                        target='_blank'
+                                    >
+                                        {t('Support Archon Arena on Patreon')}
+                                    </a>
+                                )}
                             </div>
                         </div>
+                        {patreonLinked ? (
+                            <HeroButton size='sm' variant='tertiary' onPress={onPatreonUnlink}>
+                                {t('Unlink Account')}
+                            </HeroButton>
+                        ) : (
+                            <HeroButton size='sm' variant='tertiary' onPress={onPatreonLink}>
+                                {t('Link Account')}
+                            </HeroButton>
+                        )}
                     </div>
-                    {!user?.patreon || user?.patreon === PatreonStatus.Unlinked ? (
-                        <HeroButton
-                            size='sm'
-                            variant='tertiary'
-                            onPress={() => window.location.assign(patreonUrl)}
-                        >
-                            {t('Link Account')}
-                        </HeroButton>
-                    ) : (
-                        <HeroButton size='sm' variant='tertiary' onPress={() => unlinkPatreon()}>
-                            {t('Unlink Account')}
-                        </HeroButton>
-                    )}
-                </div>
+                )}
             </Panel>
         </div>
     );

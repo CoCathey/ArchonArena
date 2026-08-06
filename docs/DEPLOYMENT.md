@@ -325,3 +325,19 @@ cd /opt/archonarena && bash deploy/healthcheck.sh
 
 Run it after every deploy, and any time something feels off. Exit code is the number of
 failures, so it can be dropped into cron/uptime tooling as-is.
+
+## 10. Patreon supporter linking (optional)
+
+Off until credentials exist: with no `PATREON_CLIENT_ID` the site shows no Patreon UI and
+never grants or revokes the supporter role, so this can be left for later without
+affecting anything else.
+
+To turn it on, register an OAuth client on Patreon whose Redirect URI is exactly
+`https://archonarena.com/patreon`, then set `PATREON_CLIENT_ID`,
+`PATREON_CLIENT_SECRET` and `PATREON_CAMPAIGN_ID` in `.env.production` and redeploy.
+Full walkthrough — including the one-line lookup for the campaign id, and why omitting it
+hands the supporter role to people who back unrelated creators — is in
+[docs/design/patreon.md](design/patreon.md).
+
+Verify by linking your own account: Profile → Integrations → Link Account should return
+you to `/profile` with the row reading `Supporter - <tier>`.

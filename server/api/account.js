@@ -14,7 +14,9 @@ const { wrapAsync } = require('../util.js');
 const UserService = require('../services/UserService');
 const ConfigService = require('../services/ConfigService');
 const BanlistService = require('../services/BanlistService');
-const PatreonService = require('../services/PatreonService');
+// ARCHON (N12): Patreon linking lives in api/patreon.js; checkauth below still
+// needs the service to reconcile the supporter role on each auth refresh.
+const { patreonService } = require('./patreon');
 const util = require('../util.js');
 const { rateLimit, createFailureThrottle, clientIp } = require('./rateLimit');
 const { renderHtmlEmail, renderTextEmail } = require('../services/emailTemplate');
@@ -121,7 +123,6 @@ let configService = new ConfigService();
 let emailService = new EmailService(configService);
 let userService;
 let banlistService;
-let patreonService;
 
 const appName = configService.getValueForSection('lobby', 'appName');
 
@@ -322,12 +323,6 @@ async function processCustomBackground(newUser, user) {
 module.exports.init = function (server, options) {
     userService = options.userService || new UserService(options.configService);
     banlistService = new BanlistService(options.db, configService);
-    patreonService = new PatreonService(
-        configService.getValueForSection('lobby', 'patreonClientId'),
-        configService.getValueForSection('lobby', 'patreonSecret'),
-        userService,
-        configService.getValueForSection('lobby', 'patreonCallbackUrl')
-    );
 
     server.post(
         '/api/account/register',
@@ -741,31 +736,44 @@ module.exports.init = function (server, options) {
         wrapAsync(async (req, res) => {
             let user = await userService.getFullUserByUsername(req.user.username);
             let userDetails = user.getWireSafeDetails();
-            let isSupporter = false;
 
-            if (user.patreon && user.patreon.refresh_token) {
-                userDetails.patreon = await patreonService.getPatreonStatusForUser(user);
+            // ARCHON (N12): only reconcile the supporter role while Patreon is
+            // actually configured. Unconfigured, every account reports 'none'
+            // and this sweep would revoke the role from everyone who has it -
+            // including on a deployment that has never turned Patreon on.
+            if (patreonService.isEnabled()) {
+                let isSupporter = false;
 
-                if (userDetails.patreon === 'none') {
-                    delete userDetails.patreon;
+                if (user.patreon && user.patreon.refresh_token) {
+                    userDetails.patreon = await patreonService.getPatreonStatusForUser(user);
 
-                    let ret = await patreonService.refreshTokenForUser(user);
-                    if (ret) {
-                        userDetails.patreon = await patreonService.getPatreonStatusForUser(user);
+                    if (userDetails.patreon === 'none') {
+                        delete userDetails.patreon;
+
+                        let ret = await patreonService.refreshTokenForUser(user);
+                        if (ret) {
+                            userDetails.patreon = await patreonService.getPatreonStatusForUser(
+                                user
+                            );
+                        }
                     }
                 }
-            }
 
-            if (userDetails.patreon === 'pledged') {
-                isSupporter = true;
-            }
-
-            if (isSupporter !== req.user.permissions.isSupporter) {
-                if (!req.user.permissions.keepsSupporterWithNoPatreon) {
-                    userDetails.permissions.isSupporter = req.user.permissions.isSupporter =
-                        isSupporter;
-                    await userService.setSupporterStatus(user.id, isSupporter);
+                if (userDetails.patreon === 'pledged') {
+                    isSupporter = true;
                 }
+
+                if (isSupporter !== req.user.permissions.isSupporter) {
+                    if (!req.user.permissions.keepsSupporterWithNoPatreon) {
+                        userDetails.permissions.isSupporter = req.user.permissions.isSupporter =
+                            isSupporter;
+                        await userService.setSupporterStatus(user.id, isSupporter);
+                    }
+                }
+            } else if (user.patreon && user.patreon.access_token) {
+                // Integration off but the account still holds a token: report
+                // the link so the profile page can offer to unlink it.
+                userDetails.patreon = 'linked';
             }
 
             res.send({ success: true, user: userDetails });
@@ -1417,74 +1425,9 @@ module.exports.init = function (server, options) {
         })
     );
 
-    server.post(
-        '/api/account/linkPatreon',
-        passport.authenticate('jwt', { session: false }),
-        wrapAsync(async (req, res) => {
-            req.params.username = req.user ? req.user.username : undefined;
-
-            let user = await checkAuth(req, res);
-
-            if (!user) {
-                return;
-            }
-
-            if (!req.body.code) {
-                return res.send({ success: false, message: 'Code is required' });
-            }
-
-            user = await patreonService.linkAccount(req.params.username, req.body.code);
-            if (!user) {
-                return res.send({
-                    success: false,
-                    message:
-                        'An error occurred syncing your patreon account.  Please try again later.'
-                });
-            }
-
-            let status = await patreonService.getPatreonStatusForUser(user);
-
-            try {
-                if (status === 'pledged' && !user.permissions.isSupporter) {
-                    await userService.setSupporterStatus(user.id, true);
-                    // eslint-disable-next-line require-atomic-updates
-                    user.permissions.isSupporter = req.user.permissions.isSupporter = true;
-                } else if (status !== 'pledged' && user.permissions.isSupporter) {
-                    await userService.setSupporterStatus(user.id, false);
-                    // eslint-disable-next-line require-atomic-updates
-                    user.permissions.isSupporter = req.user.permissions.isSupporter = false;
-                }
-                // eslint-disable-next-line no-empty
-            } catch (err) {}
-
-            return res.send({ success: true });
-        })
-    );
-
-    server.post(
-        '/api/account/unlinkPatreon',
-        passport.authenticate('jwt', { session: false }),
-        wrapAsync(async (req, res) => {
-            req.params.username = req.user ? req.user.username : undefined;
-
-            let user = await checkAuth(req, res);
-
-            if (!user) {
-                return;
-            }
-
-            let ret = await patreonService.unlinkAccount(req.params.username);
-            if (!ret) {
-                return res.send({
-                    success: false,
-                    message:
-                        'An error occurred unlinking your patreon account.  Please try again later.'
-                });
-            }
-
-            return res.send({ success: true });
-        })
-    );
+    // ARCHON (N12): /api/account/linkPatreon and /api/account/unlinkPatreon
+    // moved to api/patreon.js, where the OAuth state check lives with the rest
+    // of the flow. The paths are unchanged.
 };
 
 async function checkAuth(req, res) {

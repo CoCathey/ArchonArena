@@ -12,6 +12,9 @@ import KeyforgeGameSettings from './KeyforgeGameSettings';
 import NotificationPreferences from './NotificationPreferences';
 import ProfileCardSize from './ProfileCardSize';
 import { Constants } from '../../constants';
+// ARCHON (N12): drives whether the Integrations tab is offered at all
+import { useGetOidcStatusQuery, useGetPatreonStatusQuery } from '../../redux/api';
+import { isPatreonUnlinked } from '../../types';
 import { toBase64 } from '../../util.jsx';
 import BlankBg from '../../assets/img/bgs/blank.png';
 import MassMutationBg from '../../assets/img/bgs/massmutation.png';
@@ -85,11 +88,21 @@ const ProfileSection = Object.freeze({
     Notifications: 'notifications'
 });
 
-// ARCHON: the Integrations tab (Patreon linking and - once SSO is enabled -
-// Keybringer account linking) is hidden for now. All
-// of its code (ProfileMain's integrations section, the server endpoints)
-// stays live; flip this to true to bring the tab back.
-const SHOW_INTEGRATIONS = false;
+/**
+ * ARCHON (N12): the Integrations tab used to be behind a hardcoded `false`,
+ * because neither integration it hosts was configured and an empty tab is
+ * noise. It is now driven by what the deployment actually has: the tab appears
+ * when Patreon or Keybringer SSO is configured, or when this account still has
+ * a link to manage even though the integration has since been turned off.
+ *
+ * @param {object} params
+ * @param {boolean} params.patreonEnabled
+ * @param {boolean} params.patreonLinked
+ * @param {boolean} params.oidcEnabled
+ * @returns {boolean}
+ */
+const hasIntegrations = ({ patreonEnabled, patreonLinked, oidcEnabled }) =>
+    patreonEnabled || patreonLinked || oidcEnabled;
 
 /**
  * @param {ProfileProps} props
@@ -101,6 +114,15 @@ const Profile = ({ onSubmit, isLoading }) => {
     const [localCardSize, setCardSize] = useState(user?.settings.cardSize);
     const [customBg, setCustomBg] = useState(null);
     const [activeSection, setActiveSection] = useState(ProfileSection.Account);
+
+    // ARCHON (N12): does this deployment have anything to show on Integrations?
+    const { data: patreonStatus } = useGetPatreonStatusQuery();
+    const { data: oidcStatus } = useGetOidcStatusQuery();
+    const showIntegrations = hasIntegrations({
+        patreonEnabled: !!patreonStatus?.enabled,
+        patreonLinked: !isPatreonUnlinked(user?.patreon),
+        oidcEnabled: !!oidcStatus?.enabled
+    });
 
     const backgrounds = [{ name: 'none', label: t('none'), imageUrl: BlankBg }];
     const cardSizes = [
@@ -228,7 +250,7 @@ const Profile = ({ onSubmit, isLoading }) => {
                                 <nav className='grid gap-1'>
                                     {[
                                         [ProfileSection.Account, t('Account')],
-                                        ...(SHOW_INTEGRATIONS
+                                        ...(showIntegrations
                                             ? [[ProfileSection.Integrations, t('Integrations')]]
                                             : []),
                                         [ProfileSection.Appearance, t('Appearance')],

@@ -1,6 +1,8 @@
 const account = require('./account');
 // ARCHON: OIDC SSO login (Keybringer)
 const oidc = require('./oidc');
+// ARCHON (N12): Patreon supporter linking
+const patreon = require('./patreon');
 // ARCHON: public rating lookups
 const ratings = require('./ratings');
 // ARCHON: runtime admin settings
@@ -41,6 +43,10 @@ module.exports.init = function (server, options) {
     ratings.init(server);
     // ARCHON: first-run onboarding wizard (onboarded + avatar)
     onboarding.init(server, options);
+    // ARCHON (N12): Patreon linking. Before account.init so the fixed
+    // /api/account/patreon/* paths are matched ahead of the parameterised
+    // /api/account/:username routes.
+    patreon.init(server);
     account.init(server, options);
     // ARCHON: OIDC SSO login (Keybringer)
     oidc.init(server);
