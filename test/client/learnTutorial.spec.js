@@ -118,6 +118,82 @@ describe('Learn tutorial script', () => {
         expect(states[states.length - 1].phase).toBe('Forge a key');
     });
 
+    it('asks you to click things that are actually on the board at the time', () => {
+        // A step's action is offered while the PREVIOUS step's position is on
+        // screen, so that is where its targets have to be: "play this from your
+        // hand" is useless once the card has left your hand.
+        const onBoard = (state, side) => {
+            const player = state.players[side];
+
+            return new Set([
+                ...player.hand,
+                ...player.creatures.map((c) => c.id),
+                ...player.artifacts.map((c) => c.id),
+                ...player.other.map((c) => c.id),
+                ...player.creatures.flatMap((c) => c.upgrades)
+            ]);
+        };
+
+        TutorialSteps.forEach((step, index) => {
+            const action = step.action;
+
+            if (!action || index === 0) {
+                return;
+            }
+
+            const shown = states[index - 1];
+            const where = `"${step.title}" (offered on step ${index})`;
+
+            for (const cardId of action.cards || []) {
+                expect(onBoard(shown, 'radiant'), `${where}: your ${cardId}`).toContain(cardId);
+            }
+
+            for (const cardId of action.enemyCards || []) {
+                expect(onBoard(shown, 'onyx'), `${where}: enemy ${cardId}`).toContain(cardId);
+            }
+
+            for (const house of action.houses || []) {
+                expect(RadiantDeck.houses, `${where}: house ${house}`).toContain(house);
+            }
+
+            for (const pile of action.piles || []) {
+                expect(
+                    shown.players.radiant[pile].length,
+                    `${where}: empty ${pile}`
+                ).toBeGreaterThan(0);
+            }
+        });
+    });
+
+    it('gives every step a prompt and a button to reach it', () => {
+        // Step 0 is the opening screen; nothing precedes it, so its action is
+        // never offered. Every other step is something the reader is asked for.
+        TutorialSteps.slice(1).forEach((step) => {
+            expect(step.action?.prompt, step.title).toBeTruthy();
+            expect(step.action?.button, step.title).toBeTruthy();
+        });
+    });
+
+    it('only asks you to act on your own turns', () => {
+        // Onyx's turns are watched, not played. A "your move" prompt during
+        // Onyx's turn would be asking the reader to take the opponent's turn.
+        TutorialSteps.forEach((step, index) => {
+            if (!step.action?.yours || index === 0) {
+                return;
+            }
+
+            // Checked against the state the move PRODUCES: a "choose your
+            // house" prompt is legitimately offered while the board still shows
+            // the end of Onyx's turn.
+            const produced = states[index];
+
+            expect(
+                produced.activePlayer === 'radiant' || produced.turn === 0,
+                `"${step.title}" asks you to move during ${produced.activePlayer}'s turn`
+            ).toBe(true);
+        });
+    });
+
     it('only highlights board targets that make sense', () => {
         for (const step of TutorialSteps) {
             for (const target of step.highlight || []) {

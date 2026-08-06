@@ -5,239 +5,256 @@ import { TutorialCards } from './tutorialCards';
 import { TurnSteps, houseLabel, keyCostFor } from './tutorialEngine';
 import { KeyColours, KeyImages, LearnIcons, houseIcon } from './learnIcons';
 import TutorialCard from './TutorialCard';
+import RichText from './RichText';
 
 /**
  * ARCHON (N11): the tutorial board.
  *
- * It is laid out exactly like the real game board - your opponent above, you
- * below, stats bar on the outside edge, creatures nearest the middle, artifacts
- * behind them, hand along the bottom - so that finishing the tutorial and
- * opening a real game feels like the same screen. It renders from the plain
- * state object in tutorialEngine.js rather than from redux, which is what lets
- * a step be replayed, rewound, or shown to a signed-out visitor.
+ * It is laid out and styled like the real game board rather than like a
+ * document: your opponent above, you below, a flat stats strip on each outside
+ * edge, creatures nearest the middle, artifacts behind them, your hand along
+ * the bottom. The rows carry no headings, no frames and no "nothing here"
+ * placeholders, for the same reason a real table does not - the cards are the
+ * content, and a caption over every row is what turns a board into a form.
+ *
+ * It renders from the plain state object in tutorialEngine.js rather than from
+ * redux, which is what lets a step be replayed, rewound, or shown to a
+ * signed-out visitor.
  *
  * The one deliberate difference from a real game: Onyx's hand is face up. This
  * is a walkthrough, and the reason a play is good is usually the card that was
  * not played.
  */
 
-const GAP = 4;
-const MAX_CARD_WIDTH = 84;
-const MIN_CARD_WIDTH = 34;
+const GAP = 5;
+const MAX_CARD_WIDTH = 82;
+const MAX_HAND_WIDTH = 88;
+const MAX_ENEMY_HAND_WIDTH = 52;
+const MIN_CARD_WIDTH = 32;
 
 /** Cards shrink to fit their row, so a ten-creature battleline never scrolls. */
-const widthFor = (count, max = MAX_CARD_WIDTH) =>
-    `min(${max}px, max(${MIN_CARD_WIDTH}px, calc((100% - ${
-        (Math.max(count, 1) - 1) * GAP
-    }px) / ${Math.max(count, 1)})))`;
+const widthFor = (count, max) => {
+    const n = Math.max(count, 1);
 
+    return `min(${max}px, max(${MIN_CARD_WIDTH}px, calc((100% - ${(n - 1) * GAP}px) / ${n})))`;
+};
+
+/**
+ * One row of the play area. Deliberately unlabelled: an empty row is just
+ * empty space, the way it is on a table.
+ */
 const CardRow = ({
-    label,
+    zone,
     cards,
     side,
     highlight,
     dimOthers,
     onInspect,
+    isTarget,
+    onAct,
     align = 'center',
-    maxWidth,
-    emptyHint
+    maxWidth = MAX_CARD_WIDTH,
+    minHeight = 30
 }) => {
-    const zoneHighlighted = highlight.zones.has(label.zone);
+    const zoneHighlighted = highlight.zones.has(zone);
 
     return (
         <div
-            className={classNames('rounded-md px-1 py-1 transition-all', {
-                'bg-[color:var(--brand)]/12 ring-1 ring-[color:var(--brand)]/60': zoneHighlighted
+            className={classNames('flex items-end rounded px-2 py-1 transition-colors', {
+                'justify-center': align === 'center',
+                'justify-start': align === 'start',
+                'bg-[color:var(--brand)]/10 inset-ring-1 inset-ring-[color:var(--brand)]/45':
+                    zoneHighlighted
             })}
+            style={{ gap: GAP, minHeight }}
         >
-            <div className='mb-0.5 flex items-center gap-2'>
-                <span className='text-[10px] tracking-wide text-muted uppercase'>{label.text}</span>
-                {cards.length > 0 && (
-                    <span className='text-[10px] text-muted/70 tabular-nums'>{cards.length}</span>
-                )}
-            </div>
-            {cards.length === 0 ? (
-                <div className='flex h-9 items-center rounded border border-dashed border-border/50 px-2 text-[10px] text-muted/70'>
-                    {emptyHint}
-                </div>
-            ) : (
-                <div
-                    className={classNames('flex items-end', {
-                        'justify-center': align === 'center',
-                        'justify-start': align === 'start'
-                    })}
-                    style={{ gap: GAP }}
-                >
-                    {cards.map((entry, index) => {
-                        const cardId = typeof entry === 'string' ? entry : entry.id;
+            {cards.map((entry, index) => {
+                const cardId = typeof entry === 'string' ? entry : entry.id;
 
-                        return (
-                            <div
-                                key={`${cardId}-${index}`}
-                                style={{ width: widthFor(cards.length, maxWidth) }}
-                            >
-                                <TutorialCard
-                                    cardId={cardId}
-                                    side={side}
-                                    permanent={typeof entry === 'string' ? undefined : entry}
-                                    width='100%'
-                                    highlighted={highlight.cards.has(cardId)}
-                                    dimmed={dimOthers && !zoneHighlighted}
-                                    onInspect={onInspect}
-                                />
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
+                return (
+                    <div
+                        key={`${cardId}-${index}`}
+                        style={{ width: widthFor(cards.length, maxWidth) }}
+                    >
+                        <TutorialCard
+                            cardId={cardId}
+                            side={side}
+                            permanent={typeof entry === 'string' ? undefined : entry}
+                            width='100%'
+                            highlighted={highlight.cards.has(cardId)}
+                            dimmed={dimOthers && !zoneHighlighted}
+                            onInspect={onInspect}
+                            onActivate={isTarget?.(cardId) ? onAct : undefined}
+                        />
+                    </div>
+                );
+            })}
         </div>
     );
 };
 
-const Pile = ({ title, count, highlighted }) => (
+/**
+ * One cell of a stats strip. The real board separates these with a dotted rule
+ * rather than boxing each one, and a spotlit cell tints rather than outlines,
+ * so the strip stays a strip.
+ */
+const Stat = ({ children, label, highlighted, onAct, className }) => (
     <div
-        title={title}
+        title={onAct ? `${label} - click to play this step` : label}
+        role={onAct ? 'button' : undefined}
+        tabIndex={onAct ? 0 : undefined}
+        onClick={onAct}
+        onKeyDown={(event) => {
+            if (onAct && (event.key === 'Enter' || event.key === ' ')) {
+                event.preventDefault();
+                onAct();
+            }
+        }}
         className={classNames(
-            'flex min-w-11 flex-col items-center gap-0.5 rounded border px-1.5 py-1 transition-all',
-            // A ternary, not two object keys: both sets carry a border colour,
-            // so listing them together lets stylesheet order decide the winner
-            // and the highlight silently loses.
-            highlighted
-                ? 'border-[color:var(--brand)] bg-[color:var(--brand)]/15'
-                : 'border-border/60 bg-surface-secondary/40'
+            'flex h-7 shrink-0 items-center gap-1 border-e-2 border-dotted border-border/50 px-2 last:border-e-0',
+            highlighted && 'rounded-sm bg-[color:var(--brand)]/25',
+            onAct &&
+                'animate-pulse cursor-pointer rounded-sm ring-2 ring-[color:var(--brand)] hover:animate-none',
+            className
         )}
     >
-        <span className='text-[9px] tracking-wide text-muted uppercase'>{title}</span>
-        <span className='text-sm leading-none font-semibold text-foreground tabular-nums'>
-            {count}
-        </span>
+        {children}
     </div>
 );
 
-const Stat = ({ icon, label, value, highlighted }) => (
-    <div
-        title={label}
-        className={classNames(
-            'flex items-center gap-1 rounded border px-1.5 py-1 transition-all',
-            highlighted
-                ? 'border-[color:var(--brand)] bg-[color:var(--brand)]/15'
-                : 'border-border/60 bg-surface-secondary/40'
-        )}
-    >
-        <img src={icon} alt='' className='h-4 w-4' />
-        <span className='text-sm leading-none font-semibold text-foreground tabular-nums'>
-            {value}
-        </span>
-    </div>
+const Value = ({ children }) => (
+    <span className='text-sm leading-none font-semibold text-foreground tabular-nums'>
+        {children}
+    </span>
 );
 
-const Keys = ({ forged, highlighted }) => (
-    <div
-        title={`${forged} of 3 keys forged`}
-        className={classNames(
-            'flex items-center gap-0.5 rounded border px-1.5 py-1 transition-all',
-            highlighted
-                ? 'border-[color:var(--brand)] bg-[color:var(--brand)]/15'
-                : 'border-border/60 bg-surface-secondary/40'
-        )}
-    >
-        {KeyColours.map((colour, index) => (
-            <img
-                key={colour}
-                src={KeyImages[colour][index < forged ? 'forged' : 'unforged']}
-                alt={`${colour} key`}
-                className={classNames('h-5 w-5', { 'opacity-45': index >= forged })}
-            />
-        ))}
-    </div>
+const PileCount = ({ title, count, highlighted, onAct }) => (
+    <Stat label={title} highlighted={highlighted} onAct={onAct}>
+        <span className='text-[11px] text-muted'>{title}</span>
+        <Value>{count}</Value>
+    </Stat>
 );
 
-const Identity = ({ player, activeHouse, highlight }) => (
-    <div
-        className={classNames(
-            'flex items-center gap-2 rounded border px-2 py-1 transition-all',
-            highlight.stats.has('identity')
-                ? 'border-[color:var(--brand)] bg-[color:var(--brand)]/15'
-                : 'border-border/60 bg-surface-secondary/40'
-        )}
-    >
-        <div className='flex flex-col'>
-            <span className='text-xs leading-tight font-semibold text-foreground'>
-                {player.name}
-            </span>
-            <span className='text-[9px] leading-tight text-muted'>{player.deckName}</span>
-        </div>
-        <div
-            className={classNames('flex items-center gap-0.5 rounded px-0.5 transition-all', {
-                'bg-[color:var(--brand)]/25 ring-1 ring-[color:var(--brand)]':
-                    highlight.stats.has('houses')
-            })}
-        >
-            {player.houses.map((house) => (
-                <img
-                    key={house}
-                    src={houseIcon(house)}
-                    alt={houseLabel(house)}
-                    title={houseLabel(house)}
-                    className={classNames('h-6 w-6 transition-all', {
-                        'scale-110 drop-shadow-[0_0_5px_rgba(239,197,74,0.9)]':
-                            activeHouse === house,
-                        'opacity-40 grayscale': activeHouse && activeHouse !== house
-                    })}
-                />
-            ))}
-        </div>
-    </div>
-);
-
-const PlayerStats = ({ state, side, highlight }) => {
+const StatsStrip = ({ state, side, highlight, isMe, action, onAct }) => {
     const player = state.players[side];
+    const active = state.activePlayer === side;
+    // Only your own strip is ever clickable: you never take Onyx's turn.
+    const targetOf = (kind, name) => (isMe && action?.[kind]?.includes(name) ? onAct : undefined);
 
     return (
-        <div className='flex flex-wrap items-center gap-1.5'>
-            <Identity player={player} activeHouse={player.activeHouse} highlight={highlight} />
-            <Keys forged={player.keys} highlighted={highlight.stats.has('keys')} />
+        <div
+            className={classNames(
+                'flex items-center overflow-x-auto px-1.5 py-1',
+                isMe ? 'border-t border-border/45' : 'border-b border-border/45'
+            )}
+        >
+            <Stat label={player.deckName} highlighted={highlight.stats.has('identity')}>
+                <span
+                    className={classNames(
+                        'text-[10px] leading-none text-[color:var(--brand)]',
+                        !active && 'invisible'
+                    )}
+                    aria-hidden
+                >
+                    ▶
+                </span>
+                <span
+                    className={classNames(
+                        'text-xs leading-none font-bold whitespace-nowrap',
+                        active ? 'text-foreground' : 'text-muted'
+                    )}
+                >
+                    {player.name}
+                </span>
+            </Stat>
+
             <Stat
-                icon={LearnIcons.amber}
-                label='Æmber in pool'
-                value={player.amber}
-                highlighted={highlight.stats.has('amber')}
-            />
-            <Stat
-                icon={LearnIcons.keyCost}
-                label='Current key cost'
-                value={keyCostFor(state, side)}
-                highlighted={highlight.stats.has('keyCost')}
-            />
-            <Pile
+                label={`${player.keys} of 3 keys forged`}
+                highlighted={highlight.stats.has('keys')}
+                onAct={targetOf('stats', 'keys')}
+            >
+                {KeyColours.map((colour, index) => (
+                    <img
+                        key={colour}
+                        src={KeyImages[colour][index < player.keys ? 'forged' : 'unforged']}
+                        alt={`${colour} key`}
+                        className={classNames('h-5 w-5', index >= player.keys && 'opacity-40')}
+                    />
+                ))}
+            </Stat>
+
+            <Stat label='Æmber in pool' highlighted={highlight.stats.has('amber')}>
+                <img src={LearnIcons.amber} alt='Æmber' className='h-4 w-4' />
+                <Value>{player.amber}</Value>
+            </Stat>
+
+            <Stat label='Current key cost' highlighted={highlight.stats.has('keyCost')}>
+                <img src={LearnIcons.keyCost} alt='Key cost' className='h-4 w-4' />
+                <Value>{keyCostFor(state, side)}</Value>
+            </Stat>
+
+            <Stat label='Houses in this deck' highlighted={highlight.stats.has('houses')}>
+                {player.houses.map((house) => {
+                    const pick = targetOf('houses', house);
+
+                    return (
+                        <img
+                            key={house}
+                            src={houseIcon(house)}
+                            alt={houseLabel(house)}
+                            title={
+                                pick
+                                    ? `${houseLabel(house)} - click to choose this house`
+                                    : houseLabel(house)
+                            }
+                            onClick={pick}
+                            className={classNames('h-6 w-6 transition-all', {
+                                'drop-shadow-[0_0_5px_rgba(239,197,74,0.9)]':
+                                    player.activeHouse === house,
+                                'opacity-35 grayscale':
+                                    player.activeHouse && player.activeHouse !== house,
+                                'animate-pulse cursor-pointer rounded-full ring-2 ring-[color:var(--brand)] hover:animate-none':
+                                    !!pick
+                            })}
+                        />
+                    );
+                })}
+            </Stat>
+
+            <PileCount
                 title='Deck'
                 count={player.deck.length}
                 highlighted={highlight.zones.has('deck')}
             />
-            <Pile
+            <PileCount
                 title='Discard'
                 count={player.discard.length}
                 highlighted={highlight.zones.has('discard')}
             />
-            <Pile
+            <PileCount
                 title='Archives'
                 count={player.archives.length}
                 highlighted={highlight.zones.has('archives')}
+                onAct={targetOf('piles', 'archives')}
             />
+            <Stat label={`${player.deckName}: cards in hand`}>
+                <span className='text-[11px] text-muted'>Hand</span>
+                <Value>{player.hand.length}</Value>
+            </Stat>
         </div>
     );
 };
 
+/** The five-step turn structure, tracked live. This is a teaching aid, not a
+ *  part of the real board - it sits above it rather than inside it. */
 const TurnStrip = ({ state, highlighted }) => (
     <div
         className={classNames(
-            'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 transition-all',
-            highlighted
-                ? 'border-[color:var(--brand)] bg-[color:var(--brand)]/12'
-                : 'border-border/60 bg-surface-secondary/30'
+            'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2 py-1.5 transition-colors',
+            highlighted ? 'bg-[color:var(--brand)]/15' : 'bg-surface-secondary/35'
         )}
     >
-        <span className='text-xs font-semibold text-foreground'>
+        <span className='text-xs font-semibold whitespace-nowrap text-foreground'>
             {state.turn ? `Turn ${state.turn}` : 'Setup'}
             {state.activePlayer ? ` · ${state.players[state.activePlayer].name}` : ''}
         </span>
@@ -246,10 +263,10 @@ const TurnStrip = ({ state, highlighted }) => (
                 <span
                     key={step}
                     className={classNames(
-                        'rounded px-1.5 py-0.5 text-[10px] whitespace-nowrap transition-all',
+                        'rounded px-1.5 py-0.5 text-[10px] whitespace-nowrap transition-colors',
                         state.phase === step
                             ? 'bg-[color:var(--brand)] font-semibold text-[color:var(--brand-strong)]'
-                            : 'bg-surface-secondary/60 text-muted'
+                            : 'text-muted'
                     )}
                 >
                     {index + 1}. {step}
@@ -291,15 +308,21 @@ export const highlightedCardIds = (targets = []) =>
         .filter(([side, kind, name]) => kind === 'card' && side && TutorialCards[name])
         .map(([side, , name]) => ({ side, cardId: name }));
 
-const TutorialBoard = ({ state, highlight, onInspect }) => {
+const TutorialBoard = ({ state, highlight, action, onAct, onInspect }) => {
     const lit = parseHighlight(highlight);
     // Dim the rest of the board only when a specific card is spotlit; a zone
-    // highlight rings the row itself, which is quieter than ringing ten cards.
+    // highlight tints the row itself, which is quieter than ringing ten cards.
     const dimOthers = lit.radiant.cards.size > 0 || lit.onyx.cards.size > 0;
+    // The cards this step asks you to click. `cards` are yours, `enemyCards`
+    // are the ones you are attacking or pointing an effect at.
+    const isTarget = (side) => (cardId) =>
+        (side === 'radiant' ? action?.cards : action?.enemyCards)?.includes(cardId) || false;
     const rowProps = (side) => ({
         side,
         highlight: lit[side],
         dimOthers,
+        isTarget: isTarget(side),
+        onAct,
         onInspect: (cardId) => onInspect?.({ side, cardId })
     });
 
@@ -307,85 +330,134 @@ const TutorialBoard = ({ state, highlight, onInspect }) => {
         <div className='flex flex-col gap-2'>
             <TurnStrip state={state} highlighted={lit.global.has('turnsteps')} />
 
-            {/* Opponent: stats on the outside, battleline nearest the middle. */}
-            <div className='rounded-md border border-border/60 bg-surface-secondary/20 p-2'>
-                <PlayerStats state={state} side='onyx' highlight={lit.onyx} />
-                <div className='mt-1.5 flex flex-col gap-1'>
-                    <CardRow
-                        {...rowProps('onyx')}
-                        label={{ text: 'Onyx hand (face up for the tutorial)', zone: 'hand' }}
-                        cards={state.players.onyx.hand}
-                        align='start'
-                        maxWidth={56}
-                        emptyHint='No cards in hand'
-                    />
-                    {state.players.onyx.other.length > 0 && (
+            <div className='relative overflow-hidden rounded-md border border-border/60 bg-[color:var(--panel)]'>
+                {/* The same vignette the real board uses to settle the edges. */}
+                <div
+                    className='pointer-events-none absolute inset-0 z-0'
+                    style={{
+                        background:
+                            'radial-gradient(circle at center, color-mix(in oklab, var(--foreground) 3%, transparent) 0%, color-mix(in oklab, var(--foreground) 13%, transparent) 80%)'
+                    }}
+                />
+
+                <div className='relative z-10 flex flex-col'>
+                    <StatsStrip state={state} side='onyx' highlight={lit.onyx} />
+
+                    <div className='px-1 pt-1'>
+                        <div className='px-2 pb-0.5 text-[10px] text-muted/70'>
+                            Onyx’s hand, face up for the tutorial
+                        </div>
                         <CardRow
                             {...rowProps('onyx')}
-                            label={{ text: 'Resolving', zone: 'other' }}
-                            cards={state.players.onyx.other}
-                            emptyHint=''
+                            zone='hand'
+                            cards={state.players.onyx.hand}
+                            align='start'
+                            maxWidth={MAX_ENEMY_HAND_WIDTH}
+                            minHeight={24}
                         />
-                    )}
-                    <CardRow
-                        {...rowProps('onyx')}
-                        label={{ text: 'Onyx artifacts', zone: 'artifacts' }}
-                        cards={state.players.onyx.artifacts}
-                        emptyHint='No artifacts in play'
-                    />
-                    <CardRow
-                        {...rowProps('onyx')}
-                        label={{ text: 'Onyx battleline', zone: 'creatures' }}
-                        cards={state.players.onyx.creatures}
-                        emptyHint='No creatures in play'
-                    />
-                </div>
-            </div>
+                        <CardRow
+                            {...rowProps('onyx')}
+                            zone='other'
+                            cards={state.players.onyx.other}
+                            minHeight={0}
+                        />
+                        <CardRow
+                            {...rowProps('onyx')}
+                            zone='artifacts'
+                            cards={state.players.onyx.artifacts}
+                            align='start'
+                        />
+                        <CardRow
+                            {...rowProps('onyx')}
+                            zone='creatures'
+                            cards={state.players.onyx.creatures}
+                        />
+                    </div>
 
-            <div className='flex items-center gap-2'>
-                <div className='h-px flex-1 bg-border/60' />
-                <span className='text-[10px] tracking-widest text-muted uppercase'>
-                    The Crucible
-                </span>
-                <div className='h-px flex-1 bg-border/60' />
-            </div>
+                    {/* The centre line, as on the real board. */}
+                    <div
+                        className='mx-2 my-1 h-0.5 shrink-0'
+                        style={{
+                            background:
+                                'linear-gradient(90deg, color-mix(in oklab, var(--border) 30%, transparent) 0%, color-mix(in oklab, var(--border) 75%, transparent) 50%, color-mix(in oklab, var(--border) 30%, transparent) 100%)'
+                        }}
+                    />
 
-            {/* You. */}
-            <div className='rounded-md border border-[color:var(--brand)]/40 bg-surface-secondary/20 p-2'>
-                <div className='flex flex-col gap-1'>
-                    <CardRow
-                        {...rowProps('radiant')}
-                        label={{ text: 'Your battleline', zone: 'creatures' }}
-                        cards={state.players.radiant.creatures}
-                        emptyHint='No creatures in play'
-                    />
-                    <CardRow
-                        {...rowProps('radiant')}
-                        label={{ text: 'Your artifacts', zone: 'artifacts' }}
-                        cards={state.players.radiant.artifacts}
-                        emptyHint='No artifacts in play'
-                    />
-                    {state.players.radiant.other.length > 0 && (
+                    <div className='px-1 pb-1'>
                         <CardRow
                             {...rowProps('radiant')}
-                            label={{ text: 'Resolving', zone: 'other' }}
-                            cards={state.players.radiant.other}
-                            emptyHint=''
+                            zone='creatures'
+                            cards={state.players.radiant.creatures}
                         />
-                    )}
-                    <CardRow
-                        {...rowProps('radiant')}
-                        label={{ text: 'Your hand', zone: 'hand' }}
-                        cards={state.players.radiant.hand}
-                        align='start'
-                        maxWidth={96}
-                        emptyHint='No cards in hand'
+                        <CardRow
+                            {...rowProps('radiant')}
+                            zone='artifacts'
+                            cards={state.players.radiant.artifacts}
+                            align='start'
+                        />
+                        <CardRow
+                            {...rowProps('radiant')}
+                            zone='other'
+                            cards={state.players.radiant.other}
+                            minHeight={0}
+                        />
+                        <CardRow
+                            {...rowProps('radiant')}
+                            zone='hand'
+                            cards={state.players.radiant.hand}
+                            align='start'
+                            maxWidth={MAX_HAND_WIDTH}
+                            minHeight={40}
+                        />
+                    </div>
+
+                    <StatsStrip
+                        state={state}
+                        side='radiant'
+                        highlight={lit.radiant}
+                        isMe
+                        action={action}
+                        onAct={onAct}
                     />
                 </div>
-                <div className='mt-1.5'>
-                    <PlayerStats state={state} side='radiant' highlight={lit.radiant} />
-                </div>
             </div>
+
+            {action?.prompt && (
+                <div
+                    className={classNames(
+                        'flex flex-wrap items-center gap-2 rounded-md px-3 py-2',
+                        action.yours
+                            ? 'bg-[color:var(--brand)]/15 inset-ring-1 inset-ring-[color:var(--brand)]/50'
+                            : 'bg-surface-secondary/40'
+                    )}
+                >
+                    <span
+                        className={classNames(
+                            'text-[10px] font-semibold tracking-widest uppercase',
+                            action.yours ? 'text-[color:var(--brand)]' : 'text-muted'
+                        )}
+                    >
+                        {action.yours ? 'Your move' : 'Onyx'}
+                    </span>
+                    <RichText
+                        text={action.prompt}
+                        as='span'
+                        className='min-w-0 flex-1 text-sm text-foreground'
+                    />
+                    <button
+                        type='button'
+                        onClick={onAct}
+                        className={classNames(
+                            'shrink-0 rounded-md px-3 py-1 text-sm font-semibold transition-colors',
+                            action.yours
+                                ? 'bg-[color:var(--brand)] text-[color:var(--brand-strong)] hover:brightness-105'
+                                : 'bg-surface-secondary text-foreground hover:bg-surface-secondary/70'
+                        )}
+                    >
+                        {action.button || 'Continue'}
+                    </button>
+                </div>
+            )}
         </div>
     );
 };

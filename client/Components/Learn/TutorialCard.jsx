@@ -101,7 +101,8 @@ const TutorialCard = ({
     highlighted,
     dimmed,
     faceDown,
-    onInspect
+    onInspect,
+    onActivate
 }) => {
     const [imageFailed, setImageFailed] = useState(false);
     const card = TutorialCards[cardId];
@@ -113,6 +114,9 @@ const TutorialCard = ({
     }
 
     const inspect = () => onInspect?.(cardId);
+    // A card the current step asks you to play, use or attack. Clicking it is
+    // how you take the action; hovering still just reads it.
+    const activate = onActivate ? () => onActivate(cardId) : inspect;
 
     return (
         <div
@@ -146,24 +150,29 @@ const TutorialCard = ({
             )}
 
             <div
-                role={onInspect ? 'button' : undefined}
-                tabIndex={onInspect ? 0 : undefined}
-                onClick={inspect}
+                role={onInspect || onActivate ? 'button' : undefined}
+                tabIndex={onInspect || onActivate ? 0 : undefined}
+                title={onActivate ? `${card.name} - click to play this step` : card.name}
+                onClick={activate}
                 onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        inspect();
+                        activate();
                     }
                 }}
                 className={classNames(
                     'relative aspect-[65/91] w-full rounded-[6%] transition-all duration-200',
                     {
-                        'cursor-pointer': !!onInspect,
+                        'cursor-pointer': !!onInspect || !!onActivate,
                         'ring-2 shadow-[0_0_18px_2px_rgba(239,197,74,0.55)] ring-[color:var(--brand)]':
-                            highlighted
+                            highlighted,
+                        'hover:-translate-y-1': !!onActivate
                     }
                 )}
             >
+                {onActivate && (
+                    <span className='pointer-events-none absolute -inset-1 z-20 animate-pulse rounded-[8%] ring-2 ring-[color:var(--brand)]' />
+                )}
                 <div
                     className='h-full w-full origin-center transition-transform duration-300'
                     style={

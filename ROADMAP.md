@@ -860,15 +860,19 @@ they already know.
     starting a game, Quick Match, what Amber is, and where tournaments live.
 -   **Knows both** → straight through the existing wizard to a first game.
 -   [x] **The Learn-to-Play walkthrough itself** (`/learn`). Ghost Galaxy's two-player starter
-        set demo game, replayed step by step with the Radiant and Onyx learning decks: 92 steps
-        across all 13 turns, each one spotlighting the cards it is about on a board laid out
-        exactly like the real one, with the card's full rules text pulled in beside the prose.
-        Every rule the official booklet teaches is taught at the moment it first matters, and a
-        closing chapter covers the platform (importing decks, Quick Match, manual mode, the game
-        log). Runs client-side with no account, resumes from where the reader stopped, and steps
-        backwards. `test/client/learnTutorial.spec.js` pins it to the walkthrough's own
-        checkpoints — hand sizes, Æmber totals, key costs, which card is drawn when — and to the
-        invariant that no step invents a card.
+        set demo game, **played** rather than read: 93 steps across all 13 turns with the Radiant
+        and Onyx learning decks, on a board styled like the real one. The reader is the Radiant
+        player — each of their turns asks for a move ("Play Incubation Chamber from your hand",
+        "Reap with Sergeant Zakiel", "Choose house Mars") and they make it by clicking the card,
+        house or counter the prompt names; Onyx's turns are watched. Every rule the official
+        booklet teaches is taught at the moment it first matters, the spotlit cards' full text is
+        pulled in beside the prose, and a closing chapter covers the platform (importing decks,
+        Quick Match, manual mode, the game log). Runs client-side with no account, resumes from
+        where the reader stopped, and steps backwards.
+        `test/client/learnTutorial.spec.js` pins it to the walkthrough's own checkpoints — hand
+        sizes, Æmber totals, key costs, which card is drawn when — to the invariant that no step
+        invents a card, and to the one that makes the play-through work: every card a step asks
+        you to click is on the board at the moment it asks.
 -   Build the rest of the Learn hub on the same tutorial engine so any lesson can be replayed
     later, not only at sign-up.
 -   Store the answers on the account so the tutorial can be resumed and re-offered.

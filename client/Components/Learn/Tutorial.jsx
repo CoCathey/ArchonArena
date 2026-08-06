@@ -136,6 +136,12 @@ const Tutorial = () => {
     // With nothing hovered, the panel explains whatever this step spotlights.
     const focusCards = inspected ? [inspected] : highlightedCardIds(step.highlight).slice(0, 3);
 
+    // A step's `action` is the move that produced it, so the move being ASKED
+    // for on screen belongs to the next step - which is also the only one whose
+    // targets are still where the prompt says they are. "Play Incubation
+    // Chamber from your hand" has to appear while it is still in your hand.
+    const pendingAction = TutorialSteps[index + 1]?.action;
+
     const progress = Math.round(((index + 1) / total) * 100);
     const chapterIndex = chapters.reduce(
         (found, chapter, position) => (chapter.start <= index ? position : found),
@@ -211,6 +217,8 @@ const Tutorial = () => {
                         <TutorialBoard
                             state={state}
                             highlight={step.highlight}
+                            action={pendingAction}
+                            onAct={() => goTo(index + 1)}
                             onInspect={setInspected}
                         />
                     </Panel>
@@ -250,9 +258,11 @@ const Tutorial = () => {
                                 />
                             </div>
                         )}
-                        <div className='flex items-center justify-between gap-2 pt-1'>
-                            <span className='text-[11px] text-muted'>
-                                Tip: the ← and → keys move between steps.
+                        <div className='flex flex-wrap items-center justify-between gap-2 pt-1'>
+                            <span className='min-w-32 flex-1 text-[11px] text-muted'>
+                                {pendingAction?.yours
+                                    ? 'Make the move on the board, or use this button.'
+                                    : 'Tip: the ← and → keys move between steps.'}
                             </span>
                             {/* The last step is where a reader is most ready to
                                 play, so it ends in a door rather than a disabled
@@ -266,7 +276,7 @@ const Tutorial = () => {
                                 </Link>
                             ) : (
                                 <Button variant='primary' onPress={() => goTo(index + 1)}>
-                                    Next
+                                    {pendingAction?.button || 'Next'}
                                 </Button>
                             )}
                         </div>

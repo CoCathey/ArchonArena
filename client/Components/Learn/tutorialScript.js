@@ -68,16 +68,27 @@ export const TutorialSteps = [
     // ---------------------------------------------------------------- intro
     {
         chapter: 'Welcome',
+        action: {
+            prompt: 'You are the Radiant player. On your turns the board will ask you to do something; on Onyx’s turns you watch.',
+            button: 'Begin',
+            yours: false
+        },
         title: 'Welcome to the Crucible',
         body: [
             'KeyForge is a two-player card game. Each player is an **Archon** — a being who leads a team of followers gathered from across the Crucible, an artificial world built out of pieces of countless civilisations.',
-            'This tutorial walks you through a complete game, one action at a time. Nothing is assumed: every rule is explained the first time it matters, and the board on the right always shows the real position after the step you are reading.'
+            'You are going to play a complete game, one move at a time. **You are the Radiant player**: on your turns the board asks you to do something — play this card, reap with that creature — and you do it by clicking. On your opponent’s turns you watch.',
+            'Nothing is assumed. Every rule is explained the first time it matters, and the board is the real position, not an illustration.'
         ],
         platform:
             'You can stop and come back at any time — Archon Arena remembers which step you reached.'
     },
     {
         chapter: 'Welcome',
+        action: {
+            prompt: 'Three keys wins. Everything from here is about getting there first.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'How you win',
         body: [
             'Players compete to gather a precious resource called **Æmber** ({A}). When you have gathered enough Æmber, you **forge a key**.',
@@ -88,6 +99,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Welcome',
+        action: {
+            prompt: 'Radiant is yours, Onyx is your opponent.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'The two learning decks',
         body: [
             'This tutorial uses the two decks that come in the KeyForge two-player starter set: the **Radiant Learning Deck** and the **Onyx Learning Deck**. You will play as Radiant; Onyx is your opponent.',
@@ -99,6 +115,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Welcome',
+        action: {
+            prompt: 'Your three houses are Mars, Sanctum and Star Alliance.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'The identity card',
         body: [
             'Each deck has an **identity card** naming the Archon and showing its three houses. It sits at the edge of your play area for the whole game as a reminder of which houses you can choose from.',
@@ -113,6 +134,11 @@ export const TutorialSteps = [
     // ---------------------------------------------------------------- setup
     {
         chapter: 'Setup',
+        action: {
+            prompt: 'Stack both decks in numbered order, 1 to 18.',
+            button: 'Stack the decks',
+            yours: false
+        },
         title: 'Stack the decks',
         body: [
             'Normally both players shuffle. For this tutorial the decks are stacked in numbered order instead: the learning-deck cards are numbered 1 to 18 in their top-right corner, and they are arranged so that card 1 is drawn first, card 2 second, and so on.',
@@ -127,6 +153,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Setup',
+        action: {
+            prompt: 'Set out three unforged keys each, and the shared token supply.',
+            button: 'Set out the tokens',
+            yours: false
+        },
         title: 'Keys and the common supply',
         body: [
             'Each player takes three key tokens — red, blue and yellow — and places them **unforged** side up. Those are the three keys you are racing to forge.',
@@ -137,6 +168,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Setup',
+        action: {
+            prompt: 'Draw your opening hand of seven cards.',
+            button: 'Draw your hand',
+            yours: true
+        },
         title: 'Opening hands',
         body: [
             'The first player is normally chosen at random. In this tutorial **Radiant goes first**.',
@@ -152,6 +188,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Setup',
+        action: {
+            prompt: 'Now play. Every turn runs through those five steps in order.',
+            button: 'Start turn 1',
+            yours: false
+        },
         title: 'The five steps of a turn',
         body: [
             'Players alternate turns until someone wins. Every turn runs through the same five steps, always in this order:',
@@ -164,6 +205,11 @@ export const TutorialSteps = [
     // --------------------------------------------------------------- turn 1
     {
         chapter: 'Turn 1 · Radiant',
+        action: {
+            prompt: '**Step 1.** You have 0{A} and a key costs 6{A}, so no key is forged.',
+            button: 'No key this turn',
+            yours: true
+        },
         title: 'Step 1 — can you forge?',
         body: [
             'Radiant starts the game. The first thing you do on every turn is check whether you can forge a key.',
@@ -175,6 +221,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 1 · Radiant',
+        action: {
+            prompt: '**Step 2.** Choose **house Mars** — click the Mars symbol in your stats bar.',
+            button: 'Choose Mars',
+            houses: ['mars'],
+            yours: true
+        },
         title: 'Step 2 — choose a house',
         body: [
             'Now Radiant picks one of the three houses on their identity card. That house is **active** for the rest of the turn.',
@@ -189,6 +241,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 1 · Radiant',
+        action: {
+            prompt: '**Step 3.** Play **Incubation Chamber** from your hand — click the card.',
+            button: 'Play it',
+            cards: ['incubation-chamber'],
+            yours: true
+        },
         title: 'Step 3 — the first-turn limit',
         body: [
             'On the very first turn of the game the starting player may play or discard only **one** card. From the second turn onward, players may play, use and discard as many cards of their active house as they like, in any order.',
@@ -200,6 +258,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 1 · Radiant',
+        action: {
+            prompt: 'It entered play exhausted, so you cannot use it this turn.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'Artifacts and the artifact row',
         body: [
             'Artifacts enter play **exhausted** — sideways — and sit in their own row behind the creatures. They stay in play from turn to turn until something removes them.',
@@ -211,6 +274,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 1 · Radiant',
+        action: {
+            prompt: '**Step 4.** Ready your cards.',
+            button: 'Ready cards',
+            yours: true
+        },
         title: 'Step 4 — ready cards',
         body: [
             'With nothing else to do, Radiant moves to step 4 and readies their cards: every exhausted card they control turns upright again.',
@@ -221,6 +289,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 1 · Radiant',
+        action: {
+            prompt: '**Step 5.** Draw back up to six. You already have six, so you draw nothing.',
+            button: 'End your turn',
+            yours: true
+        },
         title: 'Step 5 — draw cards',
         body: [
             'Finally Radiant draws back up to six cards. They played one card from a hand of seven, so they already have six and draw nothing.',
@@ -234,6 +307,11 @@ export const TutorialSteps = [
     // --------------------------------------------------------------- turn 2
     {
         chapter: 'Turn 2 · Onyx',
+        action: {
+            prompt: 'Onyx has no Æmber, and declares house Brobnar.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Onyx takes a turn',
         body: [
             'Onyx has no Æmber, so no key is forged, and they declare **house Brobnar** as their active house.',
@@ -247,6 +325,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 2 · Onyx',
+        action: {
+            prompt: 'Onyx plays Headhunter and Valdr into their battleline.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Creatures and the battleline',
         body: [
             'Onyx plays two Brobnar creatures, **Headhunter** and **Valdr**. Creatures are placed exhausted into a row called your **battleline**.',
@@ -260,6 +343,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 2 · Onyx',
+        action: {
+            prompt: 'Onyx plays the artifact Gauntlet of Command.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'An artifact for Onyx',
         body: [
             'Onyx also plays the artifact **Gauntlet of Command**, exhausted, below their battleline.',
@@ -270,6 +358,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 2 · Onyx',
+        action: {
+            prompt: 'Onyx readies up and draws back to six.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Ready, then draw',
         body: [
             'Onyx readies their cards — the two creatures and the artifact turn upright — and then draws back up to six, taking three cards from the top of their deck.',
@@ -285,6 +378,12 @@ export const TutorialSteps = [
     // --------------------------------------------------------------- turn 3
     {
         chapter: 'Turn 3 · Radiant',
+        action: {
+            prompt: 'Your turn. Choose **house Sanctum**.',
+            button: 'Choose Sanctum',
+            houses: ['sanctum'],
+            yours: true
+        },
         title: 'Radiant declares Sanctum',
         body: [
             'Radiant still has no Æmber, so no key is forged. This time they declare **house Sanctum**.',
@@ -298,6 +397,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 3 · Radiant',
+        action: {
+            prompt: 'Use **Incubation Chamber**’s Omni ability to archive Yxl the Iron Captain.',
+            button: 'Use it',
+            cards: ['incubation-chamber'],
+            yours: true
+        },
         title: 'Omni: the exception to the house rule',
         body: [
             'Incubation Chamber reads *Omni: You may reveal a Mars creature from your hand. If you do, archive it.*',
@@ -313,6 +418,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 3 · Radiant',
+        action: {
+            prompt: 'Yxl is face down in your archives now, saved for a Mars turn.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'The archives',
         body: [
             'Archived cards go face down, out of play, next to your discard pile. They are not in your hand and cannot be played from the archives.',
@@ -323,6 +433,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 3 · Radiant',
+        action: {
+            prompt: 'Play **Champion Anaphiel**.',
+            button: 'Play it',
+            cards: ['champion-anaphiel'],
+            yours: true
+        },
         title: 'Reading a creature card',
         body: [
             'Radiant plays the Sanctum creature **Champion Anaphiel**. It enters play exhausted, so on the board it is lying on its side; read it from the upright copy in the panel below.',
@@ -335,6 +451,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 3 · Radiant',
+        action: {
+            prompt: 'Play **Sergeant Zakiel** next to it.',
+            button: 'Play it',
+            cards: ['sergeant-zakiel'],
+            yours: true
+        },
         title: 'Play abilities',
         body: [
             'Radiant’s other Sanctum card is **Sergeant Zakiel**, played exhausted into the battleline next to Champion Anaphiel.',
@@ -346,6 +468,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 3 · Radiant',
+        action: {
+            prompt: 'Zakiel’s Play ability readies a neighbour — ready **Champion Anaphiel**.',
+            button: 'Ready it',
+            cards: ['champion-anaphiel'],
+            yours: true
+        },
         title: 'Readying Champion Anaphiel',
         body: [
             'Champion Anaphiel is a neighbour of Sergeant Zakiel, so Zakiel’s Play ability readies it. A readied creature can be used, even though it only just arrived.',
@@ -359,6 +487,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 3 · Radiant',
+        action: {
+            prompt: 'Attack **Headhunter** with Champion Anaphiel — click Headhunter.',
+            button: 'Fight',
+            enemyCards: ['headhunter'],
+            yours: true
+        },
         title: 'Fighting',
         body: [
             'Sergeant Zakiel’s ability finishes by letting that readied creature fight. To **fight**, exhaust a ready creature and pick one enemy creature to attack. Both creatures deal damage equal to their power **at the same time** — so even a creature that dies still hits back.',
@@ -373,6 +507,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 3 · Radiant',
+        action: {
+            prompt: 'Nothing left to do. Ready your cards and draw back to six.',
+            button: 'End your turn',
+            yours: true
+        },
         title: 'End of turn',
         body: [
             'Radiant has no more Sanctum cards to play, use or discard, so they ready their cards and draw back up to six.',
@@ -388,6 +527,11 @@ export const TutorialSteps = [
     // --------------------------------------------------------------- turn 4
     {
         chapter: 'Turn 4 · Onyx',
+        action: {
+            prompt: 'Onyx declares house Ekwidon.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Onyx declares Ekwidon',
         body: [
             'Key cost is still 6{A} and Onyx has none, so they move to step 2 and declare **house Ekwidon**.'
@@ -400,6 +544,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 4 · Onyx',
+        action: {
+            prompt: 'Onyx plays Gemcoat Vendor and The Old Tinker onto a flank.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Flanks',
         body: [
             'Onyx plays the Ekwidon creatures **Gemcoat Vendor** and **The Old Tinker**, exhausted, into the battleline.',
@@ -414,6 +563,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 4 · Onyx',
+        action: {
+            prompt: 'Onyx plays Forced Retirement, which carries two bonus icons.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Bonus icons',
         body: [
             'Onyx plays the Ekwidon action card **Forced Retirement**. Look at its top-left corner, below the house symbol: this copy has two **bonus icons**, a capture {C} and a draw {R}.',
@@ -425,6 +579,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 4 · Onyx',
+        action: {
+            prompt: 'The capture bonus finds nothing to take — your pool is empty.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'The capture bonus does nothing',
         body: [
             'The capture bonus would move 1{A} from Radiant’s pool onto one of Onyx’s creatures. Radiant’s pool is empty, so nothing happens.',
@@ -437,6 +596,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 4 · Onyx',
+        action: {
+            prompt: 'The draw bonus draws them card 10, Kaupe.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'The draw bonus',
         body: [
             'The draw bonus lets Onyx draw one card from the top of their deck. They draw card number 10, the Unfathomable creature **Kaupe**.',
@@ -450,6 +614,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 4 · Onyx',
+        action: {
+            prompt: 'Forced Retirement destroys your Champion Anaphiel. You gain 1{A} for it.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Forced Retirement resolves',
         body: [
             'Now the card’s own ability: *Play: Destroy a creature. If you do, its controller gains 1{A}.*',
@@ -466,6 +635,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 4 · Onyx',
+        action: {
+            prompt: 'Onyx readies up and draws back to six.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'End of turn',
         body: [
             'Onyx has nothing else to play, use or discard, so they ready their cards and draw back up to six.'
@@ -480,6 +654,12 @@ export const TutorialSteps = [
     // --------------------------------------------------------------- turn 5
     {
         chapter: 'Turn 5 · Radiant',
+        action: {
+            prompt: 'Your turn, 1{A} in pool. Choose **house Star Alliance**.',
+            button: 'Choose Star Alliance',
+            houses: ['staralliance'],
+            yours: true
+        },
         title: 'One Æmber is not enough',
         body: [
             'Radiant begins with 1{A} in their pool. A key costs 6{A}, so no key is forged. They declare **house Star Alliance**.'
@@ -492,6 +672,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 5 · Radiant',
+        action: {
+            prompt: 'Use **Incubation Chamber** again, archiving Ironyx Rebel.',
+            button: 'Use it',
+            cards: ['incubation-chamber'],
+            yours: true
+        },
         title: 'Archiving again',
         body: [
             'Incubation Chamber’s Omni ability works no matter which house is active, so Radiant uses it again and archives their Mars card **Ironyx Rebel**.',
@@ -505,6 +691,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 5 · Radiant',
+        action: {
+            prompt: 'Play the upgrade **Badge of Unity** onto Sergeant Zakiel.',
+            button: 'Play it',
+            cards: ['badge-of-unity'],
+            yours: true
+        },
         title: 'Upgrades',
         body: [
             'Radiant plays the upgrade **Badge of Unity**. An upgrade is not played on its own — you attach it to a creature by tucking it partly underneath, and it stays there modifying that creature.',
@@ -517,6 +709,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 5 · Radiant',
+        action: {
+            prompt: 'Reap with **Sergeant Zakiel** — Badge of Unity makes him Star Alliance.',
+            button: 'Reap',
+            cards: ['sergeant-zakiel'],
+            yours: true
+        },
         title: 'Reaping',
         body: [
             'A ready creature of your active house can do one of three things: **fight**, **reap**, or **use** an Action or Omni ability printed on it.',
@@ -531,6 +729,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 5 · Radiant',
+        action: {
+            prompt: 'Play **Commander Chan** and **Medic Ingram**.',
+            button: 'Play them',
+            cards: ['commander-chan', 'medic-ingram'],
+            yours: true
+        },
         title: 'Two more creatures',
         body: [
             'Radiant plays **Commander Chan** and **Medic Ingram** into the battleline, both exhausted.',
@@ -544,6 +748,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 5 · Radiant',
+        action: {
+            prompt: 'Medic Ingram’s ability wards a creature — ward **Commander Chan**.',
+            button: 'Ward it',
+            cards: ['commander-chan'],
+            yours: true
+        },
         title: 'Warding',
         body: [
             'No creature has damage on it, so the healing part of Medic Ingram’s ability does nothing — resolve what you can, ignore the rest — but the ward still happens.',
@@ -556,6 +766,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 5 · Radiant',
+        action: {
+            prompt: 'Ready your cards and draw back to six.',
+            button: 'End your turn',
+            yours: true
+        },
         title: 'End of turn',
         body: ['Radiant readies their cards and draws back up to six.'],
         highlight: ['turnsteps'],
@@ -568,6 +783,11 @@ export const TutorialSteps = [
     // --------------------------------------------------------------- turn 6
     {
         chapter: 'Turn 6 · Onyx',
+        action: {
+            prompt: 'Onyx declares house Unfathomable and plays Wikolia.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Onyx declares Unfathomable',
         body: [
             'Onyx still has no Æmber. They declare **house Unfathomable** and play the creature **Wikolia**, exhausted, into the battleline.'
@@ -581,6 +801,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 6 · Onyx',
+        action: {
+            prompt: 'Onyx throws away Adult Swim rather than play it.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Discarding on purpose',
         body: [
             'Onyx chooses to **discard** their Unfathomable action **Adult Swim** straight from hand, without playing it.',
@@ -592,6 +817,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 6 · Onyx',
+        action: {
+            prompt: 'Onyx plays Kaupe and Frigorific Rod, gaining 1{A} from a bonus icon.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'An Æmber bonus icon',
         body: [
             'Onyx plays **Kaupe** to the battleline, then the artifact **Frigorific Rod**, both exhausted.',
@@ -606,6 +836,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 6 · Onyx',
+        action: {
+            prompt: 'Onyx plays Weak Link onto your Commander Chan, and gains another 1{A}.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'An upgrade on an enemy creature',
         body: [
             'Onyx plays the upgrade **Weak Link** — onto Radiant’s **Commander Chan**. Upgrades are not only for your own creatures.',
@@ -620,6 +855,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 6 · Onyx',
+        action: {
+            prompt: 'Onyx readies up and draws five cards.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'End of turn',
         body: [
             'Onyx readies their cards and draws back up to six — five cards this time, since their hand is nearly empty.'
@@ -634,6 +874,13 @@ export const TutorialSteps = [
     // --------------------------------------------------------------- turn 7
     {
         chapter: 'Turn 7 · Radiant',
+        action: {
+            prompt: 'Your turn, 2{A}. Choose **Sanctum**, then attack **Kaupe** with Sergeant Zakiel.',
+            button: 'Choose Sanctum and fight',
+            enemyCards: ['kaupe'],
+            houses: ['sanctum'],
+            yours: true
+        },
         title: 'Clearing the way',
         body: [
             'Radiant has 2{A} — still short of a key — and declares **house Sanctum**.',
@@ -648,6 +895,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 7 · Radiant',
+        action: {
+            prompt: 'Killing Kaupe first is what makes the rest of this turn possible.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'Why that fight came first',
         body: [
             'Kaupe read *Your opponent cannot play more than 1 card of each card type each turn.* With it in play Radiant could have played only one creature this turn.',
@@ -658,6 +910,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 7 · Radiant',
+        action: {
+            prompt: 'Play **Protect the Weak** onto Commander Chan.',
+            button: 'Play it',
+            cards: ['protect-the-weak'],
+            yours: true
+        },
         title: 'Protect the Weak',
         body: [
             'Radiant plays the upgrade **Protect the Weak** onto **Commander Chan**, gaining 1{A} from its Æmber bonus icon.',
@@ -672,6 +930,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 7 · Radiant',
+        action: {
+            prompt: 'Play the artifact **Gorm of Omm**.',
+            button: 'Play it',
+            cards: ['gorm-of-omm'],
+            yours: true
+        },
         title: 'Gorm of Omm',
         body: [
             'Radiant plays the artifact **Gorm of Omm** exhausted, next to Incubation Chamber.',
@@ -682,6 +946,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 7 · Radiant',
+        action: {
+            prompt: 'Play **Mother Northelle** and **Raiding Knight** onto your left flank.',
+            button: 'Play them',
+            cards: ['mother-northelle', 'raiding-knight'],
+            yours: true
+        },
         title: 'Capture',
         body: [
             'Radiant plays **Mother Northelle**, then **Raiding Knight**, both exhausted onto the left flank.',
@@ -698,6 +968,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 7 · Radiant',
+        action: {
+            prompt: 'Ready your cards and draw back to six — that empties your deck.',
+            button: 'End your turn',
+            yours: true
+        },
         title: 'The deck runs out',
         body: [
             'Radiant readies and draws back up to six — and that empties their deck. There is nothing wrong with this: when you next need to draw and your deck is gone, you shuffle your discard pile to make a new one.',
@@ -714,6 +989,11 @@ export const TutorialSteps = [
     // --------------------------------------------------------------- turn 8
     {
         chapter: 'Turn 8 · Onyx',
+        action: {
+            prompt: 'Onyx declares house Ekwidon.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Onyx goes to work',
         body: [
             'Onyx has 1{A} and declares **house Ekwidon** — the house of every creature they need this turn.'
@@ -726,6 +1006,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 8 · Onyx',
+        action: {
+            prompt: 'Onyx uses Gemcoat Vendor to steal 1{A} from you.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Using an Action ability — and stealing',
         body: [
             'Onyx exhausts **Gemcoat Vendor** to use its Action ability: *Steal 1{A}. Deal 1 damage to Gemcoat Vendor.*',
@@ -742,6 +1027,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 8 · Onyx',
+        action: {
+            prompt: 'Onyx reaps with The Old Tinker, then discards and draws.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'After Reap abilities',
         body: [
             'Onyx reaps with **The Old Tinker**, gaining 1{A}. Its *After Reap: Discard a card from your hand. Draw a card.* then triggers.',
@@ -757,6 +1047,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 8 · Onyx',
+        action: {
+            prompt: 'Onyx’s deck is empty, so they reshuffle and draw Forced Retirement.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Reshuffling',
         body: [
             'Onyx plays **Transitory Philosopher**, which has a draw bonus icon {R}. Their deck is empty, so they shuffle their discard pile into a new deck and draw from it.',
@@ -778,6 +1073,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 8 · Onyx',
+        action: {
+            prompt: 'Onyx replays Forced Retirement: capture 1{A} from you, then draw.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Forced Retirement, again',
         body: [
             'Onyx plays it straight away. Bonus icons first, in order:',
@@ -794,6 +1094,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 8 · Onyx',
+        action: {
+            prompt: 'Onyx destroys your Raiding Knight. The captured Æmber goes home.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Æmber comes home',
         body: [
             'Now Forced Retirement’s own ability: destroy a creature, its controller gains 1{A}. Onyx destroys **Raiding Knight**, so Radiant gains 1{A}.',
@@ -808,6 +1113,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 8 · Onyx',
+        action: {
+            prompt: 'Onyx plays Belligerent Guard, which makes you draw a card, then reaps.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'A creature that enters ready',
         body: [
             'Onyx plays **Belligerent Guard**, which reads *Belligerent Guard enters play ready.* — so it can be used the same turn.',
@@ -825,6 +1135,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 8 · Onyx',
+        action: {
+            prompt: 'Onyx readies up and draws. You are holding seven cards.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'End of turn',
         body: [
             'Onyx readies everything and draws back up to six. Radiant is now holding seven cards — a card drawn on your opponent’s turn is a card you keep.'
@@ -839,6 +1154,12 @@ export const TutorialSteps = [
     // --------------------------------------------------------------- turn 9
     {
         chapter: 'Turn 9 · Radiant',
+        action: {
+            prompt: 'Your turn. Choose **house Mars** — the house you have been saving.',
+            button: 'Choose Mars',
+            houses: ['mars'],
+            yours: true
+        },
         title: 'A Mars turn',
         body: [
             'Radiant has 2{A} and cannot forge. They declare **house Mars** — the house they have been stockpiling in the archives.'
@@ -851,6 +1172,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 9 · Radiant',
+        action: {
+            prompt: 'Take both cards out of your **archives** — click the Archives count.',
+            button: 'Take the archives',
+            piles: ['archives'],
+            yours: true
+        },
         title: 'Emptying the archives',
         body: [
             'During step 2, after choosing a house, you may take **all** the cards in your archives into your hand. Radiant takes both.',
@@ -861,6 +1188,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 9 · Radiant',
+        action: {
+            prompt: 'Use **Gorm of Omm** to destroy Onyx’s **Gauntlet of Command**.',
+            button: 'Use it',
+            enemyCards: ['gauntlet-of-command'],
+            yours: true
+        },
         title: 'Trading an artifact for an artifact',
         body: [
             'Radiant uses **Gorm of Omm**’s Omni ability: destroy Gorm of Omm, then destroy an artifact. They point it at Onyx’s **Gauntlet of Command**.',
@@ -875,6 +1208,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 9 · Radiant',
+        action: {
+            prompt: 'Play **Yxl the Iron Captain**.',
+            button: 'Play it',
+            cards: ['yxl-the-iron-captain'],
+            yours: true
+        },
         title: 'Traits',
         body: [
             'Radiant plays **Yxl the Iron Captain**, whose *Play: Each friendly Ironyx creature captures 2{A}.* fires immediately.',
@@ -889,6 +1228,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 9 · Radiant',
+        action: {
+            prompt: 'Play **Myx, the Tallminded**.',
+            button: 'Play it',
+            cards: ['myx-the-tallminded'],
+            yours: true
+        },
         title: 'A constant ability',
         body: [
             'Radiant plays **Myx, the Tallminded**, exhausted. Its text has no trigger word at all: *Your opponent’s keys cost +1{A} for each friendly Mars creature in play.*',
@@ -900,6 +1245,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 9 · Radiant',
+        action: {
+            prompt: 'Deploy **Ironyx Rebel** between Yxl and Myx.',
+            button: 'Deploy it',
+            cards: ['ironyx-rebel'],
+            yours: true
+        },
         title: 'Deploy',
         body: [
             'Radiant plays **Ironyx Rebel**, which has **deploy**: instead of entering on a flank, it can be placed anywhere in the battleline. Radiant slots it in between Yxl and Myx.',
@@ -923,6 +1274,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 9 · Radiant',
+        action: {
+            prompt: 'Play **Zysysyx Shockworm**.',
+            button: 'Play it',
+            cards: ['zysysyx-shockworm'],
+            yours: true
+        },
         title: 'One more creature',
         body: [
             'Radiant plays **Zysysyx Shockworm** to the battleline. Its *After an enemy creature reaps, stun it.* is a constant threat rather than something Radiant activates — it will punish Onyx for reaping on their next turn.'
@@ -932,6 +1289,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 9 · Radiant',
+        action: {
+            prompt: 'Play **Destroy Them All!** — one card, three answers.',
+            button: 'Play it',
+            cards: ['destroy-them-all'],
+            yours: true
+        },
         title: 'Destroy Them All!',
         body: [
             'Radiant plays the action **Destroy Them All!**: *Destroy an artifact, a creature, and an upgrade.* One card, three answers.',
@@ -953,6 +1316,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 9 · Radiant',
+        action: {
+            prompt: 'Reap with **Yxl** and **Myx**, then end your turn.',
+            button: 'Reap and end the turn',
+            cards: ['yxl-the-iron-captain', 'myx-the-tallminded'],
+            yours: true
+        },
         title: 'Cashing in',
         body: [
             'Radiant reaps with **Yxl the Iron Captain** and **Myx, the Tallminded** — the two creatures Ironyx Rebel readied — gaining 1{A} each and reaching 5{A}.',
@@ -978,6 +1347,11 @@ export const TutorialSteps = [
     // -------------------------------------------------------------- turn 10
     {
         chapter: 'Turn 10 · Onyx',
+        action: {
+            prompt: 'Onyx declares Brobnar. Their keys now cost 10{A}.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Keys just got expensive',
         body: [
             'Onyx has 3{A}, but look at their key cost. Myx, the Tallminded adds +1{A} for each of Radiant’s Mars creatures, and Radiant has four of them in play — so an Onyx key now costs **10{A}**.',
@@ -992,6 +1366,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 10 · Onyx',
+        action: {
+            prompt: 'Onyx replays Headhunter.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Headhunter returns',
         body: [
             'Onyx plays **Headhunter** — the same card Champion Anaphiel destroyed on turn 3, drawn again out of the reshuffled deck.'
@@ -1001,6 +1380,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 10 · Onyx',
+        action: {
+            prompt: 'Onyx puts Blood of Titans on it — Headhunter is now 10 power.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Making a monster',
         body: [
             'Onyx attaches the upgrade **Blood of Titans** to Headhunter: *This creature gets +5 power.* Headhunter goes from 5 power to **10**.',
@@ -1015,6 +1399,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 10 · Onyx',
+        action: {
+            prompt: 'Onyx plays Grenade Snib and Crogg the Clumsy, then draws.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Two more Brobnar creatures',
         body: [
             'Onyx plays **Grenade Snib** and **Crogg the Clumsy** into the battleline, then readies and draws back up to six.',
@@ -1041,6 +1430,12 @@ export const TutorialSteps = [
     // -------------------------------------------------------------- turn 11
     {
         chapter: 'Turn 11 · Radiant',
+        action: {
+            prompt: 'Your turn, 5{A} — one short. Choose **house Star Alliance**.',
+            button: 'Choose Star Alliance',
+            houses: ['staralliance'],
+            yours: true
+        },
         title: 'One Æmber short',
         body: [
             'Radiant has 5{A} and a key costs 6{A}. One short. They declare **house Star Alliance** and set out to find it.'
@@ -1053,6 +1448,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 11 · Radiant',
+        action: {
+            prompt: 'Attack **Wikolia** with Commander Chan.',
+            button: 'Fight',
+            enemyCards: ['wikolia'],
+            yours: true
+        },
         title: 'The ward pays off',
         body: [
             '**Commander Chan** fights **Wikolia**. Chan deals 4 damage and destroys it; Wikolia deals 3 back.',
@@ -1063,6 +1464,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 11 · Radiant',
+        action: {
+            prompt: 'Chan’s After Fight lets you use another creature — reap with **Mother Northelle**.',
+            button: 'Reap',
+            cards: ['mother-northelle'],
+            yours: true
+        },
         title: 'After Fight: use another creature',
         body: [
             'Commander Chan’s *After Fight/After Reap: Use another friendly creature.* now triggers.',
@@ -1075,6 +1482,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 11 · Radiant',
+        action: {
+            prompt: 'Northelle’s After Reap moves 1{A} off **Yxl the Iron Captain** into your pool.',
+            button: 'Move it',
+            cards: ['yxl-the-iron-captain'],
+            yours: true
+        },
         title: 'Freeing captured Æmber',
         body: [
             'Mother Northelle has her own trigger: *After Reap: Move 1{A} from a friendly creature to your pool.*',
@@ -1085,6 +1498,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 11 · Radiant',
+        action: {
+            prompt: 'Play **Tactical Officer Moon**.',
+            button: 'Play it',
+            cards: ['tactical-officer-moon'],
+            yours: true
+        },
         title: 'Optional abilities',
         body: [
             'Radiant plays **Tactical Officer Moon**. Its *Play: You may rearrange the creatures in a player’s battleline.* is optional — "you may" always means you can decline.',
@@ -1098,6 +1517,12 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 11 · Radiant',
+        action: {
+            prompt: 'Reap with **Sergeant Zakiel**, then **Medic Ingram**.',
+            button: 'Reap with both',
+            cards: ['sergeant-zakiel', 'medic-ingram'],
+            yours: true
+        },
         title: 'Two more reaps',
         body: [
             'Radiant reaps with **Sergeant Zakiel** — still Star Alliance thanks to Badge of Unity — for 8{A}, then with **Medic Ingram** for 9{A}.',
@@ -1118,6 +1543,13 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 11 · Radiant',
+        action: {
+            prompt: 'Play **Explo-rover**, then **Zap** at **Gemcoat Vendor**.',
+            button: 'Play them',
+            cards: ['explo-rover', 'zap'],
+            enemyCards: ['gemcoat-vendor'],
+            yours: true
+        },
         title: 'Zap',
         body: [
             'Radiant plays **Explo-rover**, then the action **Zap**, whose Æmber bonus icon takes them to **10{A}**.',
@@ -1135,6 +1567,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 11 · Radiant',
+        action: {
+            prompt: 'End your turn on 10{A} and call check.',
+            button: 'Ready, draw, and call check',
+            yours: true
+        },
         title: '“Check”',
         body: [
             'Radiant readies and draws what is left of their deck. With **10{A}** in the pool and a key costing 6{A}, Radiant will forge at the start of their next turn no matter what.',
@@ -1156,6 +1593,11 @@ export const TutorialSteps = [
     // -------------------------------------------------------------- turn 12
     {
         chapter: 'Turn 12 · Onyx',
+        action: {
+            prompt: 'Onyx cannot reach 10{A}, so they declare Brobnar and attack.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Onyx cannot race',
         body: [
             'Onyx has 4{A} and their keys cost **10{A}** because of Myx, the Tallminded and Radiant’s four Mars creatures. Reaping with all three Brobnar creatures would not get them there.',
@@ -1175,6 +1617,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 12 · Onyx',
+        action: {
+            prompt: 'Headhunter kills Myx, the Tallminded and gains 1{A}.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Headhunter swings',
         body: [
             '**Headhunter**, at 10 power thanks to Blood of Titans, attacks **Myx, the Tallminded** (5 power). Myx is destroyed; Headhunter takes 5 damage and survives comfortably.',
@@ -1188,6 +1635,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 12 · Onyx',
+        action: {
+            prompt: 'Crogg kills Yxl, and its splash-attack takes Ironyx Rebel with it.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Splash attack',
         body: [
             '**Crogg the Clumsy** (7 power) attacks **Yxl the Iron Captain** (4 power, 1 armor). 7 − 1 armor = 6 damage: Yxl is destroyed, and deals 4 back to Crogg.',
@@ -1205,6 +1657,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 12 · Onyx',
+        action: {
+            prompt: 'Taunt keeps Grenade Snib off Medic Ingram, so it dies on Commander Chan.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Taunt changes the target',
         body: [
             'Medic Ingram, now damaged, would be easy prey for **Grenade Snib**. But Commander Chan carries Protect the Weak, which gives it **taunt** — and Medic Ingram is Chan’s neighbour, so it cannot be attacked at all.',
@@ -1224,6 +1681,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 12 · Onyx',
+        action: {
+            prompt: 'Onyx plays Valdr and ends their turn. You still hold 8{A}.',
+            button: 'Watch',
+            yours: false
+        },
         title: 'Not enough',
         body: [
             'Onyx plays **Valdr** to the battleline, readies their cards and draws back up to six.',
@@ -1240,6 +1702,12 @@ export const TutorialSteps = [
     // -------------------------------------------------------------- turn 13
     {
         chapter: 'Turn 13 · Radiant',
+        action: {
+            prompt: '**Step 1.** You have 8{A} and a key costs 6{A} — **forge your first key**.',
+            button: 'Forge a key',
+            stats: ['keys'],
+            yours: true
+        },
         title: 'Forge!',
         body: [
             'Step 1 of Radiant’s turn: they have 8{A} and a key costs 6{A}. Radiant spends 6{A} and forges their **first key** — flipping the red key token to its forged side.',
@@ -1254,6 +1722,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 13 · Radiant',
+        action: {
+            prompt: 'That is the whole game. The rest you learn by playing.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'That is the game',
         body: [
             'You now know every rule this game uses: houses and the active house, Æmber and key cost, playing and discarding and using, reaping and fighting, ready and exhausted, damage and armor and power, capture and steal, ward and stun and taunt, deploy and splash-attack, archives, bonus icons, and the reshuffle.',
@@ -1264,6 +1737,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Turn 13 · Radiant',
+        action: {
+            prompt: 'Three keywords you will see on these cards that never came up here.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'Three keywords that never came up',
         body: [
             'Three keywords are printed on cards in these decks but never triggered in this game. Each one is explained in brackets on the card itself, which is true of every KeyForge keyword — you never have to remember one.',
@@ -1280,6 +1758,11 @@ export const TutorialSteps = [
     // ------------------------------------------------------- the platform
     {
         chapter: 'Playing on Archon Arena',
+        action: {
+            prompt: 'The board you just played on is laid out like the real one.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'The board you just used is the real one',
         body: [
             'Everything you have been reading sits in the same places in a real game here: your identity card, keys, Æmber and key cost along your stats bar; your creatures nearest the middle; your artifacts behind them; your hand along the bottom; your opponent mirrored above.',
@@ -1294,6 +1777,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Playing on Archon Arena',
+        action: {
+            prompt: 'Next: get a deck onto your account.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'Add a deck',
         body: [
             'Real KeyForge decks are unique and each has an identifier on the Master Vault. Go to **My Decks → Import Deck**, paste the deck’s link or its id, and it is yours to play with.',
@@ -1304,6 +1792,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Playing on Archon Arena',
+        action: {
+            prompt: 'Then find someone to play.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'Find an opponent',
         body: [
             '**Play → Play Online** lists open games; join one, or start your own and pick a name, a format and whether it is beginner, casual or competitive.',
@@ -1315,6 +1808,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Playing on Archon Arena',
+        action: {
+            prompt: 'And know what to do when a card misbehaves.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'When something goes wrong',
         body: [
             'Cards are automated, but if a card misbehaves or someone misclicks, the wrench icon turns on **manual mode**, which lets either player move cards and adjust counters by hand.',
@@ -1325,6 +1823,11 @@ export const TutorialSteps = [
     },
     {
         chapter: 'Playing on Archon Arena',
+        action: {
+            prompt: 'One last thing: where to go from here.',
+            button: 'Continue',
+            yours: false
+        },
         title: 'Where to go next',
         body: [
             'Play a few casual games first — the rules land much faster with a deck in your hand than in a walkthrough.',
