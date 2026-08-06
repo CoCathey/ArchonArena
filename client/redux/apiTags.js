@@ -26,5 +26,7 @@ export const TAG_TYPES = {
     // ARCHON (N8): the admin operations dashboard.
     ANALYTICS: 'Analytics',
     // ARCHON (N5): reports, the moderation queue and the audit log.
-    MODERATION: 'Moderation'
+    MODERATION: 'Moderation',
+    // ARCHON (N12): Patreon link + pledge status.
+    PATREON: 'Patreon'
 };

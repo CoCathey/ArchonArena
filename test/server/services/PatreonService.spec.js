@@ -3,14 +3,24 @@ const PatreonService = require('../../../server/services/PatreonService');
 describe('PatreonService', function () {
     let userService;
     let service;
+    let config;
     let fetchMock;
 
     beforeEach(function () {
+        config = {
+            enabled: true,
+            clientId: 'client-id',
+            clientSecret: 'secret',
+            callbackUrl: 'https://site/patreon',
+            campaignId: '',
+            campaignUrl: 'https://www.patreon.com/archonarena'
+        };
         userService = {
             update: vi.fn().mockResolvedValue(undefined),
             getUserByUsername: vi.fn()
         };
-        service = new PatreonService('client-id', 'secret', userService, 'https://site/callback');
+        const configService = { getValue: (key) => (key === 'patreon' ? config : undefined) };
+        service = new PatreonService(configService, userService);
         fetchMock = vi.spyOn(global, 'fetch');
     });
 
@@ -32,12 +42,92 @@ describe('PatreonService', function () {
         getDetails: () => ({ username: 'alice', patreon })
     });
 
+    // A v2 identity payload with one membership of the given campaign.
+    const identity = ({ status = 'active_patron', campaignId = '42', tiers = [] } = {}) => ({
+        data: { id: '1', type: 'user' },
+        included: [
+            {
+                type: 'member',
+                id: 'm1',
+                attributes: {
+                    patron_status: status,
+                    currently_entitled_amount_cents: 500,
+                    last_charge_status: 'Paid'
+                },
+                relationships: {
+                    campaign: { data: { type: 'campaign', id: campaignId } },
+                    currently_entitled_tiers: {
+                        data: tiers.map((tier) => ({ type: 'tier', id: tier.id }))
+                    }
+                }
+            },
+            ...tiers.map((tier) => ({
+                type: 'tier',
+                id: tier.id,
+                attributes: { title: tier.title, amount_cents: tier.amountCents }
+            }))
+        ]
+    });
+
+    describe('configuration', function () {
+        it('is enabled only when the credentials are present', function () {
+            expect(service.isEnabled()).toBe(true);
+
+            config.clientSecret = '';
+            expect(service.isEnabled()).toBe(false);
+        });
+
+        it('stays disabled when the kill switch is off despite credentials', function () {
+            config.enabled = false;
+
+            expect(service.isEnabled()).toBe(false);
+        });
+
+        it('is disabled when there is no callback url to redirect back to', function () {
+            config.callbackUrl = '';
+
+            expect(service.isEnabled()).toBe(false);
+        });
+    });
+
+    describe('authorization request', function () {
+        it('asks for the membership scope', function () {
+            // Without identity.memberships Patreon returns an identity with no
+            // member records, so nobody could ever reach 'pledged'.
+            const params = new URL(service.createAuthRequest().url).searchParams;
+
+            expect(params.get('scope')).toContain('identity.memberships');
+        });
+
+        it('separates the scopes with %20 rather than a bare +', function () {
+            // A '+' only means a space under form-encoding rules; read
+            // literally it silently drops identity.memberships.
+            expect(service.createAuthRequest().url).toContain(
+                'scope=identity%20identity.memberships'
+            );
+        });
+
+        it('sends the configured client and callback', function () {
+            const params = new URL(service.createAuthRequest().url).searchParams;
+
+            expect(params.get('client_id')).toBe('client-id');
+            expect(params.get('redirect_uri')).toBe('https://site/patreon');
+            expect(params.get('response_type')).toBe('code');
+        });
+
+        it('mints a fresh unguessable state each time', function () {
+            const first = service.createAuthRequest();
+            const second = service.createAuthRequest();
+
+            expect(first.state).not.toBe(second.state);
+            expect(first.state.length).toBeGreaterThanOrEqual(24);
+            expect(new URL(first.url).searchParams.get('state')).toBe(first.state);
+        });
+    });
+
     describe('pledge status', function () {
         it('reports an active patron as pledged', async function () {
-            json({
-                data: { id: '1', type: 'user' },
-                included: [{ type: 'member', attributes: { patron_status: 'active_patron' } }]
-            });
+            json(identity());
 
             expect(await service.getPatreonStatusForUser(userWith({ access_token: 't' }))).toBe(
                 'pledged'
@@ -68,13 +158,25 @@ describe('PatreonService', function () {
             );
         });
 
+        it('asks for memberships with their campaign and tier linkage', async function () {
+            json(identity());
+
+            await service.getPatreonStatusForUser(userWith({ access_token: 't' }));
+
+            const url = new URL(fetchMock.mock.calls[0][0]);
+            expect(url.pathname).toContain('/api/oauth2/v2/identity');
+            expect(url.searchParams.get('include')).toContain('memberships.campaign');
+            expect(url.searchParams.get('include')).toContain(
+                'memberships.currently_entitled_tiers'
+            );
+        });
+
         it('sends the access token as a bearer credential', async function () {
             json({ data: {}, included: [] });
 
             await service.getPatreonStatusForUser(userWith({ access_token: 'abc123' }));
 
-            const [url, options] = fetchMock.mock.calls[0];
-            expect(url).toContain('/api/oauth2/v2/identity');
+            const [, options] = fetchMock.mock.calls[0];
             expect(options.headers.Authorization).toBe('Bearer abc123');
         });
 
@@ -104,6 +206,80 @@ describe('PatreonService', function () {
         });
     });
 
+    describe('campaign scoping', function () {
+        beforeEach(function () {
+            config.campaignId = '42';
+        });
+
+        it('counts a pledge to the configured campaign', async function () {
+            json(identity({ campaignId: '42' }));
+
+            expect(await service.getPatreonStatusForUser(userWith({ access_token: 't' }))).toBe(
+                'pledged'
+            );
+        });
+
+        it('ignores an active pledge to somebody else', async function () {
+            // Otherwise backing any unrelated creator on Patreon would grant
+            // the supporter role here.
+            json(identity({ campaignId: '999' }));
+
+            expect(await service.getPatreonStatusForUser(userWith({ access_token: 't' }))).toBe(
+                'linked'
+            );
+        });
+
+        it('ignores a membership with no campaign linkage at all', async function () {
+            json({
+                data: { id: '1' },
+                included: [{ type: 'member', attributes: { patron_status: 'active_patron' } }]
+            });
+
+            expect(await service.getPatreonStatusForUser(userWith({ access_token: 't' }))).toBe(
+                'linked'
+            );
+        });
+
+        it('counts every membership when no campaign is configured', async function () {
+            config.campaignId = '';
+            json(identity({ campaignId: '999' }));
+
+            expect(await service.getPatreonStatusForUser(userWith({ access_token: 't' }))).toBe(
+                'pledged'
+            );
+        });
+    });
+
+    describe('entitlements', function () {
+        it('reports the tiers the pledge currently entitles', async function () {
+            json(
+                identity({
+                    tiers: [{ id: 't1', title: 'Archon', amountCents: 500 }]
+                })
+            );
+
+            const membership = await service.getMembershipForUser(userWith({ access_token: 't' }));
+
+            expect(membership.status).toBe('pledged');
+            expect(membership.tiers).toEqual([{ id: 't1', title: 'Archon', amountCents: 500 }]);
+            expect(membership.amountCents).toBe(500);
+            expect(membership.lastChargeStatus).toBe('Paid');
+        });
+
+        it('reports no tiers for a linked account that does not pledge', async function () {
+            json(identity({ status: 'former_patron' }));
+
+            const membership = await service.getMembershipForUser(userWith({ access_token: 't' }));
+
+            expect(membership).toEqual({
+                status: 'linked',
+                tiers: [],
+                amountCents: null,
+                lastChargeStatus: null
+            });
+        });
+    });
+
     describe('linking', function () {
         it('exchanges the code and stores the tokens against the account', async function () {
             json({ access_token: 'a', refresh_token: 'r' });
@@ -125,7 +301,7 @@ describe('PatreonService', function () {
                 code: 'the-code',
                 client_id: 'client-id',
                 client_secret: 'secret',
-                redirect_uri: 'https://site/callback'
+                redirect_uri: 'https://site/patreon'
             });
         });
 

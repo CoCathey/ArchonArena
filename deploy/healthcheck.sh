@@ -297,6 +297,48 @@ if grep -qE "^OIDC_ENABLED=true" .env.production 2>/dev/null; then
 else
     warn "Keybringer SSO not enabled" "optional - needs the Keycloak client registered first (docs/design/keybringer-sso.md)"
 fi
+# ARCHON (N12): Patreon. Optional, so unset is a WARN - but half-set is a FAIL.
+# Credentials with no campaign id is the dangerous middle state: the app works,
+# and quietly hands the supporter role to anyone who backs any creator on
+# Patreon, because /identity returns memberships across every campaign.
+if grep -qE "^PATREON_CLIENT_ID=.+" .env.production 2>/dev/null; then
+    if grep -qE "^PATREON_CLIENT_SECRET=.+" .env.production 2>/dev/null; then
+        # Asked of the app rather than re-read from the file, so this reflects
+        # what the container actually loaded (the env vars have to be forwarded
+        # in docker-compose.prod.yml to get there at all).
+        patreon_state="$($DC exec -T lobby node -e "
+            const ConfigService = require('./server/services/ConfigService');
+            const PatreonService = require('./server/services/PatreonService');
+            const s = new PatreonService(new ConfigService(), {});
+            const c = s.getConfig();
+            console.log([s.isEnabled() ? 'ON' : 'OFF', c.campaignId || '', c.callbackUrl || ''].join('|'));
+        " 2>/dev/null | tail -1)"
+        patreon_on="$(echo "$patreon_state" | cut -d'|' -f1)"
+        patreon_campaign="$(echo "$patreon_state" | cut -d'|' -f2)"
+        patreon_callback="$(echo "$patreon_state" | cut -d'|' -f3)"
+
+        if [ "$patreon_on" = "ON" ]; then
+            ok "Patreon linking enabled (callback $patreon_callback)"
+            if [ -n "$patreon_campaign" ]; then
+                ok "Patreon scoped to campaign $patreon_campaign"
+            else
+                bad "Patreon has no campaign id - a pledge to ANY creator grants supporter here" \
+                    "bash deploy/patreon-setup.sh  (or set PATREON_CAMPAIGN_ID in .env.production)"
+            fi
+            ok "the redirect URI on the Patreon client must equal $patreon_callback exactly"
+        elif [ "$patreon_on" = "OFF" ]; then
+            bad "PATREON_* is set in .env.production but the app reports Patreon off" \
+                "usually PATREON_ENABLED=false, or a stray space in a value: $DC up -d lobby"
+        else
+            warn "could not determine the Patreon configuration" "lobby may be mid-restart; re-run"
+        fi
+    else
+        bad "PATREON_CLIENT_ID is set but PATREON_CLIENT_SECRET is empty" \
+            "bash deploy/patreon-setup.sh"
+    fi
+else
+    warn "Patreon linking not configured" "optional - no Patreon UI is shown and no supporter roles change (docs/design/patreon.md)"
+fi
 
 echo "== Resources =="
 disk_pct="$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')"

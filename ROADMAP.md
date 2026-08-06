@@ -95,7 +95,8 @@ systems are moderation (**N5**) and the tutorial (**N11**).
     timeouts, or moderation queue.
 -   **Any way to learn the game on the platform.** No tutorial, and onboarding never asks how
     much a new account already knows — the `/learn` route is a placeholder.
--   **A funding path.** The inherited Patreon integration has no campaign, credentials, or perks.
+-   **A funding path.** The Patreon link flow works, but there is no campaign, no credentials
+    set, and no defined perks.
 -   **In-person game tracking.** Paper games can only be recorded through a tournament.
 -   **A reason to visit an empty site.** Nothing to watch when nobody happens to be playing.
 -   **Teams**, **versioned public API**, **Discord**, **coaching/AI**, **streaming tools**,
@@ -875,9 +876,17 @@ path. TCO's Patreon integration is inherited but dormant (`PatreonService`, the 
 tiers, and perks that cannot touch competitive fairness.
 **Tasks**
 
--   Owner: create the Patreon campaign and tiers; set `patreonClientId`, `patreonSecret` and
-    `patreonCallbackUrl`.
--   Verify the inherited link/unlink and pledge-status refresh against the live campaign.
+-   [x] **The link flow itself.** Credentials moved out of the browser bundle into config
+        (`patreon.*` / `PATREON_*`); the `identity.memberships` scope requested, without which
+        Patreon returns no membership records and no account could ever have reached `pledged`;
+        memberships scoped to our campaign, so backing an unrelated creator no longer grants the
+        supporter role here; OAuth `state` bound to a signed cookie and the requesting user id;
+        the Integrations tab (previously behind a hardcoded `false`) shown when there is
+        something to integrate. Setup walkthrough:
+        [docs/design/patreon.md](docs/design/patreon.md).
+-   Owner: create the Patreon campaign and tiers; set `PATREON_CLIENT_ID`,
+    `PATREON_CLIENT_SECRET` and `PATREON_CAMPAIGN_ID`, then link your own account to verify the
+    round trip against the live campaign.
 -   Define supporter perks — cosmetic and convenience only: custom backgrounds and card backs,
     avatar frames, a supporter badge, longer replay retention, larger deck-import batches.
     **(admin-config)** which tier unlocks which perk.
@@ -1599,10 +1608,14 @@ storage for backups and replays. This phase is about paying for that without eve
 competitive advantage.
 
 -   [x] Patreon OAuth linking, pledge-status refresh, and a supporter role inherited from TCO
-        (`PatreonService`, `/patreon`, `/api/account/linkPatreon`) — dormant: no campaign, no
-        credentials, no defined perks.
--   [ ] **Patreon supporter program**: campaign + tiers, verified link/unlink flow, perks that
-        are cosmetic and convenience only, and a page saying where the money goes → **N12**.
+        (`PatreonService`, `/patreon`, `/api/account/linkPatreon`).
+-   [x] **Patreon link flow made real** — credentials moved to config (`patreon.*`, env
+        `PATREON_*`), the `identity.memberships` scope added (without it no account could ever
+        reach `pledged`), memberships scoped to our campaign, OAuth `state` added, and the
+        Integrations tab surfaced. Dormant until the owner sets credentials; see
+        [docs/design/patreon.md](docs/design/patreon.md).
+-   [ ] **Patreon supporter program**: campaign + tiers, perks that are cosmetic and convenience
+        only, and a page saying where the money goes → **N12**.
 -   [ ] Publish running costs and what supporters cover, so the ask is concrete.
 -   [ ] Revisit only if Patreon proves insufficient: one-off donations, or store/organizer
         sponsorship of events. Never anything that touches Amber, matchmaking, or eligibility.

@@ -138,7 +138,19 @@ const AppRoutes = ({ currentGame, user }) => {
                 path='/admin/moderation'
                 element={requirePermission('canModerateChat', <ModerationQueue />)}
             />
-            <Route path='/patreon' element={<Patreon code={getParam('code')} />} />
+            {/* ARCHON (N12): Patreon's OAuth callback. `state` is checked
+                server-side against a signed cookie; `error` is set when the
+                player declined on Patreon's consent screen. */}
+            <Route
+                path='/patreon'
+                element={
+                    <Patreon
+                        code={getParam('code')}
+                        state={getParam('state')}
+                        error={getParam('error')}
+                    />
+                }
+            />
             {/* ARCHON: game history + community news are live features */}
             <Route path='/matches' element={<Matches />} />
             {/* ARCHON: public player profile - every username on the site links here */}

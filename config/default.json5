@@ -97,6 +97,35 @@
         }
     },
 
+    // ARCHON (N12): Patreon supporter linking.
+    //
+    // Dormant until credentials exist - `enabled` on its own does nothing, so a
+    // fresh checkout shows no Patreon UI rather than a button that dead-ends on
+    // Patreon's error page. To turn it on:
+    //
+    //  1. Register a client at
+    //     https://www.patreon.com/portal/registration/register-clients
+    //  2. Add the redirect URI *exactly* as `callbackUrl` below - Patreon
+    //     rejects the code exchange on any mismatch, trailing slash included.
+    //  3. Set PATREON_CLIENT_ID and PATREON_CLIENT_SECRET.
+    //  4. Set PATREON_CAMPAIGN_ID (see docs/design/patreon.md for the one-line
+    //     lookup). Without it, a pledge to *any* creator on Patreon counts as a
+    //     pledge here.
+    patreon: {
+        enabled: true, // kill switch; credentials are what actually gate it
+        clientId: '', // set via PATREON_CLIENT_ID
+        clientSecret: '', // set via PATREON_CLIENT_SECRET
+        // Where Patreon sends the player back. Must match the redirect URI
+        // registered on the client, and must be a route the SPA serves.
+        callbackUrl: 'http://localhost:4000/patreon',
+        // Numeric campaign id. Memberships of other campaigns are ignored.
+        campaignId: '', // set via PATREON_CAMPAIGN_ID
+        // Public campaign page, linked from the profile so a player who is not
+        // yet a patron can find it. Blank hides the link.
+        campaignUrl: '', // set via PATREON_CAMPAIGN_URL
+        requestTimeoutMs: 10000
+    },
+
     // Rating engine (SAS-adjusted Elo). Defaults live in code
     // (server/services/rating/); set values here to override. All of this
     // becomes runtime admin settings once the settings service exists.
