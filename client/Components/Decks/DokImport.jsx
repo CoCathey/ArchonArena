@@ -4,7 +4,34 @@ import { Button as HeroButton } from '@heroui/react';
 
 import { usePrepareDokImportMutation, useSaveDeckMutation } from '../../redux/api';
 
-const IMPORT_CONCURRENCY = 3;
+// ARCHON: pacing for a whole-collection import.
+//
+// Master Vault meters deck fetches, and it meters them hard. This importer
+// originally fired decks at concurrency 3 with no spacing, no retry and no
+// way to stop: a 257-deck sync imported exactly 3 - one per worker - and then
+// failed the remaining 254 in a few seconds, because nothing noticed the
+// refusals or slowed down for them. Worse, burning the rest of the list at
+// full tilt is precisely what deepens a rate limit.
+//
+// So requests are paced on ONE shared clock rather than per worker (otherwise
+// concurrency silently multiplies the rate), a refusal widens the spacing for
+// everybody and the deck is retried rather than lost, and a success narrows it
+// again slowly so one hiccup does not leave 200 decks crawling. If Master
+// Vault keeps refusing after all that, the run stops and says so - decks
+// already imported are skipped server-side next time, so stopping early costs
+// nothing but the wait.
+const IMPORT_CONCURRENCY = 2;
+const BASE_SPACING_MS = 300;
+const MAX_SPACING_MS = 10000;
+const MAX_DECK_ATTEMPTS = 4;
+const ABORT_AFTER_EXHAUSTED = 3;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRateLimited = (payload) =>
+    payload?.code === 'upstream_rate_limited' || /rate limit/i.test(payload?.message || '');
+
+const isAlreadyOwned = (payload) => /already exists/i.test(payload?.message || '');
 
 // Master Vault deck ids are UUIDs. This finds them in anything the player
 // pastes or uploads: a Decks of KeyForge CSV export (its first column is
@@ -70,31 +97,89 @@ const DokImport = ({ onDone, compact }) => {
         let imported = 0;
         let already = alreadyOwned;
         let failed = 0;
+        let spacingMs = BASE_SPACING_MS;
+        let nextSlotAt = 0;
+        let exhausted = 0;
+        let stopped = false;
+        const reasons = new Map();
+
+        const noteReason = (why) => reasons.set(why, (reasons.get(why) || 0) + 1);
+
+        // One clock for every worker. Pacing each worker separately would mean
+        // the real request rate was spacing x concurrency, which is how the
+        // "gentle" original managed to be a burst.
+        const takeSlot = async () => {
+            const now = Date.now();
+            const at = Math.max(now, nextSlotAt);
+            nextSlotAt = at + spacingMs;
+
+            if (at > now) {
+                await sleep(at - now);
+            }
+        };
+
+        // The API layer rejects 200 + {success:false}, so ordinary refusals
+        // arrive as exceptions. Normalise both into one payload rather than
+        // duplicating the classification down two branches.
+        const importOne = async (uuid) => {
+            try {
+                const result = await saveDeck({ uuid }).unwrap();
+
+                return result.success ? { ok: true } : { ok: false, payload: result };
+            } catch (err) {
+                return { ok: false, payload: err?.data || {} };
+            }
+        };
 
         const worker = async () => {
-            while (cursor < uuids.length) {
+            while (!stopped && cursor < uuids.length) {
                 const uuid = uuids[cursor++];
 
-                try {
-                    const result = await saveDeck({ uuid }).unwrap();
-                    if (result.success) {
+                for (let attempt = 1; ; attempt++) {
+                    await takeSlot();
+
+                    if (stopped) {
+                        return;
+                    }
+
+                    const { ok, payload } = await importOne(uuid);
+
+                    if (ok) {
                         imported++;
-                    } else if (/already exists/i.test(result.message || '')) {
-                        already++;
-                    } else {
-                        failed++;
+                        // Recover slowly. Snapping straight back to the base
+                        // spacing after one success just re-earns the limit.
+                        spacingMs = Math.max(BASE_SPACING_MS, Math.round(spacingMs * 0.9));
+                        break;
                     }
-                } catch (err) {
-                    // The API layer rejects 200 + {success:false}, so an
-                    // already-owned deck ("Deck already exists.") surfaces here
-                    // rather than in the else branch above. Count it as already
-                    // imported, not failed, so re-running a collection import
-                    // doesn't report owned decks as errors.
-                    if (/already exists/i.test(err?.data?.message || '')) {
+
+                    if (isAlreadyOwned(payload)) {
                         already++;
-                    } else {
-                        failed++;
+                        break;
                     }
+
+                    if (isRateLimited(payload)) {
+                        if (attempt < MAX_DECK_ATTEMPTS) {
+                            spacingMs = Math.min(MAX_SPACING_MS, Math.max(spacingMs * 2, 1000));
+                            await sleep(spacingMs * attempt);
+                            continue;
+                        }
+
+                        // This deck used up its retries. A few of those in a
+                        // run means Master Vault is not going to relent inside
+                        // this sitting, and continuing only deepens the limit.
+                        failed++;
+                        noteReason(t('Master Vault is rate limiting deck imports'));
+
+                        if (++exhausted >= ABORT_AFTER_EXHAUSTED) {
+                            stopped = true;
+                        }
+
+                        break;
+                    }
+
+                    failed++;
+                    noteReason(payload?.message || t('Master Vault would not return the deck'));
+                    break;
                 }
 
                 done++;
@@ -107,7 +192,16 @@ const DokImport = ({ onDone, compact }) => {
         );
 
         setPhase('done');
-        setSummary({ imported, already, failed, total: uuids.length + alreadyOwned });
+        setSummary({
+            imported,
+            already,
+            failed,
+            total: uuids.length + alreadyOwned,
+            stopped,
+            // Most common first: with 250 failures the player wants the one
+            // sentence that explains them, not a list of 250.
+            reasons: [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+        });
         onDone?.();
     };
 
@@ -214,10 +308,54 @@ const DokImport = ({ onDone, compact }) => {
     return (
         <div className={compact ? 'space-y-2' : 'space-y-3'}>
             {!compact && (
-                <p className='text-sm text-muted'>
-                    {t(
-                        'Sync your whole collection with your Decks of KeyForge API key. Find it on Decks of KeyForge under your profile. We use it for this one request and never store it.'
-                    )}
+                <div className='space-y-2 text-sm leading-relaxed text-muted'>
+                    <p>
+                        {t(
+                            'Sync your whole collection with your Decks of KeyForge API key. We use it for this one request and never store it.'
+                        )}
+                    </p>
+                    <p className='font-semibold text-foreground'>{t('To get your key:')}</p>
+                    <ol className='list-decimal space-y-1 pl-5'>
+                        <li>
+                            {t('Log in to Decks of KeyForge, then open')}{' '}
+                            <a
+                                className='text-primary hover:text-primary/80'
+                                href='https://decksofkeyforge.com/about/sellers-and-devs'
+                                target='_blank'
+                                rel='noopener noreferrer'
+                            >
+                                {t('Sellers and Devs')}
+                            </a>
+                            {t('. You must be logged in, or no key button appears.')}
+                        </li>
+                        <li>{t('Under "Generate your API Key", press the button.')}</li>
+                        <li>
+                            {t(
+                                'Copy the key straight away — Decks of KeyForge shows it once and cannot show it again.'
+                            )}
+                        </li>
+                        <li>{t('Paste it below and press Sync collection.')}</li>
+                    </ol>
+                    <p>
+                        {t(
+                            'Generating a key invalidates any previous one, so make a new key only if you have lost the old one. Your key lists the decks you have marked as owned on Decks of KeyForge — including private ones — so only give it to sites you trust.'
+                        )}
+                    </p>
+                </div>
+            )}
+
+            {compact && (
+                <p className='text-xs text-muted'>
+                    {t('Generate a key on')}{' '}
+                    <a
+                        className='text-primary hover:text-primary/80'
+                        href='https://decksofkeyforge.com/about/sellers-and-devs'
+                        target='_blank'
+                        rel='noopener noreferrer'
+                    >
+                        {t('Decks of KeyForge → Sellers and Devs')}
+                    </a>
+                    {t(' while logged in, and copy it straight away — it is shown only once.')}
                 </p>
             )}
 
@@ -325,6 +463,27 @@ const DokImport = ({ onDone, compact }) => {
                             ' ' +
                                 t('{{failed}} could not be imported.', { failed: summary.failed })}
                     </p>
+
+                    {/* A bare failure count tells a player nothing they can act
+                        on. The reason is what says whether to wait and re-run
+                        or to stop trying. */}
+                    {summary.reasons?.length > 0 && (
+                        <ul className='mt-1 space-y-0.5 text-xs text-muted'>
+                            {summary.reasons.map(([why, count]) => (
+                                <li key={why}>
+                                    {count} × {why}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+
+                    {summary.stopped && (
+                        <p className='mt-2 text-xs text-amber-400'>
+                            {t(
+                                'Stopped early because Master Vault kept refusing. Your imported decks are saved — wait a few minutes and sync again to carry on from here.'
+                            )}
+                        </p>
+                    )}
                 </div>
             )}
 

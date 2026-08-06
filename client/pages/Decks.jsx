@@ -120,7 +120,13 @@ const DecksComponent = () => {
                         <HeroModal.Header>
                             <HeroModal.Heading>{t('Import Deck')}</HeroModal.Heading>
                         </HeroModal.Header>
-                        <HeroModal.Body className='space-y-4 overflow-visible'>
+                        {/* No overflow override here. HeroUI's default scroll
+                            behaviour caps the dialog at the viewport and lets
+                            the body scroll; overriding it with overflow-visible
+                            made the modal grow past the bottom of the screen
+                            with no way to reach the rest, which is what
+                            happened once deck search was added to it. */}
+                        <HeroModal.Body className='space-y-4'>
                             <div>
                                 <h4 className='mb-2 text-sm font-semibold text-foreground'>
                                     {t('Import your whole collection')}
