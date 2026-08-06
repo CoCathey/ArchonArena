@@ -206,7 +206,7 @@ on instances that did not get a trigram index.
     (one bounded pass), `fetchPage`, `upsertDecks`, `getState` / `recordProgress` /
     `recordFailure` (cursor and breaker), `search`.
 -   `server/db/schema/55 - DeckCatalog.sql` and
-    `server/db/schema/migrations/50 - DeckCatalog.sql` — `DeckCatalog`,
+    `server/db/schema/migrations/51 - DeckCatalog.sql` — `DeckCatalog`,
     `DeckCatalogState` (single row, pinned by CHECK), and the index strategy above.
 -   `config/default.json5` → `catalog` — crawl cadence, page size, delays, breaker
     thresholds, search cap.
