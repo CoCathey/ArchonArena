@@ -571,6 +571,43 @@ describe('CatalogService', function () {
         });
     });
 
+    // The crawl is off by default, so "no rows" is the ordinary state of a
+    // fresh install rather than an error - and the UI has to be able to tell
+    // that apart from a deck genuinely not existing.
+    describe('hasIndexedDecks', function () {
+        it('reports an empty catalog', async function () {
+            db.query.mockResolvedValue([]);
+
+            expect(await service.hasIndexedDecks()).toBe(false);
+        });
+
+        it('reports a populated catalog and stops asking once it knows', async function () {
+            db.query.mockResolvedValue([{ '?column?': 1 }]);
+
+            expect(await service.hasIndexedDecks()).toBe(true);
+            expect(await service.hasIndexedDecks()).toBe(true);
+            expect(db.query).toHaveBeenCalledTimes(1);
+        });
+
+        // Guessing "populated" on failure degrades to the ordinary no-results
+        // wording; guessing "empty" would tell every player the server is
+        // misconfigured because one query timed out.
+        it('assumes populated when it cannot tell', async function () {
+            db.query.mockRejectedValue(new Error('db down'));
+
+            expect(await service.hasIndexedDecks()).toBe(true);
+        });
+
+        it('keeps asking while the catalog is still empty', async function () {
+            db.query.mockResolvedValue([]);
+
+            await service.hasIndexedDecks();
+            await service.hasIndexedDecks();
+
+            expect(db.query).toHaveBeenCalledTimes(2);
+        });
+    });
+
     // The migration creates the pg_trgm index where it can and carries on with
     // a NOTICE where it cannot, so both databases exist in the wild. Searching
     // for a substring on the one without it is a sequential scan of every deck

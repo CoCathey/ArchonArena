@@ -105,11 +105,20 @@ const DeckSearch = ({ onImported }) => {
                 <p className='text-xs text-muted'>{t('Searching…')}</p>
             )}
 
+            {/* Two different nothings. The deck index is built by a crawl that
+                is off until an operator turns it on, so the ordinary state of a
+                fresh server is an empty table - and telling someone their deck
+                "wasn't found, try later" sends them back to a search that can
+                never succeed. */}
             {!searchOff && searchable && !isFetching && decks.length === 0 && (
                 <p className='text-sm text-muted'>
-                    {t(
-                        'No decks found with that name. Newly registered decks can take a while to appear.'
-                    )}
+                    {data?.catalogEmpty
+                        ? t(
+                              'Deck search is not available on this server yet — no decks have been indexed. Use your Decks of KeyForge key or a deck link above.'
+                          )
+                        : t(
+                              'No decks found with that name. Newly registered decks can take a while to appear.'
+                          )}
                 </p>
             )}
 

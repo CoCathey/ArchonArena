@@ -35,6 +35,8 @@ class CatalogService {
         this.settingsService = settingsService;
         // null = not yet checked; see supportsTrigram.
         this.trigramAvailable = null;
+        // Latches true once the catalog has rows; see hasIndexedDecks.
+        this.catalogPopulated = false;
     }
 
     getConfig() {
@@ -444,6 +446,40 @@ class CatalogService {
         }
 
         return this.trigramAvailable;
+    }
+
+    /**
+     * ARCHON: whether the catalog holds anything at all.
+     *
+     * The crawl is off by default, so the ordinary state of a fresh install is
+     * a search box backed by an empty table. Without this the UI cannot tell
+     * "no deck of that name exists" from "this server has never indexed
+     * anything", and it told players the former - inviting them to try again
+     * later for an index nobody had switched on.
+     *
+     * Cached once it is true: a catalog that has rows does not go back to
+     * having none, and this is only consulted when a search finds nothing, so
+     * the empty case costs one LIMIT 1 on a query that already returned no
+     * rows. Failure reports "has decks" so a database hiccup degrades to the
+     * ordinary no-results wording rather than accusing the operator of a
+     * misconfiguration.
+     */
+    async hasIndexedDecks() {
+        if (this.catalogPopulated) {
+            return true;
+        }
+
+        try {
+            const rows = await this.db.query('SELECT 1 FROM "DeckCatalog" LIMIT 1');
+
+            this.catalogPopulated = !!(rows && rows.length > 0);
+
+            return this.catalogPopulated;
+        } catch (err) {
+            logger.warn(`Could not check whether the deck catalog is populated: ${err.message}`);
+
+            return true;
+        }
     }
 
     /**
