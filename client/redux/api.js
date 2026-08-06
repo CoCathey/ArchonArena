@@ -315,6 +315,19 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.LOCATION]
         }),
+        // ARCHON (I3): optional player bio.
+        getBio: builder.query({
+            query: () => '/account/bio',
+            providesTags: [TAG_TYPES.BIO]
+        }),
+        setBio: builder.mutation({
+            query: (bio) => ({
+                url: '/account/bio',
+                method: 'PUT',
+                body: { bio }
+            }),
+            invalidatesTags: [TAG_TYPES.BIO]
+        }),
         getLeaderboard: builder.query({
             query: (params) => ({
                 url: '/ratings/leaderboard',
@@ -995,6 +1008,8 @@ export const {
     useUnlinkOidcMutation,
     useGetLocationQuery,
     useSetLocationMutation,
+    useGetBioQuery,
+    useSetBioMutation,
     useGetSiteContentQuery,
     useAdminSetRatingMutation,
     useAdminResetRatingsMutation,

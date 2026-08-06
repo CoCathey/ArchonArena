@@ -72,6 +72,30 @@ module.exports.init = function (server) {
         })
     );
 
+    // ----- Own bio (I3): short, optional, editable from the account page and
+    // shown on the public profile above. Authenticated because it edits the
+    // caller's own account; reading it back does not need to go through the
+    // public /api/players/:username route, which also gates on Verified.
+    server.get(
+        '/api/account/bio',
+        jwt,
+        wrapAsync(async (req, res) => {
+            const bio = await playerProfileService.getBio(req.user.id);
+
+            res.send({ success: true, bio });
+        })
+    );
+
+    server.put(
+        '/api/account/bio',
+        jwt,
+        wrapAsync(async (req, res) => {
+            const result = await playerProfileService.setBio(req.user.id, req.body.bio);
+
+            res.send(result);
+        })
+    );
+
     // ----- Friends (all JWT-authed; friendships are private to the pair)
     server.get(
         '/api/friends',

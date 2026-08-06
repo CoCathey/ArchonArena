@@ -12,6 +12,8 @@ export const TAG_TYPES = {
     LOBBY: 'Lobby',
     OIDC: 'Oidc',
     LOCATION: 'Location',
+    // ARCHON (I3): optional player bio.
+    BIO: 'Bio',
     TOURNAMENTS: 'Tournaments',
     FRIENDS: 'Friends',
     CLUBS: 'Clubs',
