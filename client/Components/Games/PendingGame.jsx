@@ -15,8 +15,8 @@ import {
 import PendingGamePlayers from './PendingGamePlayers';
 import { Constants } from '../../constants';
 
-import ChargeMp3 from '../../assets/sound/charge.mp3';
-import ChargeOgg from '../../assets/sound/charge.ogg';
+import PlayerJoinedMp3 from '../../assets/sound/player-joined.mp3';
+import PlayerJoinedOgg from '../../assets/sound/player-joined.ogg';
 
 function showNotification(notification) {
     if (!window.Notification || Notification.permission !== 'granted') {
@@ -321,8 +321,8 @@ const PendingGame = () => {
     return (
         <>
             <audio ref={notification}>
-                <source src={ChargeMp3} type='audio/mpeg' />
-                <source src={ChargeOgg} type='audio/ogg' />
+                <source src={PlayerJoinedMp3} type='audio/mpeg' />
+                <source src={PlayerJoinedOgg} type='audio/ogg' />
             </audio>
 
             <Panel title={currentGame.name} titleClass='text-base font-semibold tracking-wide'>
