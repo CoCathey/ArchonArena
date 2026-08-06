@@ -119,7 +119,19 @@ module.exports.init = function (server) {
             const result = await ratingService.getGameResult(req.params.gameId);
 
             if (!result) {
-                return res.send({ success: true, rated: false });
+                // ARCHON: "no rating row" is two answers, not one. Rating runs
+                // after GAMEWIN, so the panel's request usually arrives first;
+                // saying "not rated" then is simply wrong. `pending` tells the
+                // client to ask again, and `reason` explains the cases where it
+                // genuinely never will be.
+                const missing = await ratingService.describeMissingRating(req.params.gameId);
+
+                return res.send({
+                    success: true,
+                    rated: false,
+                    pending: missing.pending,
+                    reason: missing.reason
+                });
             }
 
             res.send({ success: true, rated: true, ...result });

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import AmberValue from '../Site/AmberValue';
@@ -25,12 +25,51 @@ const POOL_LABELS = {
  *
  * @param {{ gameId?: string, username?: string, winner?: string }} props
  */
+// Rating is written asynchronously after GAMEWIN, so a single request almost
+// always arrives before the rating exists. This is how long to keep asking
+// before concluding none is coming. Generous on purpose: the cost of waiting is
+// a moment of "Rating this game...", and the cost of giving up early is telling
+// a player their game did not count when it did.
+const RATING_POLL_MS = 1500;
+const RATING_POLL_ATTEMPTS = 10;
+
 const GameResultPanel = ({ gameId, username, winner }) => {
     const { t } = useTranslation();
-    const { data, isFetching } = useGetGameRatingQuery(gameId, { skip: !gameId });
+    // Fixed at mount rather than counted per request, so a slow network cannot
+    // stretch the wait indefinitely.
+    const [deadline] = useState(() => Date.now() + RATING_POLL_MS * RATING_POLL_ATTEMPTS);
+    const [pollingInterval, setPollingInterval] = useState(RATING_POLL_MS);
 
-    if (!gameId || isFetching || !data) {
+    const { data } = useGetGameRatingQuery(gameId, {
+        skip: !gameId,
+        pollingInterval
+    });
+
+    // Stop as soon as the answer is final: the rating arrived, the server says
+    // none is coming, or we have waited long enough. Asking once and caching
+    // that first answer is exactly what made finished games report themselves
+    // as unrated.
+    useEffect(() => {
+        if (!data || pollingInterval === 0) {
+            return;
+        }
+
+        if (data.rated || !data.pending || Date.now() > deadline) {
+            setPollingInterval(0);
+        }
+    }, [data, deadline, pollingInterval]);
+
+    if (!gameId || !data) {
         return null;
+    }
+
+    // Still expected: say so rather than claim it was not rated.
+    if (!data.rated && data.pending && pollingInterval !== 0) {
+        return (
+            <div className='rounded-md border border-border/60 bg-surface-secondary/60 px-3 py-2 text-center text-xs text-muted'>
+                {t('Rating this game...')}
+            </div>
+        );
     }
 
     const you = (data.players || []).find(
@@ -38,13 +77,18 @@ const GameResultPanel = ({ gameId, username, winner }) => {
     );
 
     // An unrated game is a normal outcome, not an error — say so plainly
-    // instead of leaving a blank space where the result would be.
+    // instead of leaving a blank space where the result would be, and say WHY
+    // when the server knows. "Not rated" with no reason is the kind of thing
+    // players reasonably read as a bug.
     if (!data.rated || !you) {
+        const reason = data.reason;
+
         return (
             <div className='rounded-md border border-border/60 bg-surface-secondary/60 px-3 py-2 text-center text-xs text-muted'>
                 {winner
                     ? t('{{winner}} won. This game was not rated.', { winner })
                     : t('This game was not rated.')}
+                {reason ? <span className='ml-1'>{t(reason)}</span> : null}
             </div>
         );
     }

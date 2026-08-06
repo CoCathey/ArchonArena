@@ -1157,6 +1157,78 @@ class RatingService {
      * tournament-unrated event, or the rating hook not having run), which the
      * UI shows as an explicit "not rated" state rather than a blank panel.
      */
+    /**
+     * ARCHON: whether a game that has no rating yet is still going to get one.
+     *
+     * Rating runs asynchronously after GAMEWIN, so "no RatingHistory row" is two
+     * completely different answers: not yet, and never. The post-game panel used
+     * to conflate them and told players their game was unrated - usually
+     * wrongly, because the panel's request beats the rating write almost every
+     * time, and nothing ever asked again.
+     *
+     * The conditions below mirror the guards in processGameInner. They are
+     * duplicated deliberately and narrowly: this has to answer for a single
+     * game without doing the rating work, and each is a stable rule. If the two
+     * ever disagree the panel polls a little longer and then says the game was
+     * not rated, which is the same thing it would have said anyway.
+     *
+     * @returns {Promise<{pending: boolean, reason?: string}>}
+     */
+    async describeMissingRating(gameUuid) {
+        if (!gameUuid) {
+            return { pending: false, reason: 'no game' };
+        }
+
+        if (!this.getConfig().enabled) {
+            return { pending: false, reason: 'Rating is switched off on this site.' };
+        }
+
+        const rows = await this.db.query(
+            'SELECT g."Id", g."WinnerId", g."WinReason", g."FinishedAt", ' +
+                '(SELECT count(*) FROM "GamePlayers" gp WHERE gp."GameId" = g."Id") AS "Players" ' +
+                'FROM "Games" g WHERE g."GameId" = $1',
+            [gameUuid]
+        );
+        const game = rows && rows[0];
+
+        if (!game) {
+            // The result row is written by the same handler that triggers
+            // rating, so a game that is not in the table yet is still in flight.
+            return { pending: true };
+        }
+
+        if (!game.FinishedAt) {
+            return { pending: true };
+        }
+
+        if (Number(game.Players) !== 2) {
+            return { pending: false, reason: 'Only two-player games are rated.' };
+        }
+
+        if (!game.WinnerId) {
+            return { pending: false, reason: 'The game ended without a winner.' };
+        }
+
+        if (this.getConfig().excludedWinReasons.includes(game.WinReason)) {
+            return { pending: false, reason: 'This kind of result is not rated.' };
+        }
+
+        const tournamentRows = await this.db.query(
+            'SELECT t."RatedGames" FROM "TournamentMatchGames" tmg ' +
+                'JOIN "Tournaments" t ON t."Id" = tmg."TournamentId" ' +
+                'WHERE tmg."GameUuid" = $1 LIMIT 1',
+            [gameUuid]
+        );
+
+        if (tournamentRows && tournamentRows[0] && !tournamentRows[0].RatedGames) {
+            return { pending: false, reason: 'This event is not rated.' };
+        }
+
+        // Everything says it should rate, and it has not yet. Either the write
+        // is still in flight or it failed - the caller waits, then gives up.
+        return { pending: true };
+    }
+
     async getGameResult(gameUuid) {
         if (!gameUuid) {
             return null;
