@@ -1,155 +1,200 @@
-# Bulk import from a Decks of KeyForge CSV / pasted links
+# Design: Bulk import a collection from Decks of KeyForge
 
-> **Update.** The original design imported a collection by DoK username via a
-> DoK "filter" API. That endpoint does not exist in DoK's **public** API —
-> their public API (confirmed from their open source, `PublicApiEndpoints.kt`)
-> is single-deck lookup only (`GET /public-api/v3/decks/{id}`), which is what
-> SAS enrichment uses. There is no public "list a user's decks by username".
-> Bulk import now works entirely client-side from a **DoK CSV export** (or
-> pasted deck links / ids) and needs no DoK API at all. The server
-> owner-listing code below is retained but unused.
+Status: **Shipped.** A player pastes their own DoK API key and the site imports every
+deck in their DoK library that they do not already have here. The CSV / pasted-links
+route is kept alongside it for players who would rather not hand over a key.
 
-## How it works now
+## The problem
 
-`client/Components/Decks/DokImport.jsx` takes a file (the DoK "Download Decks
-Spreadsheet" CSV, whose first column is `keyforge_id`) or pasted text (DoK or
-Master Vault deck links, or raw ids), extracts every Master Vault UUID with a
-regex, dedupes, and imports each through the ordinary `POST /api/decks` path
-(Master Vault fetch + SAS enrichment), a few in parallel with a progress bar.
-Decks already owned are skipped server-side ("Deck already exists"), so
-re-running only adds new decks. No DoK API key, rate limit, or network
-dependency on DoK is involved in the import itself.
+Master Vault has no dependable public "list all of a user's decks" endpoint — a user's
+deck list there lives behind their own logged-in MV session. So the site cannot ask the
+authoritative source what a player owns, and adding a collection one pasted link at a
+time is the kind of chore that stops people finishing onboarding.
 
----
+Decks of KeyForge already mirrors each user's registered decks, which makes it the
+obvious source for the deck **list**. Each individual deck is still imported from Master
+Vault, so a bulk-imported deck is byte-for-byte identical to one imported by pasting its
+link.
 
-## (Historical) username-based bulk import
+## What DoK's public API actually offers
 
-## Goal
+An earlier version of this document claimed DoK had no public way to list a user's decks
+at all, and the code before it assumed a `POST /public-api/v1/decks/filter` endpoint that
+does not exist. Both were wrong in different directions. Checked against DoK's open
+source (`PublicApiEndpoints.kt`) and their own Sellers & Devs page, the public API
+offers:
 
-Let players pull their **entire** deck collection in instead of pasting
-one Master Vault link at a time, and keep SAS wired up. A player enters
-their Decks of KeyForge (DoK) username; we fetch their whole DoK library
-live and import every deck they don't already have. Re-running only
-imports newly-added decks, so the same action doubles as an ongoing
-"sync" with DoK.
+-   `GET /public-api/v3/decks/{id}` — single-deck lookup, which is what SAS enrichment
+    uses (see docs/design/deck-sas.md).
+-   `GET /public-api/v1/my-decks?page=N` — the decks DoK holds for **whoever's key is on
+    the request**, 100 per page. There is a sibling `/public-api/v1/my-alliances`.
+-   No listing by username, under any endpoint. That much of the old note was right, and
+    it is a deliberate design on DoK's part: the collection returned is decided by the
+    `Api-Key` header, so there is no way to ask for somebody else's.
 
-## Why DoK (not Master Vault) for the collection list
-
-Master Vault has no dependable public "list all of a user's decks"
-endpoint — a user's deck list there requires their own logged-in MV
-session. DoK, by contrast, publishes a filter API intended for exactly
-this (see decksofkeyforge.com/about/sellers-and-devs), and DoK already
-mirrors each user's registered decks. So DoK is the source of the deck
-**list**; each individual deck is still imported from Master Vault (the
-authoritative source our engine parses), keeping imported decks byte-for-
-byte identical to a normal single-deck import.
+That last point is what shapes everything below. Listing a collection is not something
+the site can do on a player's behalf with its own credential; the player has to supply
+theirs. DoK's documentation anticipates this and says third-party tools may ask users
+for their key for exactly this purpose, which is why this is a supported integration
+rather than a workaround.
 
 ## Flow
 
-1. **Prepare** — `POST /api/decks/import/dok/prepare` `{ dokUsername }`:
-    - `DokService.listOwnerDecks` pages `POST {DoK}/public-api/v1/decks/filter`
-      with `{ owner, page, pageSize, sort }` and the site `Api-Key` header,
-      collecting `{ uuid, name, sasRating }` until the collection runs dry
-      or a safety cap (`dok.maxImportDecks`, default 500) is hit.
-    - We subtract the decks the user already owns
-      (`DeckService.getOwnedDeckUuids`) and return the remainder.
-    - The DoK username is stored on the user (`Users.DokUsername`) for
-      future syncs and to prefill the field.
-2. **Import** — the client (`DokImport.jsx`) imports each returned uuid
-   through the existing `POST /api/decks` path (Master Vault fetch +
-   `deckService.create`, which already dedupes and fires SAS enrichment),
-   a few in parallel, with a live progress bar.
+1.  **Prepare** — `POST /api/decks/import/dok/prepare` `{ dokApiKey }`:
+    -   `DokService.listMyDecks` pages `GET {DoK}/public-api/v1/my-decks?page=N` with
+        `Api-Key: <the user's key>`, collecting `{ uuid, name, sasRating }` until a page
+        comes back empty, adds no new ids, or the safety cap (`dok.maxImportDecks`,
+        default 500) is hit.
+    -   Decks the user already owns (`DeckService.getOwnedDeckUuids`) are subtracted, and
+        the remainder is returned.
+2.  **Import** — the client (`DokImport.jsx`) imports each returned uuid through the
+    ordinary `POST /api/decks` path (Master Vault fetch + `deckService.create`, which
+    already dedupes and fires SAS enrichment), a few in parallel, with a live progress
+    bar.
 
-Splitting prepare (server, one DoK round-trip set) from import (client
-loop over the proven single-deck endpoint) keeps the whole thing
-**stateless** — no background jobs, no in-memory progress that dies on
-restart or across lobby processes — and reuses one battle-tested import
-path for both single and bulk imports.
+Splitting prepare (server, one set of DoK round-trips) from import (client loop over the
+proven single-deck endpoint) keeps the whole feature **stateless** — no background jobs,
+no in-memory progress that dies on restart or across lobby processes — and means one
+battle-tested import path serves both single and bulk imports. A bulk import cannot
+produce a deck that a single import could not, because it is the same code.
 
-## The site-wide API key
+## The key is used transiently and never stored
 
-The DoK `Api-Key` (env `DOK_API_KEY`, already used for SAS enrichment) is
-sufficient to read a user's _public_ decks by owner, so **individual
-players do not need their own DoK key** — they just supply their DoK
-username. If `DOK_API_KEY` is unset the prepare endpoint returns a clear
-"not configured on this server yet" message and single-deck Master Vault
-import still works.
+The key exists for the duration of the prepare request and is then dropped. It is not
+written to the database, not held in module state, and never logged. The rate limiter
+buckets by a SHA-256 prefix of the key rather than the key itself for the same reason.
+
+This costs the user a paste on every re-sync, and that is the intended trade. This
+codebase has no encryption-at-rest helper, so "store it for convenience" means storing a
+third party's credential in plaintext in a column, where it is one backup dump or one
+over-broad admin query away from being a leak of an account on someone else's site. The
+convenience saved is a few seconds; the exposure is unbounded, and it is not even our
+exposure to accept on the user's behalf.
+
+Storing it **encrypted** is a reasonable follow-up. It needs a key-management story
+first (where the encryption key lives, how it rotates, what happens on restore from
+backup), and that is a piece of infrastructure this repo does not have yet. When it
+exists, an opt-in "remember my DoK key" checkbox turns re-sync into a single button.
+
+## Rate limiting is per key, not per process
+
+All outbound DoK calls pass through a sliding-window limiter capped at
+`dok.maxRequestsPerMinute` (default 25, DoK's free tier; patron tiers are 50 / 100 /
+250). The window is now **per `Api-Key`**, not one shared window for the process.
+
+That distinction fixes a real bug rather than being tidiness. DoK meters its per-minute
+cap against whichever key made the request. A player's `my-decks` paging spends _their_
+DoK quota, not the site's — so charging it to the site-wide window would count requests
+DoK never billed us for, and the visible effect is that one player importing a large
+collection throttles SAS enrichment for every other player on the site, for no reason at
+all. Per-key windows mean each credential gets exactly the budget DoK actually gives it.
+
+Bucketing is by a hash of the key, and a bucket is deleted once its window drains, so the
+map does not accumulate a row for every player who ever ran an import.
+
+Within that budget the two kinds of call behave differently, because they answer to
+different people:
+
+-   Best-effort enrichment (`fetchDeckStats`) **skips** when the site key's budget is
+    spent and retries on a later access (`needsRefresh` stays true). Nobody is waiting on
+    it.
+-   User-initiated listing (`fetchMyDecksPage`) **waits briefly** (bounded, 8s) for a
+    slot before giving up, because somebody is watching a progress bar.
+
+Two further things keep a bulk import cheap. The `my-decks` response already carries each
+deck's SAS, so `listMyDecks` caches it (`cacheSummarySas`, `ON CONFLICT DO NOTHING`, so a
+richer prior per-deck fetch is never clobbered); and `enrichDeck` skips decks whose stats
+are already fresh, so the per-deck enrichment fired by `POST /api/decks` during the import
+is a no-op for everything the list step just cached. Importing a 50-deck collection costs
+one or two DoK calls rather than fifty.
+
+**Scale note:** the limiter is per-process, which is correct for the current single-lobby
+deployment. Multiple lobby processes would each hold their own windows; a Redis-backed
+shared counter is the follow-up when the app scales horizontally.
+
+## Collection import does not need the site's key
+
+`isEnabled()` (SAS) requires `dok.enabled` **and** `dok.apiKey`. Collection import uses
+`isImportEnabled()`, which requires only `dok.enabled`, because the credential it
+authenticates with belongs to the user and arrives on the request.
+
+The practical consequence is that a server which never obtained a `DOK_API_KEY` can still
+offer collection import — players bring their own keys — while SAS enrichment on that
+server correctly stays off. The two features have genuinely different prerequisites, and
+gating them on the same check would have made the more widely usable one unavailable to
+the deployments most likely to want it.
+
+## CSV and pasted links stay
+
+The same component still accepts a DoK "Download Decks Spreadsheet" CSV (whose first
+column is `keyforge_id`) or pasted DoK / Master Vault links and raw ids: it pulls every
+Master Vault uuid out with a regex, dedupes, and feeds the identical import loop.
+
+This is not legacy code kept out of politeness. Handing a third-party API key to a game
+site is a real thing to ask of someone, and a player who would rather not is entitled to
+a way in that involves no credential at all. The CSV route also works when DoK is down,
+and when `dok.enabled` is off entirely. Both routes converge on the same list of uuids
+and the same import loop, so keeping the second one costs a file input.
 
 ## Resilience
 
--   `listOwnerDecks` never throws: a first-page failure is reported as a
-    retryable error; a later-page failure returns a partial-but-usable
-    list; DoK being down never blocks anything.
--   Deck-id parsing is defensive: it takes `keyforgeId` (or a UUID-shaped
-    `id`) and skips anything without a valid Master Vault uuid.
--   Paging stops if the endpoint ever returns no _new_ ids (guards against
-    a filter that ignores paging), plus a hard 100-page ceiling.
+-   `listMyDecks` never throws: `{ configured: false }` when DoK import is off,
+    `{ error: true, errorDetail }` when the very first page fails (retryable, and the
+    detail distinguishes a rejected key from a timeout), and a partial-but-usable list
+    when a later page fails.
+-   HTTP status is translated into something a player can act on — 401/403 becomes "API
+    key rejected" rather than a bare number.
+-   Deck-id parsing is defensive. Each entry is a `PublicMyDeckInfo` wrapping the deck, so
+    the parser reads `entry.deck` and falls back to the entry itself, takes `keyforgeId`
+    only when it is UUID-shaped, and drops anything else.
+-   Paging stops when a page returns no _new_ ids (guarding against an endpoint that
+    ignores paging), plus a hard 100-page ceiling on top of the deck cap.
+-   `POST /api/decks/import/dok/prepare` is rate-limited per user. That limit now exists
+    to stop the site hammering DoK on one user's behalf, not to protect our own SAS
+    budget — per-key windows already handle the latter.
 -   The client import runs at concurrency 3 to be gentle on Master Vault.
-
-## Rate limiting (DoK's per-minute cap)
-
-DoK bills a single site-wide `Api-Key` and caps it at 25 requests/minute on
-the free tier (50 / 100 / 250 for patron tiers). All outbound DoK calls —
-per-deck SAS enrichment **and** the bulk-import list calls — pass through
-one **process-wide sliding-window limiter** (`reserveOutboundSlot`, shared
-across every `DokService` instance, since the key is shared):
-
--   `maxRequestsPerMinute` (config + admin settings, default 25) is the cap.
-    Bump it to match your DoK subscription with no redeploy.
--   Best-effort enrichment (`fetchDeckStats`) **skips** when the budget is
-    spent and retries on a later access (`needsRefresh` stays true) — it
-    never queues or blocks.
--   User-initiated list calls (`fetchOwnerDeckPage`) **wait briefly**
-    (bounded) for a slot rather than skipping, then give up gracefully.
-
-Two changes keep bulk import from devouring the budget:
-
-1.  The filter/list response already includes each deck's SAS, so
-    `listOwnerDecks` caches it (`cacheSummarySas`, `ON CONFLICT DO NOTHING`)
-    — a whole-collection import gets SAS from the couple of list calls it
-    already made, not one call per deck.
-2.  `enrichDeck` skips decks whose stats are already fresh, so the per-deck
-    enrichment fired by `POST /api/decks` during a bulk import is a no-op
-    for decks the list step just cached.
-
-Net effect: importing a 50-deck collection costs ~1–2 DoK calls instead of
-50+, and nothing the app does can exceed the configured per-minute cap.
-
-**Scale note:** the limiter is per-process, correct for the current
-single-lobby deployment. Multiple lobby processes would each hold their own
-window; a Redis-backed shared counter is the follow-up when the app scales
-horizontally.
 
 ## Config (`dok` section, admin-tunable)
 
--   `filterUrl` — collection filter endpoint (derived from `apiUrl` origin
-    if unset).
+-   `myDecksUrl` — collection endpoint (derived from the `apiUrl` origin when unset).
 -   `maxImportDecks` — per-import safety cap (default 500).
--   `maxRequestsPerMinute` — outbound DoK request cap (default 25; set to
-    your DoK patron tier: 50 / 100 / 250).
--   Existing `enabled`, `apiKey`, `requestTimeoutMs`, `refreshDays`.
+-   `maxRequestsPerMinute` — per-key outbound DoK cap (default 25; raise it to match your
+    DoK patron tier: 50 / 100 / 250).
+-   Existing `enabled`, `apiKey`, `apiUrl`, `requestTimeoutMs`, `refreshDays`.
 
 ## Where it appears
 
--   **Onboarding** step 3 ("Import your decks") leads with DoK bulk import,
+-   **Onboarding** step 3 ("Import your decks") leads with collection import, with the
     single-link paste below.
--   **Decks page** import modal: "Import your whole collection" (DoK) above
-    the single-deck link import.
+-   **Decks page** import modal: "Import your whole collection" above single-deck import,
+    now alongside catalog name search (docs/design/deck-catalog.md), which is the route
+    for players who do not use DoK at all.
 
-## Field mapping caveat
+## Historical
 
-The DoK filter response is parsed defensively for the Master Vault id
-(`keyforgeId`, fallback UUID-shaped `id`). If DoK renames that field, only
-`DokService.fetchOwnerDeckPage` needs adjusting.
+The `/public-api/v1/decks/filter` code — `DokService.getFilterUrl`, `fetchOwnerDeckPage`
+and `listOwnerDecks`, and the `dok.filterUrl` config key — **has been deleted**. That
+endpoint does not exist in DoK's public API and never did; the code was written against
+an assumed shape, could only ever have returned 404, and its continued presence was the
+main reason this document stayed wrong. Do not resurrect it. If a by-username listing is
+ever wanted, check `PublicApiEndpoints.kt` first — as of this writing there is no such
+endpoint at any version.
+
+`Users.DokUsername` (schema `37 - DokUsername.sql`, migration `30 - DokUsername.sql`) and
+`UserService.setDokUsername` survive as unused columns and an unused setter. They are
+harmless, and dropping a column is a migration with more risk than leaving it; but
+nothing writes `DokUsername` any more, and nothing should. There is no username in this
+flow.
 
 ## Files
 
--   `server/services/dok/DokService.js` — `getFilterUrl`, `fetchOwnerDeckPage`,
-    `listOwnerDecks`.
+-   `server/services/dok/DokService.js` — `getMyDecksUrl`, `fetchMyDecksPage`,
+    `listMyDecks`, `isImportEnabled`, `cacheSummarySas`, and the per-key
+    `reserveOutboundSlot` window.
 -   `server/services/DeckService.js` — `getOwnedDeckUuids`.
--   `server/api/decks.js` — `POST /api/decks/import/dok/prepare`.
--   `server/services/UserService.js` / `server/models/User.js` — `DokUsername`
-    mapping + `setDokUsername`; `dokUsername` on wire-safe details.
--   `server/db/schema/37 - DokUsername.sql`, `migrations/30 - DokUsername.sql`.
--   `client/Components/Decks/DokImport.jsx`; wired into `pages/Decks.jsx` and
-    `pages/Onboarding.jsx`; RTK `prepareDokImport`.
+-   `server/api/decks.js` — `POST /api/decks/import/dok/prepare` and its rate limit.
+-   `client/Components/Decks/DokImport.jsx` — both routes in (key, CSV/paste) and the
+    shared import loop; wired into `pages/Decks.jsx` and `pages/Onboarding.jsx`.
+-   `client/redux/api.js` — `prepareDokImport`.
+-   `config/default.json5` → `dok` — every knob.
+-   `test/server/services/dok/DokService.spec.js`.

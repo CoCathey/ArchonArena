@@ -137,32 +137,62 @@ describe('DokService', function () {
         });
     });
 
-    describe('listOwnerDecks', function () {
+    describe('listMyDecks', function () {
+        // DoK answers /my-decks with an array of PublicMyDeckInfo: ownership
+        // flags wrapped around the deck itself.
+        const entry = (deck) => ({ deck, ownedByMe: true });
+
         const mockPages = (pages) => {
             let call = 0;
             fetchMock.mockImplementation(async () => ({
                 ok: true,
-                json: async () => ({ decks: pages[call++] || [] })
+                json: async () => (pages[call++] || []).map(entry)
             }));
         };
 
-        it('derives the filter URL from the apiUrl origin and posts the owner', async function () {
+        it('derives the my-decks URL from the apiUrl origin and sends the user key', async function () {
             mockPages([[{ keyforgeId: uuid(1), name: 'Deck One', sasRating: 70.4 }], []]);
 
-            const result = await service.listOwnerDecks('someplayer');
+            const result = await service.listMyDecks('user-key');
 
             expect(result.configured).toBe(true);
             expect(result.decks).toEqual([{ uuid: uuid(1), name: 'Deck One', sasRating: 70 }]);
             expect(fetchMock).toHaveBeenCalledWith(
-                'https://dok.example/public-api/v1/decks/filter',
+                'https://dok.example/public-api/v1/my-decks?page=0',
                 expect.objectContaining({
-                    method: 'POST',
-                    headers: expect.objectContaining({ 'Api-Key': 'test-key' })
+                    method: 'GET',
+                    headers: { 'Api-Key': 'user-key' }
                 })
             );
-            const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
-            expect(firstBody.owner).toBe('someplayer');
-            expect(firstBody.page).toBe(0);
+        });
+
+        it('prefers an explicitly configured my-decks URL', async function () {
+            config.myDecksUrl = 'https://other.example/api/mine';
+            mockPages([[], []]);
+
+            await service.listMyDecks('user-key');
+
+            expect(fetchMock).toHaveBeenCalledWith(
+                'https://other.example/api/mine?page=0',
+                expect.anything()
+            );
+        });
+
+        it('reads the deck out of the wrapper and tolerates a flat entry', async function () {
+            fetchMock.mockImplementation(async () => ({
+                ok: true,
+                json: async () => [
+                    { deck: { keyforgeId: uuid(1), name: 'Wrapped', sasRating: 70.6 } },
+                    { keyforgeId: uuid(2), name: 'Flat', sasRating: 61.2 }
+                ]
+            }));
+
+            const result = await service.listMyDecks('user-key', { maxDecks: 2 });
+
+            expect(result.decks).toEqual([
+                { uuid: uuid(1), name: 'Wrapped', sasRating: 71 },
+                { uuid: uuid(2), name: 'Flat', sasRating: 61 }
+            ]);
         });
 
         it('pages until the collection runs dry and dedupes ids', async function () {
@@ -178,9 +208,14 @@ describe('DokService', function () {
                 []
             ]);
 
-            const result = await service.listOwnerDecks('p');
+            const result = await service.listMyDecks('user-key');
 
             expect(result.decks.map((d) => d.uuid)).toEqual([uuid(1), uuid(2), uuid(3)]);
+            expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+                'https://dok.example/public-api/v1/my-decks?page=0',
+                'https://dok.example/public-api/v1/my-decks?page=1',
+                'https://dok.example/public-api/v1/my-decks?page=2'
+            ]);
         });
 
         it('honours the maxDecks cap and reports truncation', async function () {
@@ -188,22 +223,107 @@ describe('DokService', function () {
                 [{ keyforgeId: uuid(1) }, { keyforgeId: uuid(2) }, { keyforgeId: uuid(3) }]
             ]);
 
-            const result = await service.listOwnerDecks('p', { maxDecks: 2 });
+            const result = await service.listMyDecks('user-key', { maxDecks: 2 });
 
             expect(result.decks).toHaveLength(2);
             expect(result.truncated).toBe(true);
+        });
+
+        // A collection that is exactly the cap came back whole. Calling it
+        // truncated sends the player back for decks that do not exist.
+        it('does not call a collection that exactly fills the cap truncated', async function () {
+            mockPages([[{ keyforgeId: uuid(1) }, { keyforgeId: uuid(2) }], []]);
+
+            const result = await service.listMyDecks('user-key', { maxDecks: 2 });
+
+            expect(result.decks).toHaveLength(2);
+            expect(result.truncated).toBe(false);
+        });
+
+        // The cap counts decks still to import, not decks DoK reported, so the
+        // run after a truncated one returns the decks the first one refused.
+        it('lets a capped sync continue where the last one stopped', async function () {
+            const page = [
+                { keyforgeId: uuid(1) },
+                { keyforgeId: uuid(2) },
+                { keyforgeId: uuid(3) },
+                { keyforgeId: uuid(4) }
+            ];
+
+            mockPages([page, []]);
+            const first = await service.listMyDecks('user-key', { maxDecks: 2 });
+
+            expect(first.decks.map((deck) => deck.uuid)).toEqual([uuid(1), uuid(2)]);
+            expect(first.truncated).toBe(true);
+
+            mockPages([page, []]);
+            const second = await service.listMyDecks('user-key', {
+                maxDecks: 2,
+                skipUuids: new Set([uuid(1), uuid(2)])
+            });
+
+            expect(second.decks.map((deck) => deck.uuid)).toEqual([uuid(3), uuid(4)]);
+            expect(second.skipped).toBe(2);
+            expect(second.truncated).toBe(false);
+        });
+
+        it('counts decks the caller already owns without importing them', async function () {
+            mockPages([[{ keyforgeId: uuid(1) }, { keyforgeId: uuid(2) }], []]);
+
+            const result = await service.listMyDecks('user-key', {
+                skipUuids: [uuid(1)]
+            });
+
+            expect(result.decks.map((deck) => deck.uuid)).toEqual([uuid(2)]);
+            expect(result.skipped).toBe(1);
+        });
+
+        // Paging on the parsed array would let one unreadable page end the
+        // listing, quietly dropping every deck after it.
+        it('keeps paging past a page whose rows could not be read', async function () {
+            mockPages([
+                [{ keyforgeId: uuid(1) }],
+                [{ id: 'no keyforge id' }, { keyforgeId: 'not-a-uuid' }],
+                [{ keyforgeId: uuid(3) }],
+                []
+            ]);
+
+            const result = await service.listMyDecks('user-key');
+
+            expect(result.decks.map((deck) => deck.uuid)).toEqual([uuid(1), uuid(3)]);
+        });
+
+        // A cut-off collection presented as a whole one reads as "you own 100
+        // decks" to someone who owns 700.
+        it('flags a listing cut short by a failing page', async function () {
+            let call = 0;
+            fetchMock.mockImplementation(async () => {
+                call++;
+                if (call === 1) {
+                    return { ok: true, json: async () => [{ keyforgeId: uuid(1) }] };
+                }
+
+                return { ok: false, status: 502 };
+            });
+
+            const result = await service.listMyDecks('user-key');
+
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBe(true);
+            expect(result.decks).toHaveLength(1);
         });
 
         it('skips deck entries without a valid Master Vault uuid', async function () {
             mockPages([
                 [
                     { id: 12345, name: 'no keyforge id' },
+                    { keyforgeId: 'not-a-uuid', name: 'junk id' },
                     { keyforgeId: uuid(5), name: 'good' }
                 ],
                 []
             ]);
 
-            const result = await service.listOwnerDecks('p');
+            const result = await service.listMyDecks('user-key');
 
             expect(result.decks).toEqual([{ uuid: uuid(5), name: 'good', sasRating: null }]);
         });
@@ -211,29 +331,52 @@ describe('DokService', function () {
         it('reports an error when the first page fails', async function () {
             fetchMock.mockResolvedValue({ ok: false, status: 500 });
 
-            const result = await service.listOwnerDecks('p');
+            const result = await service.listMyDecks('user-key');
 
             expect(result).toMatchObject({ configured: true, error: true });
             expect(result.errorDetail).toContain('HTTP 500');
         });
 
-        it('surfaces a helpful hint for auth and endpoint failures', async function () {
+        it('surfaces a helpful hint for auth, endpoint and rate-limit failures', async function () {
             fetchMock.mockResolvedValue({ ok: false, status: 401 });
-            expect((await service.listOwnerDecks('p')).errorDetail).toContain('API key rejected');
+            expect((await service.listMyDecks('user-key')).errorDetail).toContain(
+                'API key rejected'
+            );
 
             fetchMock.mockResolvedValue({ ok: false, status: 404 });
-            expect((await service.listOwnerDecks('p')).errorDetail).toContain(
-                'filterUrl may be wrong'
+            expect((await service.listMyDecks('user-key')).errorDetail).toContain(
+                'endpoint not found'
             );
+
+            fetchMock.mockResolvedValue({ ok: false, status: 429 });
+            expect((await service.listMyDecks('user-key')).errorDetail).toContain('DoK rate limit');
         });
 
         it('reports a connection failure detail', async function () {
             fetchMock.mockRejectedValue(new Error('getaddrinfo ENOTFOUND'));
 
-            const result = await service.listOwnerDecks('p');
+            const result = await service.listMyDecks('user-key');
 
             expect(result.error).toBe(true);
             expect(result.errorDetail).toContain('could not connect');
+        });
+
+        it('names a timeout rather than reporting a raw abort', async function () {
+            const timeout = new Error('The operation was aborted due to timeout');
+            timeout.name = 'TimeoutError';
+            fetchMock.mockRejectedValue(timeout);
+
+            expect((await service.listMyDecks('user-key')).errorDetail).toContain(
+                'request timed out'
+            );
+        });
+
+        it('rejects a response that is not an array of decks', async function () {
+            fetchMock.mockResolvedValue({ ok: true, json: async () => ({ decks: [] }) });
+
+            expect((await service.listMyDecks('user-key')).errorDetail).toContain(
+                'unexpected response shape'
+            );
         });
 
         it('returns a partial list when a later page fails', async function () {
@@ -241,12 +384,12 @@ describe('DokService', function () {
             fetchMock.mockImplementation(async () => {
                 call++;
                 if (call === 1) {
-                    return { ok: true, json: async () => ({ decks: [{ keyforgeId: uuid(1) }] }) };
+                    return { ok: true, json: async () => [entry({ keyforgeId: uuid(1) })] };
                 }
                 return { ok: false, status: 502 };
             });
 
-            const result = await service.listOwnerDecks('p');
+            const result = await service.listMyDecks('user-key');
 
             expect(result.error).toBeUndefined();
             expect(result.decks).toEqual([{ uuid: uuid(1), name: null, sasRating: null }]);
@@ -255,21 +398,54 @@ describe('DokService', function () {
         it('does not call the API when DoK is disabled', async function () {
             config.enabled = false;
 
-            const result = await service.listOwnerDecks('p');
+            const result = await service.listMyDecks('user-key');
 
             expect(result).toEqual({ configured: false, decks: [] });
             expect(fetchMock).not.toHaveBeenCalled();
         });
 
-        it('caches SAS from the filter response with no extra API calls', async function () {
+        it('does not call the API without a user key', async function () {
+            const result = await service.listMyDecks('   ');
+
+            expect(result).toEqual({ configured: true, decks: [] });
+            expect(fetchMock).not.toHaveBeenCalled();
+        });
+
+        // The whole point of /my-decks: it authenticates as the player, so a
+        // site that never bought its own DoK key can still offer the import.
+        it('works on a server with no site api key of its own', async function () {
+            config.apiKey = '';
             mockPages([[{ keyforgeId: uuid(1), name: 'A', sasRating: 65 }], []]);
 
-            await service.listOwnerDecks('p');
+            const result = await service.listMyDecks('user-key');
+
+            expect(service.isEnabled()).toBe(false);
+            expect(result.decks).toEqual([{ uuid: uuid(1), name: 'A', sasRating: 65 }]);
+            expect(fetchMock).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.objectContaining({ headers: { 'Api-Key': 'user-key' } })
+            );
+        });
+
+        it('caches SAS from the listing with no extra API calls', async function () {
+            mockPages([[{ keyforgeId: uuid(1), name: 'A', sasRating: 65 }], []]);
+
+            await service.listMyDecks('user-key');
 
             expect(db.query).toHaveBeenCalledWith(
                 expect.stringContaining('ON CONFLICT ("Uuid") DO NOTHING'),
                 expect.arrayContaining([uuid(1), 65])
             );
+        });
+
+        it('gives up a page rather than exceeding the user rate limit', async function () {
+            const wait = vi.spyOn(service, 'waitForRequestSlot').mockResolvedValue(false);
+
+            const result = await service.listMyDecks('user-key');
+
+            expect(wait).toHaveBeenCalledWith(8000, 'user-key');
+            expect(result.errorDetail).toBe('per-minute rate limit reached');
+            expect(fetchMock).not.toHaveBeenCalled();
         });
     });
 
@@ -303,6 +479,34 @@ describe('DokService', function () {
 
             expect(service.reserveRequestSlot()).toBe(true);
             expect(await service.waitForRequestSlot(0)).toBe(false);
+        });
+
+        // The load-bearing property of the per-key window: DoK meters each key
+        // separately, so a player paging their own collection must not eat into
+        // the site key's budget for SAS enrichment (or any other player's).
+        it('budgets each api key separately', async function () {
+            config.maxRequestsPerMinute = 1;
+
+            expect(service.reserveRequestSlot('user-a')).toBe(true);
+            expect(service.reserveRequestSlot('user-a')).toBe(false);
+
+            expect(service.reserveRequestSlot('user-b')).toBe(true);
+            expect(service.reserveRequestSlot()).toBe(true);
+            expect(service.reserveRequestSlot()).toBe(false);
+            expect(await service.waitForRequestSlot(0, 'user-a')).toBe(false);
+        });
+
+        it('still enriches SAS after a user has spent their own key budget', async function () {
+            config.maxRequestsPerMinute = 1;
+            fetchMock.mockImplementation(async (url) =>
+                String(url).includes('my-decks')
+                    ? { ok: true, json: async () => [] }
+                    : { ok: true, json: async () => ({ deck: { sasRating: 70 } }) }
+            );
+
+            await service.listMyDecks('user-key');
+
+            expect(await service.fetchDeckStats('uuid-1')).not.toBeNull();
         });
     });
 

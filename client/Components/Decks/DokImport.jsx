@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton } from '@heroui/react';
 
-import { useSaveDeckMutation } from '../../redux/api';
+import { usePrepareDokImportMutation, useSaveDeckMutation } from '../../redux/api';
 
 const IMPORT_CONCURRENCY = 3;
 
@@ -29,13 +29,21 @@ const extractUuids = (text) => {
 /**
  * ARCHON: bulk-import a whole KeyForge collection.
  *
- * Decks of KeyForge has no public "list a user's decks" API (their public
- * API is single-deck lookup only), so instead of a username we take the
- * player's DoK collection **CSV export** (or pasted deck links / ids),
- * pull every Master Vault id out of it, and import each through the
- * ordinary single-deck endpoint (Master Vault fetch + SAS enrichment),
- * a few in parallel with live progress. Decks already owned are skipped
- * server-side, so re-running only adds new ones.
+ * Two routes in, because they suit different players:
+ *
+ *  - A Decks of KeyForge API key. DoK publishes
+ *    `GET /public-api/v1/my-decks` for exactly this, keyed to the user's own
+ *    account, so one paste syncs the whole collection and re-syncing later is
+ *    a button rather than another export. The key is sent to our server for
+ *    that one request and never stored, here or there.
+ *  - A DoK CSV export or pasted deck links, for anyone who would rather not
+ *    hand over a key at all.
+ *
+ * Both routes end in the same place: a list of Master Vault uuids imported
+ * through the ordinary single-deck endpoint, a few at a time, so the proven
+ * import path (Master Vault fetch + SAS enrichment) stays the only one.
+ * Decks already owned are skipped server-side, so re-running only adds new
+ * decks.
  *
  * @param {{ onDone?: () => void, compact?: boolean }} props
  */
@@ -43,22 +51,24 @@ const DokImport = ({ onDone, compact }) => {
     const { t } = useTranslation();
     const fileInput = useRef(null);
 
+    const [apiKey, setApiKey] = useState('');
     const [pasted, setPasted] = useState('');
-    const [phase, setPhase] = useState('idle'); // idle | importing | done
+    const [phase, setPhase] = useState('idle'); // idle | preparing | importing | done
     const [message, setMessage] = useState(null);
     const [progress, setProgress] = useState({ done: 0, total: 0 });
     const [summary, setSummary] = useState(null);
 
     const [saveDeck] = useSaveDeckMutation();
+    const [prepareDokImport] = usePrepareDokImportMutation();
 
-    const runImport = async (uuids) => {
+    const runImport = async (uuids, { alreadyOwned = 0 } = {}) => {
         setPhase('importing');
         setProgress({ done: 0, total: uuids.length });
 
         let cursor = 0;
         let done = 0;
         let imported = 0;
-        let already = 0;
+        let already = alreadyOwned;
         let failed = 0;
 
         const worker = async () => {
@@ -97,8 +107,73 @@ const DokImport = ({ onDone, compact }) => {
         );
 
         setPhase('done');
-        setSummary({ imported, already, failed, total: uuids.length });
+        setSummary({ imported, already, failed, total: uuids.length + alreadyOwned });
         onDone?.();
+    };
+
+    const syncFromDok = async () => {
+        setMessage(null);
+        setSummary(null);
+        setPhase('preparing');
+
+        let result;
+        try {
+            result = await prepareDokImport(apiKey.trim()).unwrap();
+        } catch (err) {
+            setPhase('idle');
+            setMessage(
+                err?.data?.message ||
+                    t('Could not reach Decks of KeyForge. Please try again in a moment.')
+            );
+
+            return;
+        }
+
+        if (!result.success) {
+            setPhase('idle');
+            setMessage(result.message || t('Could not read that collection.'));
+
+            return;
+        }
+
+        // Both of these mean "there is more where this came from", and both are
+        // genuinely fixed by syncing again: the server skips what we already
+        // own as it pages, so the next run starts where this one stopped.
+        if (result.truncated) {
+            setMessage(
+                t(
+                    'Importing {{count}} decks now — more are waiting. Sync again when this finishes.',
+                    {
+                        count: result.toImport.length
+                    }
+                )
+            );
+        } else if (result.partial) {
+            setMessage(
+                t(
+                    'Decks of KeyForge stopped responding partway through, so this is only part of your collection. Sync again to pick up the rest.'
+                )
+            );
+        }
+
+        if (result.toImport.length === 0) {
+            setPhase('done');
+            setSummary({
+                imported: 0,
+                already: result.ownedCount,
+                failed: 0,
+                total: result.total
+            });
+
+            return;
+        }
+
+        // The server already told us which decks we own; counting them here
+        // keeps the summary honest without re-importing them to find out.
+        runImport(
+            result.toImport.map((deck) => deck.uuid),
+            { alreadyOwned: result.ownedCount }
+        );
     };
 
     const importFrom = (text) => {
@@ -133,7 +208,7 @@ const DokImport = ({ onDone, compact }) => {
         }
     };
 
-    const busy = phase === 'importing';
+    const busy = phase === 'preparing' || phase === 'importing';
     const percent = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
 
     return (
@@ -141,15 +216,43 @@ const DokImport = ({ onDone, compact }) => {
             {!compact && (
                 <p className='text-sm text-muted'>
                     {t(
-                        'Import your whole collection: on Decks of KeyForge, open your decks and use "Download Decks Spreadsheet", then upload that CSV here. You can also paste deck links (DoK or Master Vault), one per line.'
+                        'Sync your whole collection with your Decks of KeyForge API key. Find it on Decks of KeyForge under your profile. We use it for this one request and never store it.'
                     )}
                 </p>
             )}
 
-            <div className='flex flex-wrap gap-2'>
+            <div className='flex flex-wrap items-center gap-2'>
+                <input
+                    type='password'
+                    autoComplete='off'
+                    className='min-w-0 flex-1 rounded-md border border-border/65 bg-surface-secondary/55 px-3 py-2 text-sm text-foreground focus:border-border/90 focus:outline-none'
+                    placeholder={t('Decks of KeyForge API key')}
+                    value={apiKey}
+                    disabled={busy}
+                    onChange={(event) => setApiKey(event.target.value)}
+                />
                 <HeroButton
                     variant='primary'
-                    isPending={busy}
+                    isPending={phase === 'preparing'}
+                    isDisabled={busy || !apiKey.trim()}
+                    onPress={syncFromDok}
+                >
+                    {t('Sync collection')}
+                </HeroButton>
+            </div>
+
+            <div className='my-1 flex items-center gap-3'>
+                <span className='h-px flex-1 bg-border/60' />
+                <span className='text-xs uppercase tracking-wide text-muted'>
+                    {t('or without a key')}
+                </span>
+                <span className='h-px flex-1 bg-border/60' />
+            </div>
+
+            <div className='flex flex-wrap gap-2'>
+                <HeroButton
+                    variant='tertiary'
+                    isDisabled={busy}
                     onPress={() => fileInput.current?.click()}
                 >
                     {t('Upload DoK CSV')}
@@ -180,6 +283,10 @@ const DokImport = ({ onDone, compact }) => {
                     {t('Import pasted')}
                 </HeroButton>
             </div>
+
+            {phase === 'preparing' && (
+                <p className='text-xs text-muted'>{t('Reading your collection from DoK…')}</p>
+            )}
 
             {phase === 'importing' && (
                 <div className='space-y-1'>

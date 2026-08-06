@@ -13,6 +13,7 @@ const GameService = require('./services/GameService');
 const sharedNotificationService = require('./services/notifications');
 const tournamentNotifications = require('./services/notifications/tournamentNotifications');
 const DokService = require('./services/dok/DokService');
+const CatalogService = require('./services/catalog/CatalogService');
 const UserService = require('./services/UserService');
 const ConfigService = require('./services/ConfigService');
 // ARCHON: native tournaments create/report lobby games automatically
@@ -49,6 +50,9 @@ class Lobby {
         // ARCHON: SAS lookup for the pre-game screen. Cached reads only - the
         // deck-selection path must never wait on an outbound DoK call.
         this.dokService = options.dokService || new DokService(this.configService);
+        // ARCHON: Master Vault name -> uuid index. The lobby holds it only to
+        // run the crawl below; searching it is an API concern.
+        this.catalogService = options.catalogService || new CatalogService(this.configService);
         this.router = options.router || new GameRouter(this.configService);
 
         this.router.on('onGameClosed', this.onGameClosed.bind(this));
@@ -122,6 +126,18 @@ class Lobby {
         this.sasSweep = setInterval(() => this.runSasRefreshSweep(), 15 * 60 * 1000);
         if (this.sasSweep && this.sasSweep.unref) {
             this.sasSweep.unref();
+        }
+
+        // ARCHON: Master Vault catalog crawl. Ticks every minute and consults
+        // the configured cadence on each tick, the way decay and replay
+        // retention do, because that cadence is an admin setting: the reason an
+        // operator reaches for it is that Master Vault is unhappy with us, and
+        // a value baked into setInterval would not take effect until the lobby
+        // was restarted.
+        this.lastCatalogCrawlMs = 0;
+        this.catalogSweep = setInterval(() => this.runCatalogCrawl(), 60 * 1000);
+        if (this.catalogSweep && this.catalogSweep.unref) {
+            this.catalogSweep.unref();
         }
 
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
@@ -241,6 +257,48 @@ class Lobby {
             }
         } catch (err) {
             logger.error('SAS refresh sweep failed', err);
+        }
+    }
+
+    /**
+     * ARCHON: Master Vault catalog crawl.
+     *
+     * This is only the clock. Where the walk has got to, how hard it may push
+     * Master Vault and when its circuit breaker has parked it all live in the
+     * crawler, so the lobby's whole job is to decide that a run is due and to
+     * survive whatever comes back. Silence on a run that indexed nothing is
+     * deliberate: once the walk catches up with Master Vault most runs find no
+     * new decks, and an hourly line saying so would only train people to
+     * ignore the log.
+     */
+    async runCatalogCrawl() {
+        if (!this.catalogService) {
+            return;
+        }
+
+        try {
+            const minutes = Number(this.catalogService.getConfig().crawlIntervalMinutes) || 0;
+
+            if (minutes <= 0) {
+                return;
+            }
+
+            const now = Date.now();
+            if (now - this.lastCatalogCrawlMs < minutes * 60 * 1000) {
+                return;
+            }
+
+            this.lastCatalogCrawlMs = now;
+            const result = await this.catalogService.crawlOnce();
+
+            if (result && result.indexed > 0) {
+                logger.info(
+                    `Master Vault catalog crawl indexed ${result.indexed} deck(s)` +
+                        (result.paused ? ' (Master Vault failing, crawl now backing off)' : '')
+                );
+            }
+        } catch (err) {
+            logger.error('Master Vault catalog crawl failed', err);
         }
     }
 

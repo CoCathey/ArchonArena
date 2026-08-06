@@ -1,40 +1,69 @@
+const crypto = require('node:crypto');
+
 const logger = require('../../log');
 
-// Process-wide sliding-window log of outbound DoK request times. DoK bills
-// a single site-wide Api-Key, so the cap must be global across every
-// DokService instance in the process - not per-instance. Each entry is a
-// request timestamp (ms); anything older than 60s is pruned on access.
-const outboundRequestTimes = [];
+// ARCHON: one sliding window per Api-Key, not one per process.
+//
+// DoK meters its per-minute cap against whichever key made the request, and the
+// site now sends two kinds: the site-wide key that pays for SAS enrichment, and
+// each player's own key when we list their collection. Charging a player's
+// paging to a single shared window would throttle SAS for everybody over quota
+// DoK never actually spent, so every key gets its own budget here too.
+//
+// Keys are bucketed by a hash so a player's DoK credential is never held in
+// module state, and a bucket is dropped once its window drains - otherwise the
+// map would keep a row for every player who ever imported, forever.
+const outboundRequestTimes = new Map();
 
-function reserveOutboundSlot(limit) {
+function keyIdFor(apiKey) {
+    return crypto.createHash('sha256').update(String(apiKey)).digest('hex').slice(0, 16);
+}
+
+function reserveOutboundSlot(keyId, limit) {
     const now = Date.now();
     const cutoff = now - 60000;
 
-    while (outboundRequestTimes.length && outboundRequestTimes[0] <= cutoff) {
-        outboundRequestTimes.shift();
+    // Sweep every bucket, not just this key's: a player who imported once and
+    // left would otherwise keep an entry nobody ever prunes again.
+    for (const [id, times] of outboundRequestTimes) {
+        while (times.length && times[0] <= cutoff) {
+            times.shift();
+        }
+
+        if (times.length === 0) {
+            outboundRequestTimes.delete(id);
+        }
     }
 
-    if (outboundRequestTimes.length < limit) {
-        outboundRequestTimes.push(now);
+    const slots = outboundRequestTimes.get(keyId) || [];
 
-        return true;
+    if (slots.length >= limit) {
+        return false;
     }
 
-    return false;
+    slots.push(now);
+    outboundRequestTimes.set(keyId, slots);
+
+    return true;
 }
 
 /**
  * Integration with Decks of KeyForge (decksofkeyforge.com): fetches SAS /
  * AERC deck statistics and caches them in the DeckSas table, keyed by the
- * deck's Master Vault UUID so one row covers every user's copy of a deck.
+ * deck's Master Vault UUID so one row covers every user's copy of a deck, and
+ * lists a player's own DoK collection (/my-decks) so they can bulk-import it.
  *
  * Design constraints:
  *  - Deck import and deck listing must never fail or block on DoK being
  *    slow or down; enrichment is best-effort and cached values degrade
  *    gracefully to "no SAS shown".
+ *  - Two credentials are in play: the site-wide key SAS enrichment spends, and
+ *    the player's own key /my-decks requires. Collection listing therefore only
+ *    needs `enabled` (isImportEnabled) and works on a server that has no site
+ *    key at all, while SAS still needs both (isEnabled).
  *  - Outbound calls are capped to DoK's per-minute request limit
  *    (maxRequestsPerMinute; 25 on the free tier, higher for patrons) via a
- *    shared sliding window. Best-effort enrichment skips when the budget is
+ *    sliding window per key. Best-effort enrichment skips when the budget is
  *    spent; user-initiated calls wait briefly for a slot.
  *  - All knobs (enabled, API key, refresh interval, timeout, rate limit)
  *    come from config so the admin settings service can drive them.
@@ -56,9 +85,9 @@ const AERC_COMPONENTS = [
 ];
 
 class DokService {
-    // Test hook: clear the shared rate-limit window between cases.
+    // Test hook: clear every key's rate-limit window between cases.
     static _resetRateLimiter() {
-        outboundRequestTimes.length = 0;
+        outboundRequestTimes.clear();
     }
 
     constructor(configService, db = require('../../db'), settingsService = require('../settings')) {
@@ -82,6 +111,13 @@ class DokService {
         return !!config.enabled && !!config.apiKey;
     }
 
+    // ARCHON: collection import authenticates as the player, so it must not be
+    // gated on the site's own key the way SAS enrichment is - a server that
+    // never bought a DoK key can still let players pull in their own decks.
+    isImportEnabled() {
+        return !!this.getConfig().enabled;
+    }
+
     // DoK's per-minute request cap (25 free; 50/100/250 for patron tiers).
     getRateLimit() {
         const limit = parseInt(this.getConfig().maxRequestsPerMinute, 10);
@@ -89,19 +125,21 @@ class DokService {
         return Number.isFinite(limit) && limit > 0 ? limit : 25;
     }
 
-    // Non-blocking: reserve one request against this minute's budget.
-    reserveRequestSlot() {
-        return reserveOutboundSlot(this.getRateLimit());
+    // Non-blocking: reserve one request against this minute's budget for the
+    // key that will be sent. Defaults to the site key, which is what every
+    // SAS caller uses, so those call sites need not name it.
+    reserveRequestSlot(apiKey = this.getConfig().apiKey) {
+        return reserveOutboundSlot(keyIdFor(apiKey), this.getRateLimit());
     }
 
     // Blocking (bounded): for user-initiated calls that should prefer to
     // proceed rather than silently skip. Polls at roughly the slot-refill
     // spacing until a slot frees or maxWaitMs elapses.
-    async waitForRequestSlot(maxWaitMs = 8000) {
+    async waitForRequestSlot(maxWaitMs = 8000, apiKey = this.getConfig().apiKey) {
         const start = Date.now();
 
         for (;;) {
-            if (this.reserveRequestSlot()) {
+            if (this.reserveRequestSlot(apiKey)) {
                 return true;
             }
 
@@ -167,17 +205,17 @@ class DokService {
         }
     }
 
-    getFilterUrl() {
+    getMyDecksUrl() {
         const config = this.getConfig();
 
-        if (config.filterUrl) {
-            return config.filterUrl;
+        if (config.myDecksUrl) {
+            return config.myDecksUrl;
         }
 
-        // Derive the collection-filter endpoint from the single-deck apiUrl
-        // origin when not explicitly configured.
+        // Derive the collection endpoint from the single-deck apiUrl origin
+        // when not explicitly configured.
         try {
-            return new URL(config.apiUrl).origin + '/public-api/v1/decks/filter';
+            return new URL(config.apiUrl).origin + '/public-api/v1/my-decks';
         } catch {
             return null;
         }
@@ -193,40 +231,33 @@ class DokService {
     }
 
     /**
-     * Fetch one page of a DoK user's public decks via the filter endpoint.
-     * Returns { decks: [{ uuid, name, sasRating }] } on success (uuid is the
-     * Master Vault id, i.e. what our importer needs) or { error } describing
-     * the failure (HTTP status, timeout, rate limit) so callers can tell the
-     * user what actually went wrong.
+     * Fetch one page of the decks DoK holds for a player, authenticating as
+     * that player with their own Api-Key. Returns
+     * { decks: [{ uuid, name, sasRating }] } on success (uuid is the Master
+     * Vault id, i.e. what our importer needs) or { error } describing the
+     * failure (HTTP status, timeout, rate limit) so callers can tell the user
+     * what actually went wrong.
      */
-    async fetchOwnerDeckPage(dokUsername, page) {
+    async fetchMyDecksPage(apiKey, page) {
         const config = this.getConfig();
-        const filterUrl = this.getFilterUrl();
+        const myDecksUrl = this.getMyDecksUrl();
 
-        if (!filterUrl) {
-            return { error: 'no filter endpoint configured' };
+        if (!myDecksUrl) {
+            return { error: 'no my-decks endpoint configured' };
         }
 
-        // User-initiated: wait briefly for a slot rather than skipping.
-        if (!(await this.waitForRequestSlot())) {
-            logger.warn(
-                `DoK per-minute rate limit reached; could not fetch owner deck page ${page}`
-            );
+        // User-initiated, and billed to this player's own DoK budget rather
+        // than the site's: wait briefly for a slot rather than skipping.
+        if (!(await this.waitForRequestSlot(8000, apiKey))) {
+            logger.warn(`DoK per-minute rate limit reached; could not fetch my-decks page ${page}`);
 
             return { error: 'per-minute rate limit reached' };
         }
 
         try {
-            const response = await fetch(filterUrl, {
-                method: 'POST',
-                headers: { 'Api-Key': config.apiKey, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    owner: dokUsername,
-                    page,
-                    pageSize: 100,
-                    sort: 'ADDED_DATE',
-                    sortDirection: 'DESC'
-                }),
+            const response = await fetch(`${myDecksUrl}?page=${page}`, {
+                method: 'GET',
+                headers: { 'Api-Key': apiKey },
                 signal: AbortSignal.timeout(config.requestTimeoutMs || 10000)
             });
 
@@ -235,76 +266,99 @@ class DokService {
                 if (response.status === 401 || response.status === 403) {
                     hint = ' (API key rejected)';
                 } else if (response.status === 404) {
-                    hint = ' (endpoint not found - filterUrl may be wrong)';
+                    hint = ' (endpoint not found)';
                 } else if (response.status === 429) {
                     hint = ' (DoK rate limit)';
                 }
-                logger.warn(
-                    `DoK filter API returned ${response.status} for owner ${dokUsername} page ${page}`
-                );
+                logger.warn(`DoK my-decks API returned ${response.status} for page ${page}`);
 
                 return { error: `HTTP ${response.status}${hint}` };
             }
 
             const body = await response.json();
-            const decks = body && Array.isArray(body.decks) ? body.decks : null;
 
-            if (!decks) {
-                return { error: 'unexpected response shape (no decks array)' };
+            if (!Array.isArray(body)) {
+                return { error: 'unexpected response shape (expected an array of decks)' };
             }
 
-            return {
-                decks: decks
-                    .map((deck) => ({
-                        uuid: this.isUuid(deck.keyforgeId)
-                            ? deck.keyforgeId
-                            : this.isUuid(deck.id)
-                            ? deck.id
-                            : null,
+            const decks = body
+                .map((entry) => {
+                    // Each entry is a PublicMyDeckInfo: ownership flags
+                    // wrapped around the deck itself. Fall back to the
+                    // entry so an unwrapped deck still parses.
+                    const deck = (entry && entry.deck) || entry || {};
+
+                    return {
+                        uuid: this.isUuid(deck.keyforgeId) ? deck.keyforgeId : null,
                         name: typeof deck.name === 'string' ? deck.name : null,
                         sasRating:
                             typeof deck.sasRating === 'number' ? Math.round(deck.sasRating) : null
-                    }))
-                    .filter((deck) => deck.uuid)
-            };
+                    };
+                })
+                .filter((deck) => deck.uuid);
+
+            // Rows we could not read are worth saying out loud. If DoK ever
+            // moves the Master Vault id, every row drops here and the caller
+            // sees an empty collection - which is indistinguishable from a
+            // player who owns nothing unless the count was logged.
+            if (decks.length < body.length) {
+                logger.warn(
+                    `DoK my-decks page ${page}: ignored ${body.length - decks.length} of ` +
+                        `${body.length} entries with no Master Vault id`
+                );
+            }
+
+            // rowCount is what DoK sent, deliberately not decks.length: paging
+            // continues on it, so a page of unreadable rows must not look like
+            // the end of the collection and silently truncate the import.
+            return { decks, rowCount: body.length };
         } catch (err) {
             const detail = err.name === 'TimeoutError' ? 'request timed out' : err.message;
-            logger.warn(
-                `Failed to fetch DoK decks for owner ${dokUsername} page ${page}: ${detail}`
-            );
+            logger.warn(`Failed to fetch DoK my-decks page ${page}: ${detail}`);
 
             return { error: `could not connect (${detail})` };
         }
     }
 
     /**
-     * List a DoK user's whole public collection by paging the filter
-     * endpoint until it runs dry (or a safety cap is hit). Never throws:
-     *  - { configured: false } when DoK is not set up on this server
+     * List a player's DoK collection by paging /my-decks with their key until
+     * it runs dry (or a safety cap is hit). Never throws:
+     *  - { configured: false } when DoK import is off on this server
      *  - { configured: true, error: true } when the very first page fails
-     *  - { configured: true, decks: [...], truncated } otherwise (a later
-     *    page failing yields a partial-but-usable list)
+     *  - { configured: true, decks, truncated, partial, skipped } otherwise
+     *
+     * `skipUuids` is the set of decks the caller already has. Filtering happens
+     * HERE, mid-page, rather than on the finished list, and that is the whole
+     * reason re-running a capped sync makes progress: the cap counts decks that
+     * still need importing, so a player with 700 decks gets 1-500, imports
+     * them, and the next run - now skipping those 500 - returns 501-700.
+     * Filtering afterwards would hand back the same first 500 forever and the
+     * rest would be unreachable through this feature.
      */
-    async listOwnerDecks(dokUsername, { maxDecks } = {}) {
-        if (!this.isEnabled()) {
+    async listMyDecks(apiKey, { maxDecks, skipUuids } = {}) {
+        if (!this.isImportEnabled()) {
             return { configured: false, decks: [] };
         }
 
-        const owner = String(dokUsername || '').trim();
+        const key = String(apiKey || '').trim();
 
-        if (!owner) {
+        if (!key) {
             return { configured: true, decks: [] };
         }
 
         const config = this.getConfig();
         const cap = maxDecks || config.maxImportDecks || 500;
+        const skip = skipUuids instanceof Set ? skipUuids : new Set(skipUuids || []);
         const all = [];
+        const rated = [];
         const seen = new Set();
         let truncated = false;
+        let partial = false;
+        let skipped = 0;
 
         // Hard page ceiling as a runaway guard on top of the deck cap.
         for (let page = 0; page < 100; page++) {
-            const pageResult = await this.fetchOwnerDeckPage(owner, page);
+            const pageResult = await this.fetchMyDecksPage(key, page);
 
             if (pageResult.error) {
                 if (page === 0) {
@@ -316,47 +370,66 @@ class DokService {
                     };
                 }
 
-                break; // partial success - return what we already have
-            }
-
-            const pageDecks = pageResult.decks;
-
-            if (pageDecks.length === 0) {
+                // Partial success. Flagged rather than silent: without it the
+                // caller cannot tell a collection that ended from one that was
+                // cut off, and would present half an import as all of it.
+                logger.warn(`DoK my-decks stopped early at page ${page}: ${pageResult.error}`);
+                partial = true;
                 break;
             }
 
-            let added = 0;
-            for (const deck of pageDecks) {
+            // Measured on what DoK sent, not on what parsed - see fetchMyDecksPage.
+            if (pageResult.rowCount === 0) {
+                break;
+            }
+
+            let fresh = 0;
+            for (const deck of pageResult.decks) {
                 if (seen.has(deck.uuid)) {
                     continue;
                 }
 
                 seen.add(deck.uuid);
-                all.push(deck);
-                added++;
+                fresh++;
+                // Cached for every deck DoK reported, owned or not: a deck the
+                // player already has still wants its SAS kept current, and this
+                // response is the cheapest place it will ever come from.
+                rated.push(deck);
 
+                if (skip.has(deck.uuid)) {
+                    skipped++;
+                    continue;
+                }
+
+                // Checked before the push, so reaching the cap exactly is not
+                // truncation - only an actual next deck we refused to take is.
                 if (all.length >= cap) {
                     truncated = true;
                     break;
                 }
+
+                all.push(deck);
             }
 
-            // No new decks (endpoint ignored paging, or we hit the cap) -
-            // stop rather than loop forever.
-            if (truncated || added === 0) {
+            // Nothing new out of decks we could read means DoK is ignoring
+            // `page` and handing back the same ones; stop rather than fetch
+            // them a hundred times. A page where nothing PARSED is a different
+            // thing - the decks after it are still worth asking for, and the
+            // page ceiling is what bounds that case.
+            if (truncated || (pageResult.decks.length > 0 && fresh === 0)) {
                 break;
             }
         }
 
-        // The filter response already carries each deck's SAS - cache it now
+        // The my-decks response already carries each deck's SAS - cache it now
         // so bulk-imported decks show SAS with zero extra per-deck API calls.
-        await this.cacheSummarySas(all);
+        await this.cacheSummarySas(rated);
 
-        return { configured: true, decks: all, truncated };
+        return { configured: true, decks: all, truncated, partial, skipped };
     }
 
     /**
-     * Persist SAS ratings pulled from a filter/list response. Uses ON
+     * Persist SAS ratings pulled from a collection listing. Uses ON
      * CONFLICT DO NOTHING so a fuller prior per-deck fetch (with AERC
      * breakdown) is never clobbered by this lighter summary.
      */
@@ -445,7 +518,7 @@ class DokService {
         }
 
         // Skip when we already hold fresh stats - e.g. SAS cached from a
-        // bulk-import filter response - so importing a collection does not
+        // bulk-import collection listing - so importing a collection does not
         // spend one API call per deck on data we already have.
         const stored = await this.getStoredStats([uuid]);
         if (stored[uuid] && !this.needsRefresh(stored[uuid].FetchedAt)) {
