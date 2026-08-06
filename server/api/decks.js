@@ -310,6 +310,19 @@ module.exports.init = function (server) {
                 limit: Number.isFinite(limit) ? limit : undefined
             });
 
+            // Nothing found is ambiguous on a server whose crawl has never been
+            // switched on - which is the default - so say which kind of nothing
+            // this is rather than letting the UI imply the deck might turn up
+            // later. Only checked when there are no results, so the ordinary
+            // path pays nothing for it.
+            if (decks.length === 0) {
+                return res.send({
+                    success: true,
+                    decks: [],
+                    catalogEmpty: !(await catalogService.hasIndexedDecks())
+                });
+            }
+
             // One extra query rather than a join: the catalog lives in its own
             // table precisely so it never has to know about user-owned decks.
             const ownedUuids = new Set(await deckService.getOwnedDeckUuids(req.user.id));

@@ -307,6 +307,13 @@ const DokImport = ({ onDone, compact }) => {
 
     return (
         <div className={compact ? 'space-y-2' : 'space-y-3'}>
+            {/* ARCHON: the how-to-get-a-key steps are read once and then never
+                again, but this dialog is opened every time somebody adds a
+                deck. Left expanded they were the tallest thing in a modal that
+                already had to scroll, so they sit behind a disclosure - present
+                for the first-timer, out of the way for everyone else. A plain
+                <details> rather than a component: nothing in this client has a
+                collapsible yet, and this does not justify introducing one. */}
             {!compact && (
                 <div className='space-y-2 text-sm leading-relaxed text-muted'>
                     <p>
@@ -314,33 +321,37 @@ const DokImport = ({ onDone, compact }) => {
                             'Sync your whole collection with your Decks of KeyForge API key. We use it for this one request and never store it.'
                         )}
                     </p>
-                    <p className='font-semibold text-foreground'>{t('To get your key:')}</p>
-                    <ol className='list-decimal space-y-1 pl-5'>
-                        <li>
-                            {t('Log in to Decks of KeyForge, then open')}{' '}
-                            <a
-                                className='text-primary hover:text-primary/80'
-                                href='https://decksofkeyforge.com/about/sellers-and-devs'
-                                target='_blank'
-                                rel='noopener noreferrer'
-                            >
-                                {t('Sellers and Devs')}
-                            </a>
-                            {t('. You must be logged in, or no key button appears.')}
-                        </li>
-                        <li>{t('Under "Generate your API Key", press the button.')}</li>
-                        <li>
+                    <details className='rounded-md border border-border/60 bg-surface-secondary/40 px-3 py-2'>
+                        <summary className='cursor-pointer text-sm font-semibold text-foreground'>
+                            {t('How do I get a key?')}
+                        </summary>
+                        <ol className='mt-2 list-decimal space-y-1 pl-5'>
+                            <li>
+                                {t('Log in to Decks of KeyForge, then open')}{' '}
+                                <a
+                                    className='text-primary hover:text-primary/80'
+                                    href='https://decksofkeyforge.com/about/sellers-and-devs'
+                                    target='_blank'
+                                    rel='noopener noreferrer'
+                                >
+                                    {t('Sellers and Devs')}
+                                </a>
+                                {t('. You must be logged in, or no key button appears.')}
+                            </li>
+                            <li>{t('Under "Generate your API Key", press the button.')}</li>
+                            <li>
+                                {t(
+                                    'Copy the key straight away — Decks of KeyForge shows it once and cannot show it again.'
+                                )}
+                            </li>
+                            <li>{t('Paste it below and press Sync collection.')}</li>
+                        </ol>
+                        <p className='mt-2'>
                             {t(
-                                'Copy the key straight away — Decks of KeyForge shows it once and cannot show it again.'
+                                'Generating a key invalidates any previous one, so make a new key only if you have lost the old one. Your key lists the decks you have marked as owned on Decks of KeyForge — including private ones — so only give it to sites you trust.'
                             )}
-                        </li>
-                        <li>{t('Paste it below and press Sync collection.')}</li>
-                    </ol>
-                    <p>
-                        {t(
-                            'Generating a key invalidates any previous one, so make a new key only if you have lost the old one. Your key lists the decks you have marked as owned on Decks of KeyForge — including private ones — so only give it to sites you trust.'
-                        )}
-                    </p>
+                        </p>
+                    </details>
                 </div>
             )}
 
