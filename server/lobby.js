@@ -289,7 +289,7 @@ class Lobby {
             }
 
             this.lastCatalogCrawlMs = now;
-            const result = await this.catalogService.runCrawl();
+            const result = await this.catalogService.crawlOnce();
 
             if (result && result.indexed > 0) {
                 logger.info(

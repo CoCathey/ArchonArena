@@ -46,11 +46,24 @@ describe('CatalogService', function () {
         ...overrides
     });
 
-    // The cursor read answers with a row; every write answers with nothing.
-    const mockState = (overrides = {}) =>
-        db.query.mockImplementation(async (sql) =>
-            sql.startsWith('SELECT') ? [stateRow(overrides)] : []
-        );
+    // The cursor read answers with a row; the catalog insert answers the way
+    // RETURNING does, with one row per deck actually added (here, all of them);
+    // every other write answers with nothing.
+    const mockState = (overrides = {}, { inserted } = {}) =>
+        db.query.mockImplementation(async (sql, params) => {
+            if (sql.startsWith('SELECT')) {
+                return [stateRow(overrides)];
+            }
+
+            if (sql.includes('INSERT INTO "DeckCatalog"')) {
+                const offered = (params || []).length / 4;
+                const added = inserted == null ? offered : Math.min(inserted, offered);
+
+                return Array.from({ length: added }, (_unused, i) => ({ Uuid: uuid(i + 1) }));
+            }
+
+            return [];
+        });
 
     const mockPages = (pages) =>
         fetchMock.mockImplementation(async (url) => {
@@ -188,11 +201,17 @@ describe('CatalogService', function () {
         });
 
         it('indexes a whole page in one statement and never clobbers a row', async function () {
+            db.query.mockResolvedValue([{ Uuid: uuid(1) }, { Uuid: uuid(2) }]);
+
             expect(await service.upsertDecks([deck(1), deck(2)])).toBe(2);
 
             const [sql, params] = db.query.mock.calls[0];
 
             expect(sql).toContain('INSERT INTO "DeckCatalog"');
+            // RETURNING is what makes "indexed" mean newly added rather than
+            // offered - without it a caught-up crawl re-counts its tail page
+            // on every run and TotalIndexed climbs forever.
+            expect(sql).toContain('RETURNING "Uuid"');
             expect(sql).toContain('($1, $2, $3, $4');
             expect(sql).toContain('($5, $6, $7, $8');
             expect(sql).toContain('ON CONFLICT ("Uuid") DO NOTHING');
@@ -301,6 +320,20 @@ describe('CatalogService', function () {
                 })
             );
             expect(fetchMock).toHaveBeenCalledTimes(1);
+        });
+
+        // Once caught up, every run re-reads the same tail page. Counting rows
+        // offered rather than rows added would make TotalIndexed climb by a
+        // pageful every quarter hour, for decks the catalog already had - and
+        // TotalIndexed is what an operator reads to decide the crawl is working.
+        it('adds nothing to the total when the tail page holds no new decks', async function () {
+            mockState({ CurrentPage: 4, CaughtUp: true }, { inserted: 0 });
+            mockPages({ 4: [mvDeck(1)] });
+
+            const result = await service.crawlOnce();
+
+            expect(result.indexed).toBe(0);
+            expect(updatesMatching('"CurrentPage" = $1')[0][1]).toEqual([4, 0, true]);
         });
 
         it('spends no more than its page budget per run', async function () {

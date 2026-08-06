@@ -184,9 +184,12 @@ class CatalogService {
      * Index a page of decks in one statement. ON CONFLICT DO NOTHING because
      * the catalog is immutable once written: a deck's name, set and houses are
      * fixed at registration, so a row we already hold is a row we already know.
-     * Returns the number of rows offered to the table (0 if the insert failed);
-     * that is not the number newly added, which only a RETURNING round-trip
-     * nobody reads could tell us. Never throws.
+     *
+     * Returns how many rows were NEWLY added, which is what RETURNING gives us
+     * and what "indexed" has to mean. Counting rows offered instead would make
+     * TotalIndexed climb forever: once the crawl is caught up it re-reads the
+     * same tail page every run, and each pass would claim to have indexed a
+     * pageful of decks it already had. Never throws.
      */
     async upsertDecks(decks) {
         const rows = (decks || []).filter((deck) => deck && deck.uuid);
@@ -207,12 +210,14 @@ class CatalogService {
             params.push(deck.uuid, deck.name, deck.expansion, deck.houses || null);
         }
 
+        let inserted;
+
         try {
-            await this.db.query(
+            inserted = await this.db.query(
                 'INSERT INTO "DeckCatalog" ' +
                     '("Uuid", "Name", "Expansion", "Houses", "FirstSeen") VALUES ' +
                     values.join(', ') +
-                    ' ON CONFLICT ("Uuid") DO NOTHING',
+                    ' ON CONFLICT ("Uuid") DO NOTHING RETURNING "Uuid"',
                 params
             );
         } catch (err) {
@@ -221,7 +226,7 @@ class CatalogService {
             return 0;
         }
 
-        return rows.length;
+        return (inserted || []).length;
     }
 
     // Doubling per consecutive failure, capped. The cap matters more than the
@@ -286,7 +291,14 @@ class CatalogService {
         const config = this.getConfig();
 
         if (!this.isEnabled()) {
-            return { indexed: 0, pagesRequested: 0, caughtUp: false, paused: false, skipped: true };
+            return {
+                indexed: 0,
+                pagesRequested: 0,
+                caughtUp: false,
+                paused: false,
+                budgetExhausted: false,
+                skipped: true
+            };
         }
 
         const state = await this.getState();
@@ -298,6 +310,7 @@ class CatalogService {
                 pagesRequested: 0,
                 caughtUp: !!state.CaughtUp,
                 paused: true,
+                budgetExhausted: false,
                 skipped: true
             };
         }
@@ -471,7 +484,10 @@ class CatalogService {
 
         // The caller's limit is a request, not a promise: the cap is what stops
         // one keystroke on a public endpoint returning results by the thousand.
-        params.push(Math.min(limit || 25, config.maxSearchResults || 50));
+        // Clamped at both ends - Postgres rejects a negative LIMIT outright, so
+        // an unbounded floor turns `?limit=-1` into a query error swallowed as
+        // "no results", one log line per request.
+        params.push(Math.max(1, Math.min(limit || 25, config.maxSearchResults || 50)));
         // Sorted on lower("Name") rather than "Name" so the ordering can be
         // served by the same index the match is already reading.
         sql += ` ORDER BY lower("Name") ASC LIMIT $${params.length}`;

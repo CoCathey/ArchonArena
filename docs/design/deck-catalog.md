@@ -163,9 +163,15 @@ So the migration creates two btree indexes that need nothing installed:
     because outside the C collation a default btree cannot serve `LIKE 'prefix%'` at all,
     and without it every keystroke is a sequential scan of every deck in existence.
 
-The trigram index is then attempted inside a `DO` block whose `EXCEPTION WHEN OTHERS`
-raises a `NOTICE` and continues. Both statements sit inside the handler because either can
-be the one refused.
+`CREATE EXTENSION` and the GIN index each get their **own** `DO` block, with its own
+`EXCEPTION WHEN OTHERS` raising a `NOTICE` and continuing. Either can be the one refused,
+but they must not share a handler: a PL/pgSQL block with an `EXCEPTION` clause is a
+subtransaction, so one handler around both means a failed index build — `maintenance_work_mem`,
+disk, a lock timeout on a large table — rolls the extension back with it, while the notice
+blames only the index. That leaves a database that could have had `pg_trgm` without it, and
+strands the documented upgrade path, which is to install the extension and add a later
+migration creating just the index. Verified on PostgreSQL 16: under one shared handler the
+extension is gone afterwards; under two it survives.
 
 `CatalogService.search` then has to know which of the two databases it is talking to,
 because the fallback index only helps if the query is shaped to use it. A leading-wildcard

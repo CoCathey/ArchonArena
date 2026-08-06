@@ -249,13 +249,14 @@ const REGISTRY = {
                 label: 'Players may search the catalog by deck name',
                 default: true
             },
-            pageSize: {
-                type: 'number',
-                label: 'Decks requested per Master Vault page',
-                min: 10,
-                max: 100,
-                default: 25
-            },
+            // pageSize is deliberately NOT editable here. The crawl cursor is a
+            // page NUMBER, and page N only means the same decks forever while
+            // the page size never changes. Editing it mid-crawl re-aims the
+            // cursor at a different offset, and because the cursor only ever
+            // moves forward the decks in between are skipped permanently - an
+            // invisible hole in a table whose whole point is that you cannot
+            // tell what is missing from it. Changing it belongs with a cursor
+            // reset, which is a deploy, not a checkbox.
             pagesPerRun: {
                 type: 'number',
                 label: 'Pages fetched per crawl run',
