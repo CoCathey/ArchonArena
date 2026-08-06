@@ -145,6 +145,8 @@ check_column "Users" "OnboardedAt" "29 - Onboarding.sql"
 check_column "Clubs" "JoinCode" "29 - Onboarding.sql"
 check_column "Users" "DokUsername" "30 - DokUsername.sql"
 check_table "Stores" "31 - Stores.sql"
+check_table "DeckCatalog" "50 - DeckCatalog.sql"
+check_table "DeckCatalogState" "50 - DeckCatalog.sql"
 
 cards="$(psql_q 'SELECT COUNT(*) FROM "Cards"')"
 if [ "${cards:-0}" -gt 1000 ] 2>/dev/null; then

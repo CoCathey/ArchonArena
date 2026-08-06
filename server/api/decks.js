@@ -15,19 +15,31 @@ const deckService = new DeckService(configService, cardService);
 const DokService = require('../services/dok/DokService');
 const dokService = new DokService(configService);
 
-// ARCHON: bulk import from Decks of KeyForge remembers the linked account
-const UserService = require('../services/UserService');
-const userService = new UserService(configService);
+// ARCHON: Master Vault name -> uuid index (see docs/design/deck-catalog.md)
+const CatalogService = require('../services/catalog/CatalogService');
+const catalogService = new CatalogService(configService);
 
 // ARCHON: the DoK collection-import "prepare" step can drive many outbound
-// requests against the shared, per-minute DoK budget; cap how often a single
-// user can trigger it so one account can't starve SAS enrichment for everyone.
+// requests. Those now spend the *user's* DoK quota rather than the site's, so
+// this cap is about protecting DoK from us hammering them on a user's behalf
+// rather than about protecting our own SAS budget.
 const { rateLimit } = require('./rateLimit');
 const dokPrepareLimit = rateLimit({
     name: 'dok-prepare',
     windowMs: 10 * 60 * 1000,
     max: 10,
     message: 'Too many Decks of KeyForge import attempts. Please wait a few minutes and try again.'
+});
+
+// ARCHON: catalog search runs a leading-wildcard LIKE over a table that grows to
+// millions of rows. It is a cheap query with a trigram index and an expensive
+// one without (the index is best-effort - see the migration), so it gets a
+// limit generous enough for type-ahead and tight enough to bound the damage.
+const catalogSearchLimit = rateLimit({
+    name: 'catalog-search',
+    windowMs: 60 * 1000,
+    max: 60,
+    message: 'Too many deck searches. Please slow down a moment.'
 });
 
 module.exports.init = function (server) {
@@ -169,38 +181,54 @@ module.exports.init = function (server) {
     // ordinary /api/decks path (which handles Master Vault fetch + SAS), so
     // one proven import path serves both single and bulk. See
     // docs/design/dok-import.md.
+    //
+    // The caller supplies their OWN DoK API key. It is used for this request
+    // and then dropped: this codebase has no encryption-at-rest helper, and
+    // holding a third party's credential in plaintext to save the user a paste
+    // is a bad trade. Nothing about the key is logged, ever.
     server.post(
         '/api/decks/import/dok/prepare',
         passport.authenticate('jwt', { session: false }),
         dokPrepareLimit,
         wrapAsync(async function (req, res) {
-            const dokUsername = (req.body.dokUsername || '').trim();
+            const dokApiKey = (req.body.dokApiKey || '').trim();
 
-            if (!dokUsername) {
+            if (!dokApiKey) {
                 return res.send({
                     success: false,
-                    message: 'Enter your Decks of KeyForge username.'
+                    message: 'Enter your Decks of KeyForge API key.'
                 });
             }
 
-            if (!dokService.isEnabled()) {
+            // Note this is isImportEnabled, not isEnabled: listing a user's own
+            // decks needs only their key, so collection import works on a server
+            // that has no site-wide DOK_API_KEY (SAS enrichment still would not).
+            if (!dokService.isImportEnabled()) {
                 return res.send({
                     success: false,
-                    message: 'Decks of KeyForge import is not configured on this server yet.'
+                    message: 'Decks of KeyForge import is turned off on this server.'
                 });
             }
 
-            logger.info(
-                `DoK bulk import: user ${req.user.username} preparing import for DoK account '${dokUsername}'`
-            );
+            logger.info(`DoK collection import: user ${req.user.username} preparing import`);
+
+            // Read what they already have BEFORE listing, and let the service
+            // skip those decks as it pages. The safety cap then bounds decks
+            // that still need importing rather than decks DoK reported, which
+            // is what makes re-running a capped sync pick up where it left off
+            // instead of returning the same first batch forever.
+            const ownedUuids = new Set(await deckService.getOwnedDeckUuids(req.user.id));
 
             let result;
             try {
-                result = await dokService.listOwnerDecks(dokUsername);
+                result = await dokService.listMyDecks(dokApiKey, { skipUuids: ownedUuids });
             } catch (err) {
-                // listOwnerDecks is designed never to throw; if it somehow
-                // does, log loudly and answer cleanly instead of a bare 500.
-                logger.error(`DoK bulk import prepare failed for '${dokUsername}'`, err);
+                // listMyDecks is designed never to throw; if it somehow does,
+                // log loudly and answer cleanly instead of a bare 500.
+                logger.error(
+                    `DoK collection import prepare failed for user ${req.user.username}`,
+                    err
+                );
 
                 return res.send({
                     success: false,
@@ -209,10 +237,10 @@ module.exports.init = function (server) {
             }
 
             logger.info(
-                `DoK bulk import: '${dokUsername}' -> configured=${result.configured !== false} ` +
-                    `error=${!!result.error} decks=${
-                        result.decks.length
-                    } truncated=${!!result.truncated}`
+                `DoK collection import: user ${req.user.username} -> ` +
+                    `configured=${result.configured !== false} error=${!!result.error} ` +
+                    `new=${result.decks.length} owned=${result.skipped || 0} ` +
+                    `truncated=${!!result.truncated} partial=${!!result.partial}`
             );
 
             if (result.error) {
@@ -224,30 +252,63 @@ module.exports.init = function (server) {
                 });
             }
 
-            if (!result.decks.length) {
+            // Nothing new AND nothing recognised means the key gave us an empty
+            // collection. Nothing new but decks already owned is a successful
+            // no-op sync, which is what every run after the first one looks like.
+            if (!result.decks.length && !result.skipped) {
                 return res.send({
                     success: false,
                     message:
-                        'No public decks found for that Decks of KeyForge user. Double-check the username.'
+                        'That key returned no decks. Check the key, and that your decks are marked as owned on Decks of KeyForge.'
                 });
-            }
-
-            const ownedUuids = new Set(await deckService.getOwnedDeckUuids(req.user.id));
-            const toImport = result.decks.filter((deck) => !ownedUuids.has(deck.uuid));
-
-            // Remember the linked account for future syncs (best effort).
-            try {
-                await userService.setDokUsername(req.user.id, dokUsername);
-            } catch (err) {
-                logger.warn(`Failed to store DoK username for user ${req.user.id}: ${err.message}`);
             }
 
             res.send({
                 success: true,
-                total: result.decks.length,
-                ownedCount: result.decks.length - toImport.length,
+                total: result.decks.length + (result.skipped || 0),
+                ownedCount: result.skipped || 0,
                 truncated: !!result.truncated,
-                toImport
+                partial: !!result.partial,
+                toImport: result.decks
+            });
+        })
+    );
+
+    // ARCHON: find a deck by name in the Master Vault catalog (see
+    // docs/design/deck-catalog.md). This is the half of deck discovery that
+    // works for players who do not use Decks of KeyForge at all - they know
+    // their deck's name, not its uuid, and Master Vault has no way to look one
+    // up. Results carry `owned` so the UI can grey out decks already imported.
+    server.get(
+        '/api/decks/catalog/search',
+        passport.authenticate('jwt', { session: false }),
+        catalogSearchLimit,
+        wrapAsync(async function (req, res) {
+            if (!catalogService.isSearchEnabled()) {
+                return res.send({ success: false, message: 'Deck search is turned off.' });
+            }
+
+            const query = (req.query.q || '').trim();
+
+            if (query.length < 2) {
+                return res.send({ success: true, decks: [] });
+            }
+
+            const expansion = parseInt(req.query.expansion, 10);
+            const limit = parseInt(req.query.limit, 10);
+
+            const decks = await catalogService.search(query, {
+                expansion: Number.isFinite(expansion) ? expansion : undefined,
+                limit: Number.isFinite(limit) ? limit : undefined
+            });
+
+            // One extra query rather than a join: the catalog lives in its own
+            // table precisely so it never has to know about user-owned decks.
+            const ownedUuids = new Set(await deckService.getOwnedDeckUuids(req.user.id));
+
+            res.send({
+                success: true,
+                decks: decks.map((deck) => ({ ...deck, owned: ownedUuids.has(deck.uuid) }))
             });
         })
     );

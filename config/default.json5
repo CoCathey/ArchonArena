@@ -145,9 +145,11 @@
     dok: {
         enabled: true,
         apiUrl: 'https://decksofkeyforge.com/public-api/v3/decks/',
-        // Collection-filter endpoint used to list a user's whole DoK library
-        // for bulk import. Defaults are derived from apiUrl if omitted.
-        filterUrl: 'https://decksofkeyforge.com/public-api/v1/decks/filter',
+        // Paged listing of one player's own DoK library, used by bulk import.
+        // It is the only DoK call sent with the *player's* Api-Key rather than
+        // the site's: DoK decides whose collection to return from the key on
+        // the request, so there is no way to ask for someone else's.
+        myDecksUrl: 'https://decksofkeyforge.com/public-api/v1/my-decks',
         apiKey: '', // set via DOK_API_KEY
         requestTimeoutMs: 10000,
         refreshDays: 30, // SAS scores change between AERC versions; refetch this often
@@ -156,6 +158,48 @@
         // is 25/min; patron tiers raise it (50 / 100 / 250). Change this to
         // match your DoK subscription (also editable in admin settings).
         maxRequestsPerMinute: 25
+    },
+
+    // Master Vault deck catalog: an index of every deck that exists - uuid,
+    // name, expansion, houses, no cards - so a player can find their decks by
+    // typing a name instead of pasting a Master Vault link. Master Vault has no
+    // name lookup of its own, which is why the index has to be built here. SAS
+    // is untouched by this: it still comes from DoK.
+    //
+    // The crawler calls Master Vault from the same address as user-facing deck
+    // import, and Master Vault meters the origin rather than the job. So every
+    // request the crawl spends is one an importing player may be refused, and
+    // the defaults below are deliberately far gentler than Master Vault would
+    // tolerate: one page every few seconds, a handful of pages per run, and a
+    // circuit breaker that stops asking entirely once errors repeat.
+    catalog: {
+        // Off until an operator opts in. Indexing the whole of somebody else's
+        // API is a decision about their service, not a default to inherit.
+        enabled: false,
+        // Searching what is already indexed costs Master Vault nothing, so it
+        // stays on independently of the crawl - an instance whose crawl has
+        // been turned off keeps the catalog it has already built.
+        searchEnabled: true,
+        mvApiUrl: 'https://www.keyforgegame.com/api/decks/v2',
+        pageSize: 25,
+        pagesPerRun: 10,
+        requestDelayMs: 3000,
+        requestTimeoutMs: 15000,
+        // Circuit breaker: after this many failures in a row the crawl sleeps,
+        // doubling from a minute up to an hour, rather than retrying a page
+        // Master Vault has already refused several times.
+        maxConsecutiveFailures: 3,
+        backoffBaseMs: 60000,
+        backoffMaxMs: 3600000,
+        maxSearchResults: 50,
+        crawlIntervalMinutes: 15
+        // Whether name search matches anywhere in the name or only at the
+        // start. Unset means "look and see": substring matching needs the
+        // pg_trgm index, which the migration creates where the database role
+        // is allowed to and skips with a notice where it is not, and running a
+        // substring query without it is a sequential scan of the whole catalog
+        // on every keystroke. Set true/false only to overrule that detection.
+        // substringSearch: true
     },
 
     gameNode: {
