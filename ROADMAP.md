@@ -202,7 +202,7 @@ not new systems, and it makes the whole site feel connected.
 -   [x] Remaining link sites done: lobby game list, pending game, tournament players /
         standings / "Your Match", game history, club member lists. Every username outside the
         game board now links to its profile.
--   [x] Optional short bio, editable from the account page (`Users.Bio`, migration 51,
+-   [x] Optional short bio, editable from the account page (`Users.Bio`, migration 52,
         `PlayerProfileService.getBio`/`setBio`, `GET`/`PUT /api/account/bio`). Capped at
         280 characters server-side, so the client's counter can never disagree with what
         actually gets saved; empty and whitespace-only values are stored as `NULL` rather
