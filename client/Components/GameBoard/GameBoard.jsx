@@ -9,6 +9,7 @@ import CardBack from '../Decks/CardBack';
 import ActivePlayerPrompt from './ActivePlayerPrompt';
 // ARCHON: post-game Amber result
 import GameResultPanel from './GameResultPanel';
+import GameResultActions from './GameResultActions';
 import CardZoom from './CardZoom';
 import { canShowDeckName, getMatchRecord, isSpectating, normalizePlayer } from './gameboardUtils';
 import GameChat from './GameChat';
@@ -419,11 +420,14 @@ export const GameBoard = () => {
                                 a read of persisted RatingHistory - it never
                                 blocks or delays leaving the game. */}
                             {!spectating && currentGame.winner && (
-                                <GameResultPanel
-                                    gameId={currentGame.id}
-                                    username={user?.username}
-                                    winner={currentGame.winner}
-                                />
+                                <>
+                                    <GameResultPanel
+                                        gameId={currentGame.id}
+                                        username={user?.username}
+                                        winner={currentGame.winner}
+                                    />
+                                    <GameResultActions gameId={currentGame.id} />
+                                </>
                             )}
                             {spectating ? (
                                 <div />

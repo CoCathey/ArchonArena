@@ -230,8 +230,12 @@ moment it matters most. Players finish a rated game with no feedback that anythi
         placement countdown while a rating is still provisional.
 -   [x] Unrated games render an explicit "not rated" line rather than a blank panel — an
         unrated game is a 200 with `rated: false`, not a 404 the client has to interpret.
--   [ ] Rematch / view-replay / back-to-lobby actions alongside the result (the engine's own
-        rematch prompt already sits directly below it).
+-   [x] View-replay / back-to-lobby actions alongside the result — `GameResultActions`
+        (`client/Components/GameBoard/GameResultActions.jsx`), rendered beside
+        `GameResultPanel` and above the engine's own rematch prompt, which already covers
+        "Continue Playing" and every rematch mode, so this only adds what it did not: a link
+        to `/replay/:gameId` and a "Back to Lobby" action that mirrors `GameContextMenu`'s
+        leave path (both sockets, then close) rather than a second way to disconnect.
 
 **Blocks:** N4.
 **Acceptance criteria**
