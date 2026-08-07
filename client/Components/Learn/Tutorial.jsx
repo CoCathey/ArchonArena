@@ -216,7 +216,6 @@ const Tutorial = () => {
                     <Panel contentClassName='!overflow-visible'>
                         <TutorialBoard
                             state={state}
-                            highlight={step.highlight}
                             action={pendingAction}
                             onAct={() => goTo(index + 1)}
                             onInspect={setInspected}

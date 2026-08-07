@@ -2,6 +2,7 @@ import { Constants } from '../../constants';
 
 import AmberToken from '../../assets/img/amber.png';
 import ArmorToken from '../../assets/img/armor.png';
+import ChainsIcon from '../../assets/img/chains.png';
 import DamageToken from '../../assets/img/damage.png';
 import KeyCostIcon from '../../assets/img/keyCost.png';
 import StunToken from '../../assets/img/stun.png';
@@ -28,6 +29,7 @@ import PowerPip from '../../assets/img/enhancements/powerui.png';
 export const LearnIcons = {
     amber: AmberToken,
     armor: ArmorToken,
+    chains: ChainsIcon,
     damage: DamageToken,
     keyCost: KeyCostIcon,
     stun: StunToken,

@@ -88,22 +88,11 @@ const TokenBadge = ({ icon, count, label, className }) => (
  * @param {'radiant'|'onyx'} props.side Which deck the card belongs to
  * @param {object} [props.permanent] Board state for a card in play
  * @param {number} [props.width] Rendered width in px
- * @param {boolean} [props.highlighted] Spotlit by the current step
- * @param {boolean} [props.dimmed] Something else is spotlit
  * @param {boolean} [props.faceDown]
- * @param {(cardId: string) => void} [props.onInspect]
+ * @param {(cardId: string) => void} [props.onInspect] Hovering reads the card
+ * @param {(cardId: string) => void} [props.onActivate] Clicking plays the step
  */
-const TutorialCard = ({
-    cardId,
-    side,
-    permanent,
-    width = 72,
-    highlighted,
-    dimmed,
-    faceDown,
-    onInspect,
-    onActivate
-}) => {
+const TutorialCard = ({ cardId, side, permanent, width = 72, faceDown, onInspect, onActivate }) => {
     const [imageFailed, setImageFailed] = useState(false);
     const card = TutorialCards[cardId];
     const upgrades = permanent?.upgrades || [];
@@ -121,8 +110,7 @@ const TutorialCard = ({
     return (
         <div
             className={classNames('relative shrink-0 transition-all duration-200', {
-                'z-10': highlighted,
-                'opacity-60': dimmed && !highlighted
+                'z-10': !!onActivate
             })}
             style={{ width }}
             onMouseEnter={inspect}
@@ -164,9 +152,8 @@ const TutorialCard = ({
                     'relative aspect-[65/91] w-full rounded-[6%] transition-all duration-200',
                     {
                         'cursor-pointer': !!onInspect || !!onActivate,
-                        'ring-2 shadow-[0_0_18px_2px_rgba(239,197,74,0.55)] ring-[color:var(--brand)]':
-                            highlighted,
-                        'hover:-translate-y-1': !!onActivate
+                        'shadow-[0_0_18px_2px_rgba(239,197,74,0.55)] hover:-translate-y-1':
+                            !!onActivate
                     }
                 )}
             >

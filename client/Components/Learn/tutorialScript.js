@@ -48,8 +48,15 @@ import { RadiantDeck, OnyxDeck } from './tutorialDecks';
  *   rule      an optional rules box - the rule this step exists to teach
  *   platform  an optional note about doing this on Archon Arena rather than at
  *             a kitchen table
- *   highlight board targets to spotlight: 'side.card.id', 'side.zone.name',
- *             'side.stat.name', or 'turnsteps'
+ *   highlight what this step is about: 'side.card.id', 'side.zone.name',
+ *             'side.stat.name'. This does NOT decorate the board - the only
+ *             thing that lights up there is the move you are being asked to
+ *             make. Card entries are pulled into the card-detail panel beside
+ *             the board; zone and stat entries are documentation.
+ *   action    the move that produces this step, and what the reader clicks to
+ *             make it: { prompt, button, cards, enemyCards, houses, piles,
+ *             stats, yours }. Offered on the PREVIOUS step, where its targets
+ *             are still where the prompt says they are.
  *   apply     mutates the board into the position this step describes
  *
  * The decks are unshuffled and stacked 1-18, exactly as the starter set tells
@@ -77,7 +84,8 @@ export const TutorialSteps = [
         body: [
             'KeyForge is a two-player card game. Each player is an **Archon** — a being who leads a team of followers gathered from across the Crucible, an artificial world built out of pieces of countless civilisations.',
             'You are going to play a complete game, one move at a time. **You are the Radiant player**: on your turns the board asks you to do something — play this card, reap with that creature — and you do it by clicking. On your opponent’s turns you watch.',
-            'Nothing is assumed. Every rule is explained the first time it matters, and the board is the real position, not an illustration.'
+            'Nothing is assumed. Every rule is explained the first time it matters, and the board is the real position, not an illustration.',
+            'One thing here that a real game hides: your opponent’s hand is dealt face up along the top. In a walkthrough the card they did *not* play is usually the point.'
         ],
         platform:
             'You can stop and come back at any time — Archon Arena remembers which step you reached.'
