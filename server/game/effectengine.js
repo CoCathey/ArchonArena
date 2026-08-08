@@ -1,6 +1,7 @@
 const _ = require('underscore');
 
 const EventRegistrar = require('./eventregistrar.js');
+const PlayerEffect = require('./Effects/PlayerEffect');
 
 class EffectEngine {
     constructor(game) {
@@ -251,19 +252,31 @@ class EffectEngine {
         const seen = new Set();
 
         const collect = (effect, pending) => {
+            // Card effects show up on the card they modify; only effects
+            // applied to a player are invisible. This has to be a class check
+            // rather than an inspection of `targets`, because a pending effect
+            // has not been applied to anything yet.
+            if (!(effect instanceof PlayerEffect)) {
+                return;
+            }
+
             // A printed ongoing ability is readable on the card that has it.
             if (effect.duration === 'persistentEffect') {
                 return;
             }
 
             // `duringOpponentNextTurn` effects have not been applied yet, so
-            // they have no targets - describe who they are aimed at instead.
+            // they have no targets - work out who they are aimed at instead.
             const targets = pending
-                ? players.filter(
-                      (player) =>
-                          effect.targetController !== 'current' &&
-                          player !== effect.effectController
-                  )
+                ? players.filter((player) => {
+                      if (effect.targetController === 'opponent') {
+                          return player !== effect.effectController;
+                      }
+                      if (effect.targetController === 'current') {
+                          return player === effect.effectController;
+                      }
+                      return true;
+                  })
                 : effect.targets.filter((target) => players.includes(target));
 
             if (targets.length === 0) {

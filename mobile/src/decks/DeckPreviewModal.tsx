@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Deck } from '../api/types';
-import { CardZoomModal } from '../game/GameModals';
+import { CardZoomOverlay } from '../game/GameModals';
 import type { CardSummary } from '../game/types';
 import { useCardsStore } from '../stores/cardsStore';
 import { colors, spacing } from '../theme';
@@ -91,7 +91,17 @@ export default function DeckPreviewModal(props: {
                     </View>
                 ) : null}
 
-                <CardZoomModal card={zoomCard} onClose={() => setZoomCard(undefined)} />
+                {/* An overlay rather than a Modal: this screen is itself
+                    presented from the deck picker's modal, and a third stacked
+                    presentation is where iOS starts dropping animations. */}
+                {zoomCard ? (
+                    <View style={StyleSheet.absoluteFill}>
+                        <CardZoomOverlay
+                            card={zoomCard}
+                            onClose={() => setZoomCard(undefined)}
+                        />
+                    </View>
+                ) : null}
             </View>
         </Modal>
     );

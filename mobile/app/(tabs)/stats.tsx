@@ -26,7 +26,7 @@ import type {
 import DeckStatsSection from '../../src/stats/DeckStatsSection';
 import MetaSection from '../../src/stats/MetaSection';
 import { useAuthStore } from '../../src/stores/authStore';
-import { colors, radius, spacing } from '../../src/theme';
+import { colors, spacing } from '../../src/theme';
 import BarList, { type BarItem } from '../../src/ui/BarList';
 import HouseIcon from '../../src/ui/HouseIcon';
 import { Button, Card, EmptyState, ErrorBanner, TextField } from '../../src/ui/primitives';

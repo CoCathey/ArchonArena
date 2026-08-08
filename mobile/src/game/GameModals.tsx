@@ -14,8 +14,12 @@ import CardTile from './CardTile';
 import { CARD_ASPECT, CARDBACK, cardImageUrl } from './cardImages';
 import type { CardMenuItem, CardSummary } from './types';
 
-/** Fullscreen zoomed card preview (long-press). */
-export function CardZoomModal(props: { card?: CardSummary; onClose: () => void }) {
+/**
+ * The zoomed card itself, on a tap-to-dismiss backdrop, without a Modal of its
+ * own. Screens that are already inside a Modal use this directly rather than
+ * stacking a third presentation on top — see DeckPreviewModal.
+ */
+export function CardZoomOverlay(props: { card?: CardSummary; onClose: () => void }) {
     const { card } = props;
     const screen = Dimensions.get('window');
     const width = Math.min(screen.width - 64, 340);
@@ -29,63 +33,67 @@ export function CardZoomModal(props: { card?: CardSummary; onClose: () => void }
     const [showToken, setShowToken] = useState(false);
     useEffect(() => setShowToken(false), [card?.uuid]);
 
+    if (!card) {
+        return null;
+    }
+
     const shown = underneath && !showToken ? underneath : card;
-    const url = shown && !shown.facedown ? cardImageUrl(shown) : undefined;
+    const url = shown.facedown ? undefined : cardImageUrl(shown);
 
     return (
-        <Modal visible={!!card} transparent animationType='fade' onRequestClose={props.onClose}>
-            <Pressable style={styles.zoomBackdrop} onPress={props.onClose}>
-                {card ? (
-                    <View style={{ alignItems: 'center' }}>
-                        <Image
-                            source={url ? { uri: url } : CARDBACK}
-                            style={{ width, height, borderRadius: 14 }}
-                            contentFit='cover'
-                            transition={100}
-                        />
-                        {(card.upgrades?.length ?? 0) > 0 ? (
-                            <View style={styles.zoomAttachRow}>
-                                {card.upgrades!.map((upgrade) => (
-                                    <Image
-                                        key={upgrade.uuid}
-                                        source={
-                                            upgrade.facedown
-                                                ? CARDBACK
-                                                : { uri: cardImageUrl(upgrade) }
-                                        }
-                                        style={styles.zoomAttachImage}
-                                        contentFit='cover'
-                                    />
-                                ))}
-                            </View>
-                        ) : null}
-                        {underneath ? (
-                            <Pressable
-                                onPress={(event) => {
-                                    // Don't let the tap fall through to the
-                                    // close-on-backdrop press.
-                                    event.stopPropagation();
-                                    setShowToken((token) => !token);
-                                }}
-                                style={({ pressed }) => [
-                                    styles.flipButton,
-                                    pressed && { opacity: 0.7 }
-                                ]}
-                                hitSlop={8}
-                            >
-                                <Text style={styles.flipButtonText}>
-                                    {showToken
-                                        ? `Show card underneath${
-                                              underneath.name ? ` · ${underneath.name}` : ''
-                                          }`
-                                        : `Show token${card.name ? ` · ${card.name}` : ''}`}
-                                </Text>
-                            </Pressable>
-                        ) : null}
-                        <Text style={styles.zoomHint}>Tap anywhere to close</Text>
+        <Pressable style={styles.zoomBackdrop} onPress={props.onClose}>
+            <View style={{ alignItems: 'center' }}>
+                <Image
+                    source={url ? { uri: url } : CARDBACK}
+                    style={{ width, height, borderRadius: 14 }}
+                    contentFit='cover'
+                    transition={100}
+                />
+                {(card.upgrades?.length ?? 0) > 0 ? (
+                    <View style={styles.zoomAttachRow}>
+                        {card.upgrades!.map((upgrade) => (
+                            <Image
+                                key={upgrade.uuid}
+                                source={
+                                    upgrade.facedown ? CARDBACK : { uri: cardImageUrl(upgrade) }
+                                }
+                                style={styles.zoomAttachImage}
+                                contentFit='cover'
+                            />
+                        ))}
                     </View>
                 ) : null}
-            </Pressable>
+                {underneath ? (
+                    <Pressable
+                        onPress={() => setShowToken((token) => !token)}
+                        style={({ pressed }) => [styles.flipButton, pressed && { opacity: 0.7 }]}
+                        hitSlop={8}
+                    >
+                        <Text style={styles.flipButtonText}>
+                            {showToken
+                                ? `Show card underneath${
+                                      underneath.name ? ` · ${underneath.name}` : ''
+                                  }`
+                                : `Show token${card.name ? ` · ${card.name}` : ''}`}
+                        </Text>
+                    </Pressable>
+                ) : null}
+                <Text style={styles.zoomHint}>Tap anywhere to close</Text>
+            </View>
+        </Pressable>
+    );
+}
+
+/** Fullscreen zoomed card preview (long-press). */
+export function CardZoomModal(props: { card?: CardSummary; onClose: () => void }) {
+    return (
+        <Modal
+            visible={!!props.card}
+            transparent
+            animationType='fade'
+            onRequestClose={props.onClose}
+        >
+            <CardZoomOverlay card={props.card} onClose={props.onClose} />
         </Modal>
     );
 }

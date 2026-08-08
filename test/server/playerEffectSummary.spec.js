@@ -72,6 +72,33 @@ describe('player effect summary', function () {
         });
     });
 
+    describe('key-cost effects aimed at both players', function () {
+        beforeEach(function () {
+            this.setupTest({
+                player1: {
+                    house: 'unfathomable',
+                    hand: ['crushing-deep']
+                },
+                player2: {
+                    inPlay: ['batdrone']
+                }
+            });
+        });
+
+        // Crushing Deep uses targetController 'any', so the raised key cost
+        // applies to everyone - the summary has to say so rather than assuming
+        // the opponent.
+        it('names both players', function () {
+            this.player1.play(this.crushingDeep);
+
+            const summary = this.game.effectEngine.getPlayerEffectSummary();
+            const entry = summary.find((row) => row.source.name === 'Crushing Deep');
+
+            expect(entry).toBeDefined();
+            expect(entry.targets.slice().sort()).toEqual(['player1', 'player2']);
+        });
+    });
+
     describe('creature-only lasting effects', function () {
         beforeEach(function () {
             this.setupTest({
@@ -94,5 +121,79 @@ describe('player effect summary', function () {
 
             expect(sources).not.toContain('Troll');
         });
+    });
+});
+
+// The pending (`duringOpponentNextTurn`) list holds effects that have not been
+// applied to anything yet, so a card effect and a player effect are
+// indistinguishable by their targets. Exercised directly because no card in
+// the current pool queues a plain card effect that way — one may tomorrow.
+describe('player effect summary classification', function () {
+    const EffectEngine = require('../../server/game/effectengine.js');
+    const CardEffect = require('../../server/game/Effects/CardEffect');
+    const PlayerEffect = require('../../server/game/Effects/PlayerEffect');
+    const StaticEffect = require('../../server/game/Effects/StaticEffect');
+
+    let engine;
+    let players;
+
+    beforeEach(function () {
+        players = [{ name: 'player1' }, { name: 'player2' }];
+        const game = {
+            on: () => {},
+            removeListener: () => {},
+            getPlayers: () => players
+        };
+        engine = new EffectEngine(game);
+    });
+
+    const source = {
+        id: 'a-card',
+        name: 'A Card',
+        getShortSummary: () => ({ id: 'a-card', name: 'A Card' })
+    };
+
+    const makeEffect = (Klass, targetController) =>
+        new Klass(
+            { getPlayers: () => players },
+            source,
+            {
+                duration: 'duringOpponentNextTurn',
+                targetController,
+                // Supplied so the constructor does not reach for a framework
+                // context off a real game.
+                context: { player: players[0] }
+            },
+            new StaticEffect('someRestriction', true)
+        );
+
+    it('reports a pending player effect', function () {
+        const effect = makeEffect(PlayerEffect, 'opponent');
+        effect.effectController = players[0];
+        engine.duringOpponentNextTurnEffects.push(effect);
+
+        const summary = engine.getPlayerEffectSummary();
+
+        expect(summary).toHaveLength(1);
+        expect(summary[0].targets).toEqual(['player2']);
+        expect(summary[0].pending).toBe(true);
+    });
+
+    it('ignores a pending card effect', function () {
+        const effect = makeEffect(CardEffect, 'opponent');
+        effect.effectController = players[0];
+        engine.duringOpponentNextTurnEffects.push(effect);
+
+        expect(engine.getPlayerEffectSummary()).toEqual([]);
+    });
+
+    it('collapses several effects from one card into a single entry', function () {
+        for (const Klass of [PlayerEffect, PlayerEffect]) {
+            const effect = makeEffect(Klass, 'opponent');
+            effect.effectController = players[0];
+            engine.duringOpponentNextTurnEffects.push(effect);
+        }
+
+        expect(engine.getPlayerEffectSummary()).toHaveLength(1);
     });
 });

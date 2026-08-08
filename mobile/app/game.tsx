@@ -420,7 +420,8 @@ export default function GameScreen() {
                 only place the restriction is visible. */}
             <EffectsBar
                 effects={rootState.effects}
-                me={perspective.name}
+                // A spectator is not "you" — they get both players named.
+                me={isSpectator ? undefined : perspective.name}
                 onCardPress={setZoomCard}
             />
 
