@@ -169,3 +169,82 @@ describe('DeckService.create upstream failure classification', function () {
         expect(err.code).toBe('upstream_error');
     });
 });
+
+describe('DeckService deck list filters', function () {
+    let service;
+
+    beforeEach(function () {
+        service = new DeckService({}, {});
+    });
+
+    it('matches deck names case-insensitively against the lowered column', function () {
+        const params = [];
+
+        const filter = service.processFilter(2, params, [{ name: 'name', value: 'storm' }]);
+
+        expect(filter).toContain('lower(d."Name") LIKE $2');
+        expect(params).toEqual(['%storm%']);
+    });
+
+    it('filters by house through DeckHouses', function () {
+        const params = [];
+
+        const filter = service.processFilter(2, params, [{ name: 'house', value: 'Logos' }]);
+
+        expect(filter).toContain('"DeckHouses"');
+        expect(filter).toContain('dh."DeckId" = d."Id"');
+        expect(filter).toContain('h."Code" = $2');
+        // House codes are stored lowercase.
+        expect(params).toEqual(['logos']);
+    });
+
+    it('requires every house when several are given', function () {
+        const params = [];
+
+        const filter = service.processFilter(2, params, [
+            { name: 'house', value: 'logos' },
+            { name: 'house', value: 'untamed' }
+        ]);
+
+        // Two independent EXISTS clauses = a deck containing both houses.
+        expect(filter.match(/EXISTS/g)).toHaveLength(2);
+        expect(filter).toContain('h."Code" = $2');
+        expect(filter).toContain('h."Code" = $3');
+        expect(params).toEqual(['logos', 'untamed']);
+    });
+
+    it('numbers house parameters after an earlier name filter', function () {
+        const params = [];
+
+        const filter = service.processFilter(2, params, [
+            { name: 'name', value: 'storm' },
+            { name: 'house', value: 'logos' }
+        ]);
+
+        expect(filter).toContain('lower(d."Name") LIKE $2');
+        expect(filter).toContain('h."Code" = $3');
+        expect(params).toEqual(['%storm%', 'logos']);
+    });
+
+    it('ignores a house filter with no value rather than matching nothing', function () {
+        const params = [];
+
+        const filter = service.processFilter(2, params, [{ name: 'house', value: '' }]);
+
+        expect(filter).toBe('');
+        expect(params).toEqual([]);
+    });
+
+    it('accepts the filter as the JSON string the API receives', function () {
+        const params = [];
+
+        const filter = service.processFilter(
+            2,
+            params,
+            JSON.stringify([{ name: 'house', value: 'shadows' }])
+        );
+
+        expect(filter).toContain('h."Code" = $2');
+        expect(params).toEqual(['shadows']);
+    });
+});

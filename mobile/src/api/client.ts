@@ -1,6 +1,7 @@
 import { useAuthStore } from '../stores/authStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import type {
+    AercBreakdown,
     ApiResponse,
     Deck,
     GameRatingResult,
@@ -187,6 +188,41 @@ export async function checkAuth(): Promise<UserDetails | undefined> {
     return undefined;
 }
 
+/**
+ * Replace the signed-in user's avatar. `image` is the raw base64 body of a PNG
+ * or JPEG (no data: prefix) — the server rejects anything else. Returns the
+ * stored file name, which is also the path segment under /img/avatar.
+ */
+export async function updateAvatar(image: string): Promise<ApiResponse & { avatar?: string }> {
+    const result = await apiFetch<ApiResponse & { avatar?: string }>('/api/account/avatar', {
+        method: 'PUT',
+        body: { avatar: image }
+    });
+
+    if (result.success && result.avatar) {
+        const { user, setAuth } = useAuthStore.getState();
+        if (user) {
+            await setAuth({
+                user: {
+                    ...user,
+                    avatar: result.avatar,
+                    settings: { ...(user.settings ?? {}), avatar: result.avatar }
+                }
+            });
+        }
+    }
+
+    return result;
+}
+
+/** Public URL of a user's avatar image, or undefined if they have none. */
+export function avatarUrl(avatar?: unknown): string | undefined {
+    if (!avatar || typeof avatar !== 'string') {
+        return undefined;
+    }
+    return `${serverUrl()}/img/avatar/${avatar}.png`;
+}
+
 export async function logout(): Promise<void> {
     const { refreshToken } = useAuthStore.getState();
     try {
@@ -206,15 +242,45 @@ export async function logout(): Promise<void> {
 
 export interface DeckListResult extends ApiResponse {
     decks: Deck[];
+    /** Total matching the filter, not the page size — drives "load more". */
     numDecks: number;
 }
 
-export async function fetchDecks(options: { pageSize?: number; page?: number } = {}) {
+/** Columns the server can order by (DeckService.mapColumn). */
+export type DeckSort = 'lastUpdated' | 'name' | 'sasRating' | 'winRate' | 'expansion';
+
+export interface DeckQuery {
+    pageSize?: number;
+    page?: number;
+    sort?: DeckSort;
+    sortDir?: 'asc' | 'desc';
+    /** Substring match on the deck name. */
+    search?: string;
+    /** House codes; a deck matches if it contains every house listed. */
+    houses?: string[];
+}
+
+export async function fetchDecks(options: DeckQuery = {}) {
     const params = new URLSearchParams();
     params.set('pageSize', String(options.pageSize ?? 50));
     params.set('page', String(options.page ?? 1));
-    params.set('sort', 'lastUpdated');
-    params.set('sortDir', 'desc');
+    params.set('sort', options.sort ?? 'lastUpdated');
+    params.set('sortDir', options.sortDir ?? 'desc');
+
+    const filter: { name: string; value: unknown }[] = [];
+    const search = (options.search ?? '').trim();
+    if (search) {
+        // The server compares against lower("Name"), so a mixed-case term would
+        // otherwise never match.
+        filter.push({ name: 'name', value: search.toLowerCase() });
+    }
+    for (const house of options.houses ?? []) {
+        filter.push({ name: 'house', value: house });
+    }
+    if (filter.length > 0) {
+        params.set('filter', JSON.stringify(filter));
+    }
+
     return apiFetch<DeckListResult>(`/api/decks?${params.toString()}`);
 }
 
@@ -247,7 +313,8 @@ export function parseDeckUuid(input: string): string | undefined {
 
 export interface DeckDetailResult extends ApiResponse {
     deck?: Deck;
-    aerc?: unknown;
+    /** AERC component breakdown behind the SAS score; null when DoK has no data. */
+    aerc?: AercBreakdown | null;
 }
 
 /** Full deck (with card list) — only works for the caller's own decks. */

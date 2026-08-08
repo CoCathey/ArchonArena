@@ -1,48 +1,54 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 
-const SERVER_URL_KEY = 'aa.serverUrl';
-export const DEFAULT_SERVER_URL = 'https://archonarena.com';
+const LEGACY_SERVER_URL_KEY = 'aa.serverUrl';
+const GROUP_HAND_KEY = 'aa.groupHandByHouse';
 
-/** Normalize whatever the user typed into an origin like https://host[:port]. */
-export function normalizeServerUrl(input: string): string {
-    let url = (input || '').trim();
-    if (!url) {
-        return DEFAULT_SERVER_URL;
-    }
-    if (!/^https?:\/\//i.test(url)) {
-        url = `https://${url}`;
-    }
-    return url.replace(/\/+$/, '');
-}
+/**
+ * The one server this app talks to. It used to be user-editable; nobody but a
+ * self-hoster wanted that and it was an easy way to lock yourself out of the
+ * app, so the app is pinned here and the old stored value is cleared on
+ * startup.
+ */
+export const SERVER_URL = 'https://archonarena.com';
 
 interface SettingsState {
     serverUrl: string;
+    /** Sort the in-game hand into house groups instead of draw order. */
+    groupHandByHouse: boolean;
     hydrated: boolean;
     hydrate: () => Promise<void>;
-    setServerUrl: (url: string) => Promise<void>;
+    setGroupHandByHouse: (value: boolean) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-    serverUrl: DEFAULT_SERVER_URL,
+    serverUrl: SERVER_URL,
+    groupHandByHouse: true,
     hydrated: false,
     hydrate: async () => {
         try {
-            const stored = await SecureStore.getItemAsync(SERVER_URL_KEY);
-            set({ serverUrl: stored ? normalizeServerUrl(stored) : DEFAULT_SERVER_URL });
+            const stored = await SecureStore.getItemAsync(GROUP_HAND_KEY);
+            if (stored !== null) {
+                set({ groupHandByHouse: stored === '1' });
+            }
         } catch {
-            set({ serverUrl: DEFAULT_SERVER_URL });
-        } finally {
-            set({ hydrated: true });
+            // non-fatal: the default applies
         }
-    },
-    setServerUrl: async (url: string) => {
-        const normalized = normalizeServerUrl(url);
-        set({ serverUrl: normalized });
         try {
-            await SecureStore.setItemAsync(SERVER_URL_KEY, normalized);
+            // Drop any custom server a previous version saved, so an
+            // unreachable host cannot strand the app offline forever.
+            await SecureStore.deleteItemAsync(LEGACY_SERVER_URL_KEY);
         } catch {
-            // non-fatal: the URL still applies for this session
+            // non-fatal
+        }
+        set({ hydrated: true });
+    },
+    setGroupHandByHouse: async (value: boolean) => {
+        set({ groupHandByHouse: value });
+        try {
+            await SecureStore.setItemAsync(GROUP_HAND_KEY, value ? '1' : '0');
+        } catch {
+            // non-fatal: the choice still applies for this session
         }
     }
 }));

@@ -84,18 +84,37 @@ export interface Deck {
     houses?: string[];
     cards?: DeckCard[];
     verified?: boolean;
+    isAlliance?: boolean;
     wins?: number;
     losses?: number;
     winRate?: number;
     usageLevel?: number;
     lastUpdated?: string;
-    dokStats?: {
-        sas?: number;
-        aercScore?: number;
-        sasPercentile?: number;
-        [key: string]: unknown;
-    } | null;
+    /**
+     * Decks of KeyForge stats, attached by the server (DokService.attachStats).
+     * Flat fields — there is no nested stats object on the wire.
+     */
+    sasRating?: number;
+    aercScore?: number;
     [key: string]: unknown;
+}
+
+/** One AERC component of a deck's SAS score, from GET /api/decks/:id. */
+export interface AercComponent {
+    key: string;
+    label: string;
+    value: number;
+}
+
+export interface AercBreakdown {
+    sasRating?: number;
+    aercScore?: number;
+    aercVersion?: string;
+    fetchedAt?: string;
+    components?: AercComponent[];
+    sasPercentile?: number | null;
+    synergyRating?: number | null;
+    antisynergyRating?: number | null;
 }
 
 /** Game summary shown in the lobby game list / pending game screen. */
@@ -105,7 +124,7 @@ export interface GamePlayerSummary {
     owner?: boolean;
     left?: boolean;
     wins?: number;
-    deck?: { name?: string; selected?: boolean; status?: unknown };
+    deck?: { name?: string; selected?: boolean; status?: unknown; sasRating?: number };
     user?: unknown;
     [key: string]: unknown;
 }

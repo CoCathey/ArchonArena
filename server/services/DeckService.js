@@ -430,6 +430,18 @@ class DeckService {
             } else if (filterObject.name === 'isAlliance') {
                 filter += `AND ${this.mapColumn(filterObject.name)} = $${index++} `;
                 params.push(filterObject.value);
+            } else if (filterObject.name === 'house') {
+                // ARCHON: houses live in DeckHouses, not on the deck row, so
+                // they cannot go through mapColumn. Repeat the filter once per
+                // house to mean "contains all of these" - the way a player
+                // narrowing a collection expects it to read.
+                if (!filterObject.value) {
+                    continue;
+                }
+                filter +=
+                    'AND EXISTS (SELECT 1 FROM "DeckHouses" dh JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
+                    `WHERE dh."DeckId" = d."Id" AND h."Code" = $${index++}) `;
+                params.push(String(filterObject.value).toLowerCase());
             } else {
                 filter += `AND ${this.mapColumn(filterObject.name)} LIKE $${index++} `;
                 params.push(`%${filterObject.value}%`);

@@ -1,107 +1,59 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { router } from 'expo-router';
 import {
     ActivityIndicator,
     FlatList,
-    Pressable,
+    Keyboard,
     RefreshControl,
     StyleSheet,
     Text,
     View
 } from 'react-native';
-import type { Deck } from '../../src/api/types';
-import { fetchDecks, importDeck, parseDeckUuid } from '../../src/api/client';
+import { importDeck, parseDeckUuid } from '../../src/api/client';
+import DeckFilterBar from '../../src/decks/DeckFilterBar';
+import DeckRow from '../../src/decks/DeckRow';
+import { useDeckLibrary } from '../../src/decks/useDeckLibrary';
 import { colors, spacing } from '../../src/theme';
-import HouseIcon from '../../src/ui/HouseIcon';
-import { Button, Card, EmptyState, ErrorBanner, TextField } from '../../src/ui/primitives';
-
-export function DeckRow(props: { deck: Deck; onPress?: () => void; selected?: boolean }) {
-    const { deck } = props;
-    const sas = deck.dokStats?.sas;
-    return (
-        <Card
-            style={StyleSheet.flatten([
-                styles.deckRow,
-                props.selected ? { borderColor: colors.brand } : null
-            ])}
-        >
-            <View style={{ flex: 1 }}>
-                <Text
-                    style={styles.deckName}
-                    numberOfLines={2}
-                    onPress={props.onPress}
-                    suppressHighlighting
-                >
-                    {deck.name}
-                </Text>
-                <View style={styles.deckMeta}>
-                    <View style={styles.houseRow}>
-                        {(deck.houses ?? []).map((house) => (
-                            <HouseIcon key={house} house={house} size={22} />
-                        ))}
-                    </View>
-                    {typeof sas === 'number' ? (
-                        <Text style={styles.sas}>{Math.round(sas)} SAS</Text>
-                    ) : null}
-                    {deck.verified ? <Text style={styles.verified}>✓ verified</Text> : null}
-                </View>
-            </View>
-            {props.onPress ? (
-                <Button small title={props.selected ? 'Selected' : 'Select'} onPress={props.onPress} />
-            ) : null}
-        </Card>
-    );
-}
+import { Button, EmptyState, ErrorBanner, TextField } from '../../src/ui/primitives';
 
 export default function DecksScreen() {
-    const [decks, setDecks] = useState<Deck[]>([]);
-    const [loading, setLoading] = useState(false);
+    const library = useDeckLibrary({ pageSize: 40 });
     const [importText, setImportText] = useState('');
     const [importing, setImporting] = useState(false);
-    const [error, setError] = useState<string | undefined>();
+    const [importError, setImportError] = useState<string | undefined>();
     const [notice, setNotice] = useState<string | undefined>();
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        setError(undefined);
-        try {
-            const result = await fetchDecks({ pageSize: 100 });
-            setDecks(result.decks ?? []);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Could not load decks');
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        load();
-    }, [load]);
-
     const doImport = async () => {
-        setError(undefined);
+        setImportError(undefined);
         setNotice(undefined);
         const uuid = parseDeckUuid(importText);
         if (!uuid) {
-            setError('Paste a Master Vault deck link or deck id');
+            setImportError('Paste a Master Vault deck link or deck id');
             return;
         }
         setImporting(true);
         try {
             const result = await importDeck(uuid);
             if (!result.success) {
-                setError(result.message ?? 'Import failed');
+                setImportError(result.message ?? 'Import failed');
                 return;
             }
             setImportText('');
             setNotice('Deck imported');
-            await load();
+            Keyboard.dismiss();
+            await library.refresh();
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Import failed');
+            setImportError(err instanceof Error ? err.message : 'Import failed');
         } finally {
             setImporting(false);
         }
     };
+
+    const summary = library.filtered
+        ? `${library.decks.length} of ${library.total} shown`
+        : library.total > 0
+        ? `${library.total} deck${library.total === 1 ? '' : 's'}`
+        : undefined;
 
     return (
         <View style={styles.container}>
@@ -114,29 +66,60 @@ export default function DecksScreen() {
                 />
                 <Button title='Import' onPress={doImport} loading={importing} />
             </View>
-            <View style={{ paddingHorizontal: spacing.md }}>
-                <ErrorBanner message={error} />
+
+            <DeckFilterBar
+                search={library.searchInput}
+                onSearchChange={library.setSearchInput}
+                sort={library.sort}
+                onSortChange={library.setSort}
+                houses={library.houses}
+                onToggleHouse={library.toggleHouse}
+                onClear={library.clearFilters}
+                summary={summary}
+            />
+
+            <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.sm }}>
+                <ErrorBanner message={importError ?? library.error} />
                 {notice ? <Text style={styles.notice}>{notice}</Text> : null}
             </View>
 
             <FlatList
-                data={decks}
+                data={library.decks}
                 keyExtractor={(deck) => String(deck.id)}
+                keyboardShouldPersistTaps='handled'
+                keyboardDismissMode='on-drag'
                 renderItem={({ item }) => (
-                    <Pressable
-                        onPress={() => router.push(`/deck/${item.id}`)}
-                        style={({ pressed }) => pressed && { opacity: 0.7 }}
-                    >
-                        <DeckRow deck={item} />
-                    </Pressable>
+                    <DeckRow deck={item} onPress={() => router.push(`/deck/${item.id}`)} />
                 )}
                 contentContainerStyle={{ padding: spacing.md, paddingBottom: 48 }}
                 refreshControl={
-                    <RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.textDim} />
+                    <RefreshControl
+                        refreshing={library.loading}
+                        onRefresh={library.refresh}
+                        tintColor={colors.textDim}
+                    />
+                }
+                onEndReached={library.loadMore}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={
+                    library.loadingMore ? (
+                        <ActivityIndicator color={colors.brand} style={{ marginVertical: 16 }} />
+                    ) : library.hasMore ? (
+                        <Button
+                            variant='secondary'
+                            title={`Load more (${library.total - library.decks.length} left)`}
+                            onPress={library.loadMore}
+                        />
+                    ) : null
                 }
                 ListEmptyComponent={
-                    loading ? (
+                    library.loading ? (
                         <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
+                    ) : library.filtered ? (
+                        <EmptyState
+                            title='No decks match'
+                            subtitle='Try a different name or clear the house filter.'
+                        />
                     ) : (
                         <EmptyState
                             title='No decks yet'
@@ -158,37 +141,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.sm,
-        padding: spacing.md
-    },
-    deckRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.md,
-        marginBottom: spacing.sm
-    },
-    deckName: {
-        color: colors.text,
-        fontSize: 15,
-        fontWeight: '700'
-    },
-    deckMeta: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.md,
-        marginTop: 8
-    },
-    houseRow: {
-        flexDirection: 'row',
-        gap: 6
-    },
-    sas: {
-        color: colors.brand,
-        fontSize: 12,
-        fontWeight: '700'
-    },
-    verified: {
-        color: '#7ed494',
-        fontSize: 12
+        padding: spacing.md,
+        paddingBottom: 0
     },
     notice: {
         color: '#7ed494',

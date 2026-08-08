@@ -12,17 +12,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { login } from '../src/api/client';
 import { connectLobby } from '../src/net/lobbySocket';
-import { useSettingsStore } from '../src/stores/settingsStore';
 import { colors, spacing } from '../src/theme';
 import { Button, ErrorBanner, TextField } from '../src/ui/primitives';
 
 export default function LoginScreen() {
-    const serverUrl = useSettingsStore((state) => state.serverUrl);
-    const setServerUrl = useSettingsStore((state) => state.setServerUrl);
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [serverInput, setServerInput] = useState(serverUrl);
-    const [showServer, setShowServer] = useState(false);
     const [error, setError] = useState<string | undefined>();
     const [busy, setBusy] = useState(false);
     const passwordRef = useRef<TextInput>(null);
@@ -41,9 +36,6 @@ export default function LoginScreen() {
         }
         setBusy(true);
         try {
-            if (showServer && serverInput.trim()) {
-                await setServerUrl(serverInput);
-            }
             const result = await login(username.trim(), password);
             if (!result.success) {
                 fail(result.message ?? 'Login failed');
@@ -104,24 +96,7 @@ export default function LoginScreen() {
                         <Text style={styles.linkText} onPress={() => router.push('/register')}>
                             Create an account
                         </Text>
-                        <Text
-                            style={styles.linkText}
-                            onPress={() => setShowServer((value) => !value)}
-                        >
-                            {showServer ? 'Hide server settings' : 'Server settings'}
-                        </Text>
                     </View>
-
-                    {showServer ? (
-                        <TextField
-                            label='Server URL'
-                            value={serverInput}
-                            onChangeText={setServerInput}
-                            placeholder='https://archonarena.com'
-                            keyboardType='url'
-                            containerStyle={{ marginTop: spacing.md }}
-                        />
-                    ) : null}
                 </ScrollView>
             </KeyboardAvoidingView>
         </SafeAreaView>
@@ -155,7 +130,7 @@ const styles = StyleSheet.create({
     },
     links: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
+        justifyContent: 'center',
         marginTop: spacing.lg
     },
     linkText: {

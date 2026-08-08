@@ -223,11 +223,18 @@ function removePng(baseDir, name) {
     }
 }
 
+// ARCHON: avatars were stored at 24x24 - the exact size the web client draws
+// them at, and a blurry mess on any high-DPI screen (the mobile app shows them
+// considerably larger). Stored at 96 they stay crisp everywhere; the web is
+// unaffected since it scales them down in CSS, and avatars already on disk keep
+// working untouched.
+const AVATAR_SIZE = 96;
+
 async function getRandomAvatar(user) {
     let stringToHash = crypto.randomBytes(32).toString('hex');
     let md5Hash = crypto.createHash('md5').update(stringToHash).digest('hex');
     let avatar = await util.httpRequest(
-        `https://www.gravatar.com/avatar/${md5Hash}?d=identicon&s=24`,
+        `https://www.gravatar.com/avatar/${md5Hash}?d=identicon&s=${AVATAR_SIZE}`,
         { encoding: null, allowedHosts: ['www.gravatar.com'] }
     );
 
@@ -274,7 +281,7 @@ async function processAvatar(newUser, user) {
 
     let canvas;
     try {
-        canvas = await processImage(newUser.avatar, 24, 24);
+        canvas = await processImage(newUser.avatar, AVATAR_SIZE, AVATAR_SIZE);
     } catch (err) {
         logger.error(err);
         return null;

@@ -234,6 +234,78 @@ class EffectEngine {
         this.newEffect = effectsRemoved;
     }
 
+    /**
+     * ARCHON: lasting effects that constrain a *player* rather than a card -
+     * Befuddle's "cannot play cards of other houses", a stolen extra turn, a
+     * forbidden forge. A card effect shows up on the card, but a player effect
+     * has nowhere on the board to live: its source card is usually already in
+     * the discard, so the only trace is a log line that scrolls away. Clients
+     * use this to keep the restriction visible for as long as it applies.
+     *
+     * Public information - every one of these was announced in the game log
+     * when it was applied, so this is sent to both players and to spectators.
+     */
+    getPlayerEffectSummary() {
+        const players = this.game.getPlayers();
+        const summary = [];
+        const seen = new Set();
+
+        const collect = (effect, pending) => {
+            // A printed ongoing ability is readable on the card that has it.
+            if (effect.duration === 'persistentEffect') {
+                return;
+            }
+
+            // `duringOpponentNextTurn` effects have not been applied yet, so
+            // they have no targets - describe who they are aimed at instead.
+            const targets = pending
+                ? players.filter(
+                      (player) =>
+                          effect.targetController !== 'current' &&
+                          player !== effect.effectController
+                  )
+                : effect.targets.filter((target) => players.includes(target));
+
+            if (targets.length === 0) {
+                return;
+            }
+
+            const source = effect.source;
+            const entry = {
+                source: source ? source.getShortSummary() : undefined,
+                duration: effect.duration,
+                effectType: effect.effect && effect.effect.type,
+                controller: effect.effectController ? effect.effectController.name : undefined,
+                targets: targets.map((target) => target.name),
+                pending
+            };
+
+            // One card can apply several effects at once (a single ability
+            // granting two restrictions); they read as one entry to a player.
+            const key = JSON.stringify([
+                entry.source && entry.source.id,
+                entry.duration,
+                entry.controller,
+                entry.targets,
+                entry.pending
+            ]);
+            if (seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+            summary.push(entry);
+        };
+
+        for (const effect of this.effects) {
+            collect(effect, false);
+        }
+        for (const effect of this.duringOpponentNextTurnEffects) {
+            collect(effect, true);
+        }
+
+        return summary;
+    }
+
     registerCustomDurationEvents(effect) {
         if (!effect.until) {
             return;

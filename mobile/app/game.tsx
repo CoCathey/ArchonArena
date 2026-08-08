@@ -22,14 +22,19 @@ import { successFeedback, tapFeedback, warnFeedback } from '../src/haptics';
 import { useAuthStore } from '../src/stores/authStore';
 import { useGameStore } from '../src/stores/gameStore';
 import { useLobbyStore } from '../src/stores/lobbyStore';
+import { useSettingsStore } from '../src/stores/settingsStore';
 import { colors, spacing } from '../src/theme';
 import CardTile from '../src/game/CardTile';
+import EffectsBar from '../src/game/EffectsBar';
 import PlayerHud from '../src/game/PlayerHud';
 import PromptPanel from '../src/game/PromptPanel';
 import LogSheet from '../src/game/LogSheet';
 import { DragDropProvider, DropZone, type DropZoneName } from '../src/game/DragDrop';
+import { useVerticalSwipe } from '../src/game/gestures';
+import { groupHandByHouse } from '../src/game/handOrder';
 import { CardMenuModal, CardZoomModal, PileModal } from '../src/game/GameModals';
 import { Button } from '../src/ui/primitives';
+import HouseIcon from '../src/ui/HouseIcon';
 import type { CardMenuItem, CardSummary, PlayerState, PromptButton } from '../src/game/types';
 
 type PileName = 'discard' | 'archives' | 'purged' | 'hand' | 'deck';
@@ -85,6 +90,7 @@ export default function GameScreen() {
     const status = useGameStore((state) => state.status);
     const currentGame = useLobbyStore((state) => state.currentGame);
     const username = useAuthStore((state) => state.user?.username);
+    const handByHouse = useSettingsStore((state) => state.groupHandByHouse);
     const { width: screenWidth } = useWindowDimensions();
 
     const [zoomCard, setZoomCard] = useState<CardSummary | undefined>();
@@ -148,6 +154,10 @@ export default function GameScreen() {
 
     const smallCard = Math.max(56, Math.floor(screenWidth / 6.4));
     const handCard = Math.max(78, Math.floor(screenWidth / 4.6));
+
+    // Swiping up anywhere on the prompt/grabber strip opens the log; swiping
+    // back down inside the log sheet returns to the board.
+    const openLogHandlers = useVerticalSwipe({ onUp: () => setLogOpen(true) });
 
     const leave = () => {
         Alert.alert('Leave game', 'Leave this game?', [
@@ -282,6 +292,12 @@ export default function GameScreen() {
     const myArea = splitPlayArea(perspective);
     const oppArea = splitPlayArea(opponent);
 
+    const hand = perspective.cardPiles?.hand ?? [];
+    const handGroups = handByHouse
+        ? groupHandByHouse(hand, perspective.houses, perspective.activeHouse)
+        : // One unnamed group keeps the render path identical for both settings.
+          [{ house: 'hand', cards: hand }];
+
     const pileCards = (() => {
         if (!pileView) {
             return undefined;
@@ -399,17 +415,41 @@ export default function GameScreen() {
                 </DropZone>
             </ScrollView>
 
+            {/* Lasting effects aimed at a player (Befuddle and friends). Their
+                source card is usually in a discard pile by now, so this is the
+                only place the restriction is visible. */}
+            <EffectsBar
+                effects={rootState.effects}
+                me={perspective.name}
+                onCardPress={setZoomCard}
+            />
+
             {/* Prompt — pinned just above the player so the required action is
                 always visible, never scrolled off with the board. */}
-            {!isSpectator ? (
-                <PromptPanel
-                    me={me}
-                    onButton={onPromptButton}
-                    messages={rootState.messages ?? []}
-                    onOpenLog={() => setLogOpen(true)}
-                    onCardPress={setZoomCard}
-                />
-            ) : null}
+            <View {...openLogHandlers}>
+                {!isSpectator ? (
+                    <PromptPanel
+                        me={me}
+                        onButton={onPromptButton}
+                        messages={rootState.messages ?? []}
+                        onOpenLog={() => setLogOpen(true)}
+                        onCardPress={setZoomCard}
+                    />
+                ) : null}
+
+                {/* Always-present grab handle, so the log is one swipe away
+                    even when the prompt panel has nothing to show. */}
+                <Pressable
+                    onPress={() => setLogOpen(true)}
+                    style={styles.logGrabber}
+                    accessibilityRole='button'
+                    accessibilityLabel='Open the game log'
+                    hitSlop={6}
+                >
+                    <View style={styles.logGrabberBar} />
+                    <Text style={styles.logGrabberText}>Swipe up for the full log</Text>
+                </Pressable>
+            </View>
 
             {/* Me */}
             <PlayerHud
@@ -421,7 +461,7 @@ export default function GameScreen() {
 
             {/* Hand */}
             <DropZone name='hand'>
-                {(perspective.cardPiles?.hand?.length ?? 0) > 0 ? (
+                {hand.length > 0 ? (
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
@@ -429,15 +469,22 @@ export default function GameScreen() {
                         contentContainerStyle={styles.handContent}
                         scrollEnabled={!dragActive}
                     >
-                        {perspective.cardPiles.hand.map((card) => (
-                            <CardTile
-                                key={card.uuid}
-                                card={card}
-                                width={handCard}
-                                onPress={onHandCardPress}
-                                onLongPress={setZoomCard}
-                                dragSource={isSpectator ? undefined : 'hand'}
-                            />
+                        {handGroups.map((group, groupIndex) => (
+                            <React.Fragment key={group.house}>
+                                {/* House divider, so the groups read as groups
+                                    rather than as one long undifferentiated row. */}
+                                {groupIndex > 0 ? <View style={styles.handDivider} /> : null}
+                                {group.cards.map((card) => (
+                                    <CardTile
+                                        key={card.uuid}
+                                        card={card}
+                                        width={handCard}
+                                        onPress={onHandCardPress}
+                                        onLongPress={setZoomCard}
+                                        dragSource={isSpectator ? undefined : 'hand'}
+                                    />
+                                ))}
+                            </React.Fragment>
                         ))}
                     </ScrollView>
                 ) : (
@@ -447,6 +494,23 @@ export default function GameScreen() {
                         </Text>
                     </View>
                 )}
+                {handByHouse && handGroups.length > 1 ? (
+                    <View style={styles.handLegend}>
+                        {handGroups.map((group) => (
+                            <View key={group.house} style={styles.handLegendItem}>
+                                <HouseIcon
+                                    house={group.house}
+                                    size={13}
+                                    dimmed={
+                                        !!perspective.activeHouse &&
+                                        perspective.activeHouse !== group.house
+                                    }
+                                />
+                                <Text style={styles.handLegendCount}>{group.cards.length}</Text>
+                            </View>
+                        ))}
+                    </View>
+                ) : null}
             </DropZone>
 
             {/* Modals */}
@@ -617,5 +681,45 @@ const styles = StyleSheet.create({
     handStripEmpty: {
         alignItems: 'center',
         justifyContent: 'center'
+    },
+    handDivider: {
+        width: 1,
+        alignSelf: 'stretch',
+        marginHorizontal: 5,
+        marginVertical: 6,
+        backgroundColor: colors.borderLight
+    },
+    handLegend: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: spacing.md,
+        paddingBottom: 3,
+        backgroundColor: '#0e1420'
+    },
+    handLegendItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3
+    },
+    handLegendCount: {
+        color: colors.textFaint,
+        fontSize: 10,
+        fontWeight: '700'
+    },
+    logGrabber: {
+        alignItems: 'center',
+        paddingTop: 3,
+        paddingBottom: 4,
+        gap: 2
+    },
+    logGrabberBar: {
+        width: 34,
+        height: 3,
+        borderRadius: 2,
+        backgroundColor: colors.borderLight
+    },
+    logGrabberText: {
+        color: colors.textFaint,
+        fontSize: 9
     }
 });

@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ChatMessage } from '../api/types';
 import { colors, radius, spacing } from '../theme';
+import { useVerticalSwipe } from './gestures';
 import { LogLine } from './LogMessages';
 import type { CardSummary } from './types';
 
@@ -31,6 +32,9 @@ export default function LogSheet(props: {
     const [keyboardOpen, setKeyboardOpen] = useState(false);
     const listRef = useRef<FlatList<ChatMessage>>(null);
     const insets = useSafeAreaInsets();
+    // Swiping the handle back down returns to the board — the mirror of the
+    // swipe up that opened the sheet.
+    const dismissHandlers = useVerticalSwipe({ onDown: props.onClose });
 
     // Shrink the sheet while typing so it (and its Close button) stay on-screen
     // above the keyboard on small devices.
@@ -82,11 +86,24 @@ export default function LogSheet(props: {
                 <Pressable style={{ flex: 1 }} onPress={props.onClose} />
                 <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
                     <View style={[styles.sheet, { height: keyboardOpen ? '52%' : '75%' }]}>
-                        <View style={styles.header}>
-                            <Text style={styles.title}>Game log</Text>
-                            <Pressable onPress={props.onClose} hitSlop={12}>
-                                <Text style={styles.closeText}>Close</Text>
+                        {/* Grab area: the handle and the title row both dismiss
+                            on a downward swipe. */}
+                        <View {...dismissHandlers}>
+                            <Pressable
+                                onPress={props.onClose}
+                                style={styles.grabArea}
+                                hitSlop={8}
+                                accessibilityLabel='Close the game log'
+                                accessibilityRole='button'
+                            >
+                                <View style={styles.grabber} />
                             </Pressable>
+                            <View style={styles.header}>
+                                <Text style={styles.title}>Game log</Text>
+                                <Pressable onPress={props.onClose} hitSlop={12}>
+                                    <Text style={styles.closeText}>Swipe down ⌄</Text>
+                                </Pressable>
+                            </View>
                         </View>
                         <FlatList
                             ref={listRef}
@@ -142,12 +159,24 @@ const styles = StyleSheet.create({
         borderColor: colors.border,
         borderWidth: 1
     },
+    grabArea: {
+        alignItems: 'center',
+        paddingTop: spacing.sm,
+        paddingBottom: 2
+    },
+    grabber: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: colors.borderLight
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: spacing.lg,
-        paddingVertical: spacing.md
+        paddingTop: spacing.sm,
+        paddingBottom: spacing.md
     },
     title: {
         color: colors.text,

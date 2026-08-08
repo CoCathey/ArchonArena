@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image } from 'expo-image';
 import {
     Dimensions,
@@ -20,13 +20,23 @@ export function CardZoomModal(props: { card?: CardSummary; onClose: () => void }
     const screen = Dimensions.get('window');
     const width = Math.min(screen.width - 64, 340);
     const height = Math.round(width * CARD_ASPECT);
-    const url = card && !card.facedown ? cardImageUrl(card) : undefined;
+
+    // A token creature is a real deck card with a token laid over it. The web
+    // client zooms straight to the card underneath — that is the card whose
+    // text and stats actually matter — so start there and let the token be
+    // flipped back to.
+    const underneath = card?.versusCard;
+    const [showToken, setShowToken] = useState(false);
+    useEffect(() => setShowToken(false), [card?.uuid]);
+
+    const shown = underneath && !showToken ? underneath : card;
+    const url = shown && !shown.facedown ? cardImageUrl(shown) : undefined;
 
     return (
         <Modal visible={!!card} transparent animationType='fade' onRequestClose={props.onClose}>
             <Pressable style={styles.zoomBackdrop} onPress={props.onClose}>
                 {card ? (
-                    <View>
+                    <View style={{ alignItems: 'center' }}>
                         <Image
                             source={url ? { uri: url } : CARDBACK}
                             style={{ width, height, borderRadius: 14 }}
@@ -48,6 +58,29 @@ export function CardZoomModal(props: { card?: CardSummary; onClose: () => void }
                                     />
                                 ))}
                             </View>
+                        ) : null}
+                        {underneath ? (
+                            <Pressable
+                                onPress={(event) => {
+                                    // Don't let the tap fall through to the
+                                    // close-on-backdrop press.
+                                    event.stopPropagation();
+                                    setShowToken((token) => !token);
+                                }}
+                                style={({ pressed }) => [
+                                    styles.flipButton,
+                                    pressed && { opacity: 0.7 }
+                                ]}
+                                hitSlop={8}
+                            >
+                                <Text style={styles.flipButtonText}>
+                                    {showToken
+                                        ? `Show card underneath${
+                                              underneath.name ? ` · ${underneath.name}` : ''
+                                          }`
+                                        : `Show token${card.name ? ` · ${card.name}` : ''}`}
+                                </Text>
+                            </Pressable>
                         ) : null}
                         <Text style={styles.zoomHint}>Tap anywhere to close</Text>
                     </View>
@@ -183,6 +216,20 @@ const styles = StyleSheet.create({
         width: 70,
         height: Math.round(70 * CARD_ASPECT),
         borderRadius: 6
+    },
+    flipButton: {
+        marginTop: spacing.md,
+        backgroundColor: colors.surface,
+        borderColor: colors.borderLight,
+        borderWidth: 1,
+        borderRadius: radius.pill,
+        paddingHorizontal: 16,
+        paddingVertical: 9
+    },
+    flipButtonText: {
+        color: colors.text,
+        fontSize: 13,
+        fontWeight: '700'
     },
     sheetBackdrop: {
         flex: 1,

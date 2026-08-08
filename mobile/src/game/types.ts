@@ -18,6 +18,11 @@ export interface CardSummary {
     taunt?: boolean;
     gigantic?: boolean;
     isToken?: boolean;
+    /**
+     * For a token creature, the real deck card sitting under the token. Only
+     * sent to the card's controller (server/game/Card.js getSummary).
+     */
+    versusCard?: CardSummary;
     canPlay?: boolean;
     controlled?: boolean;
     new?: boolean;
@@ -129,6 +134,23 @@ export interface PlayerState {
     [key: string]: unknown;
 }
 
+/**
+ * A lasting effect aimed at a player rather than a card, summarized by the
+ * engine (server/game/effectengine.js getPlayerEffectSummary).
+ */
+export interface PlayerEffectSummary {
+    source?: CardSummary;
+    /** Raw engine duration, e.g. 'duringOpponentNextTurn'. */
+    duration?: string;
+    effectType?: string;
+    /** Player who applied it. */
+    controller?: string;
+    /** Players it constrains. */
+    targets?: string[];
+    /** Declared but not yet in force (starts on the opponent's next turn). */
+    pending?: boolean;
+}
+
 /** Root in-game state as sent by the game node (server/game/game.js getState). */
 export interface GameState {
     id: string;
@@ -137,6 +159,7 @@ export interface GameState {
     owner?: string | { username?: string };
     players: Record<string, PlayerState>;
     messages: ChatMessage[];
+    effects?: PlayerEffectSummary[];
     spectators?: { id?: string; name: string }[];
     winner?: string;
     cancelPromptUsed?: boolean;

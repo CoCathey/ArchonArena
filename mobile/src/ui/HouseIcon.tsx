@@ -21,6 +21,19 @@ const HOUSE_ICONS: Record<string, number> = {
     untamed: require('../../assets/img/houses/untamed.png')
 };
 
+/** Every house, in the order the card sets introduced them. */
+export const HOUSES: string[] = Object.keys(HOUSE_ICONS);
+
+/** Display name for a house code ('staralliance' -> 'Star Alliance'). */
+const HOUSE_LABELS: Record<string, string> = {
+    staralliance: 'Star Alliance'
+};
+
+export function houseLabel(house: string): string {
+    const key = house.toLowerCase().replace(/\s+/g, '');
+    return HOUSE_LABELS[key] ?? house.charAt(0).toUpperCase() + house.slice(1);
+}
+
 export function houseIconSource(house?: string): number | undefined {
     if (!house) {
         return undefined;

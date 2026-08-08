@@ -1874,6 +1874,9 @@ class Game extends EventEmitter {
             return {
                 adaptive: this.adaptive,
                 cancelPromptUsed: this.cancelPromptUsed,
+                // ARCHON: player-level lasting effects (Befuddle and friends),
+                // which otherwise leave no trace on the board.
+                effects: this.effectEngine.getPlayerEffectSummary(),
                 forcePassAvailable: this.forcePassAvailable,
                 gameFormat: this.gameFormat,
                 gamePrivate: this.gamePrivate,

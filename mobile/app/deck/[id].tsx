@@ -1,90 +1,44 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import {
     ActivityIndicator,
-    Pressable,
     RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
     View
 } from 'react-native';
-import { Image } from 'expo-image';
 import { fetchDeck } from '../../src/api/client';
-import type { Deck, DeckCard, ShortCard } from '../../src/api/types';
+import type { AercBreakdown, Deck } from '../../src/api/types';
+import DeckCardList from '../../src/decks/DeckCardList';
+import { expansionLabel } from '../../src/decks/expansions';
 import { CardZoomModal } from '../../src/game/GameModals';
-import { ENHANCEMENT_PIPS } from '../../src/game/cardIcons';
 import type { CardSummary } from '../../src/game/types';
 import { useCardsStore } from '../../src/stores/cardsStore';
-import { colors, spacing } from '../../src/theme';
+import { colors, radius, spacing } from '../../src/theme';
 import HouseIcon from '../../src/ui/HouseIcon';
 import { ErrorBanner } from '../../src/ui/primitives';
 
-interface ResolvedCard {
-    key: string;
-    id: string;
-    count: number;
-    name: string;
-    type?: string;
-    house?: string;
-    image?: string;
-    maverick?: boolean;
-    anomaly?: boolean;
-    enhancements: string[];
-}
-
-function resolve(card: DeckCard, dictionary: Record<string, ShortCard>): ResolvedCard {
-    const data = dictionary[card.id];
-    return {
-        key: `${card.dbId ?? card.id}-${card.prophecyId ?? ''}`,
-        id: card.id,
-        count: card.count || 1,
-        name: data?.name ?? card.id,
-        type: data?.type,
-        house: card.house ?? data?.house,
-        // Same fallback the web client uses: enhanced/maverick prints carry
-        // their own image, everything else is named after the card id. (The
-        // dictionary's own image field is an external Master Vault URL, so it
-        // is deliberately not used here.)
-        image: card.image || card.id,
-        maverick: !!card.maverick,
-        anomaly: !!card.anomaly,
-        enhancements: (card.enhancements ?? []).filter((pip) => !!pip)
-    };
-}
-
-function CardRow(props: { card: ResolvedCard; onPress: () => void }) {
-    const { card } = props;
+/** One AERC component as a labelled bar, scaled against the deck's largest. */
+function AercRow(props: { label: string; value: number; max: number }) {
+    const fraction = props.max > 0 ? Math.max(0, props.value) / props.max : 0;
     return (
-        <Pressable
-            onPress={props.onPress}
-            style={({ pressed }) => [styles.cardRow, pressed && { opacity: 0.6 }]}
-        >
-            <Text style={styles.cardCount}>{card.count}×</Text>
-            <Text style={styles.cardName} numberOfLines={1}>
-                {card.name}
+        <View style={styles.aercRow}>
+            <Text style={styles.aercLabel} numberOfLines={1}>
+                {props.label}
             </Text>
-            {card.enhancements.map((pip, index) => {
-                const source = ENHANCEMENT_PIPS[pip.toLowerCase().replace(/\s+/g, '')];
-                return source ? (
-                    <Image
-                        key={`${pip}-${index}`}
-                        source={source}
-                        style={styles.pip}
-                        contentFit='contain'
-                    />
-                ) : null;
-            })}
-            {card.maverick ? <Text style={styles.badgeMaverick}>maverick</Text> : null}
-            {card.anomaly ? <Text style={styles.badgeAnomaly}>anomaly</Text> : null}
-            {card.type ? <Text style={styles.cardType}>{card.type}</Text> : null}
-        </Pressable>
+            <View style={styles.aercTrack}>
+                <View style={[styles.aercFill, { width: `${Math.round(fraction * 100)}%` }]} />
+            </View>
+            <Text style={styles.aercValue}>{props.value.toFixed(1)}</Text>
+        </View>
     );
 }
 
 export default function DeckDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const [deck, setDeck] = useState<Deck | undefined>();
+    const [aerc, setAerc] = useState<AercBreakdown | undefined>();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | undefined>();
     const [zoomCard, setZoomCard] = useState<CardSummary | undefined>();
@@ -105,6 +59,7 @@ export default function DeckDetailScreen() {
                 setError(result.message ?? 'Could not load this deck');
             } else {
                 setDeck(result.deck);
+                setAerc(result.aerc ?? undefined);
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not load this deck');
@@ -119,51 +74,11 @@ export default function DeckDetailScreen() {
     }, [load, loadCards]);
 
     const houses = deck?.houses ?? [];
-    const byHouse = useMemo(() => {
-        const groups = new Map<string, ResolvedCard[]>();
-        if (!deck?.cards || !dictionary) {
-            return groups;
-        }
-        for (const card of deck.cards) {
-            if (card.isNonDeck) {
-                continue;
-            }
-            const resolved = resolve(card, dictionary);
-            const house = resolved.house ?? 'unknown';
-            const list = groups.get(house) ?? [];
-            list.push(resolved);
-            groups.set(house, list);
-        }
-        for (const list of groups.values()) {
-            list.sort((a, b) => a.name.localeCompare(b.name));
-        }
-        return groups;
-    }, [deck?.cards, dictionary]);
-
-    const nonDeckCards = useMemo(() => {
-        if (!deck?.cards || !dictionary) {
-            return [];
-        }
-        const cards = deck.cards.filter((card) => card.isNonDeck).map((c) => resolve(c, dictionary));
-        // Archon powers are baked into the deck identity; token creatures are
-        // listed once, matching the web deck view.
-        const seenTokens = new Set<string>();
-        return cards.filter((card) => {
-            if (card.type === 'archon power') {
-                return false;
-            }
-            if (card.type === 'token creature') {
-                if (seenTokens.has(card.key)) {
-                    return false;
-                }
-                seenTokens.add(card.key);
-            }
-            return true;
-        });
-    }, [deck?.cards, dictionary]);
-
-    const sas = deck?.dokStats?.sas;
+    const sas = typeof deck?.sasRating === 'number' ? Math.round(deck.sasRating) : undefined;
+    const set = expansionLabel(deck?.expansion);
     const totalGames = (deck?.wins ?? 0) + (deck?.losses ?? 0);
+    const components = (aerc?.components ?? []).filter((component) => component.value !== 0);
+    const aercMax = components.reduce((max, component) => Math.max(max, component.value), 0);
     const busy = loading || (!dictionary && !cardsError);
 
     return (
@@ -190,8 +105,32 @@ export default function DeckDetailScreen() {
                                     <HouseIcon key={house} house={house} size={24} />
                                 ))}
                             </View>
-                            {typeof sas === 'number' ? (
-                                <Text style={styles.sas}>{Math.round(sas)} SAS</Text>
+                            {set ? <Text style={styles.set}>{set}</Text> : null}
+                            {sas !== undefined ? (
+                                <Text style={styles.sas}>{sas} SAS</Text>
+                            ) : null}
+                        </View>
+                        <View style={styles.statLine}>
+                            {typeof aerc?.aercScore === 'number' ? (
+                                <Text style={styles.statChip}>
+                                    AERC {aerc.aercScore.toFixed(1)}
+                                </Text>
+                            ) : null}
+                            {typeof aerc?.sasPercentile === 'number' ? (
+                                <Text style={styles.statChip}>
+                                    Top {(100 - aerc.sasPercentile).toFixed(0)}%
+                                </Text>
+                            ) : null}
+                            {typeof aerc?.synergyRating === 'number' ? (
+                                <Text style={styles.statChip}>
+                                    Synergy +{aerc.synergyRating.toFixed(0)}
+                                </Text>
+                            ) : null}
+                            {typeof aerc?.antisynergyRating === 'number' &&
+                            aerc.antisynergyRating !== 0 ? (
+                                <Text style={styles.statChip}>
+                                    Anti −{Math.abs(aerc.antisynergyRating).toFixed(0)}
+                                </Text>
                             ) : null}
                         </View>
                         {totalGames > 0 ? (
@@ -205,51 +144,33 @@ export default function DeckDetailScreen() {
                     </View>
                 ) : null}
 
+                {components.length > 0 ? (
+                    <View style={styles.summary}>
+                        <Text style={styles.sectionTitle}>AERC breakdown</Text>
+                        {components.map((component) => (
+                            <AercRow
+                                key={component.key}
+                                label={component.label}
+                                value={component.value}
+                                max={aercMax}
+                            />
+                        ))}
+                        <Text style={styles.aercFootnote}>
+                            Decks of KeyForge ratings
+                            {aerc?.aercVersion ? ` · v${aerc.aercVersion}` : ''}
+                        </Text>
+                    </View>
+                ) : null}
+
                 {busy ? (
                     <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
                 ) : null}
 
-                {houses.map((house) => {
-                    const cards = byHouse.get(house) ?? [];
-                    if (cards.length === 0) {
-                        return null;
-                    }
-                    return (
-                        <View key={house} style={styles.houseSection}>
-                            <View style={styles.houseHeader}>
-                                <HouseIcon house={house} size={22} />
-                                <Text style={styles.houseName}>{house}</Text>
-                                <Text style={styles.houseCount}>
-                                    {cards.reduce((sum, card) => sum + card.count, 0)} cards
-                                </Text>
-                            </View>
-                            {cards.map((card) => (
-                                <CardRow
-                                    key={card.key}
-                                    card={card}
-                                    onPress={() =>
-                                        setZoomCard({ uuid: card.key, image: card.image })
-                                    }
-                                />
-                            ))}
-                        </View>
-                    );
-                })}
-
-                {nonDeckCards.length > 0 ? (
-                    <View style={styles.houseSection}>
-                        <View style={styles.houseHeader}>
-                            <Text style={styles.houseName}>Non-deck cards</Text>
-                        </View>
-                        {nonDeckCards.map((card) => (
-                            <CardRow
-                                key={card.key}
-                                card={card}
-                                onPress={() => setZoomCard({ uuid: card.key, image: card.image })}
-                            />
-                        ))}
-                    </View>
-                ) : null}
+                <DeckCardList
+                    deck={deck}
+                    dictionary={dictionary ?? undefined}
+                    onCardPress={setZoomCard}
+                />
             </ScrollView>
 
             <CardZoomModal card={zoomCard} onClose={() => setZoomCard(undefined)} />
@@ -278,85 +199,86 @@ const styles = StyleSheet.create({
     metaRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        gap: spacing.md,
         marginTop: spacing.sm
     },
     houseIcons: {
         flexDirection: 'row',
-        gap: 8
+        gap: 8,
+        flex: 1
+    },
+    set: {
+        color: colors.textFaint,
+        fontSize: 12,
+        fontWeight: '700'
     },
     sas: {
         color: colors.brand,
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: '800'
+    },
+    statLine: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: spacing.sm,
+        marginTop: spacing.sm
+    },
+    statChip: {
+        color: colors.textDim,
+        fontSize: 11,
+        fontWeight: '700',
+        backgroundColor: colors.bgElevated,
+        borderColor: colors.border,
+        borderWidth: 1,
+        borderRadius: radius.pill,
+        paddingHorizontal: 9,
+        paddingVertical: 3,
+        overflow: 'hidden'
     },
     record: {
         color: colors.textDim,
         fontSize: 12,
-        marginTop: 6
+        marginTop: 8
     },
-    houseSection: {
-        marginBottom: spacing.md
+    sectionTitle: {
+        color: colors.text,
+        fontSize: 14,
+        fontWeight: '800',
+        marginBottom: spacing.sm
     },
-    houseHeader: {
+    aercRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.sm,
-        paddingVertical: 6,
-        borderBottomColor: colors.border,
-        borderBottomWidth: 1,
-        marginBottom: 4
+        paddingVertical: 3
     },
-    houseName: {
-        color: colors.text,
-        fontSize: 15,
-        fontWeight: '800',
-        textTransform: 'capitalize',
-        flex: 1
-    },
-    houseCount: {
-        color: colors.textFaint,
-        fontSize: 12
-    },
-    cardRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 7,
-        paddingVertical: 8,
-        paddingHorizontal: 2,
-        borderBottomColor: 'rgba(42, 54, 80, 0.4)',
-        borderBottomWidth: StyleSheet.hairlineWidth
-    },
-    cardCount: {
-        color: colors.textFaint,
-        fontSize: 13,
-        fontVariant: ['tabular-nums'],
-        width: 24
-    },
-    cardName: {
-        color: colors.text,
-        fontSize: 14,
-        fontWeight: '600',
-        flexShrink: 1
-    },
-    pip: {
-        width: 14,
-        height: 14
-    },
-    badgeMaverick: {
-        color: colors.brand,
-        fontSize: 10,
-        fontWeight: '700'
-    },
-    badgeAnomaly: {
-        color: colors.accent,
-        fontSize: 10,
-        fontWeight: '700'
-    },
-    cardType: {
-        color: colors.textFaint,
+    aercLabel: {
+        color: colors.textDim,
         fontSize: 11,
-        marginLeft: 'auto',
-        textTransform: 'capitalize'
+        width: 108
+    },
+    aercTrack: {
+        flex: 1,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: colors.bgElevated,
+        overflow: 'hidden'
+    },
+    aercFill: {
+        height: '100%',
+        backgroundColor: colors.brand
+    },
+    aercValue: {
+        color: colors.text,
+        fontSize: 11,
+        fontWeight: '700',
+        fontVariant: ['tabular-nums'],
+        width: 34,
+        textAlign: 'right'
+    },
+    aercFootnote: {
+        color: colors.textFaint,
+        fontSize: 10,
+        marginTop: spacing.sm
     }
 });

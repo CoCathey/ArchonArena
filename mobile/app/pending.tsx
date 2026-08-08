@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import {
     ActivityIndicator,
@@ -14,38 +14,18 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Deck } from '../src/api/types';
-import { fetchDecks, fetchStandaloneDecks } from '../src/api/client';
+import { fetchStandaloneDecks } from '../src/api/client';
+import DeckFilterBar from '../src/decks/DeckFilterBar';
+import DeckPreviewModal from '../src/decks/DeckPreviewModal';
+import DeckRow from '../src/decks/DeckRow';
+import { useDeckLibrary } from '../src/decks/useDeckLibrary';
 import { lobby } from '../src/net/lobbySocket';
 import { useAuthStore } from '../src/stores/authStore';
 import { useGameStore } from '../src/stores/gameStore';
 import { useLobbyStore } from '../src/stores/lobbyStore';
 import { colors, radius, spacing } from '../src/theme';
 import { LogLine } from '../src/game/LogMessages';
-import HouseIcon from '../src/ui/HouseIcon';
 import { Button, Card, EmptyState, ErrorBanner, TextField } from '../src/ui/primitives';
-
-function DeckPickRow(props: { deck: Deck; onPick: () => void }) {
-    const sas = props.deck.dokStats?.sas;
-    return (
-        <Pressable onPress={props.onPick} style={({ pressed }) => [pressed && { opacity: 0.7 }]}>
-            <Card style={styles.deckPickRow}>
-                <View style={{ flex: 1 }}>
-                    <Text style={styles.deckPickName} numberOfLines={1}>
-                        {props.deck.name}
-                    </Text>
-                    <View style={styles.deckPickMeta}>
-                        {(props.deck.houses ?? []).map((house) => (
-                            <HouseIcon key={house} house={house} size={18} />
-                        ))}
-                        {typeof sas === 'number' ? (
-                            <Text style={styles.deckPickSas}>{Math.round(sas)} SAS</Text>
-                        ) : null}
-                    </View>
-                </View>
-            </Card>
-        </Pressable>
-    );
-}
 
 export default function PendingGameScreen() {
     const currentGame = useLobbyStore((state) => state.currentGame);
@@ -55,13 +35,19 @@ export default function PendingGameScreen() {
 
     const [deckModal, setDeckModal] = useState(false);
     const [deckTab, setDeckTab] = useState<'mine' | 'standalone'>('mine');
-    const [myDecks, setMyDecks] = useState<Deck[]>([]);
     const [standaloneDecks, setStandaloneDecks] = useState<Deck[]>([]);
-    const [loadingDecks, setLoadingDecks] = useState(false);
+    const [standaloneSearch, setStandaloneSearch] = useState('');
+    const [standaloneHouses, setStandaloneHouses] = useState<string[]>([]);
+    const [loadingStandalone, setLoadingStandalone] = useState(false);
     const [deckError, setDeckError] = useState<string | undefined>();
+    const [previewDeck, setPreviewDeck] = useState<Deck | undefined>();
     const [chatText, setChatText] = useState('');
     const navigatedToGame = useRef(false);
     const insets = useSafeAreaInsets();
+
+    // The collection pages in from the server (search/sort/house filter all run
+    // there), so every deck is reachable rather than just the first page.
+    const library = useDeckLibrary({ pageSize: 30, enabled: deckModal });
 
     // Handoff arrives when the owner starts the game: open the board.
     useEffect(() => {
@@ -82,35 +68,37 @@ export default function PendingGameScreen() {
         }
     }, [currentGame]);
 
-    const loadDecks = async () => {
-        setLoadingDecks(true);
+    const loadStandalone = async () => {
+        setLoadingStandalone(true);
         setDeckError(undefined);
         try {
-            const [mineRes, standaloneRes] = await Promise.allSettled([
-                fetchDecks({ pageSize: 100 }),
-                fetchStandaloneDecks()
-            ]);
-            const mine = mineRes.status === 'fulfilled' ? mineRes.value.decks ?? [] : [];
-            const standalone =
-                standaloneRes.status === 'fulfilled' ? standaloneRes.value.decks ?? [] : [];
-            setMyDecks(mine);
-            setStandaloneDecks(standalone);
-            if (mineRes.status === 'rejected' && standaloneRes.status === 'rejected') {
-                // Distinct from a genuine empty library — don't tell a user with
-                // decks that they have none.
-                setDeckError('Could not load decks. Check your connection and try again.');
-            } else if (mine.length === 0 && standalone.length > 0) {
-                setDeckTab('standalone');
-            }
+            const result = await fetchStandaloneDecks();
+            setStandaloneDecks(result.decks ?? []);
+        } catch (err) {
+            setDeckError(
+                err instanceof Error ? err.message : 'Could not load the standalone decks.'
+            );
         } finally {
-            setLoadingDecks(false);
+            setLoadingStandalone(false);
         }
     };
 
     const openDeckModal = () => {
         setDeckModal(true);
-        loadDecks();
+        loadStandalone();
     };
+
+    // Standalone decks are a short fixed list served whole, so their search and
+    // house filter are applied here rather than by the server.
+    const visibleStandalone = useMemo(() => {
+        const term = standaloneSearch.trim().toLowerCase();
+        return standaloneDecks.filter((deck) => {
+            if (term && !deck.name.toLowerCase().includes(term)) {
+                return false;
+            }
+            return standaloneHouses.every((house) => (deck.houses ?? []).includes(house));
+        });
+    }, [standaloneDecks, standaloneHouses, standaloneSearch]);
 
     if (!currentGame) {
         return <View style={styles.container} />;
@@ -128,6 +116,7 @@ export default function PendingGameScreen() {
 
     const pickDeck = (deck: Deck, standalone: boolean) => {
         lobby.selectDeck(currentGame.id, deck.id, standalone);
+        setPreviewDeck(undefined);
         setDeckModal(false);
     };
 
@@ -163,19 +152,28 @@ export default function PendingGameScreen() {
                                 {player.name}
                                 {player.owner ? '  ⭐' : ''}
                             </Text>
-                            <Text
-                                style={[
-                                    styles.deckStatus,
-                                    player.deck?.selected && { color: '#7ed494' }
-                                ]}
-                                numberOfLines={1}
-                            >
-                                {player.deck?.selected
-                                    ? player.name === username && player.deck.name
-                                        ? player.deck.name
-                                        : 'Deck selected'
-                                    : 'Choosing a deck…'}
-                            </Text>
+                            <View style={styles.deckStatusRow}>
+                                <Text
+                                    style={[
+                                        styles.deckStatus,
+                                        player.deck?.selected && { color: '#7ed494' }
+                                    ]}
+                                    numberOfLines={1}
+                                >
+                                    {player.deck?.selected
+                                        ? player.name === username && player.deck.name
+                                            ? player.deck.name
+                                            : 'Deck selected'
+                                        : 'Choosing a deck…'}
+                                </Text>
+                                {/* The server sends the opponent's SAS too, unless
+                                    the game hides decklists. */}
+                                {typeof player.deck?.sasRating === 'number' ? (
+                                    <Text style={styles.deckSas}>
+                                        {Math.round(player.deck.sasRating)} SAS
+                                    </Text>
+                                ) : null}
+                            </View>
                         </View>
                         {player.name === username ? (
                             <Button small variant='secondary' title='Select deck' onPress={openDeckModal} />
@@ -286,32 +284,112 @@ export default function PendingGameScreen() {
                             </Text>
                         </Pressable>
                     </View>
+
+                    {deckTab === 'mine' ? (
+                        <DeckFilterBar
+                            search={library.searchInput}
+                            onSearchChange={library.setSearchInput}
+                            sort={library.sort}
+                            onSortChange={library.setSort}
+                            houses={library.houses}
+                            onToggleHouse={library.toggleHouse}
+                            onClear={library.clearFilters}
+                            summary={
+                                library.filtered
+                                    ? `${library.decks.length} of ${library.total} shown`
+                                    : library.total > 0
+                                    ? `${library.total} deck${library.total === 1 ? '' : 's'}`
+                                    : undefined
+                            }
+                        />
+                    ) : (
+                        <DeckFilterBar
+                            search={standaloneSearch}
+                            onSearchChange={setStandaloneSearch}
+                            sort={library.sort}
+                            onSortChange={library.setSort}
+                            houses={standaloneHouses}
+                            onToggleHouse={(house) =>
+                                setStandaloneHouses((previous) =>
+                                    previous.includes(house)
+                                        ? previous.filter((entry) => entry !== house)
+                                        : previous.concat(house)
+                                )
+                            }
+                            onClear={() => {
+                                setStandaloneSearch('');
+                                setStandaloneHouses([]);
+                            }}
+                        />
+                    )}
+
                     <FlatList
-                        data={deckTab === 'mine' ? myDecks : standaloneDecks}
+                        data={deckTab === 'mine' ? library.decks : visibleStandalone}
                         keyExtractor={(deck) => `${deckTab}-${deck.id}`}
+                        keyboardShouldPersistTaps='handled'
+                        keyboardDismissMode='on-drag'
                         renderItem={({ item }) => (
-                            <DeckPickRow
+                            <DeckRow
                                 deck={item}
-                                onPick={() => pickDeck(item, deckTab === 'standalone')}
+                                onPress={() => setPreviewDeck(item)}
+                                accessory={
+                                    <View style={styles.deckRowActions}>
+                                        <Button
+                                            small
+                                            variant='secondary'
+                                            title='View'
+                                            onPress={() => setPreviewDeck(item)}
+                                        />
+                                        <Button
+                                            small
+                                            title='Select'
+                                            onPress={() =>
+                                                pickDeck(item, deckTab === 'standalone')
+                                            }
+                                        />
+                                    </View>
+                                }
                             />
                         )}
                         contentContainerStyle={{
                             padding: spacing.md,
                             paddingBottom: insets.bottom + spacing.md
                         }}
+                        onEndReached={deckTab === 'mine' ? library.loadMore : undefined}
+                        onEndReachedThreshold={0.5}
+                        ListFooterComponent={
+                            deckTab === 'mine' && library.loadingMore ? (
+                                <ActivityIndicator
+                                    color={colors.brand}
+                                    style={{ marginVertical: 16 }}
+                                />
+                            ) : deckTab === 'mine' && library.hasMore ? (
+                                <Button
+                                    variant='secondary'
+                                    title={`Load more (${
+                                        library.total - library.decks.length
+                                    } left)`}
+                                    onPress={library.loadMore}
+                                />
+                            ) : null
+                        }
                         ListEmptyComponent={
-                            loadingDecks ? (
+                            (deckTab === 'mine' ? library.loading : loadingStandalone) ? (
                                 <ActivityIndicator
                                     color={colors.brand}
                                     style={{ marginTop: spacing.xl }}
                                 />
-                            ) : deckError ? (
+                            ) : (deckTab === 'mine' ? library.error : deckError) ? (
                                 <View style={{ padding: spacing.md }}>
-                                    <ErrorBanner message={deckError} />
+                                    <ErrorBanner
+                                        message={deckTab === 'mine' ? library.error : deckError}
+                                    />
                                     <Button
                                         variant='secondary'
                                         title='Retry'
-                                        onPress={loadDecks}
+                                        onPress={
+                                            deckTab === 'mine' ? library.refresh : loadStandalone
+                                        }
                                     />
                                 </View>
                             ) : (
@@ -328,6 +406,13 @@ export default function PendingGameScreen() {
                     />
                 </View>
             </Modal>
+
+            <DeckPreviewModal
+                deck={previewDeck}
+                onClose={() => setPreviewDeck(undefined)}
+                confirmLabel='Play this deck'
+                onConfirm={(deck) => pickDeck(deck, deckTab === 'standalone')}
+            />
         </KeyboardAvoidingView>
     );
 }
@@ -360,10 +445,21 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '700'
     },
+    deckStatusRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+        marginTop: 3
+    },
     deckStatus: {
         color: colors.textDim,
         fontSize: 13,
-        marginTop: 3
+        flexShrink: 1
+    },
+    deckSas: {
+        color: colors.brand,
+        fontSize: 12,
+        fontWeight: '800'
     },
     waiting: {
         color: colors.textDim,
@@ -434,24 +530,7 @@ const styles = StyleSheet.create({
     deckTabTextActive: {
         color: '#161006'
     },
-    deckPickRow: {
-        marginBottom: spacing.sm
-    },
-    deckPickName: {
-        color: colors.text,
-        fontSize: 15,
-        fontWeight: '700'
-    },
-    deckPickMeta: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        marginTop: 6
-    },
-    deckPickSas: {
-        color: colors.brand,
-        fontSize: 12,
-        fontWeight: '700',
-        marginLeft: 6
+    deckRowActions: {
+        gap: 6
     }
 });
