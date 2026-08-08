@@ -395,6 +395,12 @@ export const api = createApi({
             query: (username) => `/tournaments/history/${encodeURIComponent(username)}`,
             providesTags: [TAG_TYPES.TOURNAMENTS]
         }),
+        // ARCHON (N14): the caller's open matches across every event they are
+        // in - what an async player needs and no single event page can answer.
+        getMyTournamentMatches: builder.query({
+            query: () => '/tournaments/my-matches',
+            providesTags: [TAG_TYPES.TOURNAMENTS]
+        }),
         // ARCHON: beta bug reports
         submitBugReport: builder.mutation({
             query: (body) => ({ url: '/bug-reports', method: 'POST', body }),
@@ -1061,6 +1067,7 @@ export const {
     useCreateTournamentMutation,
     useTournamentActionMutation,
     useGetTournamentHistoryQuery,
+    useGetMyTournamentMatchesQuery,
     useSubmitBugReportMutation,
     useGetBugReportsQuery,
     useSetBugReportStatusMutation,

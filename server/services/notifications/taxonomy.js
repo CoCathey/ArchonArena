@@ -28,6 +28,24 @@ const CATEGORIES = {
         description: 'An event you are registered for has begun.',
         defaults: { inApp: true, email: true }
     },
+    // ARCHON (N14): asynchronous events run on these two. Scheduling mails by
+    // default for the same reason pairings do - an offer of "Thursday 8pm?"
+    // that sits unseen for two days IS the failure the feature exists to
+    // prevent.
+    'tournament.schedule': {
+        group: 'Tournaments',
+        label: 'Match scheduling',
+        description:
+            'Your opponent proposed, accepted or cleared a time for your tournament match.',
+        defaults: { inApp: true, email: true }
+    },
+    'tournament.deadline': {
+        group: 'Tournaments',
+        label: 'Round deadlines',
+        description:
+            'A round deadline in an asynchronous event has passed with your match unplayed, or (for organizers) with matches outstanding.',
+        defaults: { inApp: true, email: true }
+    },
     'friend.request': {
         group: 'Community',
         label: 'Friend requests',

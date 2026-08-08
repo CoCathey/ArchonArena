@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
+import MySchedulePanel from '../Components/Tournaments/MySchedulePanel';
 import { Constants } from '../constants';
 import {
     useCreateTournamentMutation,
@@ -47,6 +48,8 @@ const defaultForm = {
     format: 'swiss',
     gameFormat: 'archon',
     mode: 'online',
+    pacing: 'live',
+    roundDeadlineDays: '3',
     roundCount: '',
     startTime: '',
     playerCap: '',
@@ -112,6 +115,8 @@ const Tournaments = () => {
             const result = await createTournament({
                 ...form,
                 roundCount: form.roundCount || undefined,
+                roundDeadlineDays:
+                    form.pacing === 'async' ? form.roundDeadlineDays || undefined : undefined,
                 startTime: form.startTime || undefined,
                 playerCap: form.playerCap || undefined,
                 cutTo: form.format === 'swiss' ? form.cutTo || undefined : undefined,
@@ -142,6 +147,11 @@ const Tournaments = () => {
 
     return (
         <div className='mx-auto w-full max-w-5xl space-y-4'>
+            {/* ARCHON (N14): what you owe, before what exists. A player
+                returning to an async league needs their own outstanding
+                matches first, not the catalogue. */}
+            {user && <MySchedulePanel />}
+
             <Panel title={t('Tournaments')}>
                 <div className='mb-3 flex flex-wrap items-center gap-2'>
                     <div className='flex flex-wrap gap-1'>
@@ -226,6 +236,46 @@ const Tournaments = () => {
                                     <option value='irl'>{t('In Person')}</option>
                                 </select>
                             </div>
+                            {/* ARCHON (N14): pacing is the single biggest
+                                decision about how an event will feel to play
+                                in, so it sits with format and mode rather than
+                                behind "advanced". */}
+                            <div>
+                                <Label htmlFor='tournamentPacing'>{t('Pacing')}</Label>
+                                <select
+                                    id='tournamentPacing'
+                                    className={selectClass}
+                                    value={form.pacing}
+                                    onChange={set('pacing')}
+                                >
+                                    <option value='live'>
+                                        {t('Live - played in one sitting')}
+                                    </option>
+                                    <option value='async'>
+                                        {t('Asynchronous - players schedule their own matches')}
+                                    </option>
+                                </select>
+                            </div>
+                            {form.pacing === 'async' && (
+                                <div>
+                                    <Label htmlFor='tournamentDeadlineDays'>
+                                        {t('Days per round')}
+                                    </Label>
+                                    <Input
+                                        id='tournamentDeadlineDays'
+                                        type='number'
+                                        min='1'
+                                        max='30'
+                                        value={form.roundDeadlineDays}
+                                        onChange={set('roundDeadlineDays')}
+                                    />
+                                    <div className='mt-1 text-xs text-muted'>
+                                        {t(
+                                            'Players arrange their own match time inside this window. You are told when a deadline passes with matches outstanding.'
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                             {form.format === 'swiss' && (
                                 <>
                                     <div>
@@ -644,6 +694,17 @@ const Tournaments = () => {
                                     {tournament.bestOf > 1 ? ` - Bo${tournament.bestOf}` : ''}
                                     {tournament.mode === 'irl' ? ` - ${t('In Person')}` : ''}
                                 </span>
+                                {tournament.pacing === 'async' && (
+                                    <span
+                                        className='rounded bg-sky-500/15 px-1.5 text-xs uppercase text-sky-300'
+                                        title={t(
+                                            'Players have {{days}} day(s) per round to arrange their match',
+                                            { days: tournament.roundDeadlineDays || 0 }
+                                        )}
+                                    >
+                                        {t('Async')}
+                                    </span>
+                                )}
                                 {tournament.rated && (
                                     <span className='rounded bg-amber-400/15 px-1.5 text-xs uppercase text-amber-300'>
                                         {t('Rated')}

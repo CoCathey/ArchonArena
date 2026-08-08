@@ -18,6 +18,27 @@ const FORMATS = ['swiss', 'single-elim', 'double-elim', 'round-robin'];
 // ARCHON (N9): 'hybrid' is an event where some tables play on the platform
 // and some play on paper, both feeding one standing.
 const MODES = ['online', 'irl', 'hybrid'];
+// ARCHON (N14): 'live' is an event played in one sitting with a minutes
+// clock; 'async' is a league paced in days per round, where the two players
+// of each match schedule between themselves when to meet.
+const PACINGS = ['live', 'async'];
+const DEFAULT_ROUND_DEADLINE_DAYS = 3;
+const MAX_ROUND_DEADLINE_DAYS = 30;
+// How far ahead a match may be scheduled. Generous on purpose: it bounds
+// typos (a proposal for next year), not planning.
+const MAX_SCHEDULE_AHEAD_DAYS = 60;
+
+// The round clock, in one place. Async events count their deadline in days;
+// live events in minutes; an event with neither runs unclocked. Every round
+// advance also re-arms the deadline notice ("DeadlineNotifiedAt"), because a
+// new round is a new deadline.
+const ROUND_CLOCK_SQL =
+    '"RoundEndsAt" = CASE ' +
+    'WHEN "Pacing" = \'async\' AND COALESCE("RoundDeadlineDays", 0) > 0 ' +
+    "THEN (now() AT TIME ZONE 'utc') + (\"RoundDeadlineDays\" * interval '1 day') " +
+    'WHEN "RoundTimerMinutes" > 0 ' +
+    "THEN (now() AT TIME ZONE 'utc') + (\"RoundTimerMinutes\" * interval '1 minute') " +
+    'ELSE NULL END, "DeadlineNotifiedAt" = NULL';
 const SEED_METHODS = ['registration', 'rating', 'random', 'manual'];
 const VISIBILITIES = ['public', 'private'];
 const BEST_OF_OPTIONS = [1, 3, 5];
@@ -243,6 +264,29 @@ class TournamentService {
             errors.push('Unknown tournament mode');
         }
         out.mode = options.mode || 'online';
+
+        // ARCHON (N14): async pacing - rounds measured in days, matches
+        // scheduled between the players.
+        if (options.pacing && !PACINGS.includes(options.pacing)) {
+            errors.push('Unknown pacing');
+        }
+        out.pacing = options.pacing || 'live';
+
+        const deadlineDays = options.roundDeadlineDays
+            ? parseInt(options.roundDeadlineDays, 10)
+            : null;
+        if (
+            deadlineDays !== null &&
+            (Number.isNaN(deadlineDays) ||
+                deadlineDays < 1 ||
+                deadlineDays > MAX_ROUND_DEADLINE_DAYS)
+        ) {
+            errors.push(`Round deadline must be between 1 and ${MAX_ROUND_DEADLINE_DAYS} days`);
+        }
+        // An async event always has a deadline (that is what paces it); a
+        // live event never does - it has the minutes clock instead.
+        out.roundDeadlineDays =
+            out.pacing === 'async' ? deadlineDays || DEFAULT_ROUND_DEADLINE_DAYS : null;
 
         out.gameFormat = options.gameFormat || 'archon';
 
@@ -497,10 +541,11 @@ class TournamentService {
                 // ARCHON: team events (N7); paper results, Alliance pod rules
                 // and Adaptive Bo3 (N9).
                 '"Triad", "TeamEvent", "TeamSize", "AllowPaperResults", "AlliancePolicy", ' +
-                '"AdaptiveBo3", "CreatedAt") ' +
+                // ARCHON (N14): async pacing.
+                '"AdaptiveBo3", "Pacing", "RoundDeadlineDays", "CreatedAt") ' +
                 'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ' +
                 '$16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, ' +
-                '$30, $31, $32, $33, $34, ' +
+                '$30, $31, $32, $33, $34, $35, $36, ' +
                 'now() AT TIME ZONE \'utc\') RETURNING "Id"',
             [
                 values.name,
@@ -536,7 +581,9 @@ class TournamentService {
                 values.teamSize,
                 values.allowPaperResults,
                 values.alliancePolicy ? JSON.stringify(values.alliancePolicy) : null,
-                values.adaptiveBo3
+                values.adaptiveBo3,
+                values.pacing,
+                values.roundDeadlineDays
             ]
         );
 
@@ -606,6 +653,8 @@ class TournamentService {
                 sasChainHandicap: tournament.SasChainHandicap,
                 chainsPerMatchWin: tournament.ChainsPerMatchWin,
                 triad: tournament.Triad,
+                pacing: tournament.Pacing,
+                roundDeadlineDays: tournament.RoundDeadlineDays,
                 ...options
             };
 
@@ -631,7 +680,8 @@ class TournamentService {
                     '"RequireDeckRegistration" = $18, "SasMin" = $19, "SasMax" = $20, ' +
                     '"HideDecklists" = $21, "GameTimeLimit" = $22, "DeckSwapPolicy" = $23, ' +
                     '"AllowedSets" = $24, "RequiredHouses" = $25, "BannedHouses" = $26, ' +
-                    '"SasChainHandicap" = $27, "ChainsPerMatchWin" = $28, "Triad" = $29 ' +
+                    '"SasChainHandicap" = $27, "ChainsPerMatchWin" = $28, "Triad" = $29, ' +
+                    '"Pacing" = $30, "RoundDeadlineDays" = $31 ' +
                     'WHERE "Id" = $1',
                 [
                     tournamentId,
@@ -662,7 +712,9 @@ class TournamentService {
                     values.bannedHouses ? JSON.stringify(values.bannedHouses) : null,
                     values.sasChainHandicap,
                     values.chainsPerMatchWin,
-                    values.triad
+                    values.triad,
+                    values.pacing,
+                    values.roundDeadlineDays
                 ]
             );
 
@@ -715,6 +767,7 @@ class TournamentService {
             'SELECT t."Id", t."Name", t."Format", t."GameFormat", t."Mode", t."Status", ' +
                 't."CurrentRound", t."RoundCount", t."StartTime", t."PlayerCap", t."BestOf", ' +
                 't."CutTo", t."Stage", t."Visibility", t."RatedGames", t."CreatedAt", ' +
+                't."Pacing", t."RoundDeadlineDays", t."RoundEndsAt", ' +
                 'u."Username" AS "Organizer", ' +
                 '(SELECT COUNT(*) FROM "TournamentPlayers" tp WHERE tp."TournamentId" = t."Id" ' +
                 'AND NOT tp."Waitlisted" AND tp."Dropped" IS NOT TRUE) AS "PlayerCount" ' +
@@ -741,8 +794,80 @@ class TournamentService {
             stage: row.Stage,
             visibility: row.Visibility,
             rated: row.RatedGames,
+            pacing: row.Pacing || 'live',
+            roundDeadlineDays: row.RoundDeadlineDays,
+            roundEndsAt: row.RoundEndsAt,
             organizer: row.Organizer,
             playerCount: parseInt(row.PlayerCount, 10)
+        }));
+    }
+
+    /**
+     * ARCHON (N14): every open tournament match this player owes, across all
+     * their events.
+     *
+     * An async league is played over weeks, and a player in three of them has
+     * no single page that answers "what do I owe anyone this week" - the event
+     * pages each know a third of it. This is that page's data: one row per
+     * open match, with the opponent, the agreed or offered time, and the
+     * round's deadline, soonest deadline first.
+     *
+     * Live events are included too. A player mid-event there also benefits
+     * from seeing it listed, and excluding them would make the panel lie by
+     * omission the moment somebody joined a live event.
+     */
+    async myOpenMatches(actor) {
+        if (!actor) {
+            return [];
+        }
+
+        const rows = await this.db.query(
+            'SELECT m."Id", m."Round", m."ScheduledAt", m."ProposedTime", m."ProposedBy", ' +
+                'm."ScheduleNote", m."BestOf", m."Player1Id", m."Player2Id", ' +
+                't."Id" AS "TournamentId", t."Name" AS "TournamentName", t."Pacing", ' +
+                't."RoundEndsAt", t."Mode", ' +
+                'CASE WHEN m."Player1Id" = $1 THEN u2."Username" ELSE u1."Username" END ' +
+                'AS "OpponentName", ' +
+                'CASE WHEN m."Player1Id" = $1 THEN m."Player2Id" ELSE m."Player1Id" END ' +
+                'AS "OpponentId" ' +
+                'FROM "TournamentMatches" m ' +
+                'JOIN "Tournaments" t ON t."Id" = m."TournamentId" ' +
+                'LEFT JOIN "Users" u1 ON u1."Id" = m."Player1Id" ' +
+                'LEFT JOIN "Users" u2 ON u2."Id" = m."Player2Id" ' +
+                'WHERE t."Status" = \'active\' AND m."Round" = t."CurrentRound" ' +
+                'AND m."WinnerId" IS NULL AND m."ResultType" IS NULL ' +
+                'AND m."Player1Id" IS NOT NULL AND m."Player2Id" IS NOT NULL ' +
+                'AND ($1 IN (m."Player1Id", m."Player2Id")) ' +
+                // Soonest deadline first; an event with no deadline sorts last
+                // rather than jumping the queue on a NULL.
+                'ORDER BY t."RoundEndsAt" ASC NULLS LAST, t."Id", m."Id"',
+            [actor.id]
+        );
+
+        return (rows || []).map((row) => ({
+            matchId: row.Id,
+            tournamentId: row.TournamentId,
+            tournamentName: row.TournamentName,
+            pacing: row.Pacing || 'live',
+            mode: row.Mode,
+            round: row.Round,
+            bestOf: row.BestOf,
+            opponentId: row.OpponentId,
+            opponent: row.OpponentName,
+            scheduledAt: row.ScheduledAt,
+            proposedTime: row.ProposedTime,
+            proposedBy: row.ProposedBy,
+            scheduleNote: row.ScheduleNote,
+            roundEndsAt: row.RoundEndsAt,
+            // What the player has to DO, decided here so every surface that
+            // shows this list agrees about it.
+            needsAction: row.ProposedTime
+                ? row.ProposedBy === actor.id
+                    ? 'waiting'
+                    : 'respond'
+                : row.ScheduledAt
+                ? 'play'
+                : 'propose'
         }));
     }
 
@@ -776,6 +901,7 @@ class TournamentService {
                 'm."ResultType", m."P1BannedDeckId", m."P2BannedDeckId", m."P1DeckId", ' +
                 'm."P2DeckId", m."ReportedBy", m."ConfirmedBy", m."ConfirmedAt", ' +
                 'm."DisputedBy", m."DisputeNote", ' +
+                'm."ScheduledAt", m."ProposedTime", m."ProposedBy", m."ScheduleNote", ' +
                 'u1."Username" AS "Player1", u2."Username" AS "Player2" ' +
                 'FROM "TournamentMatches" m ' +
                 'LEFT JOIN "Users" u1 ON u1."Id" = m."Player1Id" ' +
@@ -918,6 +1044,10 @@ class TournamentService {
                 // granted is the same number on every screen rather than each
                 // client re-deriving it from the round's start.
                 roundEndsAt: tournament.RoundEndsAt,
+                // ARCHON (N14): async pacing - deadlines in days, matches
+                // scheduled between the players.
+                pacing: tournament.Pacing || 'live',
+                roundDeadlineDays: tournament.RoundDeadlineDays,
                 checkInOpen: !!tournament.CheckInOpenedAt,
                 // ARCHON (N9): the kiosk code is the organizer's to print.
                 checkInCode: canManage ? tournament.CheckInCode : undefined,
@@ -1003,6 +1133,13 @@ class TournamentService {
                 confirmed: !!match.ConfirmedAt,
                 disputedBy: match.DisputedBy,
                 disputeNote: match.DisputeNote,
+                // ARCHON (N14): when the players have arranged (or one has
+                // offered) to play. Open information - the schedule is how
+                // spectators know when to show up too.
+                scheduledAt: match.ScheduledAt,
+                proposedTime: match.ProposedTime,
+                proposedBy: match.ProposedBy,
+                scheduleNote: match.ScheduleNote,
                 games: gamesByMatch[match.Id] || []
             })),
             standings
@@ -2124,9 +2261,7 @@ class TournamentService {
             'UPDATE "Tournaments" SET "Status" = \'active\', "CurrentRound" = 1, ' +
                 '"RoundCount" = $2, "StartedAt" = now() AT TIME ZONE \'utc\', ' +
                 '"RoundStartedAt" = now() AT TIME ZONE \'utc\', ' +
-                '"RoundEndsAt" = CASE WHEN "RoundTimerMinutes" > 0 ' +
-                "THEN (now() AT TIME ZONE 'utc') + (\"RoundTimerMinutes\" * interval '1 minute') " +
-                'ELSE NULL END WHERE "Id" = $1',
+                `${ROUND_CLOCK_SQL} WHERE "Id" = $1`,
             [tournamentId, roundCount]
         );
 
@@ -2346,14 +2481,291 @@ class TournamentService {
 
         // Extending a round that never had a clock starts one from now,
         // which is what an organizer who just typed "+10 minutes" means.
+        // Moving the deadline also re-arms the overdue notice: if the new
+        // deadline passes too, that is worth saying again.
         await this.db.query(
             'UPDATE "Tournaments" SET "RoundEndsAt" = ' +
-                "COALESCE(\"RoundEndsAt\", now() AT TIME ZONE 'utc') + ($2 * interval '1 minute') " +
+                "COALESCE(\"RoundEndsAt\", now() AT TIME ZONE 'utc') + ($2 * interval '1 minute'), " +
+                '"DeadlineNotifiedAt" = NULL ' +
                 'WHERE "Id" = $1',
             [tournamentId, delta]
         );
 
         return { success: true };
+    }
+
+    /**
+     * ARCHON (N14): a player offers their opponent a time to play their
+     * match. One live proposal per match - a new offer (from either side)
+     * replaces the previous one, which is how scheduling actually converges:
+     * "Thursday 8pm?" / "can't - Friday 7?" is propose, counter-propose.
+     *
+     * The offered time is stored as a UTC wall-clock string, written out
+     * explicitly rather than as a Date so the column's meaning does not
+     * depend on the server's timezone.
+     */
+    async proposeMatchTime(tournamentId, matchId, actor, time, note) {
+        const context = await this.scheduleContext(tournamentId, matchId, actor);
+
+        if (context.error) {
+            return { success: false, message: context.error };
+        }
+
+        const when = new Date(time);
+
+        if (!time || Number.isNaN(when.getTime())) {
+            return { success: false, message: 'That is not a valid date and time' };
+        }
+
+        const now = Date.now();
+
+        if (when.getTime() < now - 60 * 1000) {
+            return { success: false, message: 'Propose a time in the future' };
+        }
+
+        if (when.getTime() > now + MAX_SCHEDULE_AHEAD_DAYS * 24 * 60 * 60 * 1000) {
+            return {
+                success: false,
+                message: `Matches can be scheduled at most ${MAX_SCHEDULE_AHEAD_DAYS} days ahead`
+            };
+        }
+
+        const cleanNote = (note || '').toString().slice(0, 280) || null;
+
+        await this.db.query(
+            'UPDATE "TournamentMatches" SET "ProposedTime" = $2, "ProposedBy" = $3, ' +
+                '"ScheduleNote" = $4 WHERE "Id" = $1',
+            [matchId, when.toISOString(), actor.id, cleanNote]
+        );
+
+        this.emitScheduleEvent('matchTimeProposed', context, actor, {
+            time: when.toISOString(),
+            note: cleanNote
+        });
+
+        return { success: true };
+    }
+
+    /**
+     * The opponent agrees to the proposed time: it becomes the match's
+     * scheduled time and the proposal is consumed.
+     */
+    async acceptMatchTime(tournamentId, matchId, actor) {
+        const context = await this.scheduleContext(tournamentId, matchId, actor);
+
+        if (context.error) {
+            return { success: false, message: context.error };
+        }
+
+        const { match } = context;
+
+        if (!match.ProposedTime) {
+            return { success: false, message: 'There is no proposed time to accept' };
+        }
+
+        if (match.ProposedBy === actor.id) {
+            return { success: false, message: 'The other player has to accept your proposal' };
+        }
+
+        // The accept must consume the exact proposal it read: if a
+        // counter-offer lands between the read and this write, accepting
+        // nothing is right and agreeing to a time nobody saw is not.
+        const updated = await this.db.query(
+            'UPDATE "TournamentMatches" SET "ScheduledAt" = "ProposedTime", ' +
+                '"ProposedTime" = NULL, "ProposedBy" = NULL ' +
+                'WHERE "Id" = $1 AND "ProposedTime" = $2 AND "ProposedBy" = $3 ' +
+                'RETURNING "ScheduledAt"',
+            [matchId, match.ProposedTime, match.ProposedBy]
+        );
+
+        if (!updated || updated.length === 0) {
+            return {
+                success: false,
+                message: 'The proposal changed while you were looking - check the new time'
+            };
+        }
+
+        this.emitScheduleEvent('matchTimeAccepted', context, actor, {
+            time: updated[0].ScheduledAt
+        });
+
+        return { success: true };
+    }
+
+    /**
+     * Withdraw or decline the pending proposal, or clear an agreed time so
+     * the match reads as unscheduled again. Either player may do it (and so
+     * may the organizer, whose judge tools already outrank both).
+     */
+    async clearMatchSchedule(tournamentId, matchId, actor) {
+        const context = await this.scheduleContext(tournamentId, matchId, actor, {
+            allowManagers: true
+        });
+
+        if (context.error) {
+            return { success: false, message: context.error };
+        }
+
+        const { match } = context;
+
+        if (!match.ProposedTime && !match.ScheduledAt) {
+            return { success: false, message: 'There is nothing scheduled to clear' };
+        }
+
+        await this.db.query(
+            'UPDATE "TournamentMatches" SET "ScheduledAt" = NULL, "ProposedTime" = NULL, ' +
+                '"ProposedBy" = NULL, "ScheduleNote" = NULL WHERE "Id" = $1',
+            [matchId]
+        );
+
+        this.emitScheduleEvent('matchScheduleCleared', context, actor, {
+            hadAgreedTime: !!match.ScheduledAt
+        });
+
+        return { success: true };
+    }
+
+    /**
+     * Shared guards for the scheduling actions: the tournament is running,
+     * the match exists, is still open, has both players, and the actor is
+     * one of them (or, when allowed, a manager).
+     */
+    async scheduleContext(tournamentId, matchId, actor, { allowManagers = false } = {}) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament) {
+            return { error: 'No such tournament' };
+        }
+
+        if (tournament.Status !== 'active') {
+            return { error: 'Tournament is not active' };
+        }
+
+        const match = await this.getMatchRow(tournamentId, matchId);
+
+        if (!match) {
+            return { error: 'No such match' };
+        }
+
+        if (match.WinnerId || match.ResultType) {
+            return { error: 'This match already has a result' };
+        }
+
+        if (!match.Player1Id || !match.Player2Id) {
+            return { error: 'This match does not have both players yet' };
+        }
+
+        const isParticipant = actor.id === match.Player1Id || actor.id === match.Player2Id;
+
+        if (!isParticipant) {
+            if (!allowManagers || !(await this.canManage(actor, tournament))) {
+                return { error: 'Only the players in this match can schedule it' };
+            }
+        }
+
+        return { tournament, match };
+    }
+
+    /**
+     * Scheduling events carry enough for the notification layer to name
+     * everyone without another read: the two player ids and who acted.
+     */
+    emitScheduleEvent(event, context, actor, extra = {}) {
+        try {
+            tournamentEvents.emit(event, {
+                tournamentId: context.tournament.Id,
+                tournamentName: context.tournament.Name,
+                matchId: context.match.Id,
+                round: context.match.Round,
+                player1Id: context.match.Player1Id,
+                player2Id: context.match.Player2Id,
+                byUserId: actor.id,
+                byUsername: actor.username,
+                ...extra
+            });
+        } catch (err) {
+            logger.error(`Failed to emit ${event} for match ${context.match.Id}`, err);
+        }
+    }
+
+    /**
+     * ARCHON (N14): the async deadline sweep. Finds active async events whose
+     * round deadline has passed and has not been flagged yet, marks them (so
+     * the notice fires once per deadline, however many lobby ticks see it),
+     * and emits an event carrying how much of the round is still unplayed.
+     *
+     * Nothing is decided here: matches are not forfeited and rounds are not
+     * advanced. The deadline is the organizer's cue, and "Time in the round"
+     * is one click away - an automatic forfeit could never know which player
+     * ghosted whom.
+     */
+    async sweepRoundDeadlines() {
+        let due;
+
+        try {
+            due = await this.db.query(
+                'SELECT "Id" FROM "Tournaments" ' +
+                    'WHERE "Status" = \'active\' AND "Pacing" = \'async\' ' +
+                    'AND "RoundEndsAt" IS NOT NULL ' +
+                    'AND "RoundEndsAt" < now() AT TIME ZONE \'utc\' ' +
+                    'AND ("DeadlineNotifiedAt" IS NULL OR "DeadlineNotifiedAt" < "RoundEndsAt")'
+            );
+        } catch (err) {
+            logger.error('Failed to scan for passed tournament deadlines', err);
+
+            return { notified: 0 };
+        }
+
+        let notified = 0;
+
+        for (const row of due || []) {
+            try {
+                // The write is the claim: only the sweep that flips the marker
+                // announces, so several lobby instances stay one voice.
+                const claimed = await this.db.query(
+                    'UPDATE "Tournaments" SET "DeadlineNotifiedAt" = now() AT TIME ZONE \'utc\' ' +
+                        'WHERE "Id" = $1 AND "Status" = \'active\' ' +
+                        'AND ("DeadlineNotifiedAt" IS NULL OR "DeadlineNotifiedAt" < "RoundEndsAt") ' +
+                        'RETURNING "Id", "Name", "OrganizerId", "CurrentRound", "RoundEndsAt"',
+                    [row.Id]
+                );
+
+                if (!claimed || claimed.length === 0) {
+                    continue;
+                }
+
+                const tournament = claimed[0];
+                const matches = await this.getMatches(tournament.Id);
+                const open = matches.filter(
+                    (match) =>
+                        match.Round === tournament.CurrentRound &&
+                        match.Player1Id &&
+                        match.Player2Id &&
+                        !match.WinnerId &&
+                        !match.ResultType
+                );
+
+                notified++;
+                tournamentEvents.emit('roundDeadlinePassed', {
+                    tournamentId: tournament.Id,
+                    tournamentName: tournament.Name,
+                    organizerId: tournament.OrganizerId,
+                    round: tournament.CurrentRound,
+                    roundEndsAt: tournament.RoundEndsAt,
+                    openMatches: open.map((match) => ({
+                        matchId: match.Id,
+                        player1Id: match.Player1Id,
+                        player2Id: match.Player2Id,
+                        player1: match.Player1,
+                        player2: match.Player2
+                    }))
+                });
+            } catch (err) {
+                logger.error(`Failed to flag deadline for tournament ${row.Id}`, err);
+            }
+        }
+
+        return { notified };
     }
 
     async nextRound(tournamentId, actor) {
@@ -2396,7 +2808,7 @@ class TournamentService {
             }
 
             await this.db.query(
-                'UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE \'utc\', "RoundEndsAt" = CASE WHEN "RoundTimerMinutes" > 0 THEN (now() AT TIME ZONE \'utc\') + ("RoundTimerMinutes" * interval \'1 minute\') ELSE NULL END WHERE "Id" = $1',
+                `UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE 'utc', ${ROUND_CLOCK_SQL} WHERE "Id" = $1`,
                 [tournamentId, round]
             );
 
@@ -2430,7 +2842,7 @@ class TournamentService {
         }
 
         await this.db.query(
-            'UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE \'utc\', "RoundEndsAt" = CASE WHEN "RoundTimerMinutes" > 0 THEN (now() AT TIME ZONE \'utc\') + ("RoundTimerMinutes" * interval \'1 minute\') ELSE NULL END WHERE "Id" = $1',
+            `UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE 'utc', ${ROUND_CLOCK_SQL} WHERE "Id" = $1`,
             [tournamentId, round]
         );
 
@@ -2462,7 +2874,7 @@ class TournamentService {
         }
 
         await this.db.query(
-            'UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE \'utc\', "RoundEndsAt" = CASE WHEN "RoundTimerMinutes" > 0 THEN (now() AT TIME ZONE \'utc\') + ("RoundTimerMinutes" * interval \'1 minute\') ELSE NULL END WHERE "Id" = $1',
+            `UPDATE "Tournaments" SET "CurrentRound" = $2, "RoundStartedAt" = now() AT TIME ZONE 'utc', ${ROUND_CLOCK_SQL} WHERE "Id" = $1`,
             [tournament.Id, target]
         );
 
@@ -2523,9 +2935,7 @@ class TournamentService {
         await this.db.query(
             'UPDATE "Tournaments" SET "Stage" = \'playoff\', "CurrentRound" = $2, ' +
                 '"RoundCount" = $3, "RoundStartedAt" = now() AT TIME ZONE \'utc\', ' +
-                '"RoundEndsAt" = CASE WHEN "RoundTimerMinutes" > 0 ' +
-                "THEN (now() AT TIME ZONE 'utc') + (\"RoundTimerMinutes\" * interval '1 minute') " +
-                'ELSE NULL END WHERE "Id" = $1',
+                `${ROUND_CLOCK_SQL} WHERE "Id" = $1`,
             [tournamentId, tournament.CurrentRound + 1, maxRound]
         );
 
@@ -3813,7 +4223,7 @@ class TournamentService {
      * Current-round matches of an online event that still need a lobby
      * game, with everything the lobby needs to build them.
      */
-    async getMatchesNeedingGames(tournamentId) {
+    async getMatchesNeedingGames(tournamentId, { forPairing = false } = {}) {
         const tournament = await this.getTournamentRow(tournamentId);
 
         if (
@@ -3822,6 +4232,15 @@ class TournamentService {
             tournament.Mode !== 'online' ||
             !this.getConfig().autoCreateGames
         ) {
+            return [];
+        }
+
+        // ARCHON (N14): an async round is played out over days. Opening every
+        // table the moment the round is paired would park a lobby game per
+        // match that nobody will sit at until their scheduled time - so async
+        // events only open tables on demand ("Open my table" or the judge
+        // tool) and for the next game of a series already underway.
+        if (forPairing && tournament.Pacing === 'async') {
             return [];
         }
 

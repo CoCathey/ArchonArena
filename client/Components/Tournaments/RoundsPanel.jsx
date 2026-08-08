@@ -4,6 +4,19 @@ import { useTranslation } from 'react-i18next';
 import { Button as HeroButton } from '@heroui/react';
 
 import Panel from '../Site/Panel';
+import MatchScheduler from './MatchScheduler';
+
+/** Timestamps come back from Postgres without a zone; they are UTC. */
+const asUtc = (value) => {
+    if (!value) {
+        return null;
+    }
+
+    const text = typeof value === 'string' ? value : String(value);
+    const time = new Date(text.endsWith('Z') ? text : `${text}Z`);
+
+    return Number.isNaN(time.getTime()) ? null : time;
+};
 
 const resultBadges = {
     bye: 'bye',
@@ -61,6 +74,14 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
         match.bestOf > 1 || match.player1Wins + match.player2Wins > 1
             ? ` ${match.player1Wins}-${match.player2Wins}`
             : '';
+
+    // ARCHON (N14): in an async event, when this match is booked for is as
+    // much a part of its state as the score - it is what a reader scanning
+    // the round wants to know.
+    const isAsync = tournament.pacing === 'async';
+    const scheduledAt = asUtc(match.scheduledAt);
+    const proposedTime = asUtc(match.proposedTime);
+    const [showSchedule, setShowSchedule] = useState(false);
 
     const submitScores = (winnerId) => {
         if (match.bestOf > 1) {
@@ -135,6 +156,34 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
                 {match.resultType && match.resultType !== 'played' && match.player2Id && (
                     <span className='rounded bg-surface-tertiary/70 px-1.5 text-xs italic text-muted'>
                         {t(resultBadges[match.resultType] || match.resultType)}
+                    </span>
+                )}
+                {isAsync && !decided && match.player1Id && match.player2Id && (
+                    <span
+                        className={`rounded border px-1.5 text-xs ${
+                            scheduledAt
+                                ? 'border-sky-500/40 bg-sky-500/10 text-sky-300'
+                                : proposedTime
+                                ? 'border-amber-400/50 bg-amber-400/10 text-amber-300'
+                                : 'border-border/60 text-muted'
+                        }`}
+                        title={
+                            scheduledAt
+                                ? scheduledAt.toLocaleString()
+                                : proposedTime
+                                ? t('A time has been proposed and not answered yet')
+                                : t('Neither player has proposed a time')
+                        }
+                    >
+                        {scheduledAt
+                            ? scheduledAt.toLocaleString(undefined, {
+                                  weekday: 'short',
+                                  hour: 'numeric',
+                                  minute: '2-digit'
+                              })
+                            : proposedTime
+                            ? t('time proposed')
+                            : t('unscheduled')}
                     </span>
                 )}
                 {match.disputedBy ? (
@@ -234,6 +283,20 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
                                 {t('{{name}} won', { name })}
                             </HeroButton>
                         ))}
+                    {isAsync &&
+                        isParticipant &&
+                        !decided &&
+                        match.player2Id &&
+                        tournament.status === 'active' && (
+                            <HeroButton
+                                size='sm'
+                                variant={scheduledAt ? 'tertiary' : 'primary'}
+                                className='!h-6 !px-2 text-xs'
+                                onPress={() => setShowSchedule((open) => !open)}
+                            >
+                                {scheduledAt ? t('Reschedule') : t('Schedule…')}
+                            </HeroButton>
+                        )}
                     {tournament.canManage &&
                         tournament.status === 'active' &&
                         !decided &&
@@ -250,6 +313,15 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
                         )}
                 </span>
             </div>
+            {showSchedule && (
+                <MatchScheduler
+                    match={match}
+                    user={user}
+                    opponentName={user?.id === match.player1Id ? match.player2 : match.player1}
+                    act={act}
+                    deadline={tournament.roundEndsAt}
+                />
+            )}
             {scores && (
                 <div className='mt-1.5 flex flex-wrap items-center gap-2 border-t border-border/40 pt-1.5 text-xs'>
                     <span className='text-muted'>
@@ -394,6 +466,13 @@ const RoundsPanel = ({ tournament, matches, user, act, actionPending, onPrint })
     const disputed = matches.filter((match) => match.disputedBy);
     const showRoundTools =
         tournament.canManage && tournament.status === 'active' && currentMatches.length > 0;
+    const isAsync = tournament.pacing === 'async';
+    // ARCHON (N14): in an async round the organizer's question is not "how
+    // long is left" but "who has not even booked a time" - those are the
+    // pairs that will still be open when the deadline arrives.
+    const unscheduled = isAsync
+        ? openMatches.filter((match) => !match.scheduledAt && !match.proposedTime)
+        : [];
 
     return (
         <Panel
@@ -428,16 +507,32 @@ const RoundsPanel = ({ tournament, matches, user, act, actionPending, onPrint })
                             : t('{{count}} match still to report', {
                                   count: openMatches.length
                               })}
+                        {isAsync && unscheduled.length > 0 && (
+                            <span className='ml-1 text-amber-300'>
+                                {t('({{count}} with no time booked)', {
+                                    count: unscheduled.length
+                                })}
+                            </span>
+                        )}
                     </span>
                     <span className='ml-auto flex flex-wrap gap-2'>
+                        {/* An async round is measured in days, so the useful
+                            extension is a day - "+5 min" on a three-day round
+                            is a click that does nothing anyone can see. */}
                         <HeroButton
                             size='sm'
                             variant='tertiary'
                             className='!h-7 !px-2 text-xs'
                             isDisabled={actionPending}
-                            onPress={() => act('round-clock', { minutes: 5 }, t('Round extended'))}
+                            onPress={() =>
+                                act(
+                                    'round-clock',
+                                    { minutes: isAsync ? 24 * 60 : 5 },
+                                    t('Round extended')
+                                )
+                            }
                         >
-                            {t('+5 min')}
+                            {isAsync ? t('+1 day') : t('+5 min')}
                         </HeroButton>
                         {openMatches.length > 0 && (
                             <HeroButton

@@ -6,6 +6,7 @@ import { Button as HeroButton } from '@heroui/react';
 import Panel from '../Site/Panel';
 import AmberValue from '../Site/AmberValue';
 import Link from '../Navigation/Link';
+import MatchScheduler from './MatchScheduler';
 
 /**
  * ARCHON: the signed-in player's view of their current-round pairing -
@@ -153,6 +154,9 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                             {won ? t('You won this match') : t('You lost this match')}
                         </span>
                     ) : tournament.mode === 'online' ? (
+                        // ARCHON (N14): in an async event the table is opened
+                        // when the players actually meet, so the button is the
+                        // same one - it just is not pre-opened for them.
                         lobbyGame ? (
                             <HeroButton
                                 size='sm'
@@ -190,6 +194,18 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                     )}
                 </span>
             </div>
+            {/* ARCHON (N14): asynchronous events give the players days to find
+                an hour between them, so the scheduling exchange belongs right
+                here - on the match, next to the way into the game. */}
+            {tournament.pacing === 'async' && !decided && myMatch.player2Id && (
+                <MatchScheduler
+                    match={myMatch}
+                    user={user}
+                    opponentName={opponent?.username}
+                    act={act}
+                    deadline={tournament.roundEndsAt}
+                />
+            )}
             {/* ARCHON: the other player wrote down a result and this is the
                 first place you would look for it. Without this, "You lost this
                 match" was the end of the conversation as far as the platform

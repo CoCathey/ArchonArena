@@ -7,6 +7,7 @@ import { useParams } from 'react-router-dom';
 import Panel from '../Components/Site/Panel';
 import SelectDeckModal from '../Components/Games/SelectDeckModal';
 import RoundTimer from '../Components/Tournaments/RoundTimer';
+import RoundDeadline from '../Components/Tournaments/RoundDeadline';
 import BracketView from '../Components/Tournaments/BracketView';
 import MyMatchPanel from '../Components/Tournaments/MyMatchPanel';
 // ARCHON (N9): kiosk check-in QR and the Adaptive Bo3 chain bid
@@ -221,6 +222,22 @@ const TournamentDetail = () => {
                     </Badge>
                     <Badge>{tournament.gameFormat}</Badge>
                     <Badge>{tournament.mode === 'irl' ? t('In Person') : t('Online')}</Badge>
+                    {/* ARCHON (N14): an async event is a different commitment
+                        from a live one - it belongs next to the format, not
+                        buried in the description. */}
+                    {tournament.pacing === 'async' && (
+                        <Badge
+                            tone='amber'
+                            title={t(
+                                'Asynchronous: players have {{days}} day(s) per round to arrange and play their match',
+                                { days: tournament.roundDeadlineDays || 0 }
+                            )}
+                        >
+                            {t('Async - {{days}}d rounds', {
+                                days: tournament.roundDeadlineDays || 0
+                            })}
+                        </Badge>
+                    )}
                     {tournament.bestOf > 1 && (
                         <Badge>{t('Bo{{n}}', { n: tournament.bestOf })}</Badge>
                     )}
@@ -285,13 +302,16 @@ const TournamentDetail = () => {
                         </Badge>
                     )}
                     <span className='text-muted'>{statusLabel}</span>
-                    {tournament.status === 'active' && (
-                        <RoundTimer
-                            roundStartedAt={tournament.roundStartedAt}
-                            roundTimerMinutes={tournament.roundTimerMinutes}
-                            roundEndsAt={tournament.roundEndsAt}
-                        />
-                    )}
+                    {tournament.status === 'active' &&
+                        (tournament.pacing === 'async' ? (
+                            <RoundDeadline roundEndsAt={tournament.roundEndsAt} />
+                        ) : (
+                            <RoundTimer
+                                roundStartedAt={tournament.roundStartedAt}
+                                roundTimerMinutes={tournament.roundTimerMinutes}
+                                roundEndsAt={tournament.roundEndsAt}
+                            />
+                        ))}
                     {startTimeLabel && tournament.status === 'registration' && (
                         <span className='text-muted'>
                             {t('Starts {{time}}', { time: startTimeLabel })}
@@ -620,7 +640,11 @@ const TournamentDetail = () => {
 
             {hasBracket && (
                 <Panel title={tournament.stage === 'playoff' ? t('Playoff Bracket') : t('Bracket')}>
-                    <BracketView matches={matches} currentUsername={user?.username} />
+                    <BracketView
+                        matches={matches}
+                        players={players}
+                        currentUsername={user?.username}
+                    />
                 </Panel>
             )}
 

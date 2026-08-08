@@ -68,6 +68,18 @@ module.exports.init = function (server) {
         })
     );
 
+    // ARCHON (N14): every open match the caller owes, across all their live
+    // events. Declared before '/:id' so 'my-matches' is not read as an id.
+    server.get(
+        '/api/tournaments/my-matches',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            const matches = await tournamentService.myOpenMatches(req.user);
+
+            res.send({ success: true, matches });
+        })
+    );
+
     server.get(
         '/api/tournaments/:id',
         optionalAuth(async (req, res, user) => {
@@ -227,6 +239,34 @@ module.exports.init = function (server) {
 
     action('/api/tournaments/:id/matches/:matchId/open-game', (req) =>
         tournamentService.ensureGameForMatch(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user
+        )
+    );
+
+    // ARCHON (N14): asynchronous events - the two players of a match agree
+    // between themselves when to play it, inside the round's deadline.
+    action('/api/tournaments/:id/matches/:matchId/propose-time', (req) =>
+        tournamentService.proposeMatchTime(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user,
+            req.body.time,
+            req.body.note
+        )
+    );
+
+    action('/api/tournaments/:id/matches/:matchId/accept-time', (req) =>
+        tournamentService.acceptMatchTime(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user
+        )
+    );
+
+    action('/api/tournaments/:id/matches/:matchId/clear-time', (req) =>
+        tournamentService.clearMatchSchedule(
             parseInt(req.params.id, 10),
             parseInt(req.params.matchId, 10),
             req.user

@@ -178,6 +178,16 @@ class Lobby {
             this.dokAutoSyncSweep.unref();
         }
 
+        // ARCHON (N14): asynchronous tournaments are paced in days, so their
+        // round deadlines pass while nobody is looking at the page. This is
+        // the only clock that notices - it flags a passed deadline once and
+        // tells the organizer (and the players still holding the round up).
+        // A minute of granularity is ample for a deadline measured in days.
+        this.roundDeadlineSweep = setInterval(() => this.runRoundDeadlineSweep(), 60 * 1000);
+        if (this.roundDeadlineSweep && this.roundDeadlineSweep.unref) {
+            this.roundDeadlineSweep.unref();
+        }
+
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
 
         this.io =
@@ -609,6 +619,35 @@ class Lobby {
             logger.error('DoK auto-sync sweep failed', err);
         } finally {
             this.dokAutoSyncRunning = false;
+        }
+    }
+
+    /**
+     * ARCHON (N14): flag asynchronous tournament rounds whose deadline has
+     * passed.
+     *
+     * The service does the deciding (and claims each event with a write, so
+     * several lobby instances stay one voice); this only provides the tick and
+     * keeps a failure from taking the interval down with it. Nothing is
+     * forfeited here - a passed deadline is the organizer's cue, not a verdict.
+     */
+    async runRoundDeadlineSweep() {
+        if (!this.tournamentService || this.roundDeadlineSweepRunning) {
+            return;
+        }
+
+        try {
+            this.roundDeadlineSweepRunning = true;
+
+            const result = await this.tournamentService.sweepRoundDeadlines();
+
+            if (result && result.notified > 0) {
+                logger.info(`Flagged ${result.notified} tournament round deadline(s) as passed`);
+            }
+        } catch (err) {
+            logger.error('Tournament round deadline sweep failed', err);
+        } finally {
+            this.roundDeadlineSweepRunning = false;
         }
     }
 
@@ -2031,7 +2070,11 @@ class Lobby {
 
     async onTournamentRoundPaired({ tournamentId }) {
         try {
-            const matches = await this.tournamentService.getMatchesNeedingGames(tournamentId);
+            // forPairing: async events skip the bulk table creation here and
+            // open tables on demand instead - see getMatchesNeedingGames.
+            const matches = await this.tournamentService.getMatchesNeedingGames(tournamentId, {
+                forPairing: true
+            });
 
             for (const matchInfo of matches) {
                 await this.ensureTournamentGame(matchInfo);
