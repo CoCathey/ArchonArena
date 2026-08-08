@@ -50,7 +50,7 @@ const About = () => {
                             <Link href='/play'>Play Online</Link>. The{' '}
                             <Link href='/how-to-play'>How To Play guide</Link> covers the interface
                             in detail. Rated games move your rating; you can watch yourself climb on
-                            the <Link href='/leaderboards'>Leaderboards</Link>.
+                            the <Link href='/stats/leaderboards'>Leaderboards</Link>.
                         </p>
                     </Trans>
                     <Trans i18nKey='about.ratings'>

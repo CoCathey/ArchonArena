@@ -1,5 +1,5 @@
 import React from 'react';
-import { Route, Routes, useSearchParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
 
 import About from './pages/About';
 import Activation from './pages/Activation';
@@ -40,7 +40,6 @@ import AnalyticsAdmin from './pages/AnalyticsAdmin';
 // ARCHON (N5): reports and the moderation queue
 import ModerationQueue from './pages/ModerationQueue';
 import Onboarding from './pages/Onboarding';
-import TopPlayers from './pages/TopPlayers';
 import Ratings from './pages/Ratings';
 import PlayerProfile from './pages/PlayerProfile';
 import PlayIrl from './pages/PlayIrl';
@@ -61,6 +60,20 @@ import Unauthorised from './pages/Unauthorised';
 import UserAdmin from './pages/UserAdmin';
 import GameLobby from './Components/Games/GameLobby';
 import GameBoard from './Components/GameBoard/GameBoard.jsx';
+
+/**
+ * The leaderboards moved under /stats. Season history links carry
+ * `?season=N`, so this preserves the query rather than dropping a player on
+ * the live ladder when they asked for an archived one.
+ */
+const LeaderboardsRedirect = () => {
+    const [searchParams] = useSearchParams();
+    const search = searchParams.toString();
+
+    return <Navigate to={`/stats/leaderboards${search ? `?${search}` : ''}`} replace />;
+};
+
+LeaderboardsRedirect.displayName = 'LeaderboardsRedirect';
 
 const AppRoutes = ({ currentGame, user }) => {
     const [searchParams] = useSearchParams();
@@ -193,7 +206,24 @@ const AppRoutes = ({ currentGame, user }) => {
                     />
                 }
             />
+            {/* ARCHON: the statistics pages - site stats, your own Amber, and
+                the rankings - used to be scattered across Play, Community and
+                two top-level tabs. They are one Stats section now, and Top
+                Players (which was the rankings query pinned to the worldwide
+                top 25) has been folded into Leaderboards.
+
+                Every former path still resolves: they are linked from
+                profiles, the About page and anywhere a player has bookmarked
+                them, and a dead link is a worse outcome than a redirect nobody
+                notices. `replace` keeps the old URL out of history, so Back
+                does not bounce through it. */}
             <Route path='/stats' element={<Stats />} />
+            <Route path='/stats/me' element={<Ratings />} />
+            <Route path='/stats/leaderboards' element={<Leaderboards />} />
+            <Route
+                path='/stats/top-players'
+                element={<Navigate to='/stats/leaderboards' replace />}
+            />
             <Route path='/tournaments' element={<Tournaments />} />
             <Route path='/tournaments/:id' element={<TournamentDetail />} />
             <Route path='/learn' element={<Learn />} />
@@ -206,9 +236,15 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/community/teams' element={<Teams />} />
             <Route path='/community/teams/:id' element={<TeamDetail />} />
             <Route path='/community/members' element={<Members />} />
-            <Route path='/community/top-players' element={<TopPlayers />} />
-            <Route path='/community/ratings' element={<Ratings />} />
-            <Route path='/leaderboards' element={<Leaderboards />} />
+            {/* Former homes of the ranking pages. A query string on a
+                leaderboard link (?season=3, from the season history) has to
+                survive the move, so that one carries its search through. */}
+            <Route
+                path='/community/top-players'
+                element={<Navigate to='/stats/leaderboards' replace />}
+            />
+            <Route path='/community/ratings' element={<Navigate to='/stats/me' replace />} />
+            <Route path='/leaderboards' element={<LeaderboardsRedirect />} />
             <Route
                 path='/community/articles'
                 element={

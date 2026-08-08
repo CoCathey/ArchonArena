@@ -73,12 +73,8 @@ const ProfileRankCard = ({ username }) => {
             </div>
             <p className='mt-3 text-xs text-muted'>
                 {t('See where you stand on the')}{' '}
-                <Link href='/leaderboards' className='text-amber-300 underline'>
+                <Link href='/stats/leaderboards' className='text-amber-300 underline'>
                     {t('Leaderboards')}
-                </Link>{' '}
-                {t('and')}{' '}
-                <Link href='/community/top-players' className='text-amber-300 underline'>
-                    {t('Top Players')}
                 </Link>
                 .
             </p>

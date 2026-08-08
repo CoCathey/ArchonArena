@@ -79,13 +79,29 @@ export const SidebarMenu = [
             // 'My Decks' lives in its own top-level tab below (for signed-in
             // players); keeping it out of this submenu avoids Play also
             // lighting up on /decks.
-            { path: '/stats', title: 'Stats' },
+            // 'Stats' is its own top-level section now - see below.
             { path: '/tournaments', title: 'Tournaments' },
             { path: '/matches', title: 'Game History', showOnlyWhenLoggedIn: true }
         ]
     },
     { title: 'Learn', path: '/learn' },
     { title: 'Watch', path: '/watch' },
+    // ARCHON: one home for every number on the site. These pages answer the
+    // same question at different scopes - how is the game going, how am I
+    // going, where does everyone place - and were split across Play, Community
+    // and two separate top-level tabs, so finding any one of them meant
+    // knowing which of four places it had been filed under. Top Players is not
+    // listed because it no longer exists separately: it was the rankings query
+    // pinned to the worldwide top 25, and is now the podium on Leaderboards.
+    {
+        title: 'Stats',
+        landingPath: '/stats',
+        childItems: [
+            { path: '/stats', title: 'Overview' },
+            { path: '/stats/me', title: 'My Stats', showOnlyWhenLoggedIn: true },
+            { path: '/stats/leaderboards', title: 'Leaderboards' }
+        ]
+    },
     {
         title: 'Community',
         landingPath: '/community/members',
@@ -93,11 +109,6 @@ export const SidebarMenu = [
             { path: '/community/friends', title: 'Friends' },
             { path: '/community/clubs', title: 'Clubs' },
             { path: '/community/members', title: 'Members' },
-            { path: '/community/top-players', title: 'Top Players' },
-            // 'My Stats' (/community/ratings) is its own top-level tab below;
-            // keeping it out of this submenu avoids Community also lighting
-            // up on that page.
-            { path: '/leaderboards', title: 'Leaderboards' },
             { path: '/community/news', title: 'News', pageKey: 'news' },
             { path: '/community/articles', title: 'Articles', pageKey: 'articles' },
             { path: '/community/blogs', title: 'Blogs', pageKey: 'blogs' },
@@ -106,7 +117,6 @@ export const SidebarMenu = [
     },
     // ARCHON: quick links for signed-in players, chess.com-style
     { title: 'My Decks', path: '/decks', showOnlyWhenLoggedIn: true },
-    { title: 'My Stats', path: '/community/ratings', showOnlyWhenLoggedIn: true },
     {
         title: 'Other',
         landingPath: '/about',

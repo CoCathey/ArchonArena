@@ -7,6 +7,7 @@ import { Button as HeroButton } from '@heroui/react';
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
 import AmberValue from '../Components/Site/AmberValue';
+import Avatar from '../Components/Site/Avatar';
 import { countryName } from '../geo';
 import {
     useGetLeaderboardQuery,
@@ -17,10 +18,79 @@ import {
 
 const PAGE_SIZE = 50;
 
+// Podium display order: 2nd, 1st, 3rd, so the winner stands in the middle.
+const PODIUM_STYLES = [
+    { medal: '🥈', ring: 'ring-slate-300/70', pad: 'sm:mt-6' },
+    { medal: '🥇', ring: 'ring-amber-400/80', pad: '' },
+    { medal: '🥉', ring: 'ring-orange-400/70', pad: 'sm:mt-10' }
+];
+
+const locationOf = (entry) =>
+    [entry.state, entry.country && countryName(entry.country)].filter(Boolean).join(', ');
+
+/**
+ * The top three, as a podium. Shown above the table on the first page of any
+ * ladder.
+ *
+ * This came from the old Top Players page, which was this podium over a
+ * hard-coded worldwide top 25 - so it duplicated this page at one scope and
+ * could not do any of the others. Folding it in here means the podium now
+ * works for a country or a finished season too, which it never could as a
+ * separate page.
+ */
+const Podium = ({ entries }) => {
+    if (entries.length === 0) {
+        return null;
+    }
+
+    const ordered = [entries[1], entries[0], entries[2]];
+
+    return (
+        <div className='mb-6 grid grid-cols-3 gap-2 sm:gap-4'>
+            {ordered.map((entry, index) =>
+                entry ? (
+                    <div
+                        key={entry.username}
+                        className={`flex flex-col items-center rounded-lg border border-border/60 bg-surface-secondary/50 px-2 py-4 text-center ${PODIUM_STYLES[index].pad}`}
+                    >
+                        <div className='text-2xl'>{PODIUM_STYLES[index].medal}</div>
+                        <div className={`mt-1 rounded-full ring-2 ${PODIUM_STYLES[index].ring}`}>
+                            <Avatar imgPath={entry.avatar} />
+                        </div>
+                        <div className='mt-2 truncate text-sm font-bold text-foreground'>
+                            <Link
+                                href={`/players/${encodeURIComponent(entry.username)}`}
+                                className='hover:text-amber-300 hover:underline'
+                            >
+                                {entry.username}
+                            </Link>
+                        </div>
+                        {locationOf(entry) && (
+                            <div className='truncate text-xs text-muted'>{locationOf(entry)}</div>
+                        )}
+                        <div className='mt-1'>
+                            <AmberValue value={entry.rating} />
+                        </div>
+                    </div>
+                ) : (
+                    <div key={`empty-${index}`} />
+                )
+            )}
+        </div>
+    );
+};
+
+Podium.displayName = 'LeaderboardPodium';
+
 /**
  * ARCHON: rankings (Phase 6). Worldwide / region / country / state
- * leaderboards over the rating pools. Region, country, and state scopes
- * follow the viewing player's saved location.
+ * leaderboards over the rating pools, with a podium for the top three.
+ * Region, country, and state scopes follow the viewing player's saved
+ * location.
+ *
+ * This is the site's only rankings page. "Top Players" used to sit beside it
+ * showing the same query pinned to the worldwide top 25; the two are one page
+ * now, and the podium it contributed applies to every scope.
  */
 const Leaderboards = () => {
     const { t } = useTranslation();
@@ -77,7 +147,12 @@ const Leaderboards = () => {
     const isFetching = viewingArchive ? archiveFetching : liveFetching;
     const rawEntries = data?.entries || [];
     const hasMore = rawEntries.length > PAGE_SIZE;
-    const entries = rawEntries.slice(0, PAGE_SIZE);
+    const pageEntries = rawEntries.slice(0, PAGE_SIZE);
+
+    // The podium stands in for the first three rows, and only on the first
+    // page - on page two, rank 51 is not a medal position.
+    const podiumEntries = page === 0 ? pageEntries.slice(0, 3) : [];
+    const entries = page === 0 ? pageEntries.slice(3) : pageEntries;
 
     const scopes = [
         ['world', t('World')],
@@ -196,6 +271,7 @@ const Leaderboards = () => {
                                 ? ` · ${t('Season {{season}}', { season: currentSeason.number })}`
                                 : ''}
                         </div>
+                        <Podium entries={podiumEntries} />
                         <div className='overflow-x-auto'>
                             <table className='w-full text-sm'>
                                 <thead>
@@ -267,7 +343,10 @@ const Leaderboards = () => {
                                 </tbody>
                             </table>
                         </div>
-                        {entries.length === 0 && !isFetching && (
+                        {/* The whole page, not just the table: with three or
+                            fewer players everybody is on the podium and the
+                            table below it is legitimately empty. */}
+                        {pageEntries.length === 0 && !isFetching && (
                             <div className='px-2 py-6 text-center text-sm text-muted'>
                                 {t(
                                     'No ranked players here yet. Play rated games to claim the top spot!'
