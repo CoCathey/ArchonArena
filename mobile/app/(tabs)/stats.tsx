@@ -23,10 +23,13 @@ import type {
     PlayerRatingsResult,
     PlayerStatsResult
 } from '../../src/api/types';
+import DeckStatsSection from '../../src/stats/DeckStatsSection';
+import MetaSection from '../../src/stats/MetaSection';
 import { useAuthStore } from '../../src/stores/authStore';
-import { colors, spacing } from '../../src/theme';
+import { colors, radius, spacing } from '../../src/theme';
+import BarList, { type BarItem } from '../../src/ui/BarList';
 import HouseIcon from '../../src/ui/HouseIcon';
-import { Card, EmptyState, ErrorBanner } from '../../src/ui/primitives';
+import { Button, Card, EmptyState, ErrorBanner, TextField } from '../../src/ui/primitives';
 
 const POOLS = [
     { key: 'archon', label: 'Archon' },
@@ -193,51 +196,128 @@ function formatDuration(seconds?: number): string | undefined {
 }
 
 function MyStatsSection(props: { username?: string }) {
+    // Which player is on screen. Defaults to the signed-in user; the lookup
+    // field points it at anyone else, the way the web stats page does.
+    const [target, setTarget] = useState<string | undefined>(props.username);
+    const [lookup, setLookup] = useState('');
     const [ratings, setRatings] = useState<PlayerRating[]>([]);
     const [stats, setStats] = useState<PlayerStatsResult['stats']>();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | undefined>();
+    const [notFound, setNotFound] = useState(false);
+
+    // Signing in after this screen mounted should land on your own stats.
+    useEffect(() => {
+        setTarget((current) => current ?? props.username);
+    }, [props.username]);
 
     const load = useCallback(async () => {
-        if (!props.username) {
+        if (!target) {
             return;
         }
         setLoading(true);
         setError(undefined);
+        setNotFound(false);
         try {
             const [ratingsResult, statsResult] = await Promise.all([
-                fetchPlayerRatings(props.username),
-                fetchPlayerStats(props.username).catch((err) => {
-                    // 404 just means no finished games yet.
+                fetchPlayerRatings(target).catch((err) => {
                     if (err instanceof ApiError && err.status === 404) {
-                        return { success: true } as PlayerStatsResult;
+                        return { success: true } as PlayerRatingsResult;
+                    }
+                    throw err;
+                }),
+                fetchPlayerStats(target).catch((err) => {
+                    // 404 means no such player, or no finished games yet.
+                    if (err instanceof ApiError && err.status === 404) {
+                        return { success: false } as PlayerStatsResult;
                     }
                     throw err;
                 })
             ]);
-            setRatings((ratingsResult as PlayerRatingsResult).ratings ?? []);
+            const foundRatings = (ratingsResult as PlayerRatingsResult).ratings ?? [];
+            setRatings(foundRatings);
             setStats(statsResult.stats);
+            setNotFound(!statsResult.stats && foundRatings.length === 0);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Could not load your stats');
+            setError(err instanceof Error ? err.message : 'Could not load these stats');
         } finally {
             setLoading(false);
         }
-    }, [props.username]);
+    }, [target]);
 
     useEffect(() => {
         load();
     }, [load]);
 
     const overall = stats?.overall;
+    const viewingSelf = !!target && target === props.username;
+
+    const houseItems: BarItem[] = (stats?.houses ?? []).map((house) => ({
+        key: house.house,
+        label: house.house,
+        value: house.winRate,
+        display: typeof house.winRate === 'number' ? `${house.winRate.toFixed(0)}%` : '—',
+        sub: `${house.games} games`,
+        icon: <HouseIcon house={house.house.toLowerCase()} size={15} />
+    }));
+
+    const formatItems: BarItem[] = (stats?.formats ?? []).map((format) => ({
+        key: format.format,
+        label: format.format,
+        value: format.winRate,
+        display: typeof format.winRate === 'number' ? `${format.winRate.toFixed(0)}%` : '—',
+        sub: `${format.wins}–${format.losses}`
+    }));
 
     return (
         <ScrollView
             contentContainerStyle={{ padding: spacing.md, paddingBottom: 48 }}
+            keyboardShouldPersistTaps='handled'
             refreshControl={
                 <RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.textDim} />
             }
         >
+            <View style={styles.lookupRow}>
+                <TextField
+                    placeholder='Look up a player'
+                    value={lookup}
+                    onChangeText={setLookup}
+                    containerStyle={{ flex: 1, marginBottom: 0 }}
+                    onSubmitEditing={() => lookup.trim() && setTarget(lookup.trim())}
+                    returnKeyType='search'
+                />
+                <Button
+                    small
+                    variant='secondary'
+                    title='Search'
+                    onPress={() => lookup.trim() && setTarget(lookup.trim())}
+                />
+            </View>
+            {!viewingSelf && target ? (
+                <View style={styles.viewingRow}>
+                    <Text style={styles.viewingText}>Showing {target}</Text>
+                    {props.username ? (
+                        <Text
+                            style={styles.viewingLink}
+                            onPress={() => {
+                                setLookup('');
+                                setTarget(props.username);
+                            }}
+                        >
+                            Back to me
+                        </Text>
+                    ) : null}
+                </View>
+            ) : null}
+
             <ErrorBanner message={error} />
+
+            {notFound && !loading ? (
+                <EmptyState
+                    title={`No player named "${target}"`}
+                    subtitle='Check the spelling and try again.'
+                />
+            ) : null}
 
             {ratings.length > 0 ? (
                 ratings.map((rating) => (
@@ -308,47 +388,28 @@ function MyStatsSection(props: { username?: string }) {
                 </Card>
             ) : null}
 
-            {(stats?.houses?.length ?? 0) > 0 ? (
+            {houseItems.length > 0 ? (
                 <Card style={{ marginBottom: spacing.sm }}>
-                    <Text style={styles.sectionTitle}>By house</Text>
-                    {stats!.houses!.map((house) => (
-                        <View key={house.house} style={styles.tableRow}>
-                            <HouseIcon house={house.house.toLowerCase()} size={18} />
-                            <Text style={styles.tableName}>{house.house}</Text>
-                            <Text style={styles.tableMeta}>
-                                {house.games} games
-                                {typeof house.winRate === 'number'
-                                    ? ` · ${house.winRate.toFixed(0)}% wins`
-                                    : ''}
-                            </Text>
-                        </View>
-                    ))}
+                    <Text style={styles.sectionTitle}>Win rate by house</Text>
+                    <BarList items={houseItems} marker={50} />
                 </Card>
             ) : null}
 
-            {(stats?.formats?.length ?? 0) > 0 ? (
+            {formatItems.length > 0 ? (
                 <Card>
-                    <Text style={styles.sectionTitle}>By format</Text>
-                    {stats!.formats!.map((format) => (
-                        <View key={format.format} style={styles.tableRow}>
-                            <Text style={[styles.tableName, { textTransform: 'capitalize' }]}>
-                                {format.format}
-                            </Text>
-                            <Text style={styles.tableMeta}>
-                                {format.wins}–{format.losses}
-                                {typeof format.winRate === 'number'
-                                    ? ` · ${format.winRate.toFixed(0)}%`
-                                    : ''}
-                            </Text>
-                        </View>
-                    ))}
+                    <Text style={styles.sectionTitle}>Win rate by format</Text>
+                    <BarList items={formatItems} marker={50} />
                 </Card>
             ) : null}
 
-            {!loading && !overall && ratings.length === 0 && !error ? (
+            {!loading && !notFound && !overall && ratings.length === 0 && !error ? (
                 <EmptyState
                     title='No games yet'
-                    subtitle='Play some games and your stats will show up here.'
+                    subtitle={
+                        viewingSelf
+                            ? 'Play some games and your stats will show up here.'
+                            : 'This player has not finished any decided games yet.'
+                    }
                 />
             ) : null}
         </ScrollView>
@@ -489,26 +550,30 @@ function MatchesSection(props: { username?: string }) {
 
 // ---- Screen ----
 
-type Section = 'rankings' | 'me' | 'matches';
+type Section = 'me' | 'decks' | 'matches' | 'meta' | 'rankings';
 
 export default function StatsScreen() {
     const username = useAuthStore((state) => state.user?.username);
-    const [section, setSection] = useState<Section>('rankings');
+    const [section, setSection] = useState<Section>('me');
 
     return (
         <View style={styles.container}>
             <SegmentBar<Section>
                 options={[
-                    { key: 'rankings', label: 'Rankings' },
-                    { key: 'me', label: 'My stats' },
-                    { key: 'matches', label: 'Matches' }
+                    { key: 'me', label: 'Me' },
+                    { key: 'decks', label: 'Decks' },
+                    { key: 'matches', label: 'Games' },
+                    { key: 'meta', label: 'Meta' },
+                    { key: 'rankings', label: 'Ranks' }
                 ]}
                 value={section}
                 onChange={setSection}
             />
-            {section === 'rankings' ? <RankingsSection username={username} /> : null}
             {section === 'me' ? <MyStatsSection username={username} /> : null}
+            {section === 'decks' ? <DeckStatsSection username={username} /> : null}
             {section === 'matches' ? <MatchesSection username={username} /> : null}
+            {section === 'meta' ? <MetaSection /> : null}
+            {section === 'rankings' ? <RankingsSection username={username} /> : null}
         </View>
     );
 }
@@ -547,8 +612,31 @@ const styles = StyleSheet.create({
     },
     segmentText: {
         color: colors.textDim,
-        fontSize: 13,
+        // Five sections have to share the width of a phone.
+        fontSize: 12,
         fontWeight: '600'
+    },
+    lookupRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+        marginBottom: spacing.sm
+    },
+    viewingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: spacing.sm
+    },
+    viewingText: {
+        color: colors.textDim,
+        fontSize: 12,
+        fontWeight: '600'
+    },
+    viewingLink: {
+        color: colors.accent,
+        fontSize: 12,
+        fontWeight: '700'
     },
     segmentTextActive: {
         color: colors.text,
@@ -652,24 +740,6 @@ const styles = StyleSheet.create({
         color: colors.textFaint,
         fontSize: 11,
         marginTop: 2
-    },
-    tableRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingVertical: 7,
-        borderTopColor: 'rgba(42, 54, 80, 0.5)',
-        borderTopWidth: StyleSheet.hairlineWidth
-    },
-    tableName: {
-        color: colors.text,
-        fontSize: 13,
-        fontWeight: '600',
-        flex: 1
-    },
-    tableMeta: {
-        color: colors.textDim,
-        fontSize: 12
     },
     matchRow: {
         flexDirection: 'row',

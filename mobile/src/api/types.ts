@@ -255,6 +255,78 @@ export interface PlayerStatsResult extends ApiResponse {
     };
 }
 
+// ---- Meta / deck statistics (server/services/StatisticsService.js) ----
+
+/** A win-rate slice — one house, set, format or SAS band. */
+export interface MetaSlice {
+    games: number;
+    wins?: number;
+    /** Percent, or null when there are too few games to be meaningful. */
+    winRate?: number | null;
+}
+
+export interface MetaStats {
+    generatedAt?: string;
+    totals?: {
+        finishedGames: number;
+        decidedGames: number;
+        avgDurationSec?: number | null;
+        avgKeys?: number | null;
+    };
+    houses?: (MetaSlice & { house: string })[];
+    /** Share is a percentage of all finished games. */
+    formats?: { format: string; games: number; share?: number | null }[];
+    sasBands?: (MetaSlice & { band: string })[];
+    sets?: (MetaSlice & { set: string; expansionId?: number | null })[];
+    houseMatchups?: {
+        houses: string[];
+        cells: Record<string, MetaSlice & { house: string; opponent: string }>;
+        minGames: number;
+    };
+}
+
+export interface MetaStatsResult extends ApiResponse {
+    stats?: MetaStats;
+}
+
+/** One of the caller's decks, with how it did against what its SAS predicted. */
+export interface DeckPerformance {
+    deckId: number | string;
+    name: string;
+    identity?: string;
+    sasRating?: number | null;
+    sasBand?: string | null;
+    games: number;
+    wins: number;
+    losses: number;
+    winRate?: number | null;
+    expectedWinRate?: number | null;
+    /** Percentage points above (positive) or below what the SAS band achieves. */
+    sasDelta?: number | null;
+    lastPlayed?: string | null;
+}
+
+export interface HouseMatchup {
+    opponentHouse: string;
+    games: number;
+    wins: number;
+    losses: number;
+    winRate?: number | null;
+}
+
+export interface DeckStatsResult extends ApiResponse {
+    stats?: {
+        username: string;
+        decks?: DeckPerformance[];
+        matchups?: HouseMatchup[];
+        bestMatchup?: HouseMatchup | null;
+        worstMatchup?: HouseMatchup | null;
+        bestDeck?: DeckPerformance | null;
+        worstDeck?: DeckPerformance | null;
+        calloutMinGames?: number;
+    };
+}
+
 /** A finished game from GET /api/games — players[0] is always the caller. */
 export interface PastGame {
     gameId: string;

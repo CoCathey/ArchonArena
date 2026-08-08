@@ -4,10 +4,12 @@ import type {
     AercBreakdown,
     ApiResponse,
     Deck,
+    DeckStatsResult,
     GameRatingResult,
     LeaderboardResult,
     LoginResponse,
     MatchHistoryResult,
+    MetaStatsResult,
     PlayerRatingsResult,
     PlayerStatsResult,
     RefreshToken,
@@ -356,6 +358,16 @@ export async function fetchPlayerRatings(username: string) {
 
 export async function fetchPlayerStats(username: string) {
     return rawFetch<PlayerStatsResult>(`/api/stats/player/${encodeURIComponent(username)}`);
+}
+
+/** Platform-wide aggregates: house/set/format/SAS-band win rates. */
+export async function fetchMetaStats() {
+    return rawFetch<MetaStatsResult>('/api/stats/meta');
+}
+
+/** Per-deck record for a player, with each deck's SAS-vs-performance delta. */
+export async function fetchDeckStats(username: string) {
+    return rawFetch<DeckStatsResult>(`/api/stats/decks/${encodeURIComponent(username)}`);
 }
 
 /** The caller's own finished games (server caps this at the latest 30). */
