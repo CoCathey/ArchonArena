@@ -1,10 +1,12 @@
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons';
 import PropTypes from 'prop-types';
 import React, { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import Icon from '../Icon';
 import CardImage from './CardImage';
 
 const AbilityTargeting = (props) => {
+    const { t, i18n } = useTranslation();
     const onMouseOver = useCallback(
         (card) => {
             if (card && props.onMouseOver) {
@@ -45,10 +47,25 @@ const AbilityTargeting = (props) => {
     const overlapMargin =
         count > 1 ? { marginLeft: `calc((100% - ${count} * 4rem) / ${count - 1})` } : undefined;
 
+    // N15: the engine already knows this prompt's source card (props.source);
+    // name it explicitly rather than relying on the prompt text happening to
+    // interpolate {{card}} into a sentence. Mirrors the mobile client's
+    // "because of <card>" row (mobile/src/game/PromptPanel.tsx EffectContext).
+    const localizedSourceName =
+        i18n.language !== 'en' && props.source?.locale?.[i18n.language]?.name
+            ? props.source.locale[i18n.language].name
+            : props.source?.name || props.source?.label;
+
     return (
         <div className='ability-targeting'>
             <div className='ability-targeting-source'>
                 {renderSimpleCard(props.source)}
+                {localizedSourceName && (
+                    <span className='ability-targeting-attribution'>
+                        <span className='text-muted'>{t('because of')} </span>
+                        {localizedSourceName}
+                    </span>
+                )}
                 {count > 0 && <Icon icon={faArrowRight} />}
             </div>
             {count > 0 && (
