@@ -55,7 +55,28 @@ const NewGame = ({
             .number()
             .min(10, t('Games must be at least 10 minutes long'))
             .max(120, t('Games must be less than 2 hours')),
-        gameFormat: yup.string().required()
+        gameFormat: yup.string().required(),
+        // The range only matters when the bound is on AND the format supports
+        // deck rules - otherwise a stale value in the (hidden) inputs would
+        // block submitting with an error the player cannot see.
+        sasBoundMin: yup.number().when(['sasBound', 'gameFormat'], {
+            is: (sasBound, gameFormat) => sasBound && gameFormat !== 'sealed',
+            then: (bound) =>
+                bound
+                    .typeError(t('SAS bounds must be numbers'))
+                    .required(t('SAS bounds must be numbers'))
+                    .min(1, t('SAS bounds must be between 1 and 500'))
+                    .max(500, t('SAS bounds must be between 1 and 500'))
+        }),
+        sasBoundMax: yup.number().when(['sasBound', 'gameFormat'], {
+            is: (sasBound, gameFormat) => sasBound && gameFormat !== 'sealed',
+            then: (bound) =>
+                bound
+                    .typeError(t('SAS bounds must be numbers'))
+                    .required(t('SAS bounds must be numbers'))
+                    .min(1, t('SAS bounds must be between 1 and 500'))
+                    .max(500, t('SAS bounds must be between 1 and 500'))
+        })
     });
 
     const initialValues = {
@@ -67,6 +88,12 @@ const NewGame = ({
         useGameTimeLimit: !!defaultTimeLimit,
         gameTimeLimit: defaultTimeLimit || 45,
         gamePrivate: defaultPrivate,
+        luckyDice: false,
+        sasBound: false,
+        // Prefilled with where most decks actually live (~55-85 SAS) so
+        // switching the bound on starts from a playable range, not from blanks.
+        sasBoundMin: 60,
+        sasBoundMax: 80,
         pv: true
     };
 
@@ -90,9 +117,17 @@ const NewGame = ({
             <Formik
                 validationSchema={schema}
                 onSubmit={(values) => {
+                    const sasMin = parseInt(values.sasBoundMin, 10);
+                    const sasMax = parseInt(values.sasBoundMax, 10);
                     const baseValues = {
                         ...values,
-                        password: values.requirePassword ? values.password : ''
+                        password: values.requirePassword ? values.password : '',
+                        // The wire form is an object-or-absent; the server
+                        // re-normalizes it from scratch anyway, this just
+                        // keeps honest clients sending something sensible.
+                        sasBound: values.sasBound
+                            ? { min: Math.min(sasMin, sasMax), max: Math.max(sasMin, sasMax) }
+                            : undefined
                     };
                     const expansions = {
                         aoa: values.aoa,
@@ -232,6 +267,7 @@ const NewGame = ({
                                 <div className='mt-3'>
                                     <GameOptions
                                         formProps={formProps}
+                                        tournament={!!tournament}
                                         gameLink={
                                             currentGameId
                                                 ? `${window.location.protocol}//${window.location.host}/play?gameId=${currentGameId}`

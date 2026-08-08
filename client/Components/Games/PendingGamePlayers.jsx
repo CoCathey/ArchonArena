@@ -2,7 +2,9 @@ import React from 'react';
 import Link from '../Navigation/Link';
 import { useTranslation, Trans } from 'react-i18next';
 import { Button } from '@heroui/react';
+import { faDice } from '@fortawesome/free-solid-svg-icons';
 
+import Icon from '../Icon';
 import Panel from '../Site/Panel';
 import Avatar from '../Site/Avatar';
 import PlayerAmber from '../Site/PlayerAmber';
@@ -12,12 +14,13 @@ import PlayerAmber from '../Site/PlayerAmber';
  * @property {PendingGame} currentGame The current pending game
  * @property {User} user The logged in user
  * @property {function(): void} onSelectDeck The callback to be invoked when a deck selection is requested
+ * @property {function(): void} [onLuckyDice] The callback to be invoked when a random deck is requested
  */
 
 /**
  * @param {PendingGamePlayersProps} props
  */
-const PendingGamePlayers = ({ currentGame, user, onSelectDeck }) => {
+const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) => {
     const { t } = useTranslation();
     const players = Object.values(currentGame.players || {});
     const sortedPlayers = players.sort((left, right) => {
@@ -32,9 +35,19 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck }) => {
     });
     const seats = [sortedPlayers[0] || null, sortedPlayers[1] || null];
     const isSealed = currentGame.gameFormat === 'sealed';
+    const isLuckyDice = !!currentGame.luckyDice;
 
     const getSeatReadiness = (player) => {
         if (!player || !player.deck || !player.deck.selected) {
+            // A Lucky Dice seat is never "waiting" on its player - the deck
+            // arrives by roll when the game starts.
+            if (isLuckyDice) {
+                return {
+                    label: t('Deck rolled at start'),
+                    tone: 'text-violet-700 bg-violet-500/12 border-violet-500/30 dark:text-violet-300 dark:bg-violet-500/10'
+                };
+            }
+
             return {
                 label: t('Waiting for deck'),
                 tone: 'text-[color:color-mix(in_oklab,var(--brand)_82%,black)] bg-[color:color-mix(in_oklab,var(--brand)_10%,white)] border-[color:color-mix(in_oklab,var(--brand)_32%,transparent)] dark:text-rose-300 dark:bg-rose-500/10 dark:border-rose-500/30'
@@ -125,9 +138,13 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck }) => {
                             ? isSealed
                                 ? t('Sealed deck selected')
                                 : player.deck?.name
+                            : isLuckyDice
+                            ? t('Random deck at start')
                             : t('No deck selected')
                         : deckSelected
                         ? t('Selected')
+                        : isLuckyDice
+                        ? t('Random deck at start')
                         : t('Not selected');
 
                     return (
@@ -175,15 +192,31 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck }) => {
                                             {t('SAS')} {player.deck.sasRating}
                                         </span>
                                     )}
-                                    {playerIsMe && !isSealed && (
-                                        <Button
-                                            className='shrink-0'
-                                            size='sm'
-                                            variant={deckSelected ? 'tertiary' : 'primary'}
-                                            onPress={onSelectDeck}
-                                        >
-                                            {deckSelected ? t('Change deck') : t('Select deck')}
-                                        </Button>
+                                    {playerIsMe && !isSealed && !isLuckyDice && (
+                                        <>
+                                            <Button
+                                                className='shrink-0'
+                                                size='sm'
+                                                variant={deckSelected ? 'tertiary' : 'primary'}
+                                                onPress={onSelectDeck}
+                                            >
+                                                {deckSelected ? t('Change deck') : t('Select deck')}
+                                            </Button>
+                                            {onLuckyDice && !currentGame.tournament && (
+                                                <Button
+                                                    className='shrink-0'
+                                                    size='sm'
+                                                    variant='tertiary'
+                                                    title={t(
+                                                        'Pick a random deck from your collection'
+                                                    )}
+                                                    onPress={onLuckyDice}
+                                                >
+                                                    <Icon icon={faDice} />
+                                                    {t('Lucky Dice')}
+                                                </Button>
+                                            )}
+                                        </>
                                     )}
                                 </div>
                             </div>

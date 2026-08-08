@@ -957,6 +957,7 @@ class Lobby {
         socket.registerEvent('removegame', this.onRemoveGame.bind(this));
         socket.registerEvent('restartnode', this.onRestartNode.bind(this));
         socket.registerEvent('selectdeck', this.onSelectDeck.bind(this));
+        socket.registerEvent('selectrandomdeck', this.onSelectRandomDeck.bind(this));
         socket.registerEvent('startgame', this.onStartGame.bind(this));
         socket.registerEvent('togglenode', this.onToggleNode.bind(this));
         socket.registerEvent('watchgame', this.onWatchGame.bind(this));
@@ -1288,6 +1289,12 @@ class Lobby {
                     Object.values(game.players).length < 2 &&
                     !game.password &&
                     !game.gamePrivate &&
+                    // Quick join promises a plain game of the chosen format.
+                    // Deck-rule games (a SAS bound the joiner's collection may
+                    // not satisfy, a Lucky Dice roll they did not ask for) are
+                    // opted into from the game list, never matched into.
+                    !game.sasBound &&
+                    !game.luckyDice &&
                     game.isVisibleFor(socket.user)
             );
 
@@ -1372,15 +1379,104 @@ class Lobby {
             return;
         }
 
+        if (!game.isOwner(socket.user.username)) {
+            return;
+        }
+
+        // ARCHON: Lucky Dice games roll their decks HERE, not when players
+        // join - a roll at join could be rerolled forever by leaving and
+        // rejoining until a favourite came up. At start there is exactly one
+        // roll and it is final.
+        if (game.luckyDice) {
+            if (game.luckyDiceRolling) {
+                return;
+            }
+
+            game.luckyDiceRolling = true;
+
+            return this.rollLuckyDiceDecks(game, socket)
+                .then((rolled) => {
+                    if (rolled) {
+                        this.launchGame(socket, gameId);
+                    }
+                })
+                .catch((err) => {
+                    logger.error('Failed to roll Lucky Dice decks', err);
+                })
+                .finally(() => {
+                    game.luckyDiceRolling = false;
+                });
+        }
+
+        this.launchGame(socket, gameId);
+    }
+
+    /**
+     * ARCHON: one random eligible deck for every player who has not selected
+     * one. Players who already hold a deck keep it - that is what lets a
+     * "Rematch: Same Decks" of a Lucky Dice game actually keep the decks.
+     *
+     * Returns false (with the owner told why) as soon as any player has
+     * nothing the dice could land on; the game stays pending and un-rolled.
+     */
+    async rollLuckyDiceDecks(game, socket) {
+        for (const player of Object.values(game.getPlayers())) {
+            if (player.deck) {
+                continue;
+            }
+
+            const deckId = await this.deckService.getRandomDeckIdForUser(
+                player.user.id,
+                this.deckConstraintsFor(game)
+            );
+
+            if (!deckId) {
+                socket.send(
+                    'gameerror',
+                    game.sasBound
+                        ? `${player.name} has no decks with a SAS rating between ${game.sasBound.min} and ${game.sasBound.max}`
+                        : `${player.name} has no decks the Lucky Dice could land on`
+                );
+                game.addMessage(
+                    '{0} has no eligible decks for the Lucky Dice roll, so the game cannot start',
+                    player.name
+                );
+                this.sendGameState(game);
+
+                return false;
+            }
+
+            await this.applyDeckSelection(game, player.name, deckId, false);
+            game.addMessage('The Lucky Dice rolled a deck for {0}', player.name);
+        }
+
+        this.sendGameState(game);
+
+        return true;
+    }
+
+    /**
+     * The node handoff, split from onStartGame so the Lucky Dice roll can sit
+     * in between. Everything is re-checked from the live game rather than
+     * trusted from before the roll: players can leave, admins can remove the
+     * game, and a second start click can land while the dice were rolling.
+     */
+    launchGame(socket, gameId) {
+        const game = this.games[gameId];
+
+        if (!game || game.started) {
+            return;
+        }
+
+        if (Object.values(game.getPlayers()).length < 2) {
+            return;
+        }
+
         if (
             Object.values(game.getPlayers()).some((player) => {
                 return !player.deck;
             })
         ) {
-            return;
-        }
-
-        if (!game.isOwner(socket.user.username)) {
             return;
         }
 
@@ -1619,6 +1715,15 @@ class Lobby {
                 }
             })
             .catch((err) => {
+                // A rejection with a playerMessage is the game refusing the
+                // deck (SAS bound), not a fault - tell the player why instead
+                // of leaving the click silently dead.
+                if (err && err.playerMessage) {
+                    socket.send('gameerror', err.playerMessage);
+
+                    return;
+                }
+
                 logger.info(err);
 
                 return;
@@ -1626,86 +1731,195 @@ class Lobby {
     }
 
     /**
+     * ARCHON: Lucky Dice - select a random deck from everything the player
+     * owns that this game would accept. The pick happens server side so it
+     * really is drawn from the whole collection (the client only ever holds a
+     * page of it) and so a SAS bound is applied by the same rules that will
+     * validate the selection.
+     */
+    onSelectRandomDeck(socket, gameId) {
+        let game = this.games[gameId];
+
+        if (!game || game.started || game.gameFormat === 'sealed' || game.tournament) {
+            return;
+        }
+
+        if (!game.getPlayerByName(socket.user.username)) {
+            return;
+        }
+
+        return this.deckService
+            .getRandomDeckIdForUser(socket.user.id, this.deckConstraintsFor(game))
+            .then((deckId) => {
+                if (!deckId) {
+                    socket.send(
+                        'gameerror',
+                        game.sasBound
+                            ? `You have no decks with a SAS rating between ${game.sasBound.min} and ${game.sasBound.max}`
+                            : 'You have no decks the dice could land on for this game'
+                    );
+
+                    return;
+                }
+
+                return this.onSelectDeck(socket, gameId, deckId, false);
+            })
+            .catch((err) => {
+                logger.error('Failed to select a random deck', err);
+            });
+    }
+
+    /**
+     * What the game allows a player's deck to be, in the terms
+     * DeckService.getRandomDeckIdForUser understands. Mirrors the filter the
+     * deck-select modal applies for the same game, so the dice and the list
+     * agree about what is playable.
+     */
+    deckConstraintsFor(game) {
+        const constraints = { unchainedOnly: game.gameFormat === 'unchained' };
+
+        if (game.gameFormat !== 'alliance') {
+            constraints.isAlliance = false;
+        }
+
+        if (game.sasBound) {
+            constraints.sasMin = game.sasBound.min;
+            constraints.sasMax = game.sasBound.max;
+        }
+
+        return constraints;
+    }
+
+    /**
      * ARCHON: deck loading/status logic shared by manual selection and
      * tournament auto-selection (which has a username but no socket).
+     *
+     * In a SAS-bound game the deck must prove its rating before it is
+     * accepted: rejections throw with a playerMessage so the selecting
+     * socket can be told why, and nothing about the game changes.
      */
-    applyDeckSelection(game, username, deckId, isStandalone) {
-        return Promise.all([
+    async applyDeckSelection(game, username, deckId, isStandalone) {
+        const [cards, deck] = await Promise.all([
             this.cardService.getAllCards(),
             isStandalone
                 ? this.deckService.getStandaloneDeckById(deckId)
                 : this.deckService.getById(deckId)
-        ]).then((results) => {
-            let [cards, deck] = results;
+        ]);
 
-            for (let card of deck.cards) {
-                let house = card.house;
+        if (game.sasBound) {
+            await this.checkSasBound(game, deck, isStandalone);
+        }
 
-                card.card = cards[card.id];
-                if (house) {
-                    card.house = house;
-                }
+        for (let card of deck.cards) {
+            let house = card.house;
+
+            card.card = cards[card.id];
+            if (house) {
+                card.house = house;
             }
+        }
 
-            let deckUsageLevel = 0;
-            if (
-                deck.usageCount >
-                this.configService.getValueForSection('lobby', 'lowerDeckThreshold')
-            ) {
-                deckUsageLevel = 1;
-            }
+        let deckUsageLevel = 0;
+        if (
+            deck.usageCount > this.configService.getValueForSection('lobby', 'lowerDeckThreshold')
+        ) {
+            deckUsageLevel = 1;
+        }
 
-            if (
-                deck.usageCount >
-                this.configService.getValueForSection('lobby', 'middleDeckThreshold')
-            ) {
-                deckUsageLevel = 2;
-            }
+        if (
+            deck.usageCount > this.configService.getValueForSection('lobby', 'middleDeckThreshold')
+        ) {
+            deckUsageLevel = 2;
+        }
 
-            if (
-                deck.usageCount >
-                this.configService.getValueForSection('lobby', 'upperDeckThreshold')
-            ) {
-                deckUsageLevel = 3;
-            }
+        if (
+            deck.usageCount > this.configService.getValueForSection('lobby', 'upperDeckThreshold')
+        ) {
+            deckUsageLevel = 3;
+        }
 
-            let hasEnhancementsSet = true;
-            if (deck.cards.some((c) => c.enhancements && c.enhancements[0] === '')) {
-                hasEnhancementsSet = false;
-            }
+        let hasEnhancementsSet = true;
+        if (deck.cards.some((c) => c.enhancements && c.enhancements[0] === '')) {
+            hasEnhancementsSet = false;
+        }
 
-            if (isStandalone) {
-                deck.verified = true;
-            }
+        if (isStandalone) {
+            deck.verified = true;
+        }
 
-            deck.status = {
-                basicRules: hasEnhancementsSet,
-                extendedStatus: [],
-                noUnreleasedCards: true,
-                officialRole: true,
-                usageLevel: deckUsageLevel,
-                verified: !!deck.verified,
-                impossible: isStandalone && deck.id >= 5
-            };
+        deck.status = {
+            basicRules: hasEnhancementsSet,
+            extendedStatus: [],
+            noUnreleasedCards: true,
+            officialRole: true,
+            usageLevel: deckUsageLevel,
+            verified: !!deck.verified,
+            impossible: isStandalone && deck.id >= 5
+        };
 
-            deck.usageCount = 0;
+        deck.usageCount = 0;
 
-            if (game.gameFormat === 'alliance') {
-                deck.name = 'Alliance Deck';
-            }
+        if (game.gameFormat === 'alliance') {
+            deck.name = 'Alliance Deck';
+        }
 
-            game.selectDeck(username, deck);
-            this.sendGameState(game);
+        game.selectDeck(username, deck);
+        this.sendGameState(game);
 
-            // ARCHON: attach SAS after the deck is already selected and the
-            // state sent, so a slow or missing DeckSas row can never delay
-            // someone picking their deck. When it resolves, the pre-game
-            // screen simply updates.
-            return this.dokService
-                .attachStats([deck])
-                .then(() => this.sendGameState(game))
-                .catch(() => {});
-        });
+        // ARCHON: attach SAS after the deck is already selected and the
+        // state sent, so a slow or missing DeckSas row can never delay
+        // someone picking their deck. When it resolves, the pre-game
+        // screen simply updates. (A SAS-bound game has already attached and
+        // checked it above - this re-attach is then a cheap cache read.)
+        return this.dokService
+            .attachStats([deck])
+            .then(() => this.sendGameState(game))
+            .catch(() => {});
+    }
+
+    /**
+     * ARCHON: the SAS-bound gate. Throws (with a playerMessage) unless the
+     * deck has a cached SAS rating inside the game's range.
+     *
+     * The attach is awaited here - the one selection path that is allowed to
+     * wait on SAS, because the answer decides whether the selection happens at
+     * all. It reads the local DeckSas cache; a deck DoK has not rated yet is
+     * rejected rather than guessed at, and the attach itself queues the
+     * background fetch that will fill the cache for a retry.
+     *
+     * Standalone decks have no Master Vault identity and so no SAS - in a
+     * bounded game they are refused outright rather than treated as any
+     * particular number.
+     */
+    async checkSasBound(game, deck, isStandalone) {
+        const rejection = (message) => {
+            const err = new Error(message);
+            err.playerMessage = message;
+
+            return err;
+        };
+
+        if (isStandalone) {
+            throw rejection('Standalone decks have no SAS rating and cannot be used in this game');
+        }
+
+        if (!deck) {
+            return;
+        }
+
+        await this.dokService.attachStats([deck]).catch(() => {});
+
+        if (deck.sasRating == null) {
+            throw rejection(
+                'This deck has no SAS rating yet - it may still be syncing from Decks of KeyForge. Try again shortly or pick another deck.'
+            );
+        }
+
+        if (deck.sasRating < game.sasBound.min || deck.sasRating > game.sasBound.max) {
+            throw rejection(
+                `${deck.name} is SAS ${deck.sasRating}, outside this game's SAS ${game.sasBound.min}-${game.sasBound.max} bound`
+            );
+        }
     }
 
     onConnectFailed(socket) {
@@ -2038,6 +2252,9 @@ class Lobby {
             gameFormat: game.gameFormat,
             gameTimeLimit: game.gameTimeLimit,
             hideDeckLists: game.hideDeckLists,
+            // A rematch is the same game again: its deck rules come too.
+            luckyDice: game.luckyDice,
+            sasBound: game.sasBound,
             showHand: game.showHand,
             allowSpectators: game.allowSpectators,
             spectators: game.spectators,
@@ -2166,6 +2383,9 @@ class Lobby {
             gameFormat: game.gameFormat,
             gameTimeLimit: game.gameTimeLimit,
             hideDeckLists: game.hideDeckLists,
+            // A rematch is the same game again: its deck rules come too.
+            luckyDice: game.luckyDice,
+            sasBound: game.sasBound,
             showHand: game.showHand,
             allowSpectators: game.allowSpectators,
             spectators: game.spectators,
@@ -2194,20 +2414,27 @@ class Lobby {
         this.sendGameState(newGame);
         this.broadcastGameMessage('newgame', newGame);
 
-        const ownerDeck =
-            owner.deck || (oldGame.players || []).find((x) => x.name === owner.name)?.deck;
+        // ARCHON: in a Lucky Dice game "new decks" means new ROLLS - nobody
+        // picks, so the owner's old deck is not re-selected either. Everyone
+        // starts deckless and the dice fall at start.
+        if (!newGame.luckyDice) {
+            const ownerDeck =
+                owner.deck || (oldGame.players || []).find((x) => x.name === owner.name)?.deck;
 
-        if (!ownerDeck || !ownerDeck.id) {
-            logger.error(`Tried to rematch with new decks but ${owner.name} has no deck selected`);
-            return;
+            if (!ownerDeck || !ownerDeck.id) {
+                logger.error(
+                    `Tried to rematch with new decks but ${owner.name} has no deck selected`
+                );
+                return;
+            }
+
+            this.onSelectDeck(
+                socket,
+                newGame.id,
+                ownerDeck.id,
+                ownerDeck.isStandalone || ownerDeck.is_standalone
+            );
         }
-
-        this.onSelectDeck(
-            socket,
-            newGame.id,
-            ownerDeck.id,
-            ownerDeck.isStandalone || ownerDeck.is_standalone
-        );
 
         for (let player of Object.values(game.getPlayers()).filter(
             (player) => player.name !== owner.username && !player.left

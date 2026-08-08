@@ -167,6 +167,69 @@ class DeckService {
         return (rows || []).map((row) => row.Uuid);
     }
 
+    /**
+     * ARCHON: Lucky Dice - one random deck from everything a user owns that is
+     * legal for the game asking.
+     *
+     * The constraints mirror what the deck-select modal offers for the same
+     * game, so the dice can never land on a deck the player could not have
+     * clicked: alliance decks only in alliance games, the Unchained set only in
+     * (and only for) Unchained games, and in a SAS-bound game only decks whose
+     * cached SAS sits inside the range - which also excludes decks DoK has not
+     * rated, exactly as the bound itself does.
+     *
+     * Randomness is the database's: a user's collection is at most a few
+     * hundred rows, so ORDER BY random() is cheap and needs no state here.
+     *
+     * @returns {Promise<number|null>} a deck id, or null when nothing is
+     *          eligible (which callers should tell the player, not swallow)
+     */
+    async getRandomDeckIdForUser(
+        userId,
+        { isAlliance, unchainedOnly = false, sasMin, sasMax } = {}
+    ) {
+        const params = [userId];
+        let where = 'WHERE d."UserId" = $1 ';
+
+        if (isAlliance !== undefined && isAlliance !== null) {
+            params.push(isAlliance);
+            where += `AND d."IsAlliance" = $${params.length} `;
+        }
+
+        // 601 is the Unchained set: playable only in the unchained format and
+        // the only thing playable there (the modal filters the same way).
+        where += unchainedOnly ? 'AND e."ExpansionId" = 601 ' : 'AND e."ExpansionId" <> 601 ';
+
+        if (sasMin !== undefined && sasMin !== null) {
+            params.push(sasMin);
+            where += `AND ds."SasRating" >= $${params.length} `;
+        }
+
+        if (sasMax !== undefined && sasMax !== null) {
+            params.push(sasMax);
+            where += `AND ds."SasRating" <= $${params.length} `;
+        }
+
+        let rows;
+
+        try {
+            rows = await db.query(
+                'SELECT d."Id" FROM "Decks" d ' +
+                    'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
+                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                    where +
+                    'ORDER BY random() LIMIT 1',
+                params
+            );
+        } catch (err) {
+            logger.error('Failed to pick a random deck', err);
+
+            return null;
+        }
+
+        return rows && rows.length > 0 ? rows[0].Id : null;
+    }
+
     async deckExistsForUser(user, deckId) {
         let deck;
         try {
@@ -361,7 +424,13 @@ class DeckService {
 
         try {
             ret = await db.query(
-                'SELECT COUNT(*) AS "NumDecks" FROM "Decks" d JOIN "Expansions" e ON e."Id" = d."ExpansionId" WHERE "UserId" = $1 ' +
+                // DeckSas joined for the same reason findForUser joins it: the
+                // sasMin/sasMax filters compare against ds, and a count that
+                // cannot see the column would disagree with the page it counts.
+                'SELECT COUNT(*) AS "NumDecks" FROM "Decks" d ' +
+                    'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
+                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                    'WHERE "UserId" = $1 ' +
                     filter,
                 params
             );
@@ -442,6 +511,21 @@ class DeckService {
                     'AND EXISTS (SELECT 1 FROM "DeckHouses" dh JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
                     `WHERE dh."DeckId" = d."Id" AND h."Code" = $${index++}) `;
                 params.push(String(filterObject.value).toLowerCase());
+            } else if (filterObject.name === 'sasMin' || filterObject.name === 'sasMax') {
+                // ARCHON: the deck picker for a SAS-bound game only shows what
+                // the game will accept. Bounds are compared on the DeckSas join
+                // (ds), which both deck queries include; >= against NULL is
+                // false, so unrated decks drop out of a bounded list - the same
+                // rule the game itself enforces.
+                const bound = parseInt(filterObject.value, 10);
+
+                if (Number.isNaN(bound)) {
+                    continue;
+                }
+
+                const operator = filterObject.name === 'sasMin' ? '>=' : '<=';
+                filter += `AND ds."SasRating" ${operator} $${index++} `;
+                params.push(bound);
             } else {
                 filter += `AND ${this.mapColumn(filterObject.name)} LIKE $${index++} `;
                 params.push(`%${filterObject.value}%`);

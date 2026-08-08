@@ -12,6 +12,7 @@ import {
     lobbySendMessage,
     lobbyStartGameRequested
 } from '../../redux/socketActions';
+import { lobbyActions } from '../../redux/slices/lobbySlice';
 import PendingGamePlayers from './PendingGamePlayers';
 import { getPendingGameJoinAlert } from './pendingGameAlerts';
 import { Constants } from '../../constants';
@@ -130,6 +131,15 @@ const PendingGame = () => {
 
     deckFilter.expansion = expansions;
 
+    // ARCHON: in a SAS-bound game the picker only lists what the game will
+    // accept - the same range the server enforces on selection.
+    if (currentGame.sasBound) {
+        deckFilter.sasMin = currentGame.sasBound.min;
+        deckFilter.sasMax = currentGame.sasBound.max;
+    }
+
+    const isLuckyDice = !!currentGame.luckyDice;
+
     const canClickStart = () => {
         if (!user || !currentGame || currentGame.owner !== user.username || connecting) {
             return false;
@@ -140,7 +150,9 @@ const PendingGame = () => {
             return false;
         }
 
+        // Lucky Dice games start deckless: the server rolls at start.
         if (
+            !isLuckyDice &&
             !Object.values(currentGame.players).every((player) => {
                 return !!player.deck.selected;
             })
@@ -160,10 +172,12 @@ const PendingGame = () => {
         (player) => player.name === user?.username
     );
     const myDeckSelected = !!myPlayer?.deck?.selected;
-    const requiresDeckSelection = currentGame.gameFormat !== 'sealed' && !myDeckSelected;
+    const requiresDeckSelection =
+        currentGame.gameFormat !== 'sealed' && !isLuckyDice && !myDeckSelected;
     const allPlayersReady =
         playerCountInGame === 2 &&
-        Object.values(currentGame.players || {}).every((player) => !!player.deck?.selected);
+        (isLuckyDice ||
+            Object.values(currentGame.players || {}).every((player) => !!player.deck?.selected));
 
     const getLiveState = () => {
         if (currentGame.started) {
@@ -232,6 +246,10 @@ const PendingGame = () => {
             return t('Waiting for players');
         }
 
+        if (isLuckyDice) {
+            return waiting ? t('Rolling decks...') : t('Decks will be rolled when the game starts');
+        }
+
         const missingDecks = Object.values(currentGame.players || {}).filter(
             (player) => !player.deck?.selected
         ).length;
@@ -264,6 +282,7 @@ const PendingGame = () => {
         }
 
         if (
+            !isLuckyDice &&
             !Object.values(currentGame.players).every((player) => {
                 return !!player.deck.selected;
             })
@@ -272,10 +291,14 @@ const PendingGame = () => {
         }
 
         if (currentGame.owner === user.username) {
-            return t('Ready to begin, click start to begin the game');
+            return isLuckyDice
+                ? t('Ready to begin, Lucky Dice will roll both decks at start')
+                : t('Ready to begin, click start to begin the game');
         }
 
-        return t('Ready to begin, waiting for opponent to start the game');
+        return isLuckyDice
+            ? t('Ready to begin, decks will be rolled when the owner starts the game')
+            : t('Ready to begin, waiting for opponent to start the game');
     };
 
     const formatLabel = (value) => {
@@ -333,6 +356,29 @@ const PendingGame = () => {
                         <span className='rounded-md border border-border/60 bg-surface-secondary/42 px-2 py-0.5 text-xs text-foreground/75'>
                             {t('{{players}} / 2 players', { players: playerCountInGame })}
                         </span>
+                        {isLuckyDice && (
+                            <span
+                                className='rounded-md border border-violet-500/35 bg-violet-500/12 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-300'
+                                title={t(
+                                    'Both players are dealt a random deck from their collection when the game starts'
+                                )}
+                            >
+                                {t('Lucky Dice')}
+                            </span>
+                        )}
+                        {currentGame.sasBound && (
+                            <span
+                                className='rounded-md border border-amber-500/35 bg-amber-500/12 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+                                title={t(
+                                    'Only decks with a SAS rating inside this range can be played'
+                                )}
+                            >
+                                {t('SAS {{min}}-{{max}}', {
+                                    min: currentGame.sasBound.min,
+                                    max: currentGame.sasBound.max
+                                })}
+                            </span>
+                        )}
                         <span
                             className={`rounded-md border px-2 py-0.5 text-xs font-medium ${getLiveStateClass()}`}
                         >
@@ -395,7 +441,16 @@ const PendingGame = () => {
             <PendingGamePlayers
                 currentGame={currentGame}
                 user={user}
-                onSelectDeck={() => setShowModal(true)}
+                onSelectDeck={() => {
+                    // Each selection attempt reports its own outcome - a
+                    // rejection from a previous pick must not outlive it.
+                    dispatch(lobbyActions.clearGameError());
+                    setShowModal(true);
+                }}
+                onLuckyDice={() => {
+                    dispatch(lobbyActions.clearGameError());
+                    dispatch(lobbySendMessage('selectrandomdeck', currentGame.id));
+                }}
             />
 
             <Panel
@@ -476,6 +531,7 @@ const PendingGame = () => {
                 <SelectDeckModal
                     expansions={expansions}
                     deckFilter={deckFilter}
+                    sasBound={currentGame.sasBound}
                     onClose={() => setShowModal(false)}
                     onDeckSelected={(deck) => {
                         setShowModal(false);

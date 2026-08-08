@@ -2,8 +2,11 @@ import React from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { Button, Input, Switch, toast } from '@heroui/react';
 
-const GameOptions = ({ formProps, gameLink }) => {
+const GameOptions = ({ formProps, gameLink, tournament = false }) => {
     const { t } = useTranslation();
+    // Sealed deals the decks and tournaments auto-select registered ones, so
+    // neither deck rule can apply there (the server enforces the same).
+    const deckRulesAvailable = formProps.values.gameFormat !== 'sealed';
     const sectionHeaderClass = 'mb-2 mt-1 text-sm font-semibold tracking-wide text-foreground';
     const sectionBlockClass =
         'flex-1 rounded-md border border-[color:color-mix(in_oklab,var(--border)_72%,transparent)] bg-[color:var(--section)] px-3 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]';
@@ -129,6 +132,126 @@ const GameOptions = ({ formProps, gameLink }) => {
                     </div>
                 </div>
             </div>
+
+            {!tournament && (
+                <div className='flex h-full flex-col'>
+                    <div className={sectionHeaderClass}>
+                        <Trans>Deck rules</Trans>
+                    </div>
+                    <div className={sectionBlockClass}>
+                        {!deckRulesAvailable && (
+                            <div className='mb-1 text-xs text-foreground/62'>
+                                {t('Not available in sealed games - decks are dealt, not chosen.')}
+                            </div>
+                        )}
+                        <div className='divide-y divide-[color:color-mix(in_oklab,var(--border)_58%,transparent)]'>
+                            <Switch
+                                id='luckyDice'
+                                name='luckyDice'
+                                isDisabled={!deckRulesAvailable}
+                                isSelected={deckRulesAvailable && !!formProps.values.luckyDice}
+                                onChange={(isSelected) =>
+                                    formProps.setFieldValue('luckyDice', isSelected)
+                                }
+                                className='flex min-h-10 w-full cursor-pointer items-center justify-between gap-3 px-1'
+                            >
+                                <div className='flex flex-col'>
+                                    <span className='text-sm text-foreground'>
+                                        {t('Lucky Dice')}
+                                    </span>
+                                    <span className='text-xs text-foreground/78'>
+                                        {t(
+                                            'Both players are dealt a random deck from their collection when the game starts.'
+                                        )}
+                                    </span>
+                                </div>
+                                <Switch.Control>
+                                    <Switch.Thumb />
+                                </Switch.Control>
+                            </Switch>
+                            <div className='pt-1'>
+                                <Switch
+                                    id='sasBound'
+                                    name='sasBound'
+                                    isDisabled={!deckRulesAvailable}
+                                    isSelected={deckRulesAvailable && !!formProps.values.sasBound}
+                                    onChange={(isSelected) =>
+                                        formProps.setFieldValue('sasBound', isSelected)
+                                    }
+                                    className='flex min-h-10 w-full cursor-pointer items-center justify-between gap-3 px-1'
+                                >
+                                    <div className='flex flex-col'>
+                                        <span className='text-sm text-foreground'>
+                                            {t('SAS Bound')}
+                                        </span>
+                                        <span className='text-xs text-foreground/78'>
+                                            {t(
+                                                'Only decks with a SAS rating inside your range can be played.'
+                                            )}
+                                        </span>
+                                    </div>
+                                    <Switch.Control>
+                                        <Switch.Thumb />
+                                    </Switch.Control>
+                                </Switch>
+                            </div>
+                        </div>
+                        {deckRulesAvailable && formProps.values.sasBound && (
+                            <div className={nestedInputClass}>
+                                <div className='flex gap-2'>
+                                    <div className='min-w-0 flex-1 space-y-1'>
+                                        <label
+                                            className='block text-xs font-medium text-foreground/78'
+                                            htmlFor='sasBoundMin'
+                                        >
+                                            {t('Min SAS')}
+                                        </label>
+                                        <Input
+                                            className='w-full'
+                                            id='sasBoundMin'
+                                            name='sasBoundMin'
+                                            type='number'
+                                            value={formProps.values.sasBoundMin}
+                                            onBlur={formProps.handleBlur}
+                                            onChange={formProps.handleChange}
+                                        />
+                                    </div>
+                                    <div className='min-w-0 flex-1 space-y-1'>
+                                        <label
+                                            className='block text-xs font-medium text-foreground/78'
+                                            htmlFor='sasBoundMax'
+                                        >
+                                            {t('Max SAS')}
+                                        </label>
+                                        <Input
+                                            className='w-full'
+                                            id='sasBoundMax'
+                                            name='sasBoundMax'
+                                            type='number'
+                                            value={formProps.values.sasBoundMax}
+                                            onBlur={formProps.handleBlur}
+                                            onChange={formProps.handleChange}
+                                        />
+                                    </div>
+                                </div>
+                                {(formProps.touched.sasBoundMin && formProps.errors.sasBoundMin) ||
+                                (formProps.touched.sasBoundMax && formProps.errors.sasBoundMax) ? (
+                                    <div className='text-xs text-red-300'>
+                                        {formProps.errors.sasBoundMin ||
+                                            formProps.errors.sasBoundMax}
+                                    </div>
+                                ) : (
+                                    <div className='text-xs text-foreground/62'>
+                                        {t(
+                                            'Decks without a SAS rating cannot be played in a bounded game.'
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             <div className='flex h-full flex-col'>
                 <div className={sectionHeaderClass}>

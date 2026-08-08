@@ -5,7 +5,7 @@ import { Button, toast } from '@heroui/react';
 import moment from 'moment';
 import { useTranslation } from 'react-i18next';
 import Icon from '../Icon';
-import { faLock, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { faDice, faLock, faTrash } from '@fortawesome/free-solid-svg-icons';
 
 import Avatar from '../Site/Avatar';
 import AlertPanel from '../Site/AlertPanel';
@@ -218,6 +218,30 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
                                                 ) : null}
                                                 {t(game.gameFormat)}
                                             </span>
+                                            {game.luckyDice ? (
+                                                <span
+                                                    className='inline-flex items-center gap-1 rounded-sm border border-violet-500/35 bg-violet-500/12 px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-violet-700 dark:bg-violet-500/10 dark:text-violet-300'
+                                                    title={t(
+                                                        'Lucky Dice: both players are dealt a random deck when the game starts'
+                                                    )}
+                                                >
+                                                    <Icon icon={faDice} />
+                                                    {t('Lucky Dice')}
+                                                </span>
+                                            ) : null}
+                                            {game.sasBound ? (
+                                                <span
+                                                    className='rounded-sm border border-amber-500/35 bg-amber-500/12 px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+                                                    title={t(
+                                                        'SAS Bound: only decks with a SAS rating inside this range can be played'
+                                                    )}
+                                                >
+                                                    {t('SAS {{min}}-{{max}}', {
+                                                        min: game.sasBound.min,
+                                                        max: game.sasBound.max
+                                                    })}
+                                                </span>
+                                            ) : null}
                                             {game.tournament ? (
                                                 <Link
                                                     href={`/tournaments/${game.tournament.tournamentId}`}

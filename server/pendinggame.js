@@ -36,6 +36,41 @@ class PendingGame {
         this.useGameTimeLimit = details.useGameTimeLimit;
         this.rematch = false;
         this.tournament = details.tournament;
+        // ARCHON: neither deck rule applies where players do not choose their
+        // own deck - sealed deals one, tournaments auto-select the registered
+        // one - so both are forced off there rather than left to fight those
+        // flows.
+        const choosesOwnDeck = details.gameFormat !== 'sealed' && !details.tournament;
+        this.luckyDice = !!details.luckyDice && choosesOwnDeck;
+        this.sasBound = choosesOwnDeck
+            ? PendingGame.normalizeSasBound(details.sasBound)
+            : undefined;
+    }
+
+    /**
+     * ARCHON: the SAS range a game may be bound to, cleaned of everything a
+     * client could put in it. Details come off the wire, so the range is
+     * rebuilt from scratch: integers only, clamped into 1..500 (real SAS runs
+     * ~40-120; the cap just bounds nonsense), swapped if backwards. Anything
+     * unusable means the game simply is not SAS bound.
+     */
+    static normalizeSasBound(sasBound) {
+        if (!sasBound || typeof sasBound !== 'object') {
+            return undefined;
+        }
+
+        const clamp = (value) => Math.max(1, Math.min(500, Math.floor(value)));
+        const min = Number(sasBound.min);
+        const max = Number(sasBound.max);
+
+        if (!Number.isFinite(min) || !Number.isFinite(max)) {
+            return undefined;
+        }
+
+        return {
+            min: clamp(Math.min(min, max)),
+            max: clamp(Math.max(min, max))
+        };
     }
 
     // Getters
@@ -371,6 +406,7 @@ class PendingGame {
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
             id: this.id,
+            luckyDice: this.luckyDice,
             messages: activePlayer ? this.gameChat.messages : undefined,
             muteSpectators: this.muteSpectators,
             name: this.name,
@@ -380,6 +416,7 @@ class PendingGame {
             players: playerSummaries,
             previousWinner: this.previousWinner,
             quickMatch: this.quickMatch,
+            sasBound: this.sasBound,
             showHand: this.showHand,
             started: this.started,
             swap: this.swap,
@@ -435,12 +472,14 @@ class PendingGame {
             gameTimeLimit: this.gameTimeLimit,
             hideDeckLists: this.hideDeckLists,
             id: this.id,
+            luckyDice: this.luckyDice,
             muteSpectators: this.muteSpectators,
             name: this.name,
             needsPassword: !!this.password,
             owner: this.owner.getDetails(),
             players,
             previousWinner: this.previousWinner,
+            sasBound: this.sasBound,
             showHand: this.showHand,
             spectators,
             // ARCHON (N1): how long the node should hold the board back from
