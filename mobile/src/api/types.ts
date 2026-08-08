@@ -188,6 +188,24 @@ export interface HandoffMessage {
     user: UserDetails;
 }
 
+// ---- Friends (server/services/community/FriendService.js) ----
+
+export interface Friend {
+    userId: number;
+    username: string;
+}
+
+/**
+ * GET /api/friends. `incoming` are requests waiting on the caller, `outgoing`
+ * are the ones the caller has sent — in both cases `userId` is the other
+ * person, which is what the respond/remove endpoints take.
+ */
+export interface FriendsResult extends ApiResponse {
+    friends?: Friend[];
+    incoming?: Friend[];
+    outgoing?: Friend[];
+}
+
 export interface LobbyUserSummary {
     name: string;
     avatar?: string;

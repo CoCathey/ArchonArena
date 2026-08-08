@@ -5,6 +5,7 @@ import type {
     ApiResponse,
     Deck,
     DeckStatsResult,
+    FriendsResult,
     GameRatingResult,
     LeaderboardResult,
     LoginResponse,
@@ -322,6 +323,36 @@ export interface DeckDetailResult extends ApiResponse {
 /** Full deck (with card list) — only works for the caller's own decks. */
 export async function fetchDeck(id: Deck['id']) {
     return apiFetch<DeckDetailResult>(`/api/decks/${id}`);
+}
+
+// ---- Friends ----
+
+export async function fetchFriends() {
+    return apiFetch<FriendsResult>('/api/friends');
+}
+
+/** Ask to be someone's friend. Accepts their pending request if they asked first. */
+export async function sendFriendRequest(username: string) {
+    return apiFetch<ApiResponse>('/api/friends/request', {
+        method: 'POST',
+        body: { username }
+    });
+}
+
+/** Answer an incoming request. `userId` is the person who sent it. */
+export async function respondToFriendRequest(userId: number, accept: boolean) {
+    return apiFetch<ApiResponse>('/api/friends/respond', {
+        method: 'POST',
+        body: { userId, accept }
+    });
+}
+
+/** Unfriend, or withdraw a request still waiting on them — the same call. */
+export async function removeFriend(userId: number) {
+    return apiFetch<ApiResponse>('/api/friends/remove', {
+        method: 'POST',
+        body: { userId }
+    });
 }
 
 // ---- Cards ----
