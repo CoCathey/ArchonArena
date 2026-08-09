@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
     KeyboardAvoidingView,
@@ -10,60 +10,36 @@ import {
     Text,
     View
 } from 'react-native';
+import {
+    DEFAULT_EXPANSIONS,
+    EXPANSIONS,
+    GAME_FORMATS,
+    type GameFormat
+} from '../src/game/gameFormats';
 import { lobby } from '../src/net/lobbySocket';
 import { useAuthStore } from '../src/stores/authStore';
 import { useLobbyStore } from '../src/stores/lobbyStore';
 import { colors, radius, spacing } from '../src/theme';
 import { Button, ErrorBanner, TextField } from '../src/ui/primitives';
 
-// Unchained and Reversal are hidden from the UI for now (the engine still
-// supports them), matching the web client's format list.
-const GAME_FORMATS = [{ name: 'normal', label: 'Archon' }] as const;
-
-/** Expansion flags the web client submits; only used by sealed formats. */
-const DEFAULT_EXPANSIONS: Record<string, boolean> = {
-    aoa: false,
-    as: false,
-    cc: false,
-    cota: false,
-    dm: false,
-    disc: false,
-    dt: false,
-    gr: false,
-    mm: false,
-    momu: false,
-    pv: true,
-    toc: false,
-    vm2023: false,
-    vm2024: false,
-    vm2025: false,
-    vm2026: false,
-    wc: false,
-    woe: false
-};
-
-function Segmented<T extends string>(props: {
-    options: readonly { name: T; label: string }[];
-    value: T;
-    onChange: (value: T) => void;
-}) {
+/** One game mode as a tappable tile. */
+function FormatTile(props: { format: GameFormat; active: boolean; onPress: () => void }) {
     return (
-        <View style={styles.segmented}>
-            {props.options.map((option) => {
-                const active = option.name === props.value;
-                return (
-                    <Pressable
-                        key={option.name}
-                        onPress={() => props.onChange(option.name)}
-                        style={[styles.segment, active && styles.segmentActive]}
-                    >
-                        <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                            {option.label}
-                        </Text>
-                    </Pressable>
-                );
-            })}
-        </View>
+        <Pressable
+            onPress={props.onPress}
+            style={({ pressed }) => [
+                styles.formatTile,
+                props.active && styles.formatTileActive,
+                pressed && { opacity: 0.75 }
+            ]}
+            accessibilityRole='radio'
+            accessibilityState={{ selected: props.active }}
+        >
+            <Text style={[styles.formatLabel, props.active && styles.formatLabelActive]}>
+                {props.format.label}
+            </Text>
+            <Text style={styles.formatHint}>{props.format.hint}</Text>
+        </Pressable>
     );
 }
 
@@ -97,12 +73,16 @@ export default function NewGameScreen() {
     const gameError = useLobbyStore((state) => state.gameError);
 
     const [name, setName] = useState(`${username ?? 'My'}'s game`);
-    const [gameFormat, setGameFormat] =
-        useState<(typeof GAME_FORMATS)[number]['name']>('normal');
+    const [gameFormat, setGameFormat] = useState<GameFormat['name']>('normal');
+    const [expansions, setExpansions] = useState<Record<string, boolean>>({
+        ...DEFAULT_EXPANSIONS
+    });
     const [requirePassword, setRequirePassword] = useState(false);
     const [password, setPassword] = useState('');
     const [allowSpectators, setAllowSpectators] = useState(true);
     const [showHand, setShowHand] = useState(false);
+    const [muteSpectators, setMuteSpectators] = useState(false);
+    const [hideDeckLists, setHideDeckLists] = useState(false);
     const [gamePrivate, setGamePrivate] = useState(false);
     const [useTimeLimit, setUseTimeLimit] = useState(false);
     const [timeLimit, setTimeLimit] = useState('45');
@@ -118,6 +98,19 @@ export default function NewGameScreen() {
         }
     }, [submitted, currentGame]);
 
+    const sealed = gameFormat === 'sealed';
+    const chosenSets = useMemo(
+        () => EXPANSIONS.filter((expansion) => expansions[expansion.name]).length,
+        [expansions]
+    );
+    // A sealed game with no sets has nothing to build a deck from.
+    const canCreate = !sealed || chosenSets > 0;
+
+    const setAllExpansions = (value: boolean) =>
+        setExpansions(
+            Object.fromEntries(EXPANSIONS.map((expansion) => [expansion.name, value]))
+        );
+
     const create = () => {
         const details = {
             name: name.trim() || `${username ?? 'My'}'s game`,
@@ -125,12 +118,14 @@ export default function NewGameScreen() {
             requirePassword,
             allowSpectators,
             showHand,
+            muteSpectators,
+            hideDeckLists,
             gamePrivate,
             gameFormat,
             useGameTimeLimit: useTimeLimit,
             gameTimeLimit: Math.max(10, Math.min(120, parseInt(timeLimit, 10) || 45)),
             quickJoin,
-            expansions: { ...DEFAULT_EXPANSIONS }
+            expansions: { ...expansions }
         };
         lobby.newGame(details);
         setSubmitted(true);
@@ -143,7 +138,7 @@ export default function NewGameScreen() {
         >
             <ScrollView
                 style={styles.container}
-                contentContainerStyle={{ padding: spacing.lg }}
+                contentContainerStyle={{ padding: spacing.lg, paddingBottom: 48 }}
                 keyboardShouldPersistTaps='handled'
                 keyboardDismissMode='on-drag'
             >
@@ -158,79 +153,150 @@ export default function NewGameScreen() {
                         autoCapitalize='sentences'
                     />
                 ) : (
-                <Text style={styles.quickJoinText}>
-                    Quick join finds the first open game matching your settings — or creates one
-                    if none exists.
-                </Text>
-            )}
+                    <Text style={styles.quickJoinText}>
+                        Quick join finds the first open game in this mode — or creates one if
+                        none exists.
+                    </Text>
+                )}
 
-            {/* Only worth a picker once more than one format is offered. */}
-            {GAME_FORMATS.length > 1 ? (
-                <>
-                    <Text style={styles.sectionLabel}>Format</Text>
-                    <Segmented
-                        options={GAME_FORMATS}
-                        value={gameFormat}
-                        onChange={setGameFormat}
-                    />
-                </>
-            ) : null}
-
-            {!quickJoin ? (
-                <>
-                    <View style={{ height: spacing.md }} />
-                    <ToggleRow
-                        label='Allow spectators'
-                        value={allowSpectators}
-                        onChange={setAllowSpectators}
-                    />
-                    <ToggleRow
-                        label='Open hands'
-                        hint='Both players can see each other’s hands'
-                        value={showHand}
-                        onChange={setShowHand}
-                    />
-                    <ToggleRow
-                        label='Private game'
-                        hint='Hidden from the public game list'
-                        value={gamePrivate}
-                        onChange={setGamePrivate}
-                    />
-                    <ToggleRow
-                        label='Require password'
-                        value={requirePassword}
-                        onChange={setRequirePassword}
-                    />
-                    {requirePassword ? (
-                        <TextField
-                            label='Password'
-                            value={password}
-                            onChangeText={setPassword}
-                            placeholder='Game password'
+                <Text style={styles.sectionLabel}>Game mode</Text>
+                <View style={styles.formatGrid}>
+                    {GAME_FORMATS.map((format) => (
+                        <FormatTile
+                            key={format.name}
+                            format={format}
+                            active={format.name === gameFormat}
+                            onPress={() => setGameFormat(format.name)}
                         />
-                    ) : null}
-                    <ToggleRow
-                        label='Use time limit'
-                        value={useTimeLimit}
-                        onChange={setUseTimeLimit}
-                    />
-                    {useTimeLimit ? (
-                        <TextField
-                            label='Time limit (minutes)'
-                            value={timeLimit}
-                            onChangeText={setTimeLimit}
-                            keyboardType='number-pad'
-                        />
-                    ) : null}
-                </>
-            ) : null}
+                    ))}
+                </View>
 
-            <View style={{ height: spacing.lg }} />
-            <Button
-                title={quickJoin ? 'Find a game' : 'Create game'}
-                onPress={create}
-                loading={submitted && !gameError}
-            />
+                {sealed ? (
+                    <>
+                        <View style={styles.setsHeader}>
+                            <Text style={styles.sectionLabel}>Allowed sets</Text>
+                            <View style={styles.setsActions}>
+                                <Pressable onPress={() => setAllExpansions(true)} hitSlop={8}>
+                                    <Text style={styles.setsAction}>All</Text>
+                                </Pressable>
+                                <Pressable onPress={() => setAllExpansions(false)} hitSlop={8}>
+                                    <Text style={styles.setsAction}>None</Text>
+                                </Pressable>
+                            </View>
+                        </View>
+                        <Text style={styles.sectionHint}>
+                            Sealed decks are drawn from these sets.
+                        </Text>
+                        <View style={styles.setGrid}>
+                            {EXPANSIONS.map((expansion) => {
+                                const on = !!expansions[expansion.name];
+                                return (
+                                    <Pressable
+                                        key={expansion.name}
+                                        onPress={() =>
+                                            setExpansions((previous) => ({
+                                                ...previous,
+                                                [expansion.name]: !previous[expansion.name]
+                                            }))
+                                        }
+                                        style={({ pressed }) => [
+                                            styles.setChip,
+                                            on && styles.setChipActive,
+                                            pressed && { opacity: 0.75 }
+                                        ]}
+                                        accessibilityRole='checkbox'
+                                        accessibilityState={{ checked: on }}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.setChipText,
+                                                on && styles.setChipTextActive
+                                            ]}
+                                        >
+                                            {expansion.label}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+                        {chosenSets === 0 ? (
+                            <Text style={styles.setsWarning}>
+                                Pick at least one set to build sealed decks from.
+                            </Text>
+                        ) : null}
+                    </>
+                ) : null}
+
+                {!quickJoin ? (
+                    <>
+                        <View style={{ height: spacing.md }} />
+                        <ToggleRow
+                            label='Allow spectators'
+                            value={allowSpectators}
+                            onChange={setAllowSpectators}
+                        />
+                        {allowSpectators ? (
+                            <>
+                                <ToggleRow
+                                    label='Open hands'
+                                    hint='Spectators can see both hands'
+                                    value={showHand}
+                                    onChange={setShowHand}
+                                />
+                                <ToggleRow
+                                    label='Mute spectators'
+                                    value={muteSpectators}
+                                    onChange={setMuteSpectators}
+                                />
+                            </>
+                        ) : null}
+                        <ToggleRow
+                            label='Hide deck lists'
+                            value={hideDeckLists}
+                            onChange={setHideDeckLists}
+                        />
+                        <ToggleRow
+                            label='Private game'
+                            hint='Hidden from the public game list'
+                            value={gamePrivate}
+                            onChange={setGamePrivate}
+                        />
+                        <ToggleRow
+                            label='Require password'
+                            value={requirePassword}
+                            onChange={setRequirePassword}
+                        />
+                        {requirePassword ? (
+                            <TextField
+                                label='Password'
+                                value={password}
+                                onChangeText={setPassword}
+                                placeholder='Game password'
+                            />
+                        ) : null}
+                        <ToggleRow
+                            label='Use time limit'
+                            value={useTimeLimit}
+                            onChange={setUseTimeLimit}
+                        />
+                        {useTimeLimit ? (
+                            <TextField
+                                label='Time limit (minutes)'
+                                value={timeLimit}
+                                onChangeText={setTimeLimit}
+                                keyboardType='number-pad'
+                            />
+                        ) : null}
+                    </>
+                ) : null}
+
+                <View style={{ height: spacing.lg }} />
+                <Button
+                    title={quickJoin ? 'Find a game' : 'Create game'}
+                    onPress={create}
+                    disabled={!canCreate}
+                    loading={submitted && !gameError}
+                />
             </ScrollView>
         </KeyboardAvoidingView>
     );
@@ -248,29 +314,90 @@ const styles = StyleSheet.create({
         marginTop: spacing.md,
         marginBottom: 6
     },
-    segmented: {
+    sectionHint: {
+        color: colors.textFaint,
+        fontSize: 12,
+        marginBottom: spacing.sm
+    },
+    formatGrid: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: spacing.sm
+    },
+    formatTile: {
+        // Two per row, accounting for the gap between them.
+        width: '48%',
+        flexGrow: 1,
         backgroundColor: colors.bgElevated,
-        borderRadius: radius.md,
-        borderWidth: 1,
         borderColor: colors.border,
-        overflow: 'hidden'
+        borderWidth: 1,
+        borderRadius: radius.md,
+        paddingHorizontal: spacing.md,
+        paddingVertical: 10,
+        gap: 3
     },
-    segment: {
-        flex: 1,
-        alignItems: 'center',
-        paddingVertical: 10
+    formatTileActive: {
+        borderColor: colors.brand,
+        backgroundColor: colors.surfaceHover
     },
-    segmentActive: {
-        backgroundColor: colors.brand
-    },
-    segmentText: {
+    formatLabel: {
         color: colors.textDim,
-        fontSize: 14,
+        fontSize: 15,
+        fontWeight: '800'
+    },
+    formatLabelActive: {
+        color: colors.brand
+    },
+    formatHint: {
+        color: colors.textFaint,
+        fontSize: 11,
+        lineHeight: 15
+    },
+    setsHeader: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        justifyContent: 'space-between'
+    },
+    setsActions: {
+        flexDirection: 'row',
+        gap: spacing.md,
+        paddingBottom: 6
+    },
+    setsAction: {
+        color: colors.accent,
+        fontSize: 12,
+        fontWeight: '700'
+    },
+    setGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6
+    },
+    setChip: {
+        backgroundColor: colors.bgElevated,
+        borderColor: colors.border,
+        borderWidth: 1,
+        borderRadius: radius.pill,
+        paddingHorizontal: 12,
+        paddingVertical: 7
+    },
+    setChipActive: {
+        backgroundColor: colors.brand,
+        borderColor: colors.brand
+    },
+    setChipText: {
+        color: colors.textDim,
+        fontSize: 12,
         fontWeight: '600'
     },
-    segmentTextActive: {
-        color: '#161006'
+    setChipTextActive: {
+        color: '#161006',
+        fontWeight: '800'
+    },
+    setsWarning: {
+        color: colors.warning,
+        fontSize: 12,
+        marginTop: spacing.sm
     },
     toggleRow: {
         flexDirection: 'row',

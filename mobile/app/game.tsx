@@ -32,7 +32,7 @@ import LogSheet from '../src/game/LogSheet';
 import { DragDropProvider, DropZone, type DropZoneName } from '../src/game/DragDrop';
 import { useVerticalSwipe } from '../src/game/gestures';
 import { groupHandByHouse } from '../src/game/handOrder';
-import { CardMenuModal, CardZoomModal, PileModal } from '../src/game/GameModals';
+import { CardMenuModal, CardZoomOverlay, PileModal } from '../src/game/GameModals';
 import { Button } from '../src/ui/primitives';
 import HouseIcon from '../src/ui/HouseIcon';
 import type { CardMenuItem, CardSummary, PlayerState, PromptButton } from '../src/game/types';
@@ -88,7 +88,6 @@ export default function GameScreen() {
 
     const rootState = useGameStore((state) => state.rootState);
     const status = useGameStore((state) => state.status);
-    const currentGame = useLobbyStore((state) => state.currentGame);
     const username = useAuthStore((state) => state.user?.username);
     const handByHouse = useSettingsStore((state) => state.groupHandByHouse);
     const { width: screenWidth } = useWindowDimensions();
@@ -103,10 +102,7 @@ export default function GameScreen() {
     const [dragActive, setDragActive] = useState(false);
     const leftGame = useRef(false);
 
-    const players = useMemo(
-        () => Object.values(rootState?.players ?? {}),
-        [rootState?.players]
-    );
+    const players = useMemo(() => Object.values(rootState?.players ?? {}), [rootState?.players]);
     const me = username ? rootState?.players?.[username] : undefined;
     const isSpectator = !me;
     const perspective: PlayerState | undefined = me ?? players[0];
@@ -256,13 +252,9 @@ export default function GameScreen() {
                     <ActivityIndicator size='large' color={colors.brand} />
                 )}
                 <Text style={styles.loadingText}>
-                    {failed
-                        ? 'Could not reach the game server.'
-                        : 'Connecting to the game…'}
+                    {failed ? 'Could not reach the game server.' : 'Connecting to the game…'}
                 </Text>
-                {failed ? (
-                    <Button title='Retry connection' onPress={reconnectGameSocket} />
-                ) : null}
+                {failed ? <Button title='Retry connection' onPress={reconnectGameSocket} /> : null}
                 <Pressable
                     onPress={() => {
                         leftGame.current = true;
@@ -317,244 +309,260 @@ export default function GameScreen() {
     ) : null;
 
     return (
-        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-            <DragDropProvider
-                enabled={!isSpectator}
-                manualMode={!!rootState.manualMode}
-                onDrop={onDrop}
-                onDragActiveChange={setDragActive}
-            >
-            {/* Header */}
-            <View style={styles.header}>
-                <View style={{ flex: 1 }}>
-                    <Text style={styles.gameName} numberOfLines={1}>
-                        {rootState.name}
-                    </Text>
-                    <Text style={styles.phase}>
-                        {String(perspective.phase ?? '')}
-                        {rootState.manualMode ? ' · manual' : ''}
-                        {isSpectator ? ' · spectating' : ''}
-                    </Text>
-                </View>
-                {status === 'failed' ? (
-                    <Pressable
-                        onPress={reconnectGameSocket}
-                        style={styles.reconnectButton}
-                        hitSlop={8}
+        <View style={styles.container}>
+            <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+                <DragDropProvider
+                    enabled={!isSpectator}
+                    manualMode={!!rootState.manualMode}
+                    onDrop={onDrop}
+                    onDragActiveChange={setDragActive}
+                >
+                    {/* Header */}
+                    <View style={styles.header}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.gameName} numberOfLines={1}>
+                                {rootState.name}
+                            </Text>
+                            <Text style={styles.phase}>
+                                {String(perspective.phase ?? '')}
+                                {rootState.manualMode ? ' · manual' : ''}
+                                {isSpectator ? ' · spectating' : ''}
+                            </Text>
+                        </View>
+                        {status === 'failed' ? (
+                            <Pressable
+                                onPress={reconnectGameSocket}
+                                style={styles.reconnectButton}
+                                hitSlop={8}
+                            >
+                                <Text style={styles.reconnectButtonText}>Reconnect</Text>
+                            </Pressable>
+                        ) : status !== 'connected' ? (
+                            <Text style={styles.reconnecting}>reconnecting…</Text>
+                        ) : null}
+                        <Pressable
+                            onPress={() => setLogOpen(true)}
+                            style={styles.headerButton}
+                            hitSlop={8}
+                        >
+                            <Text style={styles.headerButtonText}>Log</Text>
+                        </Pressable>
+                        <Pressable onPress={showGameMenu} style={styles.headerButton} hitSlop={8}>
+                            <Text style={styles.headerButtonText}>⋯</Text>
+                        </Pressable>
+                    </View>
+
+                    {winnerBanner}
+
+                    {/* Opponent */}
+                    {opponent ? (
+                        <PlayerHud
+                            player={opponent}
+                            active={!!opponent.activePlayer}
+                            onPilePress={(pile) => setPileView({ player: 'opponent', pile })}
+                        />
+                    ) : null}
+
+                    {/* Board */}
+                    <ScrollView
+                        style={styles.board}
+                        contentContainerStyle={{ paddingVertical: 4 }}
+                        scrollEnabled={!dragActive}
                     >
-                        <Text style={styles.reconnectButtonText}>Reconnect</Text>
-                    </Pressable>
-                ) : status !== 'connected' ? (
-                    <Text style={styles.reconnecting}>reconnecting…</Text>
-                ) : null}
-                <Pressable onPress={() => setLogOpen(true)} style={styles.headerButton} hitSlop={8}>
-                    <Text style={styles.headerButtonText}>Log</Text>
-                </Pressable>
-                <Pressable onPress={showGameMenu} style={styles.headerButton} hitSlop={8}>
-                    <Text style={styles.headerButtonText}>⋯</Text>
-                </Pressable>
-            </View>
+                        <CardRow
+                            cards={oppArea.artifacts}
+                            width={smallCard}
+                            minHeight={oppArea.artifacts.length ? smallCard * 1.4 + 8 : 20}
+                            onPress={onPlayAreaCardPress}
+                            onLongPress={setZoomCard}
+                        />
+                        <CardRow
+                            cards={oppArea.creatures}
+                            width={smallCard}
+                            minHeight={smallCard * 1.4 + 8}
+                            onPress={onPlayAreaCardPress}
+                            onLongPress={setZoomCard}
+                            emptyLabel='No enemy creatures'
+                        />
 
-            {winnerBanner}
+                        <View style={{ height: 8 }} />
 
-            {/* Opponent */}
-            {opponent ? (
-                <PlayerHud
-                    player={opponent}
-                    active={!!opponent.activePlayer}
-                    onPilePress={(pile) => setPileView({ player: 'opponent', pile })}
-                />
-            ) : null}
-
-            {/* Board */}
-            <ScrollView
-                style={styles.board}
-                contentContainerStyle={{ paddingVertical: 4 }}
-                scrollEnabled={!dragActive}
-            >
-                <CardRow
-                    cards={oppArea.artifacts}
-                    width={smallCard}
-                    minHeight={oppArea.artifacts.length ? smallCard * 1.4 + 8 : 20}
-                    onPress={onPlayAreaCardPress}
-                    onLongPress={setZoomCard}
-                />
-                <CardRow
-                    cards={oppArea.creatures}
-                    width={smallCard}
-                    minHeight={smallCard * 1.4 + 8}
-                    onPress={onPlayAreaCardPress}
-                    onLongPress={setZoomCard}
-                    emptyLabel='No enemy creatures'
-                />
-
-                <View style={{ height: 8 }} />
-
-                {/* My side of the board accepts card drops (playing from hand,
+                        {/* My side of the board accepts card drops (playing from hand,
                     manual-mode moves). */}
-                <DropZone name='play area'>
-                    <CardRow
-                        cards={myArea.creatures}
-                        width={smallCard}
-                        minHeight={smallCard * 1.4 + 8}
-                        onPress={onPlayAreaCardPress}
-                        onLongPress={setZoomCard}
-                        emptyLabel={isSpectator ? undefined : 'Your battleline is empty'}
-                        dragSource={isSpectator ? undefined : 'play area'}
-                        scrollEnabled={!dragActive}
-                    />
-                    <CardRow
-                        cards={myArea.artifacts}
-                        width={smallCard}
-                        minHeight={myArea.artifacts.length ? smallCard * 1.4 + 8 : 20}
-                        onPress={onPlayAreaCardPress}
-                        onLongPress={setZoomCard}
-                        dragSource={isSpectator ? undefined : 'play area'}
-                        scrollEnabled={!dragActive}
-                    />
-                </DropZone>
-            </ScrollView>
+                        <DropZone name='play area'>
+                            <CardRow
+                                cards={myArea.creatures}
+                                width={smallCard}
+                                minHeight={smallCard * 1.4 + 8}
+                                onPress={onPlayAreaCardPress}
+                                onLongPress={setZoomCard}
+                                emptyLabel={isSpectator ? undefined : 'Your battleline is empty'}
+                                dragSource={isSpectator ? undefined : 'play area'}
+                                scrollEnabled={!dragActive}
+                            />
+                            <CardRow
+                                cards={myArea.artifacts}
+                                width={smallCard}
+                                minHeight={myArea.artifacts.length ? smallCard * 1.4 + 8 : 20}
+                                onPress={onPlayAreaCardPress}
+                                onLongPress={setZoomCard}
+                                dragSource={isSpectator ? undefined : 'play area'}
+                                scrollEnabled={!dragActive}
+                            />
+                        </DropZone>
+                    </ScrollView>
 
-            {/* Lasting effects aimed at a player (Befuddle and friends). Their
+                    {/* Lasting effects aimed at a player (Befuddle and friends). Their
                 source card is usually in a discard pile by now, so this is the
                 only place the restriction is visible. */}
-            <EffectsBar
-                effects={rootState.effects}
-                // A spectator is not "you" — they get both players named.
-                me={isSpectator ? undefined : perspective.name}
-                onCardPress={setZoomCard}
-            />
-
-            {/* Prompt — pinned just above the player so the required action is
-                always visible, never scrolled off with the board. */}
-            <View {...openLogHandlers}>
-                {!isSpectator ? (
-                    <PromptPanel
-                        me={me}
-                        onButton={onPromptButton}
-                        messages={rootState.messages ?? []}
-                        onOpenLog={() => setLogOpen(true)}
+                    <EffectsBar
+                        effects={rootState.effects}
+                        // A spectator is not "you" — they get both players named.
+                        me={isSpectator ? undefined : perspective.name}
                         onCardPress={setZoomCard}
                     />
-                ) : null}
 
-                {/* Always-present grab handle, so the log is one swipe away
+                    {/* Prompt — pinned just above the player so the required action is
+                always visible, never scrolled off with the board. */}
+                    <View {...openLogHandlers}>
+                        {!isSpectator ? (
+                            <PromptPanel
+                                me={me}
+                                onButton={onPromptButton}
+                                messages={rootState.messages ?? []}
+                                onOpenLog={() => setLogOpen(true)}
+                                onCardPress={setZoomCard}
+                            />
+                        ) : null}
+
+                        {/* Always-present grab handle, so the log is one swipe away
                     even when the prompt panel has nothing to show. */}
-                <Pressable
-                    onPress={() => setLogOpen(true)}
-                    style={styles.logGrabber}
-                    accessibilityRole='button'
-                    accessibilityLabel='Open the game log'
-                    hitSlop={6}
-                >
-                    <View style={styles.logGrabberBar} />
-                    <Text style={styles.logGrabberText}>Swipe up for the full log</Text>
-                </Pressable>
-            </View>
+                        <Pressable
+                            onPress={() => setLogOpen(true)}
+                            style={styles.logGrabber}
+                            accessibilityRole='button'
+                            accessibilityLabel='Open the game log'
+                            hitSlop={6}
+                        >
+                            <View style={styles.logGrabberBar} />
+                            <Text style={styles.logGrabberText}>Swipe up for the full log</Text>
+                        </Pressable>
+                    </View>
 
-            {/* Me */}
-            <PlayerHud
-                player={perspective}
-                isMe={!isSpectator}
-                active={!!perspective.activePlayer}
-                onPilePress={(pile) => setPileView({ player: 'me', pile })}
-            />
+                    {/* Me */}
+                    <PlayerHud
+                        player={perspective}
+                        isMe={!isSpectator}
+                        active={!!perspective.activePlayer}
+                        onPilePress={(pile) => setPileView({ player: 'me', pile })}
+                    />
 
-            {/* Hand */}
-            <DropZone name='hand'>
-                {hand.length > 0 ? (
-                    <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        style={styles.handStrip}
-                        contentContainerStyle={styles.handContent}
-                        scrollEnabled={!dragActive}
-                    >
-                        {handGroups.map((group, groupIndex) => (
-                            <React.Fragment key={group.house}>
-                                {/* House divider, so the groups read as groups
+                    {/* Hand */}
+                    <DropZone name='hand'>
+                        {hand.length > 0 ? (
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                style={styles.handStrip}
+                                contentContainerStyle={styles.handContent}
+                                scrollEnabled={!dragActive}
+                            >
+                                {handGroups.map((group, groupIndex) => (
+                                    <React.Fragment key={group.house}>
+                                        {/* House divider, so the groups read as groups
                                     rather than as one long undifferentiated row. */}
-                                {groupIndex > 0 ? <View style={styles.handDivider} /> : null}
-                                {group.cards.map((card) => (
-                                    <CardTile
-                                        key={card.uuid}
-                                        card={card}
-                                        width={handCard}
-                                        onPress={onHandCardPress}
-                                        onLongPress={setZoomCard}
-                                        dragSource={isSpectator ? undefined : 'hand'}
-                                    />
+                                        {groupIndex > 0 ? (
+                                            <View style={styles.handDivider} />
+                                        ) : null}
+                                        {group.cards.map((card) => (
+                                            <CardTile
+                                                key={card.uuid}
+                                                card={card}
+                                                width={handCard}
+                                                onPress={onHandCardPress}
+                                                onLongPress={setZoomCard}
+                                                dragSource={isSpectator ? undefined : 'hand'}
+                                            />
+                                        ))}
+                                    </React.Fragment>
                                 ))}
-                            </React.Fragment>
-                        ))}
-                    </ScrollView>
-                ) : (
-                    <View style={[styles.handStrip, styles.handStripEmpty]}>
-                        <Text style={styles.emptyRowText}>
-                            {isSpectator ? 'Spectator view' : 'No cards in hand'}
-                        </Text>
-                    </View>
-                )}
-                {handByHouse && handGroups.length > 1 ? (
-                    <View style={styles.handLegend}>
-                        {handGroups.map((group) => (
-                            <View key={group.house} style={styles.handLegendItem}>
-                                <HouseIcon
-                                    house={group.house}
-                                    size={13}
-                                    dimmed={
-                                        !!perspective.activeHouse &&
-                                        perspective.activeHouse !== group.house
-                                    }
-                                />
-                                <Text style={styles.handLegendCount}>{group.cards.length}</Text>
+                            </ScrollView>
+                        ) : (
+                            <View style={[styles.handStrip, styles.handStripEmpty]}>
+                                <Text style={styles.emptyRowText}>
+                                    {isSpectator ? 'Spectator view' : 'No cards in hand'}
+                                </Text>
                             </View>
-                        ))}
-                    </View>
-                ) : null}
-            </DropZone>
+                        )}
+                        {handByHouse && handGroups.length > 1 ? (
+                            <View style={styles.handLegend}>
+                                {handGroups.map((group) => (
+                                    <View key={group.house} style={styles.handLegendItem}>
+                                        <HouseIcon
+                                            house={group.house}
+                                            size={13}
+                                            dimmed={
+                                                !!perspective.activeHouse &&
+                                                perspective.activeHouse !== group.house
+                                            }
+                                        />
+                                        <Text style={styles.handLegendCount}>
+                                            {group.cards.length}
+                                        </Text>
+                                    </View>
+                                ))}
+                            </View>
+                        ) : null}
+                    </DropZone>
 
-            {/* Modals */}
-            <CardZoomModal card={zoomCard} onClose={() => setZoomCard(undefined)} />
-            <CardMenuModal
-                card={menuCard}
-                onClose={() => setMenuCard(undefined)}
-                onItem={onMenuItem}
-                onZoom={(card) => {
-                    setMenuCard(undefined);
-                    setZoomCard(card);
-                }}
-            />
-            <PileModal
-                visible={!!pileView}
-                title={
-                    pileView
-                        ? `${pileView.player === 'me' ? perspective.name : opponent?.name} · ${
-                              pileView.pile
-                          }`
-                        : undefined
-                }
-                cards={pileCards}
-                onClose={() => setPileView(undefined)}
-                onCardPress={(card) => {
-                    if (!isSpectator && card.selectable) {
-                        sendGameMessage('cardClicked', card.uuid);
-                        setPileView(undefined);
-                    } else {
-                        setZoomCard(card);
-                    }
-                }}
-                onCardLongPress={setZoomCard}
-            />
-            <LogSheet
-                visible={logOpen}
-                messages={rootState.messages ?? []}
-                onClose={() => setLogOpen(false)}
-                onSend={(text) => sendGameMessage('chat', text)}
-                onCardPress={onLogCardPress}
-            />
-            </DragDropProvider>
-        </SafeAreaView>
+                    {/* Modals. Only ever one of these is on screen at a time: each
+                handles its own card zoom internally, because stacking native
+                modals and unwinding them out of order locks up iOS. */}
+                    <CardMenuModal
+                        card={menuCard}
+                        onClose={() => setMenuCard(undefined)}
+                        onItem={onMenuItem}
+                    />
+                    <PileModal
+                        visible={!!pileView}
+                        title={
+                            pileView
+                                ? `${
+                                      pileView.player === 'me' ? perspective.name : opponent?.name
+                                  } · ${pileView.pile}`
+                                : undefined
+                        }
+                        cards={pileCards}
+                        onClose={() => setPileView(undefined)}
+                        onCardSelect={
+                            isSpectator
+                                ? undefined
+                                : (card) => {
+                                      sendGameMessage('cardClicked', card.uuid);
+                                      setPileView(undefined);
+                                  }
+                        }
+                    />
+                    <LogSheet
+                        visible={logOpen}
+                        messages={rootState.messages ?? []}
+                        onClose={() => setLogOpen(false)}
+                        onSend={(text) => sendGameMessage('chat', text)}
+                        onCardPress={onLogCardPress}
+                    />
+                </DragDropProvider>
+            </SafeAreaView>
+
+            {/* Zoom for cards tapped on the board or in hand. A plain overlay,
+            not a Modal — nothing else is presented at that moment, and it
+            keeps the screen down to one native presentation. Outside the
+            SafeAreaView so it covers the notch and home indicator too. */}
+            {zoomCard ? (
+                <View style={StyleSheet.absoluteFill}>
+                    <CardZoomOverlay card={zoomCard} onClose={() => setZoomCard(undefined)} />
+                </View>
+            ) : null}
+        </View>
     );
 }
 

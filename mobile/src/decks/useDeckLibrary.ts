@@ -29,9 +29,12 @@ export const DECK_SORTS: DeckSortOption[] = [
  * page happens to be loaded — a search that only looked at the first page would
  * confidently report "no decks" for a deck the player owns.
  */
-export function useDeckLibrary(options: { pageSize?: number; enabled?: boolean } = {}) {
+export function useDeckLibrary(
+    options: { pageSize?: number; enabled?: boolean; isAlliance?: boolean } = {}
+) {
     const pageSize = options.pageSize ?? 40;
     const enabled = options.enabled !== false;
+    const isAlliance = options.isAlliance;
 
     const [decks, setDecks] = useState<Deck[]>([]);
     const [total, setTotal] = useState(0);
@@ -70,7 +73,8 @@ export function useDeckLibrary(options: { pageSize?: number; enabled?: boolean }
                     sort: sort.key,
                     sortDir: sort.dir,
                     search,
-                    houses
+                    houses,
+                    isAlliance
                 });
                 if (id !== requestId.current) {
                     return;
@@ -99,7 +103,7 @@ export function useDeckLibrary(options: { pageSize?: number; enabled?: boolean }
                 }
             }
         },
-        [houses, pageSize, search, sort]
+        [houses, isAlliance, pageSize, search, sort]
     );
 
     useEffect(() => {

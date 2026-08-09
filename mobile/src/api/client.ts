@@ -261,6 +261,12 @@ export interface DeckQuery {
     search?: string;
     /** House codes; a deck matches if it contains every house listed. */
     houses?: string[];
+    /**
+     * Restrict to alliance decks (true) or exclude them (false). Alliance decks
+     * are only legal in an alliance game, and only there — the same split the
+     * web client applies.
+     */
+    isAlliance?: boolean;
 }
 
 export async function fetchDecks(options: DeckQuery = {}) {
@@ -279,6 +285,9 @@ export async function fetchDecks(options: DeckQuery = {}) {
     }
     for (const house of options.houses ?? []) {
         filter.push({ name: 'house', value: house });
+    }
+    if (options.isAlliance !== undefined) {
+        filter.push({ name: 'isAlliance', value: options.isAlliance });
     }
     if (filter.length > 0) {
         params.set('filter', JSON.stringify(filter));

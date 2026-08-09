@@ -11,6 +11,7 @@ import {
     View
 } from 'react-native';
 import type { GameSummary } from '../../src/api/types';
+import { formatLabel } from '../../src/game/gameFormats';
 import { connectLobby, lobby } from '../../src/net/lobbySocket';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useGameStore } from '../../src/stores/gameStore';
@@ -54,7 +55,9 @@ function GameRow(props: {
                 <View style={styles.badgeRow}>
                     {game.started ? <Badge text='In progress' color='#274a33' textColor='#7ed494' /> : null}
                     {game.gameFormat && game.gameFormat !== 'normal' ? (
-                        <Badge text={String(game.gameFormat)} />
+                        // 'adaptive-bo1' is an engine name, not something to
+                        // put in front of a player.
+                        <Badge text={formatLabel(game.gameFormat)} />
                     ) : null}
                     {game.needsPassword ? <Badge text='🔒 password' /> : null}
                     {game.showHand ? <Badge text='open hands' /> : null}

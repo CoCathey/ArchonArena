@@ -16,9 +16,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Deck } from '../src/api/types';
 import { fetchStandaloneDecks } from '../src/api/client';
 import DeckFilterBar from '../src/decks/DeckFilterBar';
-import DeckPreviewModal from '../src/decks/DeckPreviewModal';
+import DeckPreview from '../src/decks/DeckPreview';
 import DeckRow from '../src/decks/DeckRow';
 import { useDeckLibrary } from '../src/decks/useDeckLibrary';
+import { formatLabel } from '../src/game/gameFormats';
 import { lobby } from '../src/net/lobbySocket';
 import { useAuthStore } from '../src/stores/authStore';
 import { useGameStore } from '../src/stores/gameStore';
@@ -45,9 +46,19 @@ export default function PendingGameScreen() {
     const navigatedToGame = useRef(false);
     const insets = useSafeAreaInsets();
 
+    const gameFormat = currentGame?.gameFormat ?? 'normal';
+    // Sealed hands both players a generated deck; there is nothing to pick.
+    const isSealed = gameFormat === 'sealed';
+
     // The collection pages in from the server (search/sort/house filter all run
     // there), so every deck is reachable rather than just the first page.
-    const library = useDeckLibrary({ pageSize: 30, enabled: deckModal });
+    // Alliance decks are legal in an alliance game and only there, so the
+    // picker never offers a deck the game would reject.
+    const library = useDeckLibrary({
+        pageSize: 30,
+        enabled: deckModal,
+        isAlliance: gameFormat === 'alliance'
+    });
 
     // Handoff arrives when the owner starts the game: open the board.
     useEffect(() => {
@@ -56,6 +67,16 @@ export default function PendingGameScreen() {
             router.replace('/game');
         }
     }, [handoff]);
+
+    // A sealed game has no deck to choose: ask the lobby to deal one as soon
+    // as we arrive, the same as the web pending screen does.
+    const sealedRequested = useRef(false);
+    useEffect(() => {
+        if (isSealed && currentGame && !sealedRequested.current) {
+            sealedRequested.current = true;
+            lobby.getSealedDeck(currentGame.id);
+        }
+    }, [currentGame, isSealed]);
 
     // If the pending game disappears (we left / it timed out), close.
     useEffect(() => {
@@ -110,8 +131,7 @@ export default function PendingGameScreen() {
         typeof currentGame.owner === 'string'
             ? currentGame.owner === username
             : currentGame.owner?.username === username;
-    const everyoneReady =
-        players.length === 2 && players.every((player) => player.deck?.selected);
+    const everyoneReady = players.length === 2 && players.every((player) => player.deck?.selected);
     const iAmSpectator = !me;
 
     const pickDeck = (deck: Deck, standalone: boolean) => {
@@ -137,11 +157,7 @@ export default function PendingGameScreen() {
         >
             <ScrollView contentContainerStyle={{ padding: spacing.md }}>
                 <Text style={styles.gameName}>{currentGame.name}</Text>
-                <Text style={styles.gameMeta}>
-                    {currentGame.gameFormat && currentGame.gameFormat !== 'normal'
-                        ? currentGame.gameFormat
-                        : 'Archon'}
-                </Text>
+                <Text style={styles.gameMeta}>{formatLabel(currentGame.gameFormat)}</Text>
 
                 <ErrorBanner message={gameError} />
 
@@ -164,6 +180,8 @@ export default function PendingGameScreen() {
                                         ? player.name === username && player.deck.name
                                             ? player.deck.name
                                             : 'Deck selected'
+                                        : isSealed
+                                        ? 'Dealing a sealed deck…'
                                         : 'Choosing a deck…'}
                                 </Text>
                                 {/* The server sends the opponent's SAS too, unless
@@ -175,8 +193,13 @@ export default function PendingGameScreen() {
                                 ) : null}
                             </View>
                         </View>
-                        {player.name === username ? (
-                            <Button small variant='secondary' title='Select deck' onPress={openDeckModal} />
+                        {player.name === username && !isSealed ? (
+                            <Button
+                                small
+                                variant='secondary'
+                                title='Select deck'
+                                onPress={openDeckModal}
+                            />
                         ) : null}
                     </Card>
                 ))}
@@ -248,171 +271,186 @@ export default function PendingGameScreen() {
                 animationType='slide'
                 onRequestClose={() => setDeckModal(false)}
             >
-                <View style={[styles.modalContainer, { paddingTop: insets.top + 12 }]}>
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Choose a deck</Text>
-                        <Button small variant='secondary' title='Close' onPress={() => setDeckModal(false)} />
-                    </View>
-                    <View style={styles.deckTabs}>
-                        <Pressable
-                            style={[styles.deckTabButton, deckTab === 'mine' && styles.deckTabActive]}
-                            onPress={() => setDeckTab('mine')}
-                        >
-                            <Text
+                <View style={styles.modalContainer}>
+                    <View style={{ flex: 1, paddingTop: insets.top + 12 }}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Choose a deck</Text>
+                            <Button
+                                small
+                                variant='secondary'
+                                title='Close'
+                                onPress={() => setDeckModal(false)}
+                            />
+                        </View>
+                        <View style={styles.deckTabs}>
+                            <Pressable
                                 style={[
-                                    styles.deckTabText,
-                                    deckTab === 'mine' && styles.deckTabTextActive
+                                    styles.deckTabButton,
+                                    deckTab === 'mine' && styles.deckTabActive
                                 ]}
+                                onPress={() => setDeckTab('mine')}
                             >
-                                My decks
-                            </Text>
-                        </Pressable>
-                        <Pressable
-                            style={[
-                                styles.deckTabButton,
-                                deckTab === 'standalone' && styles.deckTabActive
-                            ]}
-                            onPress={() => setDeckTab('standalone')}
-                        >
-                            <Text
+                                <Text
+                                    style={[
+                                        styles.deckTabText,
+                                        deckTab === 'mine' && styles.deckTabTextActive
+                                    ]}
+                                >
+                                    My decks
+                                </Text>
+                            </Pressable>
+                            <Pressable
                                 style={[
-                                    styles.deckTabText,
-                                    deckTab === 'standalone' && styles.deckTabTextActive
+                                    styles.deckTabButton,
+                                    deckTab === 'standalone' && styles.deckTabActive
                                 ]}
+                                onPress={() => setDeckTab('standalone')}
                             >
-                                Standalone
-                            </Text>
-                        </Pressable>
-                    </View>
+                                <Text
+                                    style={[
+                                        styles.deckTabText,
+                                        deckTab === 'standalone' && styles.deckTabTextActive
+                                    ]}
+                                >
+                                    Standalone
+                                </Text>
+                            </Pressable>
+                        </View>
 
-                    {deckTab === 'mine' ? (
-                        <DeckFilterBar
-                            search={library.searchInput}
-                            onSearchChange={library.setSearchInput}
-                            sort={library.sort}
-                            onSortChange={library.setSort}
-                            houses={library.houses}
-                            onToggleHouse={library.toggleHouse}
-                            onClear={library.clearFilters}
-                            summary={
-                                library.filtered
-                                    ? `${library.decks.length} of ${library.total} shown`
-                                    : library.total > 0
-                                    ? `${library.total} deck${library.total === 1 ? '' : 's'}`
-                                    : undefined
-                            }
-                        />
-                    ) : (
-                        <DeckFilterBar
-                            search={standaloneSearch}
-                            onSearchChange={setStandaloneSearch}
-                            sort={library.sort}
-                            onSortChange={library.setSort}
-                            houses={standaloneHouses}
-                            onToggleHouse={(house) =>
-                                setStandaloneHouses((previous) =>
-                                    previous.includes(house)
-                                        ? previous.filter((entry) => entry !== house)
-                                        : previous.concat(house)
-                                )
-                            }
-                            onClear={() => {
-                                setStandaloneSearch('');
-                                setStandaloneHouses([]);
+                        {deckTab === 'mine' ? (
+                            <DeckFilterBar
+                                search={library.searchInput}
+                                onSearchChange={library.setSearchInput}
+                                sort={library.sort}
+                                onSortChange={library.setSort}
+                                houses={library.houses}
+                                onToggleHouse={library.toggleHouse}
+                                onClear={library.clearFilters}
+                                summary={
+                                    library.filtered
+                                        ? `${library.decks.length} of ${library.total} shown`
+                                        : library.total > 0
+                                        ? `${library.total} deck${library.total === 1 ? '' : 's'}`
+                                        : undefined
+                                }
+                            />
+                        ) : (
+                            <DeckFilterBar
+                                search={standaloneSearch}
+                                onSearchChange={setStandaloneSearch}
+                                sort={library.sort}
+                                onSortChange={library.setSort}
+                                houses={standaloneHouses}
+                                onToggleHouse={(house) =>
+                                    setStandaloneHouses((previous) =>
+                                        previous.includes(house)
+                                            ? previous.filter((entry) => entry !== house)
+                                            : previous.concat(house)
+                                    )
+                                }
+                                onClear={() => {
+                                    setStandaloneSearch('');
+                                    setStandaloneHouses([]);
+                                }}
+                            />
+                        )}
+
+                        <FlatList
+                            data={deckTab === 'mine' ? library.decks : visibleStandalone}
+                            keyExtractor={(deck) => `${deckTab}-${deck.id}`}
+                            keyboardShouldPersistTaps='handled'
+                            keyboardDismissMode='on-drag'
+                            renderItem={({ item }) => (
+                                <DeckRow
+                                    deck={item}
+                                    onPress={() => setPreviewDeck(item)}
+                                    accessory={
+                                        <View style={styles.deckRowActions}>
+                                            <Button
+                                                small
+                                                variant='secondary'
+                                                title='View'
+                                                onPress={() => setPreviewDeck(item)}
+                                            />
+                                            <Button
+                                                small
+                                                title='Select'
+                                                onPress={() =>
+                                                    pickDeck(item, deckTab === 'standalone')
+                                                }
+                                            />
+                                        </View>
+                                    }
+                                />
+                            )}
+                            contentContainerStyle={{
+                                padding: spacing.md,
+                                paddingBottom: insets.bottom + spacing.md
                             }}
-                        />
-                    )}
-
-                    <FlatList
-                        data={deckTab === 'mine' ? library.decks : visibleStandalone}
-                        keyExtractor={(deck) => `${deckTab}-${deck.id}`}
-                        keyboardShouldPersistTaps='handled'
-                        keyboardDismissMode='on-drag'
-                        renderItem={({ item }) => (
-                            <DeckRow
-                                deck={item}
-                                onPress={() => setPreviewDeck(item)}
-                                accessory={
-                                    <View style={styles.deckRowActions}>
-                                        <Button
-                                            small
-                                            variant='secondary'
-                                            title='View'
-                                            onPress={() => setPreviewDeck(item)}
+                            onEndReached={deckTab === 'mine' ? library.loadMore : undefined}
+                            onEndReachedThreshold={0.5}
+                            ListFooterComponent={
+                                deckTab === 'mine' && library.loadingMore ? (
+                                    <ActivityIndicator
+                                        color={colors.brand}
+                                        style={{ marginVertical: 16 }}
+                                    />
+                                ) : deckTab === 'mine' && library.hasMore ? (
+                                    <Button
+                                        variant='secondary'
+                                        title={`Load more (${
+                                            library.total - library.decks.length
+                                        } left)`}
+                                        onPress={library.loadMore}
+                                    />
+                                ) : null
+                            }
+                            ListEmptyComponent={
+                                (deckTab === 'mine' ? library.loading : loadingStandalone) ? (
+                                    <ActivityIndicator
+                                        color={colors.brand}
+                                        style={{ marginTop: spacing.xl }}
+                                    />
+                                ) : (deckTab === 'mine' ? library.error : deckError) ? (
+                                    <View style={{ padding: spacing.md }}>
+                                        <ErrorBanner
+                                            message={deckTab === 'mine' ? library.error : deckError}
                                         />
                                         <Button
-                                            small
-                                            title='Select'
-                                            onPress={() =>
-                                                pickDeck(item, deckTab === 'standalone')
+                                            variant='secondary'
+                                            title='Retry'
+                                            onPress={
+                                                deckTab === 'mine'
+                                                    ? library.refresh
+                                                    : loadStandalone
                                             }
                                         />
                                     </View>
-                                }
-                            />
-                        )}
-                        contentContainerStyle={{
-                            padding: spacing.md,
-                            paddingBottom: insets.bottom + spacing.md
-                        }}
-                        onEndReached={deckTab === 'mine' ? library.loadMore : undefined}
-                        onEndReachedThreshold={0.5}
-                        ListFooterComponent={
-                            deckTab === 'mine' && library.loadingMore ? (
-                                <ActivityIndicator
-                                    color={colors.brand}
-                                    style={{ marginVertical: 16 }}
-                                />
-                            ) : deckTab === 'mine' && library.hasMore ? (
-                                <Button
-                                    variant='secondary'
-                                    title={`Load more (${
-                                        library.total - library.decks.length
-                                    } left)`}
-                                    onPress={library.loadMore}
-                                />
-                            ) : null
-                        }
-                        ListEmptyComponent={
-                            (deckTab === 'mine' ? library.loading : loadingStandalone) ? (
-                                <ActivityIndicator
-                                    color={colors.brand}
-                                    style={{ marginTop: spacing.xl }}
-                                />
-                            ) : (deckTab === 'mine' ? library.error : deckError) ? (
-                                <View style={{ padding: spacing.md }}>
-                                    <ErrorBanner
-                                        message={deckTab === 'mine' ? library.error : deckError}
-                                    />
-                                    <Button
-                                        variant='secondary'
-                                        title='Retry'
-                                        onPress={
-                                            deckTab === 'mine' ? library.refresh : loadStandalone
+                                ) : (
+                                    <EmptyState
+                                        title='No decks'
+                                        subtitle={
+                                            deckTab === 'mine'
+                                                ? 'Import decks in the Decks tab first, or use a standalone deck.'
+                                                : undefined
                                         }
                                     />
-                                </View>
-                            ) : (
-                                <EmptyState
-                                    title='No decks'
-                                    subtitle={
-                                        deckTab === 'mine'
-                                            ? 'Import decks in the Decks tab first, or use a standalone deck.'
-                                            : undefined
-                                    }
-                                />
-                            )
-                        }
+                                )
+                            }
+                        />
+                    </View>
+
+                    {/* Rendered inside the picker rather than as a modal of
+                        its own — see the note on DeckPreview. Sits outside the
+                        padded column so it covers the whole screen. */}
+                    <DeckPreview
+                        deck={previewDeck}
+                        onClose={() => setPreviewDeck(undefined)}
+                        confirmLabel='Play this deck'
+                        onConfirm={(deck) => pickDeck(deck, deckTab === 'standalone')}
                     />
                 </View>
             </Modal>
-
-            <DeckPreviewModal
-                deck={previewDeck}
-                onClose={() => setPreviewDeck(undefined)}
-                confirmLabel='Play this deck'
-                onConfirm={(deck) => pickDeck(deck, deckTab === 'standalone')}
-            />
         </KeyboardAvoidingView>
     );
 }

@@ -166,6 +166,14 @@ export const lobby = {
     selectDeck(gameId: string, deckId: string | number, isStandalone: boolean): void {
         emit('selectdeck', gameId, deckId, isStandalone);
     },
+    /**
+     * Ask the lobby to deal this player a sealed deck. Sealed games have no
+     * deck choice — the server builds one from the game's allowed sets and
+     * assigns it — so the pending screen requests it on arrival.
+     */
+    getSealedDeck(gameId: string): void {
+        emit('getsealeddeck', gameId);
+    },
     pendingChat(message: string): void {
         emit('chat', message);
     },

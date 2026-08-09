@@ -103,10 +103,13 @@ export function CardMenuModal(props: {
     card?: CardSummary;
     onClose: () => void;
     onItem: (card: CardSummary, item: CardMenuItem) => void;
-    onZoom: (card: CardSummary) => void;
 }) {
     const { card } = props;
     const menu = (card?.menu ?? []).filter((item) => item.command !== 'click');
+    // Zoom lives inside this modal rather than opening another one on top of
+    // it — see the note on PileModal.
+    const [zoom, setZoom] = useState(false);
+    useEffect(() => setZoom(false), [card?.uuid]);
 
     return (
         <Modal visible={!!card} transparent animationType='slide' onRequestClose={props.onClose}>
@@ -126,7 +129,7 @@ export function CardMenuModal(props: {
                     ))}
                     <Pressable
                         style={({ pressed }) => [styles.sheetItem, pressed && { opacity: 0.6 }]}
-                        onPress={() => card && props.onZoom(card)}
+                        onPress={() => setZoom(true)}
                     >
                         <Text style={styles.sheetItemText}>View card</Text>
                     </Pressable>
@@ -142,21 +145,50 @@ export function CardMenuModal(props: {
                     </Pressable>
                 </Pressable>
             </Pressable>
+            {zoom && card ? (
+                <View style={StyleSheet.absoluteFill}>
+                    <CardZoomOverlay card={card} onClose={() => setZoom(false)} />
+                </View>
+            ) : null}
         </Modal>
     );
 }
 
-/** Grid viewer for a card pile (discard, archives, purged...). */
+/**
+ * Grid viewer for a card pile (discard, archives, purged...).
+ *
+ * Zooming a card here renders *inside* this modal instead of opening a second
+ * one over it. Stacking two native modals and then dismissing the lower one
+ * leaves iOS with an orphaned presentation that swallows every touch — the app
+ * looks frozen. Opening a discard pile, long-pressing a card and closing the
+ * pile did exactly that.
+ */
 export function PileModal(props: {
     title?: string;
     cards?: CardSummary[];
     visible: boolean;
     onClose: () => void;
-    onCardPress?: (card: CardSummary) => void;
-    onCardLongPress?: (card: CardSummary) => void;
+    /** Called for a card the player can act on; zooming is handled here. */
+    onCardSelect?: (card: CardSummary) => void;
 }) {
     const screen = Dimensions.get('window');
     const cardWidth = Math.floor((screen.width - spacing.md * 2 - 8 * 3) / 4);
+    const [zoomCard, setZoomCard] = useState<CardSummary | undefined>();
+
+    // Never leave a zoom hanging over a pile that has since closed.
+    useEffect(() => {
+        if (!props.visible) {
+            setZoomCard(undefined);
+        }
+    }, [props.visible]);
+
+    const press = (card: CardSummary) => {
+        if (card.selectable && props.onCardSelect) {
+            props.onCardSelect(card);
+            return;
+        }
+        setZoomCard(card);
+    };
 
     return (
         <Modal
@@ -183,12 +215,8 @@ export function PileModal(props: {
                             <CardTile
                                 card={item}
                                 width={cardWidth}
-                                onPress={(card) =>
-                                    props.onCardPress
-                                        ? props.onCardPress(card)
-                                        : props.onCardLongPress?.(card)
-                                }
-                                onLongPress={props.onCardLongPress}
+                                onPress={press}
+                                onLongPress={setZoomCard}
                             />
                         )}
                         ListEmptyComponent={
@@ -197,6 +225,14 @@ export function PileModal(props: {
                     />
                 </Pressable>
             </Pressable>
+            {zoomCard ? (
+                <View style={StyleSheet.absoluteFill}>
+                    <CardZoomOverlay
+                        card={zoomCard}
+                        onClose={() => setZoomCard(undefined)}
+                    />
+                </View>
+            ) : null}
         </Modal>
     );
 }
