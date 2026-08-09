@@ -288,13 +288,14 @@ found by auditing the launch path rather than the feature list. All three are fi
         control confirming violations are detected when the policy is wrong. `CSP_MODE`
         (`enforce` / `report-only` / `off`) can turn it down without a redeploy.
 
-#### I5 — Pre-launch security and abuse pass
+#### I5 — Pre-launch security and abuse pass _(done)_
 
 **Why:** the moment the site is public it is a target, and account/auth endpoints are the
 softest surface. When this item was written, rate limiting existed but was applied only to
 bug reports, community actions, deck DoK prepare and tournament creation — not to login,
 registration or password reset. Every auth endpoint is now limited, and the limits are
-shared across lobby processes; what remains is the `fabric` upgrade.
+shared across lobby processes. The dependency tree went from 55 advisories (1 critical,
+9 high) to 5 (all moderate, none in the production graph).
 **Tasks**
 
 -   [x] `helmet` upgraded v3 → v8. Its default CSP is disabled (it would break the site and
@@ -310,24 +311,41 @@ shared across lobby processes; what remains is the `fabric` upgrade.
         never logged. SQL confirmed exclusively parameterised.
 -   [x] `docs/SECURITY.md` written — controls, dependency triage with reasoning, two
         documented accepted risks, and a standing re-review checklist.
--   [ ] **`fabric` v5 → v7** — now the **only** root left: every remaining critical and high
-        in the production tree traces to it alone (13 advisories, down from 16). Scoped in
-        detail during this pass:
-    -   **What it buys:** fabric 7 declares no hard dependencies (`canvas`/`jsdom` become
-        optional, and `canvas@3` drops `@mapbox/node-pre-gyp`), so the whole
-        `canvas` → `node-pre-gyp` → `tar` chain — and the only critical in the tree — goes
-        away. It keeps a CommonJS entry (`fabric/node`), so server callers need not become
-        ESM.
-    -   **Real size:** 98 call sites over 10 APIs in 7 files, ~1,600 lines.
-    -   **Why it is still its own project:** the migration is mechanical, but the risk is
-        _silent visual regression_. Text metrics and shadow rendering changed in fabric 6,
-        and the archon maker generates the deck images players look at — a shifted baseline
-        would ship subtly wrong deck lists with nothing failing. `buildDeckList`,
-        `buildCard` and `buildCardBack` are cleanly exported, so a before/after image-diff
-        harness is buildable; that harness is the actual first task, and it does not exist
-        yet.
-    -   Exposure meanwhile stays low: no SVG path exists (the fabric advisory is stored XSS
-        via SVG export) and uploads are magic-byte-gated.
+-   [x] **`fabric` v5 → v7** — the last root: every critical and high in the production tree
+        traced to it alone. Fabric 5 vendors its own `canvas@2`, so the
+        `canvas` → `node-pre-gyp` → `tar` chain — and the only critical — went with it.
+        Fabric 7 uses the `canvas@3` already declared here and keeps a CommonJS entry
+        (`fabric/node`), so no server caller had to become ESM.
+    -   Fabric 6 was a rewrite, not a bump: the namespace became named exports, the node and
+        browser builds split, `util.loadImage` and `Image.fromURL` became promises (the old
+        callback form would simply hang forever), several methods stopped returning `this`,
+        and `setWidth`/`setHeight` went away. Fabric 7 then changed the **default object
+        origin from top-left to centre** — the one that would have shipped silently, since
+        several call sites set `originX: 'center'` while relying on `originY` staying `top`.
+        Restored once per side; `server/fabricNode.js` is now the server's only way in to
+        Fabric so the next file that draws cannot re-break it.
+    -   **Verified by the image-diff harness written first for exactly this** (see Quality &
+        operations): eight of nine reference images byte-identical to the Fabric 5 output.
+        The ninth moves the deck list's three separator rules up one pixel, because Fabric 5
+        drew a zero-height stroked `Line` one pixel below its declared y — confirmed
+        independent of the origin change, with nothing else in the image moving.
+    -   The harness needed two fixes to be trustworthy: `playwright`/`pngjs` were never
+        declared (npm pruned playwright as extraneous on the first install), and Playwright
+        quietly prefers the headless shell over full Chromium, which rasterises text
+        differently and read exactly like a rendering regression. The browser binary is
+        pinned now and its identity recorded next to the baselines.
+    -   Avatar upload — the only place the server draws with Fabric on a request path — had
+        no coverage and now has a test that drives a real upload through `processAvatar`.
+-   [x] **`socket.io-parser` patched to 4.2.7** — through 4.2.6 a peer could announce a
+        binary event with zero attachments and the reconstructor held it open indefinitely
+        (GHSA-2m8v-j782-fhvr), reachable by any connected client. A patch inside the range
+        `socket.io` already asked for, so no constraint changed.
+-   [x] **`precss` removed.** Declared as a devDependency, imported by nothing, and absent
+        from `postcss.config.cjs`, which loads only `@tailwindcss/postcss` — dead weight
+        carried over from the fork. It dragged in `postcss-preset-env@6` (2018) and with it
+        the last remaining high advisory plus forty moderates, none of which had a fix
+        available upstream. The built stylesheet keeps the same content hash, which is the
+        proof it was inert.
 -   [x] **Replaced the unmaintained `patreon` package with direct `fetch`.** It was three
         HTTP calls wrapped in a package that has been abandoned for years; it now talks to
         Patreon's **v2** API, because the package spoke the long-deprecated v1. Three high
@@ -367,7 +385,8 @@ shared across lobby processes; what remains is the `fabric` upgrade.
         with a test — and the lockout is now visible from a second lobby process, not only
         the one that counted the failures.
 -   [x] No high or critical advisory outstanding in `npm audit`, or each is documented with a
-        reason. Down to a single documented root (`fabric`) from two.
+        reason. Zero of either remain; the five moderates left are all build-time and none is
+        in the production graph.
 -   [x] `docs/SECURITY.md` exists with the checklist, the date it was last run, and the
         results.
 
@@ -1702,9 +1721,21 @@ competitive advantage.
 -   [x] Gameplay regression suite kept green on every PR (the full card suite runs in CI).
 -   [x] **In-app bug reports** (BugReportService, migration 34) with an admin triage page —
         the beta feedback channel.
--   [ ] Data migration/versioning discipline: ledger + runner, one numbered migration per
+-   [x] Data migration/versioning discipline: ledger + runner, one numbered migration per
         schema change → **I2**.
--   [ ] Security: dependency audit, auth rate limiting, OWASP pass before launch → **I5**.
+-   [x] Security: dependency audit, auth rate limiting, OWASP pass before launch → **I5**.
+-   [x] **Image-diff harness over the archon maker** (`npm run test:images`). The deck
+        list, the card back and every card image are drawn by Fabric in
+        `client/archonMaker.js`, and nothing in the suite looked at the result — a
+        library upgrade, a font change or a token change could move text a pixel or drop
+        a shadow with every test still green. Nine reference images render in a real
+        browser against the Vite dev server (not `dist/`, which would baseline the
+        previous release) and are compared byte for byte; a size change is a hard
+        failure. Built before the Fabric upgrade and proved to fail first: a one-pixel
+        shift injected into the deck-list card title moved 5.1% of that image and left
+        the other seven at 0.0000%. The Chromium binary is pinned and recorded with the
+        baselines, because the headless shell and full Chromium do not rasterise text
+        identically and the difference reads exactly like a regression.
 -   [ ] Load testing for game nodes + matchmaking before public launch → **N10**.
 -   [x] Upstream sync process: `npm run sync:upstream` plus a weekly workflow that applies
         keyteki's gameplay changes, runs the full gate, and opens a PR only when it is green —

@@ -151,7 +151,6 @@
         "pegjs": "^0.10.0",
         "playwright-core": "^1.56.0",
         "pngjs": "^5.0.0",
-        "precss": "^4.0.0",
         "prettier": "^2.0.5",
         "typescript": "^5.4.5",
         "vite": "^7.3.2",
