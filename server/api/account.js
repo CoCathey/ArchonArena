@@ -7,7 +7,7 @@ const _ = require('underscore');
 const EmailService = require('../services/EmailService');
 const fs = require('fs');
 const path = require('path');
-const { fabric } = require('fabric');
+const { FabricImage, StaticCanvas } = require('../fabricNode');
 
 const logger = require('../log.js');
 const { wrapAsync } = require('../util.js');
@@ -245,33 +245,32 @@ async function getRandomAvatar(user) {
     await fs.promises.writeFile(buildPngPath('public/img/avatar', user.username), avatar);
 }
 
-function processImage(image, width, height) {
-    return new Promise((resolve, reject) => {
-        const canvas = new fabric.StaticCanvas();
-        canvas.setWidth(width);
-        canvas.setHeight(height);
-        fabric.Image.fromURL(
-            'data:image/png;base64,' + image,
-            (img) => {
-                if (!img || img.getElement() == null) {
-                    reject(new Error('Error occurred in fabric'));
-                } else {
-                    img.scaleToWidth(width)
-                        .scaleToHeight(height)
-                        .set({
-                            originX: 'center',
-                            originY: 'center',
-                            left: width / 2,
-                            top: height / 2
-                        });
-                    canvas.add(img);
-                    canvas.renderAll();
-                    resolve(canvas);
-                }
-            },
-            { crossOrigin: 'anonymous' }
-        );
+async function processImage(image, width, height) {
+    const canvas = new StaticCanvas(null, { width, height });
+    // Fabric rejects rather than yielding a null image when the data URL will
+    // not decode, so an unusable avatar arrives here as a throw and is caught
+    // by the caller exactly as the old null check was.
+    const img = await FabricImage.fromURL('data:image/png;base64,' + image, {
+        crossOrigin: 'anonymous'
     });
+
+    if (!img || img.getElement() == null) {
+        throw new Error('Error occurred in fabric');
+    }
+
+    // Not chained: from v6 these return nothing rather than the object.
+    img.scaleToWidth(width);
+    img.scaleToHeight(height);
+    img.set({
+        originX: 'center',
+        originY: 'center',
+        left: width / 2,
+        top: height / 2
+    });
+    canvas.add(img);
+    canvas.renderAll();
+
+    return canvas;
 }
 
 async function processAvatar(newUser, user) {

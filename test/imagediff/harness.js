@@ -19,12 +19,10 @@
  *    Fabric measures text at draw time and an unloaded font silently falls back
  *    to a different metric.
  */
-import * as fabricModule from 'fabric';
+import { StaticCanvas } from 'fabric';
 
 import { buildCard, buildCardBack, buildDeckList } from '../../client/archonMaker';
 import '../../client/styles/tailwind.css';
-
-const fabric = fabricModule.fabric ?? fabricModule.default ?? fabricModule;
 
 /** Stand-in card art: deterministic, offline, and visibly wrong if it vanishes. */
 const stubArt = () => {
@@ -199,7 +197,7 @@ async function renderSubject(name) {
     const element = document.createElement('canvas');
     document.getElementById('stage').appendChild(element);
 
-    const canvas = new fabric.StaticCanvas(element);
+    const canvas = new StaticCanvas(element);
     canvas.renderOnAddRemove = false;
 
     await SUBJECTS[name](canvas);

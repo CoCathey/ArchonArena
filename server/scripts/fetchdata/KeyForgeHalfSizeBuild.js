@@ -1,11 +1,8 @@
-const { fabric } = require('fabric');
+const { FabricImage, FabricText, Shadow, StaticCanvas, util } = require('../../fabricNode');
 const { registerFont } = require('canvas');
 const fs = require('fs');
 const path = require('path');
-const loadImage = (imgPath) =>
-    new Promise((resolve) => {
-        fabric.Image.fromURL(imgPath, (image) => resolve(image));
-    });
+const loadImage = (imgPath) => FabricImage.fromURL(imgPath);
 const parameters = {
     action: { top: 0, height: 250, width: 297.5 },
     artifact: { top: 0, height: 250, width: 297.5 },
@@ -57,12 +54,12 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
         return;
     }
 
-    const canvas = new fabric.StaticCanvas(null, {
+    const canvas = new StaticCanvas(null, {
         width: parameters[card.type].width,
         height: parameters[card.type].height
     });
     canvas.renderOnAddRemove = false;
-    const canvasFinal = new fabric.StaticCanvas(null, { width: 300, height: 262.5 });
+    const canvasFinal = new StaticCanvas(null, { width: 300, height: 262.5 });
     canvasFinal.renderOnAddRemove = false;
     let framePath = assetsPath + `/${card.house}_Frame`;
     if (card.type === 'upgrade') {
@@ -77,7 +74,7 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
     const frame = await loadImage(`file://${framePath}`);
     frame.scaleToWidth(300);
     const art = await loadImage(imgPath);
-    const artCanvas = new fabric.Image(art.toCanvasElement());
+    const artCanvas = new FabricImage(art.toCanvasElement());
     artCanvas.set({ top: parameters[card.type].top, left: 150, originX: 'center' });
 
     if (
@@ -90,7 +87,7 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
     }
     canvas.add(artCanvas);
     canvas.renderAll();
-    const finalArt = new fabric.Image(canvas.toCanvasElement(), { left: 150, originX: 'center' });
+    const finalArt = new FabricImage(canvas.toCanvasElement(), { left: 150, originX: 'center' });
     if (card.type === 'upgrade') {
         finalArt.set({ top: 19 });
     }
@@ -107,18 +104,18 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
     let barCanvas;
     let Power;
     let Armor;
-    let Name = new fabric.Text(localizedName, {
+    let Name = new FabricText(localizedName, {
         fill: '#fdfbfa',
         fontFamily: 'TeutonFett',
         textAlign: 'center',
         fontSize: 20,
-        shadow: new fabric.Shadow(shadowProps)
+        shadow: new Shadow(shadowProps)
     });
-    let cardType = new fabric.Text(
+    let cardType = new FabricText(
         card.type === 'creature1' ? 'CREATURE' : card.type.toUpperCase(),
         {
             fill: '#fdfbfa',
-            shadow: new fabric.Shadow({ ...shadowProps, offsetX: 1, offsetY: 1, blur: 1 }),
+            shadow: new Shadow({ ...shadowProps, offsetX: 1, offsetY: 1, blur: 1 }),
             fontFamily: 'TeutonFett',
             textAlign: 'center',
             fontSize: 8
@@ -144,7 +141,7 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
             });
 
             bar = await loadImage(`file://${assetsPath + `/${card.house}_Action.png`}`);
-            barCanvas = new fabric.Image(bar.toCanvasElement()).set({
+            barCanvas = new FabricImage(bar.toCanvasElement()).set({
                 originX: 'center',
                 originY: 'center',
                 top: 230,
@@ -164,7 +161,7 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
                     `/${card.house}_${card.rarity === 'Evil Twin' ? 'eviltwin' : 'Creature'}.png`
                 }`
             );
-            barCanvas = new fabric.Image(bar.toCanvasElement()).set({
+            barCanvas = new FabricImage(bar.toCanvasElement()).set({
                 originX: 'center',
                 originY: 'center',
                 top: card.rarity === 'Evil Twin' ? 224 : 230,
@@ -173,20 +170,20 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
             barCanvas.scaleToWidth(270);
             Name = getCircularText(localizedName, 1200);
             cardType.set({ originX: 'center', originY: 'center', left: 150, top: 242.5 });
-            Power = new fabric.Text(card.power ? card.power.toString() : '0', {
+            Power = new FabricText(card.power ? card.power.toString() : '0', {
                 fill: '#fdfbfa',
                 fontSize: 37.5,
-                shadow: new fabric.Shadow(shadowProps),
+                shadow: new Shadow(shadowProps),
                 fontFamily: 'Bombardier',
                 fontWeight: 800,
                 textAlign: 'center',
                 stroke: 'black',
                 strokeWidth: 1
             });
-            Armor = new fabric.Text(card.armorTotal > 0 ? card.armor.toString() : '~', {
+            Armor = new FabricText(card.armorTotal > 0 ? card.armor.toString() : '~', {
                 fill: '#fdfbfa',
                 fontSize: 37.5,
-                shadow: new fabric.Shadow(shadowProps),
+                shadow: new Shadow(shadowProps),
                 fontFamily: 'Bombardier',
                 fontWeight: 800,
                 textAlign: 'center',
@@ -203,9 +200,9 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
             });
             canvasFinal.add(barCanvas, Name, Power, Armor, cardType);
             if (card.rarity === 'Evil Twin') {
-                let EvilTwin = new fabric.Text('EVIL TWIN', {
+                let EvilTwin = new FabricText('EVIL TWIN', {
                     fill: '#fdfbfa',
-                    shadow: new fabric.Shadow({ ...shadowProps, offsetX: 1, offsetY: 1, blur: 1 }),
+                    shadow: new Shadow({ ...shadowProps, offsetX: 1, offsetY: 1, blur: 1 }),
                     fontFamily: 'TeutonFett',
                     textAlign: 'center',
                     fontSize: 8
@@ -218,7 +215,7 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
             Name = getCircularText(localizedName, 1200);
             bar = await loadImage(`file://${assetsPath + `/${card.house}_Upgrade.png`}`);
             if (card.house === 'untamed') {
-                barCanvas = new fabric.Image(bar.toCanvasElement()).set({
+                barCanvas = new FabricImage(bar.toCanvasElement()).set({
                     originX: 'center',
                     originY: 'center',
                     top: 40,
@@ -228,7 +225,7 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
                 Name.set({ originX: 'center', left: 153, top: 13 });
                 cardType.set({ originX: 'center', originY: 'center', left: 153, top: 55 });
             } else {
-                barCanvas = new fabric.Image(bar.toCanvasElement()).set({
+                barCanvas = new FabricImage(bar.toCanvasElement()).set({
                     originX: 'center',
                     originY: 'center',
                     top: 40,
@@ -246,7 +243,7 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
             Name = getCircularText(card.locale[language].name, 1200);
             bar = await loadImage(`file://${assetsPath + `/${card.house}_Upgrade.png`}`);
             if (card.house === 'untamed') {
-                barCanvas = new fabric.Image(bar.toCanvasElement()).set({
+                barCanvas = new FabricImage(bar.toCanvasElement()).set({
                     originX: 'center',
                     originY: 'center',
                     top: 39,
@@ -256,7 +253,7 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
                 Name.set({ originX: 'center', left: 153, top: 13 });
                 cardType.set({ originX: 'center', originY: 'center', left: 153, top: 54 });
             } else {
-                barCanvas = new fabric.Image(bar.toCanvasElement()).set({
+                barCanvas = new FabricImage(bar.toCanvasElement()).set({
                     originX: 'center',
                     originY: 'center',
                     top: 41,
@@ -298,7 +295,7 @@ const buildHalfSize = async (card, imgPath, filename, language) => {
 };
 
 const getCircularText = (text = '', diameter, yOffset = 0) => {
-    const canvas = fabric.util.createCanvasElement();
+    const canvas = util.createCanvasElement();
 
     let ctx = canvas.getContext('2d');
     let textHeight = 40,
@@ -333,7 +330,7 @@ const getCircularText = (text = '', diameter, yOffset = 0) => {
         ctx.rotate((charWid / 2 / (diameter / 2 - textHeight)) * -1); // rotate half letter
     }
 
-    return new fabric.Image(canvas, { left: 0, top: 0 });
+    return new FabricImage(canvas, { left: 0, top: 0 });
 };
 
 const getCurvedFontSize = (length) => {

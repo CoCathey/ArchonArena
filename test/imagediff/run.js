@@ -16,7 +16,12 @@
  * `dist/` would be a baseline of the previous release.
  */
 const { createServer } = require('vite');
-const { chromium } = require('playwright');
+// `playwright-core`, not `playwright`: the full package downloads three
+// browsers on postinstall, which is a tax on everybody who never runs this.
+// The version is pinned to the one whose bundled Chromium revision matches the
+// baselines - a different Chromium renders text differently, so bumping it
+// means recapturing them.
+const { chromium } = require('playwright-core');
 const fs = require('node:fs');
 const path = require('node:path');
 const { PNG } = require('pngjs');
@@ -24,6 +29,19 @@ const { PNG } = require('pngjs');
 const BASELINE_DIR = path.join(__dirname, 'baseline');
 const OUTPUT_DIR = path.join(__dirname, 'current');
 const DIFF_DIR = path.join(__dirname, 'diff');
+const BROWSER_FILE = path.join(BASELINE_DIR, 'browser.json');
+
+/**
+ * Which Chromium to draw with.
+ *
+ * This is explicit rather than left to `chromium.launch()` because Playwright
+ * quietly prefers the headless shell over the full browser, and the two do not
+ * rasterise text identically - swapping between them moves antialiased glyph
+ * edges all over every image that has any text on it. That reads exactly like a
+ * rendering regression and is not one, so the binary is pinned and its identity
+ * is recorded next to the baselines.
+ */
+const chromiumPath = () => process.env.CHROMIUM_PATH || chromium.executablePath();
 
 // Anti-aliasing of the same glyph can legitimately differ by a hair between
 // runs of the same browser build. This tolerance forgives that and nothing
@@ -110,9 +128,14 @@ function comparePngs(baseline, current) {
 
     await server.listen();
 
-    const browser = await chromium.launch({
-        executablePath: process.env.CHROMIUM_PATH || undefined
-    });
+    const executablePath = chromiumPath();
+    const browser = await chromium.launch({ executablePath });
+    // The path itself is machine-specific, so only the parts that decide how
+    // glyphs land are recorded: which binary, and which build of it.
+    const fingerprint = {
+        executable: path.basename(executablePath),
+        version: browser.version()
+    };
     // Pinned so a different device pixel ratio cannot silently rescale
     // everything and read as a diff.
     const page = await browser.newPage({
@@ -136,9 +159,29 @@ function comparePngs(baseline, current) {
             console.warn('WARNING: PoppinsMedium did not report as loaded; text metrics may drift');
         }
 
+        if (updating) {
+            fs.writeFileSync(BROWSER_FILE, `${JSON.stringify(fingerprint, null, 4)}\n`);
+        } else if (fs.existsSync(BROWSER_FILE)) {
+            const recorded = JSON.parse(fs.readFileSync(BROWSER_FILE, 'utf8'));
+
+            if (
+                recorded.executable !== fingerprint.executable ||
+                recorded.version !== fingerprint.version
+            ) {
+                console.warn(
+                    `WARNING: baselines were captured with ${recorded.executable} ` +
+                        `${recorded.version}, this run is using ${fingerprint.executable} ` +
+                        `${fingerprint.version}. Any text that moves is the browser, not the code.\n`
+                );
+            }
+        }
+
         const names = await page.evaluate(() => window.__subjectNames);
 
-        console.log(`${updating ? 'Capturing' : 'Comparing'} ${names.length} images\n`);
+        console.log(
+            `${updating ? 'Capturing' : 'Comparing'} ${names.length} images ` +
+                `with ${fingerprint.executable} ${fingerprint.version}\n`
+        );
 
         for (const name of names) {
             const dataUrl = await page.evaluate((subject) => window.__renderSubject(subject), name);

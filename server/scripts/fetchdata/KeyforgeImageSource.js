@@ -1,6 +1,6 @@
 /*eslint no-console:0 */
 const fs = require('fs');
-const { fabric } = require('fabric');
+const { FabricImage, StaticCanvas } = require('../../fabricNode');
 const path = require('path');
 const KeyForgeHalfSizeBuild = require('./KeyForgeHalfSizeBuild');
 
@@ -26,13 +26,18 @@ class KeyforgeImageSource {
 
     async buildGigantics(card, language, imageLangDir, imgPath) {
         console.log(`Built gigantic image for ${card.id} in ${language}`);
-        const canvas = new fabric.StaticCanvas();
+        const canvas = new StaticCanvas(null, { width: 300, height: 420 });
         canvas.renderOnAddRemove = false;
-        canvas.setDimensions({ width: 300, height: 420 });
         const bottom = await this.loadImage(path.join(imageLangDir, card + '.png'));
         const top = await this.loadImage(path.join(imageLangDir, card + '2.png'));
-        top.rotate(-90).scaleToWidth(300).set({ top: 210, left: 0 });
-        bottom.rotate(-90).scaleToWidth(300).set({ top: 420, left: 0 });
+        // Not chained: from v6 `rotate` and `scaleToWidth` return nothing
+        // rather than the object.
+        top.rotate(-90);
+        top.scaleToWidth(300);
+        top.set({ top: 210, left: 0 });
+        bottom.rotate(-90);
+        bottom.scaleToWidth(300);
+        bottom.set({ top: 420, left: 0 });
 
         canvas.add(top);
         canvas.add(bottom);
@@ -48,9 +53,7 @@ class KeyforgeImageSource {
     }
 
     loadImage(imgPath) {
-        return new Promise((resolve) => {
-            fabric.Image.fromURL(`file://${imgPath}`, (image) => resolve(image));
-        });
+        return FabricImage.fromURL(`file://${imgPath}`);
     }
 }
 

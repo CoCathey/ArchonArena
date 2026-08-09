@@ -1,10 +1,8 @@
-import * as fabricModule from 'fabric';
+import { StaticCanvas } from 'fabric';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSelector } from 'react-redux';
 import { buildCard, houselessCards } from '../../archonMaker';
-
-const fabric = fabricModule.fabric ?? fabricModule.default ?? fabricModule;
 
 /**
  * @typedef CardImageProps
@@ -96,7 +94,7 @@ const CardImage = ({ card, cardBack, size, halfSize, onMouseOver, onMouseOut }) 
 
         if (!fabricRef.current) {
             try {
-                fabricRef.current = new fabric.StaticCanvas(node);
+                fabricRef.current = new StaticCanvas(node);
                 fabricRef.current.renderOnAddRemove = false;
             } catch {
                 fabricRef.current = null;

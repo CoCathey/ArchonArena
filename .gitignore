@@ -68,3 +68,7 @@ dump.rdb
 # Image-diff harness output (baselines ARE committed; these are per-run)
 test/imagediff/current/
 test/imagediff/diff/
+# Which browser drew the baselines. Tracked alongside them - it is what tells
+# you a text diff is the renderer rather than the code - so it has to be
+# exempted from the broad *.json rule above.
+!test/imagediff/baseline/browser.json

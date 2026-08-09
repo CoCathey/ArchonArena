@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import * as fabricModule from 'fabric';
-
-const fabric = fabricModule.fabric ?? fabricModule.default ?? fabricModule;
+import { StaticCanvas } from 'fabric';
 
 import { buildDeckList } from '../../archonMaker';
 
@@ -29,7 +27,7 @@ const IdentityCardImage = ({ deck, size, showAccolades = true }) => {
 
         if (!fabricRef.current) {
             try {
-                fabricRef.current = new fabric.StaticCanvas(node);
+                fabricRef.current = new StaticCanvas(node);
                 fabricRef.current.renderOnAddRemove = false;
             } catch {
                 fabricRef.current = null;

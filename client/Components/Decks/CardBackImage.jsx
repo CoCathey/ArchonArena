@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import * as fabricModule from 'fabric';
+import { StaticCanvas } from 'fabric';
 
-const fabric = fabricModule.fabric ?? fabricModule.default ?? fabricModule;
 import { buildCardBack } from '../../archonMaker';
 
 const CardBackImage = ({ className = 'block h-full w-full', deck, showDeckName = true, size }) => {
@@ -17,7 +16,7 @@ const CardBackImage = ({ className = 'block h-full w-full', deck, showDeckName =
 
         if (!fabricRef.current) {
             try {
-                fabricRef.current = new fabric.StaticCanvas(node);
+                fabricRef.current = new StaticCanvas(node);
                 fabricRef.current.renderOnAddRemove = false;
             } catch {
                 fabricRef.current = null;
