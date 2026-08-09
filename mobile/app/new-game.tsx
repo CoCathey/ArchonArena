@@ -77,6 +77,10 @@ export default function NewGameScreen() {
     const [expansions, setExpansions] = useState<Record<string, boolean>>({
         ...DEFAULT_EXPANSIONS
     });
+    const [luckyDice, setLuckyDice] = useState(false);
+    const [sasBound, setSasBound] = useState(false);
+    const [sasMin, setSasMin] = useState('60');
+    const [sasMax, setSasMax] = useState('80');
     const [requirePassword, setRequirePassword] = useState(false);
     const [password, setPassword] = useState('');
     const [allowSpectators, setAllowSpectators] = useState(true);
@@ -99,6 +103,9 @@ export default function NewGameScreen() {
     }, [submitted, currentGame]);
 
     const sealed = gameFormat === 'sealed';
+    // Neither deck rule can apply where players do not choose their own deck.
+    // Sealed deals them, so the server forces both off there.
+    const deckRules = !sealed;
     const chosenSets = useMemo(
         () => EXPANSIONS.filter((expansion) => expansions[expansion.name]).length,
         [expansions]
@@ -112,6 +119,15 @@ export default function NewGameScreen() {
         );
 
     const create = () => {
+        const min = parseInt(sasMin, 10);
+        const max = parseInt(sasMax, 10);
+        // The server re-normalizes the range anyway (integers, clamped,
+        // swapped if backwards); this just avoids sending it nonsense.
+        const bound =
+            deckRules && sasBound && Number.isFinite(min) && Number.isFinite(max)
+                ? { min: Math.min(min, max), max: Math.max(min, max) }
+                : undefined;
+
         const details = {
             name: name.trim() || `${username ?? 'My'}'s game`,
             password: requirePassword ? password : '',
@@ -122,6 +138,8 @@ export default function NewGameScreen() {
             hideDeckLists,
             gamePrivate,
             gameFormat,
+            luckyDice: deckRules && luckyDice,
+            sasBound: bound,
             useGameTimeLimit: useTimeLimit,
             gameTimeLimit: Math.max(10, Math.min(120, parseInt(timeLimit, 10) || 45)),
             quickJoin,
@@ -229,6 +247,42 @@ export default function NewGameScreen() {
 
                 {!quickJoin ? (
                     <>
+                        {deckRules ? (
+                            <>
+                                <Text style={styles.sectionLabel}>Deck rules</Text>
+                                <ToggleRow
+                                    label='Lucky Dice'
+                                    hint='Both players are dealt a random deck from their collection when the game starts.'
+                                    value={luckyDice}
+                                    onChange={setLuckyDice}
+                                />
+                                <ToggleRow
+                                    label='SAS Bound'
+                                    hint='Only decks with a SAS rating inside your range can be played.'
+                                    value={sasBound}
+                                    onChange={setSasBound}
+                                />
+                                {sasBound ? (
+                                    <View style={styles.sasRow}>
+                                        <TextField
+                                            label='Min SAS'
+                                            value={sasMin}
+                                            onChangeText={setSasMin}
+                                            keyboardType='number-pad'
+                                            containerStyle={{ flex: 1, marginBottom: 0 }}
+                                        />
+                                        <TextField
+                                            label='Max SAS'
+                                            value={sasMax}
+                                            onChangeText={setSasMax}
+                                            keyboardType='number-pad'
+                                            containerStyle={{ flex: 1, marginBottom: 0 }}
+                                        />
+                                    </View>
+                                ) : null}
+                            </>
+                        ) : null}
+
                         <View style={{ height: spacing.md }} />
                         <ToggleRow
                             label='Allow spectators'
@@ -397,6 +451,11 @@ const styles = StyleSheet.create({
     setsWarning: {
         color: colors.warning,
         fontSize: 12,
+        marginTop: spacing.sm
+    },
+    sasRow: {
+        flexDirection: 'row',
+        gap: spacing.md,
         marginTop: spacing.sm
     },
     toggleRow: {

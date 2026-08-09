@@ -59,6 +59,10 @@ function GameRow(props: {
                         // put in front of a player.
                         <Badge text={formatLabel(game.gameFormat)} />
                     ) : null}
+                    {game.luckyDice ? <Badge text='🎲 lucky dice' /> : null}
+                    {game.sasBound ? (
+                        <Badge text={`SAS ${game.sasBound.min}–${game.sasBound.max}`} />
+                    ) : null}
                     {game.needsPassword ? <Badge text='🔒 password' /> : null}
                     {game.showHand ? <Badge text='open hands' /> : null}
                 </View>

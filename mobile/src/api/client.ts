@@ -267,6 +267,13 @@ export interface DeckQuery {
      * web client applies.
      */
     isAlliance?: boolean;
+    /**
+     * SAS range, for the picker in a SAS-bound game. Compared on the DeckSas
+     * join, so decks DoK has not rated drop out — the same rule the game
+     * itself enforces on selection.
+     */
+    sasMin?: number;
+    sasMax?: number;
 }
 
 export async function fetchDecks(options: DeckQuery = {}) {
@@ -288,6 +295,12 @@ export async function fetchDecks(options: DeckQuery = {}) {
     }
     if (options.isAlliance !== undefined) {
         filter.push({ name: 'isAlliance', value: options.isAlliance });
+    }
+    if (options.sasMin !== undefined) {
+        filter.push({ name: 'sasMin', value: options.sasMin });
+    }
+    if (options.sasMax !== undefined) {
+        filter.push({ name: 'sasMax', value: options.sasMax });
     }
     if (filter.length > 0) {
         params.set('filter', JSON.stringify(filter));

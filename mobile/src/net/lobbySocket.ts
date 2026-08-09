@@ -174,6 +174,15 @@ export const lobby = {
     getSealedDeck(gameId: string): void {
         emit('getsealeddeck', gameId);
     },
+    /**
+     * Lucky Dice: let the server pick a random deck. It rolls over the whole
+     * collection — which the app only ever holds a page of — and applies the
+     * game's own rules (alliance, SAS bound) to the roll.
+     */
+    selectRandomDeck(gameId: string): void {
+        useLobbyStore.getState().setGameError(undefined);
+        emit('selectrandomdeck', gameId);
+    },
     pendingChat(message: string): void {
         emit('chat', message);
     },

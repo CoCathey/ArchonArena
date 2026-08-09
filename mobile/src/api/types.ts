@@ -142,6 +142,10 @@ export interface GameSummary {
     useGameTimeLimit?: boolean;
     gameTimeLimit?: number;
     adaptive?: boolean;
+    /** Both players are dealt a random deck when the owner starts the game. */
+    luckyDice?: boolean;
+    /** Only decks whose SAS sits in this range may be played. */
+    sasBound?: { min: number; max: number };
     createdAt?: string;
     players: Record<string, GamePlayerSummary>;
     spectators?: { id?: string; name: string }[];
@@ -392,6 +396,10 @@ export interface NewGameRequest {
     useGameTimeLimit?: boolean;
     gameTimeLimit?: number;
     quickJoin?: boolean;
+    /** Deal both players a random deck when the game starts. */
+    luckyDice?: boolean;
+    /** Restrict playable decks to this SAS range. */
+    sasBound?: { min: number; max: number };
     expansions: Record<string, boolean>;
     [key: string]: unknown;
 }

@@ -47,17 +47,24 @@ export default function PendingGameScreen() {
     const insets = useSafeAreaInsets();
 
     const gameFormat = currentGame?.gameFormat ?? 'normal';
-    // Sealed hands both players a generated deck; there is nothing to pick.
+    // Sealed hands both players a generated deck; Lucky Dice rolls one for each
+    // of them when the owner starts. Neither has anything to pick.
     const isSealed = gameFormat === 'sealed';
+    const isLuckyDice = !!currentGame?.luckyDice;
+    const sasBound = currentGame?.sasBound;
+    const choosesOwnDeck = !isSealed && !isLuckyDice;
 
     // The collection pages in from the server (search/sort/house filter all run
-    // there), so every deck is reachable rather than just the first page.
-    // Alliance decks are legal in an alliance game and only there, so the
-    // picker never offers a deck the game would reject.
+    // there), so every deck is reachable rather than just the first page. The
+    // picker also applies the game's own rules — alliance decks are legal in an
+    // alliance game and only there, and a SAS bound hides what it would refuse
+    // — so it never offers a deck the game would reject.
     const library = useDeckLibrary({
         pageSize: 30,
         enabled: deckModal,
-        isAlliance: gameFormat === 'alliance'
+        isAlliance: gameFormat === 'alliance',
+        sasMin: sasBound?.min,
+        sasMax: sasBound?.max
     });
 
     // Handoff arrives when the owner starts the game: open the board.
@@ -157,7 +164,27 @@ export default function PendingGameScreen() {
         >
             <ScrollView contentContainerStyle={{ padding: spacing.md }}>
                 <Text style={styles.gameName}>{currentGame.name}</Text>
-                <Text style={styles.gameMeta}>{formatLabel(currentGame.gameFormat)}</Text>
+                <View style={styles.gameMetaRow}>
+                    <Text style={styles.gameMeta}>{formatLabel(currentGame.gameFormat)}</Text>
+                    {isLuckyDice ? <Text style={styles.ruleBadge}>🎲 Lucky Dice</Text> : null}
+                    {sasBound ? (
+                        <Text style={styles.ruleBadge}>
+                            SAS {sasBound.min}–{sasBound.max}
+                        </Text>
+                    ) : null}
+                </View>
+                {isLuckyDice ? (
+                    <Text style={styles.ruleHint}>
+                        Both players are dealt a random deck from their collection when the game
+                        starts.
+                    </Text>
+                ) : null}
+                {sasBound ? (
+                    <Text style={styles.ruleHint}>
+                        Only decks rated between {sasBound.min} and {sasBound.max} SAS can be
+                        played.
+                    </Text>
+                ) : null}
 
                 <ErrorBanner message={gameError} />
 
@@ -182,6 +209,8 @@ export default function PendingGameScreen() {
                                             : 'Deck selected'
                                         : isSealed
                                         ? 'Dealing a sealed deck…'
+                                        : isLuckyDice
+                                        ? 'Rolls a deck when the game starts'
                                         : 'Choosing a deck…'}
                                 </Text>
                                 {/* The server sends the opponent's SAS too, unless
@@ -193,13 +222,24 @@ export default function PendingGameScreen() {
                                 ) : null}
                             </View>
                         </View>
-                        {player.name === username && !isSealed ? (
-                            <Button
-                                small
-                                variant='secondary'
-                                title='Select deck'
-                                onPress={openDeckModal}
-                            />
+                        {player.name === username && choosesOwnDeck ? (
+                            <View style={styles.seatActions}>
+                                <Button
+                                    small
+                                    variant='secondary'
+                                    title='Select deck'
+                                    onPress={openDeckModal}
+                                />
+                                {/* Rolled server side: it draws from the whole
+                                    collection, which the app only ever holds a
+                                    page of. */}
+                                <Button
+                                    small
+                                    variant='ghost'
+                                    title='🎲 Lucky Dice'
+                                    onPress={() => lobby.selectRandomDeck(currentGame.id)}
+                                />
+                            </View>
                         ) : null}
                     </Card>
                 ))}
@@ -468,9 +508,7 @@ const styles = StyleSheet.create({
     gameMeta: {
         color: colors.textDim,
         fontSize: 13,
-        marginTop: 2,
-        marginBottom: spacing.md,
-        textTransform: 'capitalize'
+        fontWeight: '600'
     },
     playerRow: {
         flexDirection: 'row',
@@ -498,6 +536,35 @@ const styles = StyleSheet.create({
         color: colors.brand,
         fontSize: 12,
         fontWeight: '800'
+    },
+    gameMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: spacing.sm,
+        marginTop: 2,
+        marginBottom: spacing.sm
+    },
+    ruleBadge: {
+        color: colors.brand,
+        fontSize: 11,
+        fontWeight: '800',
+        backgroundColor: colors.surface,
+        borderColor: colors.border,
+        borderWidth: 1,
+        borderRadius: radius.pill,
+        paddingHorizontal: 9,
+        paddingVertical: 3,
+        overflow: 'hidden'
+    },
+    ruleHint: {
+        color: colors.textFaint,
+        fontSize: 11,
+        lineHeight: 15,
+        marginBottom: spacing.sm
+    },
+    seatActions: {
+        gap: 4
     },
     waiting: {
         color: colors.textDim,
