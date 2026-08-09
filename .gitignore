@@ -64,3 +64,7 @@ tmp/
 .env.*.bak.*
 config/local*.json5
 dump.rdb
+
+# Image-diff harness output (baselines ARE committed; these are per-run)
+test/imagediff/current/
+test/imagediff/diff/

@@ -24,7 +24,9 @@
         "migrate": "node server/scripts/migrate.js",
         "sync:upstream": "node server/scripts/upstream-sync.js",
         "check:email": "node server/scripts/check-email.js",
-        "backfill:ratings": "node server/scripts/backfill-ratings.js"
+        "backfill:ratings": "node server/scripts/backfill-ratings.js",
+        "test:images": "node test/imagediff/run.js",
+        "test:images:update": "node test/imagediff/run.js --update"
     },
     "lint-staged": {
         "!(*.{js,jsx,ts,tsx})": "prettier --ignore-unknown --write",
