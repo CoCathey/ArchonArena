@@ -33,7 +33,25 @@ class MenuPrompt extends UiPrompt {
         let promptTitle =
             this.properties.promptTitle ||
             (this.properties.source ? this.properties.source.name : undefined);
-        return _.extend({ promptTitle: promptTitle }, this.properties.activePrompt);
+        let activePrompt = _.extend({ promptTitle: promptTitle }, this.properties.activePrompt);
+
+        // Let the client attribute this prompt to the card that raised it,
+        // even for control types (card-name, trait-name) that don't already
+        // carry a source of their own.
+        let source = this.properties.source;
+        if (
+            source &&
+            typeof source !== 'string' &&
+            source.type &&
+            Array.isArray(activePrompt.controls)
+        ) {
+            let sourceSummary = source.getShortSummary();
+            activePrompt.controls = activePrompt.controls.map((control) =>
+                control.source ? control : _.extend({ source: sourceSummary }, control)
+            );
+        }
+
+        return activePrompt;
     }
 
     waitingPrompt() {

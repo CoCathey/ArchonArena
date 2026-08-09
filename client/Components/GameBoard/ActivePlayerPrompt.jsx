@@ -7,6 +7,7 @@ import CardNameLookup from './CardNameLookup';
 import HouseSelect from './HouseSelect';
 import OptionsSelect from './OptionsSelect';
 import TraitNameLookup from './TraitNameLookup';
+import { getPromptSourceAttribution } from './promptAttribution';
 
 import CardImage from './CardImage';
 
@@ -325,6 +326,8 @@ const ActivePlayerPrompt = (props) => {
         controlSource = props.controls[0].source;
     }
 
+    const sourceAttribution = getPromptSourceAttribution(props.controls);
+
     let promptTitle;
 
     if (props.promptTitle) {
@@ -375,6 +378,23 @@ const ActivePlayerPrompt = (props) => {
                 {promptTitle}
                 <div className='px-1 text-center'>
                     <h4 className='mb-2 text-base font-medium leading-snug'>{promptTexts}</h4>
+                    {sourceAttribution && (
+                        <div
+                            className='mb-2 flex items-center justify-center gap-2 text-sm text-foreground/78'
+                            onMouseOver={() => onMouseOver(sourceAttribution)}
+                            onMouseOut={() => onMouseOut(sourceAttribution)}
+                        >
+                            <div className='ability-targeting-card !h-16 !w-11 shrink-0'>
+                                <CardImage card={{ ...sourceAttribution, facedown: false }} />
+                            </div>
+                            <span>
+                                because of{' '}
+                                <span className='font-medium text-foreground'>
+                                    {sourceAttribution.name}
+                                </span>
+                            </span>
+                        </div>
+                    )}
                     <div className='space-y-1.5'>{getControls()}</div>
                     <div className='mt-2 space-y-1.5'>{getButtons()}</div>
                     {props.forcePassAvailable && (

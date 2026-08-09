@@ -85,7 +85,17 @@ class HandlerMenuPrompt extends UiPrompt {
 
     getAdditionalPromptControls() {
         if (this.properties.controls && this.properties.controls.type !== 'targeting') {
-            return this.properties.controls;
+            // Custom control types (e.g. house-select) don't carry their own
+            // source, but the prompt always knows one - attach it so the
+            // client can attribute the prompt to the card that raised it.
+            if (!this.source.type) {
+                return this.properties.controls;
+            }
+
+            let sourceSummary = this.source.getShortSummary();
+            return this.properties.controls.map((control) =>
+                control.source ? control : { ...control, source: sourceSummary }
+            );
         }
 
         let targets;

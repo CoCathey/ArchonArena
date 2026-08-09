@@ -56,10 +56,15 @@ class OptionsMenuPrompt extends UiPrompt {
             return { text: option.name, arg: option.value };
         });
 
+        let control = { type: 'options-select' };
+        if (this.source.type) {
+            control = { ...control, source: this.source.getShortSummary() };
+        }
+
         return {
             menuTitle: this.properties.activePromptTitle || 'Select one',
             buttons: buttons,
-            controls: [{ type: 'options-select' }],
+            controls: [control],
             promptTitle: this.promptTitle
         };
     }

@@ -999,7 +999,7 @@ the whole of what is left here.
 -   An admin can see and clear pending invite requests.
 -   The Android page links to an install that works on a clean device.
 
-#### N15 — Move-by-move clarity in the apps _(mobile done; web attribution and passive effects open)_
+#### N15 — Move-by-move clarity in the apps _(mobile and web prompts done; passive effects open)_
 
 **Why:** the Expo app keeps the play-by-play behind a slide-up sheet (`LogSheet`), so on a phone
 it is easy to miss what the opponent just did. And on both clients a prompt often asks for a
@@ -1014,11 +1014,20 @@ show it.
         and buttons from `values` or the serialized card, and a "because of _<card>_" context row
         renders `controls[].source` above the prompt with a thumbnail. This also fixed a literal
         `{{card}}` rendering as button text when playing from archives.
--   [ ] **Web client: still only interpolates, never attributes.** `ActivePlayerPrompt` resolves
-        `controls[0].source` into `{{card}}` placeholders (`localizedText`), so a prompt whose text
-        happens to mention the card reads correctly — but a prompt whose text does _not_ name it
-        shows nothing, and that is exactly the case the item was written for. The mobile
-        "because of _<card>_" row is the model to port.
+-   [x] **Web client: now attributes, not just interpolates.** `ActivePlayerPrompt` resolves
+        `controls[0].source` into `{{card}}` placeholders, but that only covered prompts whose text
+        happened to mention the card. The gap was structural, not just visual: `card-name`,
+        `trait-name`, `house-select` and `options-select` prompts (`MenuPrompt`, `HandlerMenuPrompt`,
+        `OptionsMenuPrompt`) never put a `source` on their control at all, on either client, so there
+        was nothing for even the mobile "because of" row to find. Fixed at the source: each of those
+        three prompt classes now attaches the already-known source card's `getShortSummary()` to any
+        control missing one (skipped when the source has no card `type`, matching the existing
+        `targeting`-control guard) — additive metadata only, no change to what any prompt resolves.
+        `ActivePlayerPrompt` renders the same "because of _<card>_" row the mobile app uses
+        (`getPromptSourceAttribution`, `client/Components/GameBoard/promptAttribution.js`), skipped
+        for `targeting` controls since `AbilityTargeting` already draws that source card itself.
+        Covered by `test/client/promptAttribution.spec.js`; the full 38k-test server suite stays
+        green, confirming no existing test's expectations about control shape broke.
 -   [ ] Same treatment for triggered and passive effects that change the board without prompting —
         untouched on both clients.
 
@@ -1026,10 +1035,13 @@ show it.
 **Acceptance criteria**
 
 -   [x] On a phone, a player can follow the opponent's whole turn without opening the log sheet.
--   [ ] Every prompt that originates from a card names that card. True on mobile; on web only when
-        the prompt text carries a `{{card}}` placeholder.
--   [x] Nothing about what the engine resolves changes — this is presentation only. The mobile work
-        is client-side interpolation and display over data the server already sent.
+-   [x] Every prompt that originates from a card names that card, on both clients — including
+        `card-name`/`trait-name`/`house-select`/`options-select` prompts, which previously carried no
+        source at all. Passive/triggered-effect attribution (no prompt involved) remains open.
+-   [x] Nothing about what the engine resolves changes — this is presentation only. Both the mobile
+        and web work is client-side display over data the server sends; the server-side change only
+        adds a `source` field to a control payload already sent to the client, and only when one
+        wasn't already present.
 
 #### N16 — Visual redesign: make it look premium
 
