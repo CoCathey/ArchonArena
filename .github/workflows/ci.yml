@@ -16,6 +16,23 @@ jobs:
     build:
         runs-on: ubuntu-latest
 
+        # The backup/restore rehearsal in test/deploy/backupRestore.spec.js runs
+        # deploy/backup.sh and deploy/restore.sh against a real server loaded
+        # with the whole of server/db/schema. A restore procedure nobody executes
+        # is a guess, so it is executed here rather than written down.
+        services:
+            postgres:
+                image: postgres:16
+                env:
+                    POSTGRES_PASSWORD: postgres
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd pg_isready
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+
         steps:
             - name: Checkout source
               uses: actions/checkout@v4
@@ -29,6 +46,12 @@ jobs:
             - name: Install dependencies
               run: npm ci --include=optional
 
+            # backup.sh shells out to pg_dump and restore.sh to psql, so the
+            # client tools have to be on the runner, not only in the service
+            # container.
+            - name: Install the PostgreSQL client
+              run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
             - name: Typecheck client
               run: npm run typecheck:client
 
@@ -40,3 +63,8 @@ jobs:
 
             - name: Test
               run: npm test
+              env:
+                  # Set rather than left to the scratch-cluster fallback, so a
+                  # service that failed to come up fails the run instead of
+                  # skipping the rehearsal.
+                  ARCHON_TEST_PG_URI: postgres://postgres:postgres@127.0.0.1:5432

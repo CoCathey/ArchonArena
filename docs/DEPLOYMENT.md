@@ -278,15 +278,113 @@ run at all if a migration that was already applied has since been edited.
 
 ## 6. Backups
 
-Nightly dump (add to root's crontab on the host):
+`deploy/backup.sh` produces one encrypted archive per night holding the database and the
+uploaded avatars and backgrounds, ships it off-host, verifies what arrived, prunes old
+copies, and records the run so `deploy/healthcheck.sh` can tell you when it stops
+happening.
 
-```cron
-0 5 * * * cd /opt/archonarena && docker compose -f docker-compose.prod.yml --env-file .env.production exec -T postgres pg_dump -U archonarena archonarena | gzip > /var/backups/archonarena-$(date +\%F).sql.gz
+### Setting it up
+
+1. **Generate a passphrase and put it in two places.**
+
+    ```bash
+    openssl rand -base64 48
+    ```
+
+    Set it as `BACKUP_PASSPHRASE` in `.env.production` **and** store it in your password
+    manager. It is the one input that cannot be reconstructed, and it otherwise lives only
+    on the machine the backup exists to survive. An archive you cannot decrypt is an
+    elaborate way of having no backup.
+
+2. **Point it at storage.** Set `BACKUP_S3_BUCKET` (plus `AWS_ACCESS_KEY_ID`,
+   `AWS_SECRET_ACCESS_KEY`, and `BACKUP_S3_ENDPOINT` for anything that is not AWS — R2,
+   B2, Wasabi and MinIO all speak S3), or `BACKUP_RSYNC_TARGET` for a second machine you
+   control. Every setting is documented in `.env.production.example`.
+
+3. **Check the plan without running it,** then run it once by hand:
+
+    ```bash
+    cd /opt/archonarena
+    bash deploy/backup.sh --dry-run
+    bash deploy/backup.sh
+    ```
+
+4. **Schedule it** in root's crontab:
+
+    ```cron
+    0 5 * * * cd /opt/archonarena && bash deploy/backup.sh >> /var/log/archon-backup.log 2>&1
+    ```
+
+`healthcheck.sh` FAILs when no passphrase is set, when no backup has ever completed, when
+the newest is over 48h old, or when backups are only being written to this machine.
+
+### What is in the archive, and what is not
+
+| Included                             | Why                                               |
+| ------------------------------------ | ------------------------------------------------- |
+| Full `pg_dump` of the database       | Accounts, ratings, tournaments, decks, replays    |
+| Uploaded avatars and backgrounds     | Player uploads; they exist nowhere else           |
+| A manifest with a SHA-256 per member | So a restore can prove each member arrived intact |
+
+| Excluded              | Why                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| `.env.production`     | One compromised bucket would give up the data _and_ the keys to read it. Password manager. |
+| Redis                 | Rate-limit counters and socket adapter state. Nothing durable.                             |
+| Card art (by default) | ~6k images `npm run fetchdata` re-downloads. `BACKUP_INCLUDE_CARD_ART=true` to include.    |
+
+### Restoring
+
+Check an archive is readable without touching anything — safe against production, and the
+only thing that actually proves a backup is a backup:
+
+```bash
+bash deploy/restore.sh --verify-only /var/backups/archonarena/archonarena-....tar.enc
 ```
 
-Restore: `gunzip -c <file> | docker compose ... exec -T postgres psql -U archonarena archonarena`.
-Keep at least 14 days; copy off-host (object storage) — a backup on the same disk is not
-a backup.
+Rehearse into a scratch database, leaving the live one alone:
+
+```bash
+bash deploy/restore.sh --database archonarena_rehearsal s3://bucket/archonarena/archonarena-....tar.enc
+```
+
+Restore for real, after a loss. On a rebuilt host, bring the stack up first so the
+database and volumes exist (section 4), then:
+
+```bash
+bash deploy/restore.sh --yes s3://bucket/archonarena/archonarena-....tar.enc
+docker compose -f docker-compose.prod.yml --env-file .env.production restart lobby node-0
+bash deploy/healthcheck.sh
+```
+
+Every member is checked against the manifest before anything is written. The dump carries
+`DROP ... IF EXISTS` for what it recreates, so it applies cleanly over the schema that
+first boot's initdb already created.
+
+Card art is not in the archive unless you opted in, so on a rebuilt host finish with
+`docker compose ... exec lobby npm run fetchdata` — until it completes, boards show blank
+cards.
+
+### Timings
+
+Measured by `test/deploy/backupRestore.spec.js`, which runs both scripts against a real
+PostgreSQL 16 loaded with the full `server/db/schema` on every CI run:
+
+| Step                                     | Time |
+| ---------------------------------------- | ---- |
+| Backup (schema, no game history)         | ~2s  |
+| Restore into a fresh database            | ~2s  |
+| Whole rehearsal, including cluster setup | ~17s |
+
+These scale with the database, not with the schema — the fixed cost is about two seconds
+and two rounds of PBKDF2. Re-measure once there is real history: run the rehearsal command
+above against a production archive and record what it takes, because the number that
+matters during an outage is how long _your_ data takes, not how long an empty one does.
+
+That test is the reason this section can be trusted. A restore procedure nobody executes
+is a guess, so this one is executed on every push: it dumps a populated database, restores
+it into a second one, and compares row counts, values and table counts. It also proves the
+integrity check refuses a damaged archive, and that the script will not restore over the
+live database without `--yes`.
 
 ## 7. Scaling game nodes
 

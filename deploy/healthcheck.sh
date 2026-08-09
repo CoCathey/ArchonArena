@@ -224,6 +224,51 @@ else
     bad "SECURITY: ${demo} seeded demo account(s) present - 'admin' has full permissions and the password 'password'" "rename or delete them now, then bootstrap a real admin: $DC exec lobby npm run grant-admin -- <username>"
 fi
 
+echo "== Backups =="
+# A backup nobody is watching stops silently and stays stopped. The only way to
+# find out used to be needing it. deploy/backup.sh writes last-success.json
+# after the archive has been verified AND the off-host copy confirmed, so its
+# timestamp is evidence of a usable backup rather than evidence the script ran.
+BACKUP_DIR="$(grep -E '^BACKUP_DIR=' .env.production 2>/dev/null | cut -d= -f2-)"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/archonarena}"
+backup_record="$BACKUP_DIR/last-success.json"
+
+if ! grep -qE '^BACKUP_PASSPHRASE=.+' .env.production 2>/dev/null; then
+    bad "no backups configured - ratings, tournaments and replays exist only on this disk" \
+        "openssl rand -base64 48   (put it in BACKUP_PASSPHRASE *and* your password manager, set BACKUP_S3_BUCKET, then: bash deploy/backup.sh). See docs/DEPLOYMENT.md section 6"
+elif [ ! -f "$backup_record" ]; then
+    bad "backups are configured but none has ever completed" "bash deploy/backup.sh"
+else
+    finished="$(grep -o '"finishedAt": *"[^"]*"' "$backup_record" | cut -d'"' -f4)"
+    off_host="$(grep -o '"offHost": *"[^"]*"' "$backup_record" | cut -d'"' -f4)"
+    backup_bytes="$(grep -o '"bytes": *[0-9]*' "$backup_record" | grep -oE '[0-9]+')"
+    finished_s="$(date -d "$finished" +%s 2>/dev/null || echo 0)"
+    age_h=$((($(date +%s) - finished_s) / 3600))
+
+    if [ "$finished_s" -eq 0 ]; then
+        warn "could not read the backup timestamp from $backup_record" "check the file, or re-run: bash deploy/backup.sh"
+    elif [ "$age_h" -ge 48 ]; then
+        bad "newest backup is ${age_h}h old" "the nightly job has not run: check root's crontab, then: bash deploy/backup.sh"
+    elif [ "$age_h" -ge 26 ]; then
+        warn "newest backup is ${age_h}h old (nightly, so one run has been missed)" "check root's crontab; harmless once, a pattern is not"
+    else
+        ok "backup ${age_h}h old ($(numfmt --to=iec "${backup_bytes:-0}" 2>/dev/null || echo "${backup_bytes:-?} bytes"))"
+    fi
+
+    # The whole point is that it is somewhere this machine is not.
+    if [ "$off_host" = "none" ]; then
+        bad "backups are being written to this machine only" \
+            "set BACKUP_S3_BUCKET (or BACKUP_RSYNC_TARGET) in .env.production - a backup on the disk you are protecting against is not a backup"
+    else
+        ok "shipped off-host via $off_host"
+    fi
+
+    # Present is not the same as restorable, and only a decrypt proves the
+    # second. Too slow to do on every health check; said out loud so it is a
+    # decision rather than an oversight.
+    ok "prove it can actually be restored: bash deploy/restore.sh --verify-only $BACKUP_DIR/\$(ls -t $BACKUP_DIR | head -1)"
+fi
+
 echo "== Environment (.env.production) =="
 for var in SECRET HMAC_SECRET DB_USER DB_PASSWORD; do
     if grep -qE "^$var=.+" .env.production 2>/dev/null; then

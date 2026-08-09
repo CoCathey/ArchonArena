@@ -128,8 +128,11 @@ the single highest-value item on the roadmap.
     default, the login page asks `/api/account/oidc/status` before offering the button, and
     local registration is a complete signup path on its own. When permission does arrive
     this becomes config, not code.
--   Bring up `docker-compose.prod.yml` + Caddy; set `SENTRY_DSN`.
--   Verify WebSocket pass-through to the game node end to end on the live host.
+-   [x] **Soft launch done** — the stack is up behind Caddy and friends are playing real
+        games on it. That closes the bring-up half of this item and moves the risk from "will
+        it work" to "what happens when it breaks", which is what the two unticked lines below
+        are about.
+-   Set `SENTRY_DSN`. Errors currently go nowhere: a 5xx at 2am is invisible.
 -   Point an external uptime monitor at the site; alert on 5xx and on TLS expiry.
 -   Run `deploy/healthcheck.sh` on the host until it is all-PASS.
 
@@ -426,23 +429,64 @@ that inherit only the site name from config.
 -   Activation and reset emails render correctly in a major HTML client and degrade to
     readable plain text.
 
-#### I7 — Off-host backups and a rehearsed restore
+#### I7 — Off-host backups and a rehearsed restore _(code done; needs a bucket)_
 
-**Why:** docs/DEPLOYMENT.md §5 says it plainly — a backup on the same disk is not a backup.
-Ratings, tournament history, and replays are unrecoverable if the VPS is lost.
+**Why:** docs/DEPLOYMENT.md said it plainly and then did not do it — the backup section was
+a cron one-liner writing a plain dump to `/var/backups`, on the same disk as the database,
+followed by a note to copy it off-host by hand. A backup that depends on somebody
+remembering is not a backup. With the soft launch live, ratings, tournament history,
+replays and player uploads exist on exactly one disk.
 **Tasks**
 
--   Nightly `pg_dump` shipped to object storage, encrypted, with retention.
--   Also back up uploaded avatars, custom backgrounds, and card art.
--   Monitor backup freshness; alert when the newest backup is older than 48h.
--   Rehearse a full restore into a scratch environment and write the timing into the runbook.
+-   [x] `deploy/backup.sh`: one encrypted archive per run holding the database and the
+        uploaded avatars and backgrounds, shipped to any S3-compatible store (the AWS CLI
+        runs in a container, so the host installs nothing and `--endpoint-url` covers R2,
+        B2, Wasabi and MinIO) or to a second host over rsync, with local and remote
+        retention.
+    -   The archive is **verified by decrypting it again** and comparing checksums before
+        the run counts as a success. A truncated write is then found now rather than during
+        the restore you are doing because the server is gone.
+    -   The upload is **verified by asking the remote for the object's size**. An upload
+        command that exited 0 is not evidence the bytes are there.
+    -   A dump that does not contain `Users`, `Ratings` and `Games` is refused, because a
+        dump of the wrong or a freshly-initialised database exits 0 and looks like a backup.
+    -   `.env.production` is deliberately **not** in the archive: one compromised bucket
+        would otherwise give up the data and the keys to read it. Redis is not either
+        (nothing durable). Card art is opt-in — `npm run fetchdata` re-downloads it.
+-   [x] `deploy/restore.sh` with three modes: `--verify-only` (safe against production,
+        proves an archive is readable rather than merely present), `--database NAME` (rehearse
+        into a scratch database), and a destructive restore that refuses without `--yes`.
+        Every member is checked against the manifest before anything is written.
+-   [x] Freshness in `deploy/healthcheck.sh`: FAIL when no passphrase is configured, when no
+        backup has ever completed, when the newest is over 48h old, or when backups are
+        landing only on the machine they are meant to survive. WARN at 26h — a nightly job
+        that missed once. The record it reads is written only after the archive verified and
+        the off-host copy was confirmed, so its timestamp means a usable backup exists rather
+        than that the script ran.
+-   [x] **The rehearsal runs in CI** (`test/deploy/backupRestore.spec.js`), against a real
+        PostgreSQL 16 loaded with the whole of `server/db/schema`: back up a populated
+        database, restore into a second one, compare row counts, values and table counts,
+        and check the uploaded images come back byte for byte. It also proves the integrity
+        check refuses a damaged archive and that the script will not restore over the live
+        database without `--yes`. A restore procedure nobody executes is a guess, and one
+        rehearsed by hand once stops being true at the next schema change.
+-   [ ] **Owner:** create a bucket, set `BACKUP_PASSPHRASE` (**and put it in a password
+        manager** — it lives on the machine the backup exists to survive), set
+        `BACKUP_S3_BUCKET` and the credentials, run `bash deploy/backup.sh` once by hand,
+        then add the nightly cron line. All four steps are in DEPLOYMENT.md §6.
 
-**Depends on:** I1.
+**Depends on:** owner action for the bucket; nothing in the code.
 **Acceptance criteria**
 
--   A restore from an off-host backup produces a working site with intact ratings, tournaments,
-    and decks, and the runbook records how long it took.
--   A deliberately stale backup triggers the freshness alert.
+-   [x] A restore from an archive produces intact ratings, tournaments and decks, and the
+        runbook records how long it took (~2s each way on a schema-only database; the fixed
+        cost is two rounds of PBKDF2, and DEPLOYMENT.md says to re-measure against real
+        history).
+-   [x] A damaged archive is refused rather than half-restored.
+-   [x] A deliberately stale backup triggers the freshness FAIL. Exercised against seven
+        fixtures — nothing configured, configured but never run, fresh, 30h, 73h, fresh but
+        local-only, and an unparseable timestamp — each landing on the intended
+        OK/WARN/FAIL.
 
 ### Near-term — the retention loop
 
