@@ -7,6 +7,7 @@ import CardNameLookup from './CardNameLookup';
 import HouseSelect from './HouseSelect';
 import OptionsSelect from './OptionsSelect';
 import TraitNameLookup from './TraitNameLookup';
+import { getPromptSourceContext } from './promptSourceContext';
 
 import CardImage from './CardImage';
 
@@ -325,6 +326,8 @@ const ActivePlayerPrompt = (props) => {
         controlSource = props.controls[0].source;
     }
 
+    const sourceContext = getPromptSourceContext(props.controls);
+
     let promptTitle;
 
     if (props.promptTitle) {
@@ -374,6 +377,22 @@ const ActivePlayerPrompt = (props) => {
                 {timer}
                 {promptTitle}
                 <div className='px-1 text-center'>
+                    {sourceContext && (
+                        <div
+                            className='mb-2 flex items-center justify-center gap-2'
+                            onMouseOver={() => onMouseOver(sourceContext.source)}
+                            onMouseOut={() => onMouseOut(sourceContext.source)}
+                        >
+                            <div className='h-12 w-8 shrink-0 overflow-hidden rounded-[6.25%] [&>canvas]:h-full! [&>canvas]:w-full!'>
+                                <CardImage card={{ ...sourceContext.source, facedown: false }} />
+                            </div>
+                            <span className='text-xs text-muted'>
+                                {t('Because of {{card}}', {
+                                    card: sourceContext.source.name || sourceContext.source.label
+                                })}
+                            </span>
+                        </div>
+                    )}
                     <h4 className='mb-2 text-base font-medium leading-snug'>{promptTexts}</h4>
                     <div className='space-y-1.5'>{getControls()}</div>
                     <div className='mt-2 space-y-1.5'>{getButtons()}</div>

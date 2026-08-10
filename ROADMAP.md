@@ -999,7 +999,7 @@ the whole of what is left here.
 -   An admin can see and clear pending invite requests.
 -   The Android page links to an install that works on a clean device.
 
-#### N15 — Move-by-move clarity in the apps _(mobile done; web attribution and passive effects open)_
+#### N15 — Move-by-move clarity in the apps _(mobile and web prompt attribution done; passive effects open)_
 
 **Why:** the Expo app keeps the play-by-play behind a slide-up sheet (`LogSheet`), so on a phone
 it is easy to miss what the opponent just did. And on both clients a prompt often asks for a
@@ -1014,11 +1014,13 @@ show it.
         and buttons from `values` or the serialized card, and a "because of _<card>_" context row
         renders `controls[].source` above the prompt with a thumbnail. This also fixed a literal
         `{{card}}` rendering as button text when playing from archives.
--   [ ] **Web client: still only interpolates, never attributes.** `ActivePlayerPrompt` resolves
-        `controls[0].source` into `{{card}}` placeholders (`localizedText`), so a prompt whose text
-        happens to mention the card reads correctly — but a prompt whose text does _not_ name it
-        shows nothing, and that is exactly the case the item was written for. The mobile
-        "because of _<card>_" row is the model to port.
+-   [x] **Web client: attributes, not just interpolates.** `ActivePlayerPrompt` still resolves
+        `controls[0].source` into `{{card}}` placeholders (`localizedText`) for prompt text that
+        names the card itself, but a prompt whose text does not now gets the same "because of
+        _<card>_" row the Expo app renders: a small thumbnail plus the source's name, sourced
+        from `getPromptSourceContext` (`client/Components/GameBoard/promptSourceContext.js`).
+        It deliberately stays quiet for a `targeting` control, since `AbilityTargeting` already
+        renders that source visually and a second copy would just duplicate the card.
 -   [ ] Same treatment for triggered and passive effects that change the board without prompting —
         untouched on both clients.
 
@@ -1026,10 +1028,10 @@ show it.
 **Acceptance criteria**
 
 -   [x] On a phone, a player can follow the opponent's whole turn without opening the log sheet.
--   [ ] Every prompt that originates from a card names that card. True on mobile; on web only when
-        the prompt text carries a `{{card}}` placeholder.
--   [x] Nothing about what the engine resolves changes — this is presentation only. The mobile work
-        is client-side interpolation and display over data the server already sent.
+-   [x] Every prompt that originates from a card names that card, on both mobile and web —
+        whether or not the prompt text itself carries a `{{card}}` placeholder.
+-   [x] Nothing about what the engine resolves changes — this is presentation only. Both clients'
+        work is client-side interpolation and display over data the server already sent.
 
 #### N16 — Visual redesign: make it look premium
 
@@ -1472,8 +1474,9 @@ much stronger deck pays less.
 -   [ ] Accessibility pass (keyboard nav, contrast, screen-reader landmarks) → **N6**.
 -   [ ] Replace the `/learn` placeholder with a tutorial that teaches inside a real game →
         **N11**, then the wider Learn hub → **F6**.
--   [ ] Name the card and ability responsible in every prompt ("…because of Gateway to Dis")
-        → **N15**.
+-   [x] Name the card and ability responsible in every prompt ("…because of Gateway to Dis")
+        → **N15**. Triggered/passive effects that change the board without prompting remain
+        open.
 
 ## Phase 9 — Player identity & community
 
@@ -1575,7 +1578,7 @@ much stronger deck pays less.
         mobile network resilience (timeouts, reconnect).
 -   [ ] Mobile-responsive web as the baseline → **N6**.
 -   [ ] PWA: installable, push notifications for round pairings/turn timers → **N6**/**N2**.
--   [ ] Show each move as it happens in the Expo app, rather than only inside the slide-up log
+-   [x] Show each move as it happens in the Expo app, rather than only inside the slide-up log
         sheet → **N15**.
 -   [ ] Turn the `/mobile/android` placeholder into a real link to the beta build, and
         `/mobile/ios` into a TestFlight invite request → **N14**.
