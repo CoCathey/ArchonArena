@@ -1,5 +1,5 @@
-const AllPlayerPrompt = require('../allplayerprompt');
 const _ = require('underscore');
+const AllPlayerPrompt = require('../allplayerprompt');
 
 class FirstPlayerSelection extends AllPlayerPrompt {
     constructor(game) {
@@ -10,7 +10,12 @@ class FirstPlayerSelection extends AllPlayerPrompt {
     }
 
     completionCondition(player) {
-        return this.previousWinner === player.name || !this.previousWinner || this.clickedButton;
+        return (
+            this.previousWinner === player.name ||
+            !this.previousWinner ||
+            this.clickedButton ||
+            this.game.adaptiveFirstDeck
+        );
     }
 
     activePrompt() {
@@ -52,6 +57,15 @@ class FirstPlayerSelection extends AllPlayerPrompt {
     }
 
     onCompleted() {
+        if (this.game.adaptiveFirstDeck) {
+            this.players.forEach((player) => {
+                if (player.deckData === this.game.adaptiveFirstDeck) {
+                    this.game.activePlayer = player;
+                    this.game.addMessage('{0} becomes the first player!', player);
+                }
+            });
+        }
+
         if (!this.game.activePlayer) {
             let allPlayersShuffled = _.shuffle(this.game.getPlayers());
             this.game.activePlayer = allPlayersShuffled.shift();
