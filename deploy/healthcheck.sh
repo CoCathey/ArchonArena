@@ -149,6 +149,11 @@ check_table "Stores" "31 - Stores.sql"
 check_table "DeckCatalog" "51 - DeckCatalog.sql"
 check_table "DeckCatalogState" "51 - DeckCatalog.sql"
 check_table "DeckImportJobs" "53 - DeckImportJobs.sql"
+# ARCHON: replays. Missing here means every replay on the site is missing, and
+# nothing else says so - the viewer reports "no replay for this game" one game at
+# a time, which reads like the games were not recorded rather than like the table
+# was never created. That is exactly how it went unnoticed before.
+check_table "GameReplays" "38 - GameReplays.sql"
 
 cards="$(psql_q 'SELECT COUNT(*) FROM "Cards"')"
 if [ "${cards:-0}" -gt 1000 ] 2>/dev/null; then
@@ -207,6 +212,20 @@ elif echo "$unrated_out" | grep -qE '[0-9]+ finished game\(s\) have no rating ro
 else
     # Could not tell - do not claim either way.
     warn "could not check for unrated games" "run: $DC exec lobby npm run backfill:ratings"
+fi
+
+# A table with nothing in it, next to finished games, is the other way replays
+# silently do not work: recording switched off, or the game node never sending
+# one. Only meaningful once games have actually finished.
+finished="$(psql_q $'SELECT COUNT(*) FROM "Games" WHERE "FinishedAt" IS NOT NULL')"
+replays="$(psql_q 'SELECT COUNT(*) FROM "GameReplays"')"
+if [ "${finished:-0}" -eq 0 ] 2>/dev/null; then
+    ok "no finished games yet, so no replays expected"
+elif [ "${replays:-0}" -gt 0 ] 2>/dev/null; then
+    ok "replays recorded (${replays} for ${finished} finished games)"
+else
+    bad "0 replays for ${finished} finished game(s) - nothing is being recorded" \
+        "check Site Settings > Replays > 'Record replays for finished games', then finish a game and re-run. If it stays 0, look for 'Failed to save the replay' in: $DC logs lobby"
 fi
 
 users="$(psql_q 'SELECT COUNT(*) FROM "Users"')"

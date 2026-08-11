@@ -543,6 +543,18 @@ Replays are also the substrate for coaching, AI analysis, and streaming tools la
         the row limit — filtering the last 30 games client-side would answer "you never played
         that deck" for anyone with a longer history. The controls offer the decks, opponents
         and formats that actually appear in that player's history.
+-   [x] **Replays are your own games only.** They were readable by any signed-in account that
+        knew a game id, and every finished game's id is on both players' public profiles - so in
+        practice every game on the site was readable by every member, which is not what a player
+        agrees to by finishing a match. Participants and admins only now (an admin because a
+        report about a game cannot be investigated without the game); share links are untouched,
+        because those are an explicit act by a player about their own game.
+-   [x] **A missing replay says which of the five things went wrong** - not yours, never
+        recorded, recording switched off, no such game, or replay storage missing on the server -
+        instead of one "No replay is available for this game" covering all of them. The last of
+        those is an operator problem that makes every replay on the site missing at once, so
+        `deploy/healthcheck.sh` now FAILs on a missing `GameReplays` table and on zero replays
+        next to finished games.
 
 **Depends on:** I2 (retention migration), I3 (profile links from replays).
 **Acceptance criteria**

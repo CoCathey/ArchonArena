@@ -361,6 +361,46 @@ class GameService {
     }
 
     /**
+     * ARCHON: why is there no replay for this game?
+     *
+     * There are four answers and they used to be one: "No replay is available
+     * for this game", which is true of a game played before recording existed,
+     * a game whose capture blew the size limit, a site with recording switched
+     * off, and a deployment whose "GameReplays" table was never created. A
+     * player cannot act on any of those and neither can an operator reading a
+     * bug report, which is how "replays don't work" arrives with nothing to go
+     * on.
+     *
+     * Only called once a replay has already come back empty.
+     *
+     * @returns {Promise<'no-such-game'|'storage-missing'|'recording-disabled'|'not-recorded'>}
+     */
+    async describeMissingReplay(gameUuid) {
+        // A table that does not exist is the one cause that makes every replay
+        // on the site missing at once, so it is worth naming separately - it is
+        // an operator problem, not a per-game one.
+        try {
+            await this.db.query('SELECT 1 FROM "GameReplays" LIMIT 1');
+        } catch (err) {
+            logger.error('Replay storage is unavailable', err);
+
+            return 'storage-missing';
+        }
+
+        const game = await this.db.query('SELECT 1 FROM "Games" WHERE "GameId" = $1', [gameUuid]);
+
+        if (!game || game.length === 0) {
+            return 'no-such-game';
+        }
+
+        if (!this.getReplayConfig().enabled) {
+            return 'recording-disabled';
+        }
+
+        return 'not-recorded';
+    }
+
+    /**
      * ARCHON: delete replays older than the configured retention window.
      *
      * Returns the number of rows removed. `retentionDays` of 0 means keep

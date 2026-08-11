@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSelector } from 'react-redux';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import moment from 'moment';
@@ -46,6 +47,11 @@ const SEASON_BADGE_LIMIT = 10;
 const PlayerProfile = () => {
     const { t } = useTranslation();
     const { username } = useParams();
+    // Replays are your own games only, so the link is only worth offering on
+    // your own profile - anywhere else it is an invitation to a refusal.
+    const viewer = useSelector((state) => state.account.user);
+    const isOwnProfile =
+        !!viewer?.username && viewer.username.toLowerCase() === String(username).toLowerCase();
 
     const { data, isFetching, isError } = useGetPlayerProfileQuery(username, { skip: !username });
     const { data: ratingsData } = useGetRatingsQuery(username, { skip: !username });
@@ -276,12 +282,14 @@ const PlayerProfile = () => {
                                         {game.deckName}
                                     </span>
                                 )}
-                                <Link
-                                    href={`/replay/${encodeURIComponent(game.gameId)}`}
-                                    className='ml-auto text-xs text-muted hover:text-amber-300'
-                                >
-                                    {t('Replay')}
-                                </Link>
+                                {isOwnProfile && (
+                                    <Link
+                                        href={`/replay/${encodeURIComponent(game.gameId)}`}
+                                        className='ml-auto text-xs text-muted hover:text-amber-300'
+                                    >
+                                        {t('Replay')}
+                                    </Link>
+                                )}
                             </li>
                         ))}
                     </ul>

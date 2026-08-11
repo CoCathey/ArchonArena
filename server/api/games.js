@@ -18,7 +18,14 @@ const shareLimit = rateLimit({
     message: 'Too many share links created. Please wait a little before sharing more replays.'
 });
 
-module.exports.init = function (server) {
+// ARCHON: services are injectable at init, matching api/account.js. It is what
+// lets test/server/api/replayAccess.spec.js drive the shipped replay route
+// rather than a copy of it - and the check that route makes is the sort that
+// survives quietly until a refactor drops it.
+module.exports.init = function (server, options = {}) {
+    gameService = options.gameService || gameService;
+    ratingService = options.ratingService || ratingService;
+
     server.get(
         '/api/games',
         passport.authenticate('jwt', { session: false }),
@@ -70,21 +77,51 @@ module.exports.init = function (server) {
     );
 
     // ARCHON: recorded replay (structured play-by-play) for a finished game.
+    //
+    // Your own games only. This used to hand a replay to any logged-in account
+    // that could guess or read a game id, which made every game on the site
+    // effectively public to members - not what a player assumes when they
+    // finish a match, and not something they ever agreed to. A player who does
+    // want to show a game has a share link for it, which is an explicit act.
+    //
+    // Admins are the one exception, because a report about what happened in a
+    // game cannot be investigated without seeing the game.
     server.get(
         '/api/games/:gameId/replay',
         passport.authenticate('jwt', { session: false }),
         wrapAsync(async function (req, res) {
+            const isParticipant = await gameService.isGameParticipant(
+                req.params.gameId,
+                req.user.id
+            );
+            const isAdmin = !!req.user.permissions?.isAdmin;
+
+            if (!isParticipant && !isAdmin) {
+                // 403 rather than 404: the game exists, it is simply not
+                // theirs, and saying so is not a leak - they had to know the id
+                // to ask, and every finished game is already listed publicly on
+                // the players' profiles.
+                return res.status(403).send({
+                    success: false,
+                    reason: 'not-your-game',
+                    message: 'You can only watch replays of your own games.'
+                });
+            }
+
             const replay = await gameService.getReplay(req.params.gameId);
 
             if (!replay) {
-                return res.status(404).send({ success: false, message: 'Replay not found' });
+                // Which of the four reasons, so the page can say something the
+                // reader can act on.
+                const reason = await gameService.describeMissingReplay(req.params.gameId);
+
+                return res
+                    .status(404)
+                    .send({ success: false, reason, message: 'Replay not found' });
             }
 
-            // Whether the caller may share it is theirs to know, so the button
-            // does not appear for a spectator reading someone else's game.
-            const canShare = await gameService.isGameParticipant(req.params.gameId, req.user.id);
-
-            res.send({ success: true, replay: replay, canShare });
+            // Sharing stays a participant's call even when an admin is reading.
+            res.send({ success: true, replay: replay, canShare: isParticipant });
         })
     );
 
