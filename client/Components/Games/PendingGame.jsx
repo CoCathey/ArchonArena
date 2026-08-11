@@ -172,8 +172,12 @@ const PendingGame = () => {
         (player) => player.name === user?.username
     );
     const myDeckSelected = !!myPlayer?.deck?.selected;
+    // ARCHON: a tournament seat pinned to the event's deck does not choose
+    // one - the table selects it. Telling that player to "select a deck"
+    // would be pointing them at a picker the server refuses.
+    const deckIsPinned = !!currentGame.tournament?.deckLocked;
     const requiresDeckSelection =
-        currentGame.gameFormat !== 'sealed' && !isLuckyDice && !myDeckSelected;
+        currentGame.gameFormat !== 'sealed' && !isLuckyDice && !myDeckSelected && !deckIsPinned;
     const allPlayersReady =
         playerCountInGame === 2 &&
         (isLuckyDice ||
@@ -405,6 +409,23 @@ const PendingGame = () => {
                         >
                             <span className='text-sm'>
                                 {t('You need to select a deck before the game can start.')}
+                            </span>
+                        </AlertPanel>
+                    )}
+
+                    {/* ARCHON: the pinned seat's version of the same notice.
+                        The deck is loading, not missing - and if it never
+                        arrives the player needs to know the picker is not the
+                        answer. */}
+                    {deckIsPinned && !myDeckSelected && (
+                        <AlertPanel
+                            type='info'
+                            className='!mb-2 !items-center !py-1.5 [&_[data-slot=indicator]]:self-center [&_[data-slot=content]]:flex-1 [&_[data-slot=content]]:w-full [&_[data-slot=description]]:w-full'
+                        >
+                            <span className='text-sm'>
+                                {t(
+                                    'Loading the deck you registered for this event. If it does not appear, check it is still in your collection or ask the organizer.'
+                                )}
                             </span>
                         </AlertPanel>
                     )}

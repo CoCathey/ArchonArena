@@ -2,7 +2,7 @@ import React from 'react';
 import Link from '../Navigation/Link';
 import { useTranslation, Trans } from 'react-i18next';
 import { Button } from '@heroui/react';
-import { faDice } from '@fortawesome/free-solid-svg-icons';
+import { faDice, faLock } from '@fortawesome/free-solid-svg-icons';
 
 import Icon from '../Icon';
 import Panel from '../Site/Panel';
@@ -36,6 +36,17 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
     const seats = [sortedPlayers[0] || null, sortedPlayers[1] || null];
     const isSealed = currentGame.gameFormat === 'sealed';
     const isLuckyDice = !!currentGame.luckyDice;
+    // ARCHON: this seat is pinned to the deck the event registered. The two
+    // policies need different wording - under 'locked' there is nothing the
+    // player can do about it, under 'between-rounds' there is, and it is on
+    // the event page rather than here.
+    const deckIsPinned = !!currentGame.tournament?.deckLocked;
+    const pinnedDeckHint =
+        currentGame.tournament?.deckSwapPolicy === 'between-rounds'
+            ? t(
+                  'This event runs on the deck you registered for this round. Change it on the event page before your match starts.'
+              )
+            : t('This event locks you to one deck for the whole run.');
 
     const getSeatReadiness = (player) => {
         if (!player || !player.deck || !player.deck.selected) {
@@ -192,7 +203,21 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                                             {t('SAS')} {player.deck.sasRating}
                                         </span>
                                     )}
-                                    {playerIsMe && !isSealed && !isLuckyDice && (
+                                    {/* ARCHON: a seat the event has pinned to a
+                                        deck. The server refuses anything else,
+                                        so offering the picker here would only
+                                        be offering a click that gets rejected -
+                                        say what the rule is instead. */}
+                                    {playerIsMe && deckIsPinned && (
+                                        <span
+                                            className='shrink-0 inline-flex items-center gap-1 whitespace-nowrap rounded border border-amber-500/35 bg-amber-500/12 px-1.5 py-0 text-xs font-medium leading-4 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+                                            title={pinnedDeckHint}
+                                        >
+                                            <Icon icon={faLock} />
+                                            {t('Event deck')}
+                                        </span>
+                                    )}
+                                    {playerIsMe && !isSealed && !isLuckyDice && !deckIsPinned && (
                                         <>
                                             <Button
                                                 className='shrink-0'

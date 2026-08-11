@@ -2133,6 +2133,124 @@ describe('TournamentService', function () {
         });
     });
 
+    /**
+     * ARCHON: what "between rounds" actually means.
+     *
+     * The policy is a toggle the organizer sets once, and it has to hold for
+     * the whole event or it is not a rule. 'locked' is the easy half. The
+     * interesting half is 'between-rounds', which without a defined window
+     * meant "any time the event is active" - so a player could change deck
+     * between game two and game three of a best-of-three, which is not a
+     * swap between rounds, it is a different match.
+     *
+     * The window closes when the first game of the pairing hits the table,
+     * not when the pairing is published: in an asynchronous event the
+     * pairing can go up days before anyone sits down, and taking the window
+     * away then would leave the swap policy with almost no window at all.
+     */
+    describe('the deck swap window', function () {
+        let id;
+
+        beforeEach(async function () {
+            db.state.decks.push(
+                { Id: 101, UserId: 1, Name: 'Opener', Uuid: 'u-101', SasRating: 60 },
+                { Id: 102, UserId: 1, Name: 'Swap', Uuid: 'u-102', SasRating: 61 }
+            );
+
+            const created = await service.create(organizer, {
+                name: 'Swap window',
+                format: 'swiss',
+                deckSwapPolicy: 'between-rounds'
+            });
+
+            id = created.id;
+
+            await service.register(id, { id: 1 });
+            await service.register(id, { id: 2 });
+            await service.registerDeck(id, { id: 1 }, 101);
+            await service.start(id, organizer);
+        });
+
+        const myMatch = () =>
+            db.state.matches.find((match) => match.Player1Id === 1 || match.Player2Id === 1);
+
+        it('is open while the pairing is up but unplayed', async function () {
+            expect(myMatch()).toBeTruthy();
+
+            expect((await service.registerDeck(id, { id: 1 }, 102)).success).toBe(true);
+        });
+
+        it('closes the moment a game is on the table', async function () {
+            await service.attachGame(id, myMatch().Id, 1, 'game-uuid-1');
+
+            const refused = await service.registerDeck(id, { id: 1 }, 102);
+
+            expect(refused.success).toBe(false);
+            expect(refused.message).toMatch(/already started/i);
+        });
+
+        // The point of the window: it reopens for the next round.
+        it('reopens once the match is decided', async function () {
+            const match = myMatch();
+
+            await service.attachGame(id, match.Id, 1, 'game-uuid-1');
+            expect((await service.registerDeck(id, { id: 1 }, 102)).success).toBe(false);
+
+            await service.reportResult(id, match.Id, 1, organizer);
+
+            expect((await service.registerDeck(id, { id: 1 }, 102)).success).toBe(true);
+        });
+
+        // A mid-series swap is the case the old rule let through: game one is
+        // played and decided, but the MATCH is not, so the deck stays put.
+        it('stays shut between games of a best-of-three', async function () {
+            const created = await service.create(organizer, {
+                name: 'Bo3 swap window',
+                format: 'swiss',
+                bestOf: 3,
+                deckSwapPolicy: 'between-rounds'
+            });
+
+            await service.register(created.id, { id: 1 });
+            await service.register(created.id, { id: 2 });
+            await service.registerDeck(created.id, { id: 1 }, 101);
+            await service.start(created.id, organizer);
+
+            const match = db.state.matches.find(
+                (entry) => entry.TournamentId === created.id && entry.Player1Id
+            );
+
+            await service.attachGame(created.id, match.Id, 1, 'bo3-game-1');
+            await service.recordGameWin({
+                winner: 'user1',
+                tournament: { tournamentId: created.id, matchId: match.Id },
+                gameId: 'bo3-game-1'
+            });
+
+            // One game down, match still open.
+            expect(db.state.matches.find((entry) => entry.Id === match.Id).WinnerId).toBeFalsy();
+            expect((await service.registerDeck(created.id, { id: 1 }, 102)).success).toBe(false);
+        });
+
+        it('never opens at all for a locked event', async function () {
+            const locked = await service.create(organizer, {
+                name: 'Locked',
+                format: 'swiss',
+                deckSwapPolicy: 'locked'
+            });
+
+            await service.register(locked.id, { id: 1 });
+            await service.register(locked.id, { id: 2 });
+            await service.registerDeck(locked.id, { id: 1 }, 101);
+            await service.start(locked.id, organizer);
+
+            const refused = await service.registerDeck(locked.id, { id: 1 }, 102);
+
+            expect(refused.success).toBe(false);
+            expect(refused.message).toMatch(/locks you to one deck/i);
+        });
+    });
+
     describe('chains', function () {
         it('computes SAS handicap starting chains for the stronger deck', async function () {
             db.state.decks.push(

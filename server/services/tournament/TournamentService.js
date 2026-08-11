@@ -1476,9 +1476,57 @@ class TournamentService {
     }
 
     /**
+     * ARCHON: has this player's pairing for the round now running already
+     * begun?
+     *
+     * This is the line a 'between-rounds' swap must not cross. "Between
+     * rounds" has to mean something precise or it means nothing: without
+     * this, an event that merely allows a swap allowed one at any moment
+     * while it was active - including between game two and game three of a
+     * best-of-three, which is not a deck swap, it is a different match.
+     *
+     * The moment chosen is the first game hitting the table rather than the
+     * pairing being published, so a player who sees their round-three
+     * opponent still has until they actually sit down. That matters most in
+     * asynchronous events, where the pairing may go up days before anyone
+     * plays it.
+     */
+    async roundUnderwayFor(tournament, userId) {
+        const matches = await this.getMatches(tournament.Id);
+        const open = matches.filter(
+            (match) =>
+                match.Round === tournament.CurrentRound &&
+                !match.WinnerId &&
+                !match.ResultType &&
+                (match.Player1Id === userId || match.Player2Id === userId)
+        );
+
+        if (open.length === 0) {
+            // Nothing outstanding this round: they are genuinely between
+            // rounds, which is the whole window the policy grants.
+            return false;
+        }
+
+        const gameRows = await this.db.query(
+            'SELECT "MatchId", "GameNumber", "GameUuid", "WinnerId" FROM "TournamentMatchGames" ' +
+                'WHERE "TournamentId" = $1 ORDER BY "MatchId", "GameNumber"',
+            [tournament.Id]
+        );
+        const started = new Set((gameRows || []).map((row) => row.MatchId));
+
+        return open.some((match) => started.has(match.Id));
+    }
+
+    /**
      * Register or change the deck a player will pilot. Open through the
-     * registration window; locked once the event starts (Archon decks
-     * are locked for the whole event, per standard rules).
+     * registration window; after that it is the event's DeckSwapPolicy that
+     * decides - 'locked' freezes the deck for the whole run (the Archon
+     * standard), 'between-rounds' lets a player bring a different one to
+     * their next pairing but never mid-match.
+     *
+     * Whatever this records is what the table will hand the player: the
+     * lobby pins the seat to it (see Lobby.tournamentDeckFor), so the
+     * pre-game deck picker cannot be used to get around the policy.
      */
     async registerDeck(tournamentId, actor, deckId) {
         const tournament = await this.getTournamentRow(tournamentId);
@@ -1498,7 +1546,18 @@ class TournamentService {
             tournament.Status === 'active' && tournament.DeckSwapPolicy === 'between-rounds';
 
         if (tournament.Status !== 'registration' && !swapAllowed) {
-            return { success: false, message: 'Decks are locked once the event starts' };
+            return {
+                success: false,
+                message: 'This event locks you to one deck - decks were frozen when it started'
+            };
+        }
+
+        if (swapAllowed && (await this.roundUnderwayFor(tournament, actor.id))) {
+            return {
+                success: false,
+                message:
+                    'Your match for this round has already started. You can change deck once it is finished.'
+            };
         }
 
         const playerRows = await this.db.query(
@@ -1515,6 +1574,7 @@ class TournamentService {
                 'UPDATE "TournamentPlayers" SET "DeckId" = NULL WHERE "TournamentId" = $1 AND "UserId" = $2',
                 [tournamentId, actor.id]
             );
+            this.emitDeckRegistered(tournamentId, actor, null);
 
             return { success: true };
         }
@@ -1529,8 +1589,27 @@ class TournamentService {
             'UPDATE "TournamentPlayers" SET "DeckId" = $3 WHERE "TournamentId" = $1 AND "UserId" = $2',
             [tournamentId, actor.id, deckId]
         );
+        this.emitDeckRegistered(tournamentId, actor, deckId);
 
         return { success: true };
+    }
+
+    /**
+     * ARCHON: tell the lobby a player's event deck changed.
+     *
+     * A table for the new round may already be open and waiting (async
+     * events open theirs on demand, sometimes well before either player
+     * arrives). It was built with the deck registered at the time, and the
+     * seat is pinned to that - so without this, a legal between-rounds swap
+     * would leave the player pinned to the deck they just replaced.
+     */
+    emitDeckRegistered(tournamentId, actor, deckId) {
+        tournamentEvents.emit('deckRegistered', {
+            tournamentId,
+            userId: actor.id,
+            username: actor.username,
+            deckId: deckId || null
+        });
     }
 
     /**
@@ -4366,6 +4445,10 @@ class TournamentService {
                 gameFormat: LOBBY_FORMAT_BY_EVENT[tournament.GameFormat] || 'normal',
                 hideDecklists: !!tournament.HideDecklists,
                 gameTimeLimit: tournament.GameTimeLimit,
+                // Which sentence the table uses when it refuses a deck the
+                // event did not pin: "locked for the event" and "change it on
+                // the event page first" are different instructions.
+                deckSwapPolicy: tournament.DeckSwapPolicy || 'locked',
                 gameNumber: (match.Player1Wins || 0) + (match.Player2Wins || 0) + 1,
                 knownGameUuids: games.map((game) => game.GameUuid),
                 previousWinner: previousWinnerId ? playerById[previousWinnerId]?.Username : null,

@@ -86,6 +86,11 @@ describe('Lobby deck rules', function () {
             applyDeckSelection: Lobby.prototype.applyDeckSelection,
             checkSasBound: Lobby.prototype.checkSasBound,
             deckConstraintsFor: Lobby.prototype.deckConstraintsFor,
+            // The tournament deck lock, which onSelectDeck consults on every
+            // selection. These games are not tournament tables, so it has
+            // nothing to say here - see tournamentDeckLock.spec.js.
+            tournamentDeckFor: Lobby.prototype.tournamentDeckFor,
+            pinnedDeckMessage: Lobby.prototype.pinnedDeckMessage,
             onSelectDeck: Lobby.prototype.onSelectDeck,
             onSelectRandomDeck: Lobby.prototype.onSelectRandomDeck,
             onStartGame: Lobby.prototype.onStartGame,

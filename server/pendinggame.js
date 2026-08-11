@@ -434,7 +434,17 @@ class PendingGame {
                       gameNumber: this.tournament.gameNumber,
                       round: this.tournament.round,
                       table: this.tournament.table,
-                      players: this.tournament.players
+                      players: this.tournament.players,
+                      // ARCHON: the deck lock, as far as this viewer needs to
+                      // know it. Whether THEIR seat is pinned and under which
+                      // policy - never which deck anyone else is pinned to,
+                      // which is decklist information and stays server side.
+                      deckSwapPolicy: this.tournament.deckSwapPolicy || 'locked',
+                      deckLocked: !!(
+                          activePlayer &&
+                          this.tournament.decks &&
+                          this.tournament.decks[activePlayer]
+                      )
                   }
                 : undefined,
             useGameTimeLimit: this.useGameTimeLimit

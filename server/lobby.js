@@ -75,6 +75,7 @@ class Lobby {
         this.router.on('onGameWin', this.onTournamentGameWin.bind(this));
         tournamentEvents.on('roundPaired', this.onTournamentRoundPaired.bind(this));
         tournamentEvents.on('ensureMatchGame', this.onTournamentEnsureMatchGame.bind(this));
+        tournamentEvents.on('deckRegistered', this.onTournamentDeckRegistered.bind(this));
 
         // ARCHON: tell paired players their round is up (N2). A separate
         // listener on the same bridge, so a notification failure cannot affect
@@ -1739,9 +1740,51 @@ class Lobby {
             });
     }
 
+    /**
+     * ARCHON: the deck a player is pinned to at a tournament table, or null
+     * when the event pins nothing (deck registration is optional, and sealed
+     * events build their decks at the table).
+     *
+     * An event either locks a player to one deck for the whole run or lets
+     * them bring a different one between rounds. Either way the deck that
+     * reaches the table is the one the event recorded for this pairing - and
+     * the pre-game deck picker is sitting right there, so if it is not
+     * refused here the policy is decoration.
+     */
+    tournamentDeckFor(game, username) {
+        const pinned = game && game.tournament && game.tournament.decks;
+
+        return (pinned && pinned[username]) || null;
+    }
+
+    /**
+     * Why the table is refusing this deck. The two policies need different
+     * instructions: under 'locked' there is nothing the player can do, under
+     * 'between-rounds' there is, and it is on the event page.
+     */
+    pinnedDeckMessage(game) {
+        return game.tournament?.deckSwapPolicy === 'between-rounds'
+            ? 'This event runs on the deck you registered for this round. Change it on the event page before your match starts.'
+            : 'This event locks you to the deck you registered. Ask the organizer if you need to change it.';
+    }
+
     onSelectDeck(socket, gameId, deckId, isStandalone) {
         let game = this.games[gameId];
         if (!game) {
+            return;
+        }
+
+        // ARCHON: the deck lock. A tournament seat plays the event's deck.
+        const pinnedDeckId = this.tournamentDeckFor(game, socket.user.username);
+
+        if (pinnedDeckId && (isStandalone || Number(deckId) !== Number(pinnedDeckId))) {
+            socket.send('gameerror', this.pinnedDeckMessage(game));
+
+            // Put the pinned deck back on screen, so the refusal leaves the
+            // player looking at what they are actually playing rather than at
+            // a picker that appears to have half-worked.
+            this.sendGameState(game);
+
             return;
         }
 
@@ -2097,6 +2140,53 @@ class Lobby {
         }
     }
 
+    /**
+     * ARCHON: a player changed the deck they are registered with, and the
+     * event allowed it.
+     *
+     * Their table for this round may already be open - asynchronous events
+     * open theirs on demand, often long before either player sits down - and
+     * it was built with the deck they had at the time. The seat is pinned to
+     * that deck, so leaving it alone would pin them to the deck they just
+     * replaced: a swap the event permitted, refused by the table. Re-pin the
+     * open table and put the new deck in the seat.
+     *
+     * Only tables that have not started: once the game is under way the deck
+     * is part of it, and the service will not have allowed the swap anyway.
+     */
+    async onTournamentDeckRegistered({ tournamentId, username, deckId }) {
+        const tables = Object.values(this.games).filter(
+            (game) =>
+                !game.started &&
+                game.tournament &&
+                game.tournament.tournamentId === tournamentId &&
+                Object.prototype.hasOwnProperty.call(game.tournament.decks || {}, username)
+        );
+
+        for (const game of tables) {
+            game.tournament.decks[username] = deckId || null;
+
+            const player = game.getPlayerByName(username);
+
+            if (!player || !deckId) {
+                // Not seated yet (or they cleared their deck): the pin is
+                // updated, and joining will select it.
+                this.sendGameState(game);
+                continue;
+            }
+
+            try {
+                await this.applyDeckSelection(game, username, deckId, false);
+                this.startTournamentGameIfReady(game);
+            } catch (err) {
+                logger.error(
+                    `Failed to re-select deck ${deckId} for ${username} at tournament table ${game.id}`,
+                    err
+                );
+            }
+        }
+    }
+
     async onTournamentGameWin(gameSave) {
         if (!gameSave || !gameSave.tournament) {
             return;
@@ -2181,6 +2271,10 @@ class Lobby {
                 round: matchInfo.round,
                 table: matchInfo.table,
                 players: matchInfo.players.map((player) => player.username),
+                // The deck each seat is pinned to for this pairing, and the
+                // policy that decides what the table says when it refuses
+                // anything else. See Lobby.tournamentDeckFor.
+                deckSwapPolicy: matchInfo.deckSwapPolicy || 'locked',
                 decks: Object.fromEntries(
                     matchInfo.players.map((player) => [player.username, player.deckId])
                 )
@@ -2251,6 +2345,33 @@ class Lobby {
         const players = Object.values(game.getPlayers());
 
         if (players.length < 2 || players.some((player) => !player.deck)) {
+            return;
+        }
+
+        // ARCHON: the deck lock, second gate. onSelectDeck refuses a deck the
+        // event did not pin, but this is the only place a tournament game
+        // actually starts - so checking here means no other route into a
+        // player's deck (a rematch, a reconnect, a selection path added
+        // later) can start an event game on the wrong one.
+        const wrongSeat = players.find((player) => {
+            const pinned = this.tournamentDeckFor(game, player.name);
+
+            return pinned && Number(player.deck.id) !== Number(pinned);
+        });
+
+        if (wrongSeat) {
+            // Never a silent hang: the players are sitting there waiting for
+            // a table that has decided not to start.
+            logger.error(
+                `Tournament game ${game.id} not started: ${wrongSeat.name} is holding deck ${
+                    wrongSeat.deck.id
+                }, not the registered ${this.tournamentDeckFor(game, wrongSeat.name)}`
+            );
+
+            for (const player of Object.values(game.getPlayers())) {
+                this.sockets[player.id]?.send('gameerror', this.pinnedDeckMessage(game));
+            }
+
             return;
         }
 
