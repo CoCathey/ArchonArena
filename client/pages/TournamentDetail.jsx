@@ -221,7 +221,21 @@ const TournamentDetail = () => {
                         {tournament.cutTo ? ` → ${t('Top {{n}}', { n: tournament.cutTo })}` : ''}
                     </Badge>
                     <Badge>{tournament.gameFormat}</Badge>
-                    <Badge>{tournament.mode === 'irl' ? t('In Person') : t('Online')}</Badge>
+                    <Badge
+                        title={
+                            tournament.mode === 'hybrid'
+                                ? t(
+                                      'Some matches are played here and some across a table; both feed one standing'
+                                  )
+                                : undefined
+                        }
+                    >
+                        {tournament.mode === 'irl'
+                            ? t('In Person')
+                            : tournament.mode === 'hybrid'
+                            ? t('Hybrid')
+                            : t('Online')}
+                    </Badge>
                     {/* ARCHON (N14): an async event is a different commitment
                         from a live one - it belongs next to the format, not
                         buried in the description. */}
@@ -396,17 +410,48 @@ const TournamentDetail = () => {
                             </>
                         ))}
                     {user && tournament.status === 'active' && tournament.isRegistered && (
-                        <HeroButton
-                            size='sm'
-                            variant='tertiary'
-                            onPress={() => {
-                                if (window.confirm(t('Drop from the event?'))) {
-                                    act('drop', {}, t('You dropped from the event'));
-                                }
-                            }}
-                        >
-                            {t('Drop')}
-                        </HeroButton>
+                        <>
+                            {/* ARCHON: an event that allows deck swaps has to
+                                offer one. This control did not exist: the
+                                policy granted a right, the page only showed
+                                the deck picker during registration, and once
+                                the event started the only button a player had
+                                was Drop. The window opens between rounds and
+                                shuts when the match starts, so the server
+                                decides whether it is offered at all. */}
+                            {tournament.deckSwapPolicy === 'between-rounds' &&
+                                !tournament.triad &&
+                                (tournament.canSwapDeck ? (
+                                    <HeroButton
+                                        size='sm'
+                                        variant='primary'
+                                        onPress={() => setShowDeckPicker(true)}
+                                    >
+                                        {t('Change Deck for Next Round')}
+                                    </HeroButton>
+                                ) : (
+                                    <Badge
+                                        title={t(
+                                            'Your match for this round has started. You can change deck once it is finished.'
+                                        )}
+                                    >
+                                        {myPlayer?.deckName
+                                            ? t('Playing {{deck}}', { deck: myPlayer.deckName })
+                                            : t('Deck locked this round')}
+                                    </Badge>
+                                ))}
+                            <HeroButton
+                                size='sm'
+                                variant='tertiary'
+                                onPress={() => {
+                                    if (window.confirm(t('Drop from the event?'))) {
+                                        act('drop', {}, t('You dropped from the event'));
+                                    }
+                                }}
+                            >
+                                {t('Drop')}
+                            </HeroButton>
+                        </>
                     )}
 
                     {tournament.canManage && (

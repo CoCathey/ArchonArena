@@ -64,6 +64,17 @@ const createFakeDb = () => {
                     SasChainHandicap: params[26],
                     ChainsPerMatchWin: params[27],
                     Triad: params[28],
+                    // The columns create() writes past Triad. The fake stopped
+                    // here, so anything the service derived rather than read
+                    // back - AllowPaperResults is derived from the mode -
+                    // could not be asserted on at all.
+                    TeamEvent: params[29],
+                    TeamSize: params[30],
+                    AllowPaperResults: params[31],
+                    AlliancePolicy: params[32],
+                    AdaptiveBo3: params[33],
+                    Pacing: params[34],
+                    RoundDeadlineDays: params[35],
                     Status: 'registration',
                     Stage: 'main',
                     CurrentRound: 0,
@@ -1982,6 +1993,85 @@ describe('TournamentService', function () {
         });
     });
 
+    /**
+     * ARCHON: hybrid events - one standing, some matches played here and some
+     * across a table with cards.
+     *
+     * The mode has been accepted since N9 and has its own schema, but every
+     * path that opens a table checked for 'online' exactly, so a hybrid event
+     * could not open a single one: the half of it that was meant to be played
+     * on the platform had nowhere to play. It is on demand rather than at
+     * pairing because nobody can tell from here which matches are paper.
+     */
+    describe('hybrid events', function () {
+        const createHybrid = async () => {
+            const created = await service.create(organizer, {
+                name: 'Hybrid Cup',
+                format: 'swiss',
+                mode: 'hybrid'
+            });
+
+            await service.register(created.id, { id: 1 });
+            await service.register(created.id, { id: 2 });
+            await service.start(created.id, organizer);
+
+            return created.id;
+        };
+
+        // The contrast is the point: a plain online event opens its tables the
+        // moment the round is paired, and a hybrid one must not - half those
+        // tables would be for matches being played on paper.
+        it('does not open a table for every pairing, where an online event does', async function () {
+            const hybrid = await createHybrid();
+            const online = await createSwiss(2);
+
+            await service.start(online, organizer);
+
+            expect(await service.getMatchesNeedingGames(hybrid, { forPairing: true })).toEqual([]);
+            expect(
+                (await service.getMatchesNeedingGames(online, { forPairing: true })).length
+            ).toBe(1);
+        });
+
+        it('opens one when a player asks for it', async function () {
+            const id = await createHybrid();
+
+            const needing = await service.getMatchesNeedingGames(id);
+            expect(needing.length).toBe(1);
+
+            const opened = await service.ensureGameForMatch(id, needing[0].matchId, { id: 1 });
+            expect(opened.success).toBe(true);
+        });
+
+        it('still refuses an in-person event, which has no tables to open', async function () {
+            const created = await service.create(organizer, {
+                name: 'Paper Cup',
+                format: 'swiss',
+                mode: 'irl'
+            });
+
+            await service.register(created.id, { id: 1 });
+            await service.register(created.id, { id: 2 });
+            await service.start(created.id, organizer);
+
+            expect(await service.getMatchesNeedingGames(created.id)).toEqual([]);
+
+            const match = db.state.matches.find((entry) => entry.TournamentId === created.id);
+            const refused = await service.ensureGameForMatch(created.id, match.Id, { id: 1 });
+
+            expect(refused.success).toBe(false);
+        });
+
+        // Paper results are how the other half reports, and a hybrid event
+        // takes them by default - that half has no game to auto-report.
+        it('accepts paper results without the organizer turning anything on', async function () {
+            const id = await createHybrid();
+            const detail = await service.getDetail(id, organizer);
+
+            expect(detail.tournament.allowPaperResults).toBe(true);
+        });
+    });
+
     describe('completion', function () {
         it('stamps final ranks and serves player history', async function () {
             const id = await createSwiss(4, { roundCount: 1 });
@@ -2199,6 +2289,47 @@ describe('TournamentService', function () {
             await service.reportResult(id, match.Id, 1, organizer);
 
             expect((await service.registerDeck(id, { id: 1 }, 102)).success).toBe(true);
+        });
+
+        /**
+         * The page has to know, or it offers a button the service refuses.
+         * This is the same window read from the other side: getDetail answers
+         * with data it already has loaded, so the answer cannot drift from
+         * what registerDeck will actually do.
+         */
+        it('is reported to the player as canSwapDeck', async function () {
+            const swapFlag = async () =>
+                (await service.getDetail(id, { id: 1 })).tournament.canSwapDeck;
+
+            expect(await swapFlag()).toBe(true);
+
+            await service.attachGame(id, myMatch().Id, 1, 'game-uuid-1');
+            expect(await swapFlag()).toBe(false);
+
+            await service.reportResult(id, myMatch().Id, 1, organizer);
+            expect(await swapFlag()).toBe(true);
+        });
+
+        it('is never reported for an event that locks decks', async function () {
+            const locked = await service.create(organizer, {
+                name: 'No swaps',
+                format: 'swiss',
+                deckSwapPolicy: 'locked'
+            });
+
+            await service.register(locked.id, { id: 1 });
+            await service.register(locked.id, { id: 2 });
+
+            // Registration is still open, so the deck is still theirs to set.
+            expect((await service.getDetail(locked.id, { id: 1 })).tournament.canSwapDeck).toBe(
+                true
+            );
+
+            await service.start(locked.id, organizer);
+
+            expect((await service.getDetail(locked.id, { id: 1 })).tournament.canSwapDeck).toBe(
+                false
+            );
         });
 
         // A mid-series swap is the case the old rule let through: game one is

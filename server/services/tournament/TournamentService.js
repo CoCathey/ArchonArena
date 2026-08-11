@@ -18,6 +18,13 @@ const FORMATS = ['swiss', 'single-elim', 'double-elim', 'round-robin'];
 // ARCHON (N9): 'hybrid' is an event where some tables play on the platform
 // and some play on paper, both feeding one standing.
 const MODES = ['online', 'irl', 'hybrid'];
+// The modes where a match can be played on the platform. 'hybrid' has always
+// been in MODES and has always described itself this way, but every path that
+// opens a table checked for 'online' exactly - so a hybrid event could not
+// open a single one, and the half of it that was supposed to play here had
+// nowhere to play. Its tables open on demand rather than at pairing (see
+// getMatchesNeedingGames), because the other half is being played on paper.
+const PLATFORM_MODES = ['online', 'hybrid'];
 // ARCHON (N14): 'live' is an event played in one sitting with a minutes
 // clock; 'async' is a league paced in days per round, where the two players
 // of each match schedule between themselves when to meet.
@@ -1076,7 +1083,21 @@ class TournamentService {
                 isRegistered: !!(myRow && !myRow.Dropped),
                 isWaitlisted: !!(myRow && myRow.Waitlisted && !myRow.Dropped),
                 isCheckedIn: !!(myRow && myRow.CheckedIn),
-                myDeckId: myRow?.DeckId || null
+                myDeckId: myRow?.DeckId || null,
+                // ARCHON: may this player change their deck right now? The
+                // page asks rather than guessing, because "between rounds"
+                // is a window that opens and shuts as the event runs, and a
+                // button that is refused when clicked is worse than no
+                // button. Triad pools have their own ban/pick flow.
+                canSwapDeck: !!(
+                    myRow &&
+                    !myRow.Dropped &&
+                    !tournament.Triad &&
+                    (tournament.Status === 'registration' ||
+                        (tournament.Status === 'active' &&
+                            tournament.DeckSwapPolicy === 'between-rounds' &&
+                            !this.isRoundUnderwayFor(tournament, myRow.UserId, matches, gameRows)))
+                )
             },
             staff: (staffRows || []).map((row) => ({
                 userId: row.UserId,
@@ -1493,7 +1514,22 @@ class TournamentService {
      */
     async roundUnderwayFor(tournament, userId) {
         const matches = await this.getMatches(tournament.Id);
-        const open = matches.filter(
+        const gameRows = await this.db.query(
+            'SELECT "MatchId", "GameNumber", "GameUuid", "WinnerId" FROM "TournamentMatchGames" ' +
+                'WHERE "TournamentId" = $1 ORDER BY "MatchId", "GameNumber"',
+            [tournament.Id]
+        );
+
+        return this.isRoundUnderwayFor(tournament, userId, matches, gameRows);
+    }
+
+    /**
+     * The rule itself, over rows already in hand - getDetail has both lists
+     * loaded and reports the same answer to the player as `canSwapDeck`, so
+     * the page never offers a swap the service is about to refuse.
+     */
+    isRoundUnderwayFor(tournament, userId, matches, gameRows) {
+        const open = (matches || []).filter(
             (match) =>
                 match.Round === tournament.CurrentRound &&
                 !match.WinnerId &&
@@ -1507,11 +1543,6 @@ class TournamentService {
             return false;
         }
 
-        const gameRows = await this.db.query(
-            'SELECT "MatchId", "GameNumber", "GameUuid", "WinnerId" FROM "TournamentMatchGames" ' +
-                'WHERE "TournamentId" = $1 ORDER BY "MatchId", "GameNumber"',
-            [tournament.Id]
-        );
         const started = new Set((gameRows || []).map((row) => row.MatchId));
 
         return open.some((match) => started.has(match.Id));
@@ -4308,7 +4339,7 @@ class TournamentService {
         if (
             !tournament ||
             tournament.Status !== 'active' ||
-            tournament.Mode !== 'online' ||
+            !PLATFORM_MODES.includes(tournament.Mode) ||
             !this.getConfig().autoCreateGames
         ) {
             return [];
@@ -4319,7 +4350,13 @@ class TournamentService {
         // match that nobody will sit at until their scheduled time - so async
         // events only open tables on demand ("Open my table" or the judge
         // tool) and for the next game of a series already underway.
-        if (forPairing && tournament.Pacing === 'async') {
+        //
+        // ARCHON: a hybrid event is the same argument for a different reason.
+        // Some of its pairings are being played across a table with cards, and
+        // there is no way to know which from here - so it opens tables on
+        // demand too, rather than parking a lobby game nobody will ever sit at
+        // for every match played on paper.
+        if (forPairing && (tournament.Pacing === 'async' || tournament.Mode === 'hybrid')) {
             return [];
         }
 
@@ -4602,7 +4639,7 @@ class TournamentService {
             return { success: false, message: 'No such tournament' };
         }
 
-        if (tournament.Status !== 'active' || tournament.Mode !== 'online') {
+        if (tournament.Status !== 'active' || !PLATFORM_MODES.includes(tournament.Mode)) {
             return { success: false, message: 'This event has no online games to open' };
         }
 

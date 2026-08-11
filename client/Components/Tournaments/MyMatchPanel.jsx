@@ -78,7 +78,9 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
     const oppBannedDeckId = isP1 ? myMatch.p2BannedDeckId : myMatch.p1BannedDeckId;
     const myPickedDeckId = isP1 ? myMatch.p1DeckId : myMatch.p2DeckId;
     const oppPickedDeckId = isP1 ? myMatch.p2DeckId : myMatch.p1DeckId;
-    const myPool = players.find((player) => player.userId === user.id)?.triadDecks || [];
+    const me = players.find((player) => player.userId === user.id);
+    const myDeckName = me?.deckName;
+    const myPool = me?.triadDecks || [];
     const oppPool = opponent?.triadDecks || [];
 
     const triadStep =
@@ -153,10 +155,16 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                         <span className={`font-bold ${won ? 'text-emerald-400' : 'text-red-400'}`}>
                             {won ? t('You won this match') : t('You lost this match')}
                         </span>
-                    ) : tournament.mode === 'online' ? (
+                    ) : tournament.mode !== 'irl' ? (
                         // ARCHON (N14): in an async event the table is opened
                         // when the players actually meet, so the button is the
                         // same one - it just is not pre-opened for them.
+                        //
+                        // ARCHON: a hybrid event reaches the same button by a
+                        // different road. Its pairings may be played here or
+                        // across a table, and nobody knows which until the two
+                        // players decide - so both routes are offered and the
+                        // pair take whichever they are actually using.
                         lobbyGame ? (
                             <HeroButton
                                 size='sm'
@@ -192,8 +200,28 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                             {t('Play your match and report the result below')}
                         </span>
                     )}
+                    {/* In a hybrid event the button is one of two ways to play
+                        this match, not the only one. */}
+                    {tournament.mode === 'hybrid' && !decided && !triadStep && (
+                        <span className='text-muted'>
+                            {t('or play it on paper and report the result below')}
+                        </span>
+                    )}
                 </span>
             </div>
+
+            {/* ARCHON: which deck the event has you on. In an event that locks
+                decks this is the one thing a player most wants confirmed
+                before they sit down, and it was nowhere on the page. */}
+            {myDeckName && !tournament.triad && (
+                <div className='mt-2 text-sm text-muted'>
+                    {t('Your deck')}:{' '}
+                    <span className='font-semibold text-foreground'>{myDeckName}</span>
+                    {tournament.deckSwapPolicy === 'between-rounds'
+                        ? ` - ${t('you may change it between rounds')}`
+                        : ` - ${t('locked for this event')}`}
+                </div>
+            )}
             {/* ARCHON (N14): asynchronous events give the players days to find
                 an hour between them, so the scheduling exchange belongs right
                 here - on the match, next to the way into the game. */}

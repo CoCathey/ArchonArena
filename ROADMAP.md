@@ -874,7 +874,14 @@ organizers will hit in practice.
 **Tasks**
 
 -   [x] **Hybrid events** (migration 46) — a new `hybrid` mode, plus `AllowPaperResults` and
-        `TournamentMatches.ResultSource`. An IRL or hybrid event takes paper results by
+        `TournamentMatches.ResultSource`. The mode shipped half-built and was finished later:
+        every path that opens a lobby table tested for `Mode === 'online'` exactly, so a hybrid
+        event could not open a single one — the half of it meant to be played on the platform
+        had nowhere to play — and the create form never offered the mode at all. Tables now
+        open for `online` and `hybrid` alike, but a hybrid event opens them **on demand** rather
+        than at pairing: nobody can tell from the server which of its matches are being played
+        across a table with cards, so auto-opening every one would park a lobby game for each
+        paper match that nobody will ever sit at. An IRL or hybrid event takes paper results by
         definition; a purely online event has to opt in, because there a typed result is a
         claim about a game the platform could have witnessed and did not. Paper results feed
         the **standing only, never Amber** — the Elo engine needs the key differential and

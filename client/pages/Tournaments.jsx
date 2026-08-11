@@ -234,6 +234,14 @@ const Tournaments = () => {
                                         {t('Online (games created automatically)')}
                                     </option>
                                     <option value='irl'>{t('In Person')}</option>
+                                    {/* ARCHON: one standing, played both ways.
+                                        Tables open on demand rather than at
+                                        pairing, because the organizer cannot
+                                        know from here which matches are being
+                                        played across a table with cards. */}
+                                    <option value='hybrid'>
+                                        {t('Hybrid (players open their own online tables)')}
+                                    </option>
                                 </select>
                             </div>
                             {/* ARCHON (N14): pacing is the single biggest
@@ -418,7 +426,7 @@ const Tournaments = () => {
                                         onChange={set('roundTimerMinutes')}
                                     />
                                 </div>
-                                {form.mode === 'online' && (
+                                {form.mode !== 'irl' && (
                                     <div>
                                         <Label htmlFor='tournamentGameClock'>
                                             {t('In-game clock minutes per player (blank = none)')}
