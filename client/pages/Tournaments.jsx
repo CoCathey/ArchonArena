@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
 import MySchedulePanel from '../Components/Tournaments/MySchedulePanel';
+import { describeEvent } from '../Components/Tournaments/describeEvent';
 import { Constants } from '../constants';
 import {
     useCreateTournamentMutation,
@@ -102,6 +103,7 @@ const Tournaments = () => {
     const tournaments = data?.tournaments || [];
     const myHistory = historyData?.events || [];
     const set = (field) => (event) => setForm({ ...form, [field]: event.target.value });
+    const eventPreview = describeEvent(form);
 
     const statuses = [
         ['', t('All')],
@@ -668,6 +670,41 @@ const Tournaments = () => {
                                 onChange={set('description')}
                             />
                         </div>
+                        {/* ARCHON: the event, said back to the organizer before
+                            they commit to it. Twenty controls decide how an
+                            event runs and most only matter for some of the
+                            others, so a first-time organizer cannot tell which
+                            of their answers will actually do anything until it
+                            runs. The notes are advisory - the server validates,
+                            this explains. */}
+                        <div className='rounded-md border border-border/60 bg-surface-secondary/40 p-3'>
+                            <div className='mb-1 text-xs font-semibold uppercase tracking-wide text-muted'>
+                                {t('What you are about to run')}
+                            </div>
+                            {/* Rendered as-is rather than through t(): these
+                                sentences are composed from the organizer's own
+                                numbers, so every variant would be its own
+                                translation key and none of them would ever
+                                match one. */}
+                            <ul className='list-disc space-y-0.5 pl-5 text-sm text-foreground/85'>
+                                {eventPreview.summary.map((line) => (
+                                    <li key={line}>{line}</li>
+                                ))}
+                            </ul>
+                            {eventPreview.notes.length > 0 && (
+                                <div className='mt-2 border-t border-border/50 pt-2'>
+                                    <div className='mb-1 text-xs font-semibold uppercase tracking-wide text-amber-500'>
+                                        {t('Settings that will not do anything')}
+                                    </div>
+                                    <ul className='list-disc space-y-0.5 pl-5 text-sm text-amber-600 dark:text-amber-300'>
+                                        {eventPreview.notes.map((line) => (
+                                            <li key={line}>{line}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+
                         <HeroButton
                             variant='primary'
                             size='sm'

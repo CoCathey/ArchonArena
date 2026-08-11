@@ -1131,6 +1131,50 @@ show it.
 -   [x] Nothing about what the engine resolves changes — this is presentation only. The mobile work
         is client-side interpolation and display over data the server already sent.
 
+#### N17 — Tournaments end to end _(done)_
+
+**Why:** the tournament engine was the most complete system on the platform and the least
+finished product. Everything an organizer could set had a column, a validator and a test; several
+things they could set did nothing when the event ran, and the biggest of them was the one players
+would notice first.
+
+**Tasks**
+
+-   [x] **The deck lock is enforced.** `DeckSwapPolicy` decided whether decks were frozen for the
+        event or swappable between rounds, and nothing anywhere enforced either. A tournament
+        table shows the ordinary pre-game deck picker listing the player's whole collection, so
+        registering a deck only pre-_selected_ it: a player could register the deck the organizer
+        sees in the standings and pilot a different one, in a locked event, with nothing recorded.
+        The lobby now pins each seat to the deck the event recorded for that pairing —
+        `onSelectDeck` refuses anything else and says which policy is refusing it, and
+        `startTournamentGameIfReady` re-checks before starting, because it is the only place a
+        tournament game begins.
+-   [x] **"Between rounds" means something.** Without a defined window it meant "any time the
+        event is active", which includes between game two and game three of a best-of-three. The
+        window closes when the first game of a pairing hits the table and reopens when the match
+        is decided. It closes at the first game rather than at the pairing because an asynchronous
+        pairing goes up days before anyone sits down, and closing it there would leave the policy
+        almost no window at all.
+-   [x] **The swap is actually offerable.** Once an event started, the only control a registered
+        player had was Drop — so a swaps-allowed event and a locked one were identical to the
+        people in them. The event page offers the swap when the window is open, names the deck
+        they are on when it is not, and asks the server which of the two it is (`canSwapDeck`)
+        rather than guessing and offering a click that gets refused.
+-   [x] **Hybrid events open tables.** See N9 — the mode was accepted, had its own migration and
+        its own feature flag, and could not open a single online table.
+-   [x] **The create form says what it is about to build.** Twenty controls decide how an event
+        runs and most only matter for some of the others; a top cut on a single-elimination
+        bracket, a minutes clock on a league paced in days and a SAS band on a sealed event are
+        all accepted and all ignored. The form now describes the event in plain English before the
+        organizer commits, and lists the settings that will not do anything.
+-   [x] **A whole event runs against real PostgreSQL.** Every other tournament test used an
+        in-memory fake that routes on SQL fragments — good enough for lifecycle logic, but it
+        agrees with itself by construction and cannot fail on a column the schema does not have or
+        a constraint the code violates. `tournamentEndToEnd.spec.js` runs creation, registration,
+        check-in, two Swiss rounds through recorded game results, a top-4 cut, the playoff and the
+        finish on the real schema, then the deck lock and the asynchronous round clock. Writing it
+        immediately turned up a unique index the fake had no way to model.
+
 #### N16 — Visual redesign: make it look premium
 
 **Why:** the platform's look is inherited from keyteki with a rebrand painted over it. There

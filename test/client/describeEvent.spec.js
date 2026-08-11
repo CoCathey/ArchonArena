@@ -1,0 +1,211 @@
+import { describeEvent } from '../../client/Components/Tournaments/describeEvent';
+
+/**
+ * ARCHON: the create form's plain-English preview.
+ *
+ * Hosting an event means answering about twenty controls, and most of them
+ * only matter for some of the others. An organizer could set a top cut on a
+ * single-elimination bracket, a minutes round clock on an asynchronous
+ * league, or a SAS band on a sealed event, and nothing would tell them - the
+ * server accepts all three, because none is invalid, they just do nothing.
+ * They would find out when the event ran.
+ *
+ * What is worth testing here is not the prose but which sentences appear for
+ * which combination: the notes are the whole point, and a note that never
+ * fires is the same as not having written it.
+ */
+describe('describeEvent', function () {
+    const form = (overrides = {}) => ({
+        format: 'swiss',
+        gameFormat: 'archon',
+        mode: 'online',
+        pacing: 'live',
+        deckSwapPolicy: 'locked',
+        visibility: 'public',
+        ...overrides
+    });
+
+    const has = (lines, pattern) => lines.some((line) => pattern.test(line));
+
+    describe('the shape of the event', function () {
+        it('names the rounds when they are set, and explains when they are not', function () {
+            expect(has(describeEvent(form({ roundCount: '5' })).summary, /5 rounds of Swiss/)).toBe(
+                true
+            );
+
+            const openEnded = describeEvent(form()).summary;
+            expect(has(openEnded, /set from the turnout/)).toBe(true);
+        });
+
+        // The count the engine itself falls back on, so the organizer sees the
+        // same number the event will actually use.
+        it('suggests a round count from the player cap', function () {
+            expect(
+                has(describeEvent(form({ playerCap: '16' })).summary, /about 4 for 16 players/)
+            ).toBe(true);
+            expect(
+                has(describeEvent(form({ playerCap: '32' })).summary, /about 5 for 32 players/)
+            ).toBe(true);
+        });
+
+        it('counts the rounds a full round robin needs', function () {
+            expect(
+                has(
+                    describeEvent(form({ format: 'round-robin', playerCap: '8' })).summary,
+                    /7 rounds for a full 8/
+                )
+            ).toBe(true);
+        });
+
+        it('explains what the lower bracket is for', function () {
+            expect(
+                has(describeEvent(form({ format: 'double-elim' })).summary, /lower bracket/)
+            ).toBe(true);
+        });
+
+        it('describes the cut and its series length together', function () {
+            const lines = describeEvent(form({ cutTo: '8', playoffBestOf: '3' })).summary;
+
+            expect(has(lines, /top 8 then cut.*best of 3/)).toBe(true);
+        });
+    });
+
+    describe('how it is played', function () {
+        it('tells an async organizer their rounds are days', function () {
+            const lines = describeEvent(form({ pacing: 'async', roundDeadlineDays: '5' })).summary;
+
+            expect(has(lines, /5 days per round/)).toBe(true);
+        });
+
+        it('says how tables open, which differs by mode and pacing', function () {
+            expect(has(describeEvent(form()).summary, /tables opened for every pairing/)).toBe(
+                true
+            );
+            expect(
+                has(
+                    describeEvent(form({ pacing: 'async' })).summary,
+                    /opening their table when they meet/
+                )
+            ).toBe(true);
+            expect(has(describeEvent(form({ mode: 'hybrid' })).summary, /one standing/)).toBe(true);
+            expect(has(describeEvent(form({ mode: 'irl' })).summary, /in person/)).toBe(true);
+        });
+    });
+
+    describe('the deck rules', function () {
+        // The setting the whole deck lock exists to serve: an organizer has to
+        // be able to see which of the two they picked.
+        it('spells out the difference between the two deck policies', function () {
+            expect(
+                has(
+                    describeEvent(form({ deckSwapPolicy: 'locked' })).summary,
+                    /One deck for the whole event/
+                )
+            ).toBe(true);
+
+            const swap = describeEvent(form({ deckSwapPolicy: 'between-rounds' })).summary;
+            expect(has(swap, /different deck to each round/)).toBe(true);
+            // And the limit on it, which is the part players argue about.
+            expect(has(swap, /never mid-match/)).toBe(true);
+        });
+
+        it('describes a Triad pool rather than a deck', function () {
+            expect(has(describeEvent(form({ triad: true })).summary, /three decks/)).toBe(true);
+        });
+
+        it('reports the SAS band and house rules', function () {
+            const lines = describeEvent(
+                form({
+                    sasMin: '50',
+                    sasMax: '75',
+                    bannedHouses: ['brobnar'],
+                    requiredHouses: ['logos']
+                })
+            ).summary;
+
+            expect(has(lines, /between 50 and 75 SAS/)).toBe(true);
+            expect(has(lines, /may not contain brobnar/)).toBe(true);
+            expect(has(lines, /must contain logos/)).toBe(true);
+        });
+    });
+
+    /**
+     * The reason this exists. Each of these is a setting the server accepts
+     * without complaint and then ignores.
+     */
+    describe('settings that will not do anything', function () {
+        const noteFor = (overrides) => describeEvent(form(overrides)).notes;
+
+        it('flags a top cut on a format that already ends in a bracket', function () {
+            expect(
+                has(noteFor({ format: 'single-elim', cutTo: '8' }), /only applies to Swiss/)
+            ).toBe(true);
+            expect(noteFor({ format: 'swiss', cutTo: '8' })).toEqual([]);
+        });
+
+        it('flags a round count on a format that sets its own', function () {
+            expect(
+                has(noteFor({ format: 'double-elim', roundCount: '5' }), /round count is ignored/)
+            ).toBe(true);
+            expect(
+                has(noteFor({ format: 'round-robin', roundCount: '5' }), /round count is ignored/)
+            ).toBe(true);
+            expect(noteFor({ format: 'swiss', roundCount: '5' })).toEqual([]);
+        });
+
+        it('flags a minutes clock on an event paced in days', function () {
+            expect(
+                has(noteFor({ pacing: 'async', roundTimerMinutes: '50' }), /paced in days/)
+            ).toBe(true);
+            expect(noteFor({ pacing: 'live', roundTimerMinutes: '50' })).toEqual([]);
+        });
+
+        it('flags deck rules on an event that deals its own decks', function () {
+            const sealed = noteFor({
+                gameFormat: 'sealed',
+                sasMin: '50',
+                requireDeckRegistration: true,
+                bannedHouses: ['dis']
+            });
+
+            expect(has(sealed, /SAS band/)).toBe(true);
+            expect(has(sealed, /nothing to register/)).toBe(true);
+            expect(has(sealed, /House restrictions/)).toBe(true);
+        });
+
+        it('flags a swap policy on a Triad event, which swaps by its own rules', function () {
+            expect(
+                has(noteFor({ triad: true, deckSwapPolicy: 'between-rounds' }), /does not apply/)
+            ).toBe(true);
+            expect(noteFor({ triad: true, deckSwapPolicy: 'locked' })).toEqual([]);
+        });
+
+        it('flags a game clock on an event with no game to clock', function () {
+            expect(
+                has(noteFor({ mode: 'irl', gameTimeLimit: '30' }), /no game to put a clock on/)
+            ).toBe(true);
+            expect(noteFor({ mode: 'online', gameTimeLimit: '30' })).toEqual([]);
+        });
+
+        it('flags a playoff series length with no playoff', function () {
+            expect(has(noteFor({ playoffBestOf: '3' }), /only applies once a top cut is set/)).toBe(
+                true
+            );
+            expect(noteFor({ playoffBestOf: '3', cutTo: '8' })).toEqual([]);
+        });
+
+        // The default form is the one every organizer starts from, and it must
+        // not open with a wall of warnings about itself.
+        it('says nothing about a form nobody has touched', function () {
+            expect(describeEvent(form()).notes).toEqual([]);
+            expect(describeEvent({}).notes).toEqual([]);
+        });
+    });
+
+    it('describes an empty form without falling over', function () {
+        const empty = describeEvent();
+
+        expect(empty.summary.length).toBeGreaterThan(0);
+        expect(empty.notes).toEqual([]);
+    });
+});
