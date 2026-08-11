@@ -465,6 +465,33 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.CLUBS]
         }),
+        // ARCHON: named club invitations, as opposed to the shareable code.
+        getClubInvitations: builder.query({
+            query: () => '/clubs/invitations',
+            providesTags: [TAG_TYPES.CLUBS]
+        }),
+        inviteToClub: builder.mutation({
+            query: ({ id, username }) => ({
+                url: `/clubs/${id}/invite`,
+                method: 'POST',
+                body: { username }
+            }),
+            invalidatesTags: (result, error, { id }) => [
+                TAG_TYPES.CLUBS,
+                { type: TAG_TYPES.CLUBS, id }
+            ]
+        }),
+        respondToClubInvitation: builder.mutation({
+            query: ({ id, accept }) => ({
+                url: `/clubs/${id}/invitation`,
+                method: 'POST',
+                body: { accept }
+            }),
+            invalidatesTags: (result, error, { id }) => [
+                TAG_TYPES.CLUBS,
+                { type: TAG_TYPES.CLUBS, id }
+            ]
+        }),
         // ARCHON (N7): club competition
         getClubLeaderboard: builder.query({
             query: ({ id, pool }) => ({ url: `/clubs/${id}/leaderboard`, params: { pool } }),
@@ -1079,6 +1106,10 @@ export const {
     useCreateClubMutation,
     useClubActionMutation,
     useJoinClubByCodeMutation,
+    // ARCHON: named club invitations
+    useGetClubInvitationsQuery,
+    useInviteToClubMutation,
+    useRespondToClubInvitationMutation,
     // ARCHON (N7): club competition and teams
     useGetClubLeaderboardQuery,
     useDecideClubJoinRequestMutation,

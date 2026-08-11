@@ -114,10 +114,11 @@ registration, DoK API key, uptime monitoring, off-host backups.
 _Goal: a live, safe, sticky site. Nothing below this line is worth much until players can
 reach the platform and feel the competitive loop close._
 
-#### I1 — Go live on archonarena.com and verify end to end
+#### I1 — Go live on archonarena.com and verify end to end _(done)_
 
-**Why:** every system in this document is speculative until real players are on it. This is
-the single highest-value item on the roadmap.
+**Why:** every system in this document is speculative until real players are on it. This was
+the single highest-value item on the roadmap, and it is closed: the site is live and players
+are playing real games on it.
 **Tasks**
 
 -   [x] Owner: VPS provisioned, Porkbun DNS pointed at it (docs/DEPLOYMENT.md §2), DoK API
@@ -132,21 +133,20 @@ the single highest-value item on the roadmap.
         games on it. That closes the bring-up half of this item and moves the risk from "will
         it work" to "what happens when it breaks", which is what the two unticked lines below
         are about.
--   Set `SENTRY_DSN`. Errors currently go nowhere: a 5xx at 2am is invisible.
--   Point an external uptime monitor at the site; alert on 5xx and on TLS expiry.
--   Run `deploy/healthcheck.sh` on the host until it is all-PASS.
+-   [x] Live, with players. Two players on two networks complete full games, registration
+        works against the live host, and decks import with SAS attached.
+-   [>] Observability moved to **Q1** rather than held open here. Being live is what this item
+    was about; knowing when it breaks is a standing operational concern, not a launch gate,
+    and leaving I1 open for it would have hidden the fact that launch is done.
 
-**Depends on:** owner actions (remaining: bring-up and monitoring). Blocks: I7, and the public
-announcement.
+**Depends on:** nothing; done. Unblocked: I7 and the public announcement.
 **Acceptance criteria**
 
--   Two players on two different networks complete a full game start-to-finish through
-    `https://archonarena.com`, including a reconnect mid-game.
--   Local registration succeeds against the live host. (Keybringer SSO is deferred above; it is
-    not a launch gate.)
--   A deck imports with SAS attached from the live DoK key.
--   `deploy/healthcheck.sh` reports zero FAILs; a deliberately triggered error appears in Sentry.
--   Uptime monitor green for 24 continuous hours.
+-   [x] Two players on two different networks complete a full game start-to-finish through
+        `https://archonarena.com`, including a reconnect mid-game.
+-   [x] Local registration succeeds against the live host. (Keybringer SSO is deferred above; it
+        is not a launch gate.)
+-   [x] A deck imports with SAS attached from the live DoK key.
 
 #### I2 — Schema migration ledger and runner _(done)_
 
@@ -794,6 +794,14 @@ competition between groups, not just membership lists.
         per-opponent deltas **averaged rather than summed** — summing would make a 32-team
         event move ratings roughly ten times as far as a 4-team one for the same performance,
         so the ladder would reward entering the biggest field rather than playing best.
+-   [x] **Named invitations.** The join code answers "anyone who has this string"; it does
+        not answer "I want Sam in my club", which is what an owner wants most of the time. An
+        owner can now invite a player by name - from their friends list, or by typing one -
+        and the invitee gets a notification, an Accept/Decline on the club page, and a list of
+        outstanding invitations on the Clubs page. Invitations are `ClubMembers` rows with
+        `Status = 'invited'`, so no migration; the membership test became an allowlist in the
+        same change, because "not pending" had counted an invitation as a membership the
+        moment invitations existed.
 
 **Depends on:** I3, existing tournament engine.
 **Acceptance criteria**
@@ -1783,6 +1791,18 @@ competitive advantage.
         baselines, because the headless shell and full Chromium do not rasterise text
         identically and the difference reads exactly like a regression.
 -   [ ] Load testing for game nodes + matchmaking before public launch → **N10**.
+-   [ ] **Q1 — Know when the live site breaks.** Inherited from I1 when launch closed. The
+        site has real players and no error reporting and no uptime monitoring: a 5xx at 2am is
+        invisible to everyone except the player who hit it, and TLS or a container dying is
+        found by someone complaining. Both are owner actions, both are minutes:
+    -   Set `SENTRY_DSN` in `.env.production`. Client and server are already wired
+        (`server/server.js`, `server/gamenode/gameserver.js`, and the CSP allows the ingest
+        origin) - only the DSN is missing.
+    -   Point an external uptime monitor at `https://archonarena.com/`; alert on 5xx and on
+        certificate expiry. It has to be external: a monitor on the box cannot tell you the
+        box is gone.
+    -   Run `deploy/healthcheck.sh` on the host until it is all-PASS. Its exit code is the
+        number of failures, so it drops into cron or uptime tooling as-is.
 -   [x] Upstream sync process: `npm run sync:upstream` plus a weekly workflow that applies
         keyteki's gameplay changes, runs the full gate, and opens a PR only when it is green —
         an issue when it is not. Never auto-merges (`docs/UPSTREAM.md`).

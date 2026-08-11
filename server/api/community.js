@@ -23,6 +23,15 @@ const clubCreateLimit = rateLimit({
     max: 5,
     message: 'You have created several clubs recently. Please wait a while before creating another.'
 });
+// An invitation is addressed to one person and mails them by default, so it is
+// the club surface with an actual spam shape. Generous for anyone building a
+// club, useless for anyone working through a user list.
+const clubInviteLimit = rateLimit({
+    name: 'club-invite',
+    windowMs: 60 * 60 * 1000,
+    max: 30,
+    message: 'You have sent a lot of club invitations recently. Please wait a while.'
+});
 const storeCreateLimit = rateLimit({
     name: 'store-create',
     windowMs: 60 * 60 * 1000,
@@ -177,6 +186,21 @@ module.exports.init = function (server) {
         })
     );
 
+    // ARCHON: named invitations. The join code covers "anyone with this string";
+    // this covers "I want Sam", which is what an owner actually wants most of
+    // the time and had no way to express.
+    //
+    // Declared before '/api/clubs/:id' on purpose. Express matches in
+    // registration order, so the other way round this literal path arrives at
+    // the detail handler as the id "invitations" and 404s a route that exists.
+    server.get(
+        '/api/clubs/invitations',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send({ success: true, invitations: await clubService.invitations(req.user.id) });
+        })
+    );
+
     server.get(
         '/api/clubs/:id',
         wrapAsync(async (req, res, next) => {
@@ -196,6 +220,31 @@ module.exports.init = function (server) {
                     next(detailErr);
                 }
             })(req, res, next);
+        })
+    );
+
+    server.post(
+        '/api/clubs/:id/invite',
+        jwt,
+        clubInviteLimit,
+        wrapAsync(async (req, res) => {
+            res.send(
+                await clubService.invite(parseInt(req.params.id, 10), req.user, req.body.username)
+            );
+        })
+    );
+
+    server.post(
+        '/api/clubs/:id/invitation',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(
+                await clubService.respondToInvitation(
+                    parseInt(req.params.id, 10),
+                    req.user.id,
+                    !!req.body.accept
+                )
+            );
         })
     );
 

@@ -7,7 +7,12 @@ import { useNavigate } from 'react-router-dom';
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
 import { clubJoinOutcome } from '../Components/Community/clubJoinOutcome';
-import { useCreateClubMutation, useGetClubsQuery, useJoinClubByCodeMutation } from '../redux/api';
+import {
+    useCreateClubMutation,
+    useGetClubInvitationsQuery,
+    useGetClubsQuery,
+    useJoinClubByCodeMutation
+} from '../redux/api';
 
 const inputClass =
     'w-full rounded-md border border-border/65 bg-surface-secondary/55 px-3 py-2 text-sm text-foreground focus:border-border/90 focus:outline-none dark:border-border/80 dark:bg-surface-secondary/85';
@@ -28,8 +33,13 @@ const Clubs = () => {
     const { data } = useGetClubsQuery(query ? { query } : undefined);
     const [createClub, createState] = useCreateClubMutation();
     const [joinByCode, joinByCodeState] = useJoinClubByCodeMutation();
+    // An invitation raises a notification, and a notification is easy to miss.
+    // This is the place a player looks when they remember someone mentioned a
+    // club, so the outstanding ones are listed here too.
+    const { data: invitationData } = useGetClubInvitationsQuery(undefined, { skip: !user });
 
     const clubs = data?.clubs || [];
+    const invitations = invitationData?.invitations || [];
 
     const onCreate = async () => {
         try {
@@ -94,6 +104,26 @@ const Clubs = () => {
                         </HeroButton>
                     )}
                 </div>
+
+                {invitations.length > 0 && (
+                    <div className='mb-3 space-y-1 rounded-md border border-amber-300/50 bg-amber-300/10 px-3 py-2'>
+                        <div className='text-sm font-semibold text-foreground'>
+                            {t('You have been invited')}
+                        </div>
+                        {invitations.map((invitation) => (
+                            <Link
+                                key={invitation.id}
+                                href={`/community/clubs/${invitation.id}`}
+                                className='block text-sm text-muted hover:text-foreground'
+                            >
+                                {t('{{club}}, by {{owner}}', {
+                                    club: invitation.name,
+                                    owner: invitation.owner
+                                })}
+                            </Link>
+                        ))}
+                    </div>
+                )}
 
                 {user && (
                     <div className='mb-3 flex gap-2'>

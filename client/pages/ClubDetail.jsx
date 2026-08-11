@@ -15,7 +15,10 @@ import {
     useDecideClubJoinRequestMutation,
     useGetClubInPersonGamesQuery,
     useGetClubLeaderboardQuery,
-    useGetClubQuery
+    useGetClubQuery,
+    useGetFriendsQuery,
+    useInviteToClubMutation,
+    useRespondToClubInvitationMutation
 } from '../redux/api';
 
 const POOLS = ['archon', 'sealed', 'alliance'];
@@ -33,6 +36,10 @@ const ClubDetail = () => {
     const { data, refetch } = useGetClubQuery(id);
     const [clubAction] = useClubActionMutation();
     const [decideRequest] = useDecideClubJoinRequestMutation();
+    const [inviteToClub, inviteState] = useInviteToClubMutation();
+    const [respondToInvitation] = useRespondToClubInvitationMutation();
+    const [inviteName, setInviteName] = useState('');
+    const { data: friendData } = useGetFriendsQuery(undefined, { skip: !user });
     const [pool, setPool] = useState('archon');
     const { data: board } = useGetClubLeaderboardQuery({ id, pool });
     const { data: paperGames } = useGetClubInPersonGamesQuery({ id, limit: 10 });
@@ -49,7 +56,17 @@ const ClubDetail = () => {
         );
     }
 
-    const { club, members, pendingMembers = [] } = data;
+    const { club, members, pendingMembers = [], invitedMembers = [] } = data;
+
+    // Friends worth offering: not already in the club, not already invited, not
+    // already waiting on approval. Offering any of those only produces an error
+    // the owner has to read to understand.
+    const alreadyKnown = new Set(
+        [...members, ...pendingMembers, ...invitedMembers].map((member) => member.username)
+    );
+    const invitableFriends = (friendData?.friends || []).filter(
+        (friend) => !alreadyKnown.has(friend.username)
+    );
 
     const decide = async (userId, approve) => {
         try {
@@ -63,6 +80,55 @@ const ClubDetail = () => {
             }
         } catch {
             toast.danger(t('Action failed'));
+        }
+    };
+
+    const invite = async (username) => {
+        const name = (username || '').trim();
+
+        if (!name) {
+            return;
+        }
+
+        try {
+            const result = await inviteToClub({ id, username: name }).unwrap();
+
+            if (result.success) {
+                toast.success(t('Invited {{name}}', { name: result.username }));
+                setInviteName('');
+                refetch();
+            } else {
+                toast.danger(result.message || t('Could not send that invitation'));
+            }
+        } catch (err) {
+            // The server's reason is the useful part here - "No player by that
+            // name", "already in this club" - so it is shown rather than a
+            // generic failure.
+            toast.danger(err?.data?.message || t('Could not send that invitation'));
+        }
+    };
+
+    const answerInvitation = async (accept) => {
+        try {
+            const result = await respondToInvitation({ id, accept }).unwrap();
+
+            if (result.success) {
+                toast.success(
+                    accept
+                        ? t('Welcome to {{name}}', { name: result.name })
+                        : t('Invitation declined')
+                );
+
+                if (accept) {
+                    refetch();
+                } else {
+                    navigate('/community/clubs');
+                }
+            } else {
+                toast.danger(result.message || t('Action failed'));
+            }
+        } catch (err) {
+            toast.danger(err?.data?.message || t('Action failed'));
         }
     };
 
@@ -115,6 +181,26 @@ const ClubDetail = () => {
                                 <span className='text-xs text-muted'>
                                     {t('Your request is waiting for the owner')}
                                 </span>
+                            ) : club.isInvited ? (
+                                <>
+                                    <span className='text-xs text-muted'>
+                                        {t('You have been invited')}
+                                    </span>
+                                    <HeroButton
+                                        size='sm'
+                                        variant='primary'
+                                        onPress={() => answerInvitation(true)}
+                                    >
+                                        {t('Accept')}
+                                    </HeroButton>
+                                    <HeroButton
+                                        size='sm'
+                                        variant='tertiary'
+                                        onPress={() => answerInvitation(false)}
+                                    >
+                                        {t('Decline')}
+                                    </HeroButton>
+                                </>
                             ) : (
                                 <HeroButton
                                     size='sm'
@@ -165,6 +251,61 @@ const ClubDetail = () => {
                         <ReportButton targetType='club' targetId={club.id} />
                     </div>
                 )}
+                {/* ARCHON: an invitation addressed to one player, as opposed
+                    to the code above which is for anyone who has it. The
+                    friends list is here because "invite my friends" is the
+                    common case and nobody remembers how a username is spelled. */}
+                {club.isOwner && (
+                    <div className='mt-3 rounded-md border border-border/60 bg-surface-secondary/50 px-3 py-2'>
+                        <div className='flex flex-wrap items-center gap-2'>
+                            <span className='text-sm text-muted'>{t('Invite a player:')}</span>
+                            <input
+                                className='min-w-40 flex-1 rounded-md border border-border/65 bg-surface-secondary/55 px-2 py-1 text-sm text-foreground focus:border-border/90 focus:outline-none'
+                                aria-label={t('Username to invite')}
+                                placeholder={t('Username')}
+                                value={inviteName}
+                                onChange={(event) => setInviteName(event.target.value)}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Enter') {
+                                        invite(inviteName);
+                                    }
+                                }}
+                            />
+                            <HeroButton
+                                size='sm'
+                                variant='primary'
+                                isDisabled={!inviteName.trim()}
+                                isPending={inviteState.isLoading}
+                                onPress={() => invite(inviteName)}
+                            >
+                                {t('Invite')}
+                            </HeroButton>
+                        </div>
+                        {invitableFriends.length > 0 && (
+                            <div className='mt-2 flex flex-wrap items-center gap-1'>
+                                <span className='mr-1 text-xs text-muted'>{t('Friends:')}</span>
+                                {invitableFriends.map((friend) => (
+                                    <HeroButton
+                                        key={friend.userId}
+                                        size='sm'
+                                        variant='tertiary'
+                                        className='!h-6 !px-2 text-xs'
+                                        onPress={() => invite(friend.username)}
+                                    >
+                                        {friend.username}
+                                    </HeroButton>
+                                ))}
+                            </div>
+                        )}
+                        {invitedMembers.length > 0 && (
+                            <div className='mt-2 text-xs text-muted'>
+                                {t('Waiting on:')}{' '}
+                                {invitedMembers.map((member) => member.username).join(', ')}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {club.isOwner && club.joinCode && (
                     <div className='mt-3 flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-surface-secondary/50 px-3 py-2 text-sm'>
                         <span className='text-muted'>{t('Invite code:')}</span>

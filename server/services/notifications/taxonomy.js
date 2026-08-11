@@ -64,6 +64,16 @@ const CATEGORIES = {
         description: 'Someone joined a club you own.',
         defaults: { inApp: true, email: false }
     },
+    // Mails by default for the same reason a friend request does: it is
+    // addressed to one person, it is waiting on them, and an invitation nobody
+    // sees is the failure the feature exists to prevent. The abuse that email
+    // default invites is bounded at the route instead, by a rate limit.
+    'club.invite': {
+        group: 'Community',
+        label: 'Club invitations',
+        description: 'A club owner invited you to join their club.',
+        defaults: { inApp: true, email: true }
+    },
     // ARCHON (N13): an in-person game is stuck until the other player files
     // their report, and neither of them is on the site when it happens - the
     // whole exchange takes place across a table. So this mails by default:

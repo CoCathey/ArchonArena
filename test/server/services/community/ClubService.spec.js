@@ -1,7 +1,17 @@
 const ClubService = require('../../../../server/services/community/ClubService');
 
 const createFakeDb = () => {
-    const state = { clubs: [], members: [], nextId: 1 };
+    const state = {
+        clubs: [],
+        members: [],
+        // Accounts, so an invitation can be addressed to a name.
+        users: [
+            { Id: 1, Username: 'owner' },
+            { Id: 2, Username: 'sam' },
+            { Id: 3, Username: 'alex' }
+        ],
+        nextId: 1
+    };
 
     return {
         state,
@@ -61,6 +71,20 @@ const createFakeDb = () => {
                 return exists ? [] : [{ Id: state.members.length }];
             }
 
+            if (sql.includes('DELETE FROM "ClubMembers"') && sql.includes("'invited'")) {
+                const before = state.members.length;
+                state.members = state.members.filter(
+                    (member) =>
+                        !(
+                            member.ClubId === params[0] &&
+                            member.UserId === params[1] &&
+                            member.Status === 'invited'
+                        )
+                );
+
+                return before === state.members.length ? [] : [{ Id: 1 }];
+            }
+
             if (sql.includes('DELETE FROM "ClubMembers"')) {
                 state.members = state.members.filter(
                     (member) => !(member.ClubId === params[0] && member.UserId === params[1])
@@ -72,6 +96,58 @@ const createFakeDb = () => {
                 state.clubs = state.clubs.filter((club) => club.Id !== params[0]);
                 state.members = state.members.filter((member) => member.ClubId !== params[0]);
                 return [];
+            }
+
+            if (sql.includes('SELECT * FROM "ClubMembers"')) {
+                return state.members.filter(
+                    (member) => member.ClubId === params[0] && member.UserId === params[1]
+                );
+            }
+
+            if (sql.includes('FROM "Users"') && sql.includes('lower("Username")')) {
+                return state.users.filter(
+                    (user) => user.Username.toLowerCase() === String(params[0]).toLowerCase()
+                );
+            }
+
+            if (sql.includes('FROM "Users" WHERE "Id"')) {
+                return state.users.filter((user) => user.Id === params[0]);
+            }
+
+            if (
+                sql.includes('UPDATE "ClubMembers" SET "Status" = \'active\'') &&
+                sql.includes("'invited'")
+            ) {
+                const row = state.members.find(
+                    (member) =>
+                        member.ClubId === params[0] &&
+                        member.UserId === params[1] &&
+                        member.Status === 'invited'
+                );
+
+                if (!row) {
+                    return [];
+                }
+
+                row.Status = 'active';
+
+                return [{ Id: 1 }];
+            }
+
+            if (sql.includes('JOIN "Clubs" c ON c."Id" = cm."ClubId"')) {
+                return state.members
+                    .filter((member) => member.UserId === params[0] && member.Status === 'invited')
+                    .map((member) => {
+                        const club = state.clubs.find((c) => c.Id === member.ClubId);
+
+                        return {
+                            Id: club.Id,
+                            Name: club.Name,
+                            Description: club.Description,
+                            CreatedAt: null,
+                            Owner: 'user' + club.OwnerId
+                        };
+                    });
             }
 
             if (sql.includes('FROM "ClubMembers" cm')) {
@@ -220,6 +296,149 @@ describe('ClubService', function () {
         expect((await service.joinByCode(2, 'NOPE9999')).success).toBe(false);
         expect((await service.joinByCode(2, '')).success).toBe(false);
         expect((await service.joinByCode(2, 'ab')).success).toBe(false);
+    });
+
+    // ARCHON: named invitations. The join code answers "anyone with this
+    // string"; this answers "I want Sam".
+    describe('invitations', function () {
+        const owner = { id: 1, permissions: {} };
+
+        it('invites a player by name and leaves them a non-member until they accept', async function () {
+            const { id } = await service.create(1, { name: 'Austin Archons' });
+
+            const result = await service.invite(id, owner, 'sam');
+
+            expect(result).toMatchObject({ success: true, username: 'sam' });
+
+            // The trap this guards: 'invited' is not 'pending', so a
+            // membership test written as "not pending" counts an invitation as
+            // a membership - the invitee appears in the roster and the member
+            // count before they have answered.
+            const detail = await service.getDetail(id, 2);
+
+            expect(detail.club.isMember).toBe(false);
+            expect(detail.club.isInvited).toBe(true);
+            expect(detail.members.map((m) => m.username)).not.toContain('user2');
+
+            // ...and the owner can see the outstanding invitation, nobody else.
+            expect((await service.getDetail(id, 1)).invitedMembers).toHaveLength(1);
+            expect((await service.getDetail(id, 2)).invitedMembers).toHaveLength(0);
+        });
+
+        it('is case-insensitive about the name and rejects one that is not an account', async function () {
+            const { id } = await service.create(1, { name: 'Austin Archons' });
+
+            expect((await service.invite(id, owner, 'SAM')).success).toBe(true);
+            expect((await service.invite(id, owner, 'nobody')).message).toMatch(/No player/);
+        });
+
+        it('only the owner can invite', async function () {
+            const { id } = await service.create(1, { name: 'Austin Archons' });
+            await service.join(id, 2);
+
+            const result = await service.invite(id, { id: 2, permissions: {} }, 'alex');
+
+            expect(result.success).toBe(false);
+            expect(result.message).toMatch(/owner/i);
+        });
+
+        it('refuses to invite someone already in, already invited, or already asking', async function () {
+            const { id } = await service.create(1, { name: 'Austin Archons' });
+
+            await service.invite(id, owner, 'sam');
+            expect((await service.invite(id, owner, 'sam')).message).toMatch(
+                /already been invited/
+            );
+
+            await service.join(id, 3);
+            expect((await service.invite(id, owner, 'alex')).message).toMatch(
+                /already in this club/
+            );
+        });
+
+        it('accepting makes the player a member', async function () {
+            const { id } = await service.create(1, { name: 'Austin Archons' });
+            await service.invite(id, owner, 'sam');
+
+            const result = await service.respondToInvitation(id, 2, true);
+
+            expect(result).toMatchObject({ success: true, name: 'Austin Archons' });
+            expect((await service.getDetail(id, 2)).club.isMember).toBe(true);
+            expect((await service.getDetail(id, 1)).invitedMembers).toHaveLength(0);
+        });
+
+        // An invitation from the owner IS the approval. Routing an invited
+        // player into the owner's own queue asks the same person twice.
+        it('accepting an invitation to an approval club does not go back into the queue', async function () {
+            const { id } = await service.create(1, {
+                name: 'Austin Archons',
+                joinPolicy: 'approval'
+            });
+            await service.invite(id, owner, 'sam');
+            await service.respondToInvitation(id, 2, true);
+
+            const detail = await service.getDetail(id, 2);
+
+            expect(detail.club.isMember).toBe(true);
+            expect(detail.club.isPending).toBe(false);
+        });
+
+        it('declining removes the invitation and joins nothing', async function () {
+            const { id } = await service.create(1, { name: 'Austin Archons' });
+            await service.invite(id, owner, 'sam');
+
+            expect(await service.respondToInvitation(id, 2, false)).toMatchObject({
+                success: true,
+                declined: true
+            });
+            expect((await service.getDetail(id, 2)).club.isInvited).toBe(false);
+            expect(db.state.members.filter((m) => m.UserId === 2)).toHaveLength(0);
+        });
+
+        it('answering an invitation you do not have fails rather than joining you', async function () {
+            const { id } = await service.create(1, { name: 'Austin Archons' });
+
+            expect((await service.respondToInvitation(id, 2, true)).success).toBe(false);
+            expect((await service.getDetail(id, 2)).club.isMember).toBe(false);
+        });
+
+        // Pressing Join while invited must not silently do nothing: the insert
+        // hits the unique constraint, and reporting success would leave them
+        // joined in the reply and invited in the club.
+        it('pressing Join while invited accepts the invitation', async function () {
+            const { id } = await service.create(1, { name: 'Austin Archons' });
+            await service.invite(id, owner, 'sam');
+
+            expect((await service.join(id, 2)).success).toBe(true);
+            expect((await service.getDetail(id, 2)).club.isMember).toBe(true);
+        });
+
+        it('lists a player their outstanding invitations', async function () {
+            const first = await service.create(1, { name: 'Austin Archons' });
+            const second = await service.create(1, { name: 'Dallas Dis' });
+
+            await service.invite(first.id, owner, 'sam');
+            await service.invite(second.id, owner, 'sam');
+            await service.respondToInvitation(second.id, 2, false);
+
+            const invitations = await service.invitations(2);
+
+            expect(invitations.map((i) => i.name)).toEqual(['Austin Archons']);
+        });
+
+        it('notifies the invitee, and the owner when it is accepted', async function () {
+            const notifications = [];
+            const notifying = new ClubService(db, { notify: (e) => notifications.push(e) });
+            const { id } = await notifying.create(1, { name: 'Austin Archons' });
+
+            await notifying.invite(id, owner, 'sam');
+            expect(notifications).toHaveLength(1);
+            expect(notifications[0]).toMatchObject({ userId: 2, category: 'club.invite' });
+            expect(notifications[0].title).toMatch(/invited you to Austin Archons/);
+
+            await notifying.respondToInvitation(id, 2, true);
+            expect(notifications[1]).toMatchObject({ userId: 1, category: 'club.join' });
+        });
     });
 
     it('only the owner sees the join code in club detail', async function () {
