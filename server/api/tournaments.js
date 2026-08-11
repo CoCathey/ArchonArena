@@ -19,6 +19,27 @@ const tournamentCreateLimit = rateLimit({
         'You have created several tournaments recently. Please wait a while before creating another.'
 });
 
+// ARCHON: opening a table is the most expensive thing a participant can ask
+// for - it builds a lobby game and broadcasts it to everyone in the lobby. A
+// player opening their own table does it once or twice a round; the ceiling is
+// only here so one account cannot fill the lobby list with tables.
+const openGameLimit = rateLimit({
+    name: 'tournament-open-game',
+    windowMs: 10 * 60 * 1000,
+    max: 30,
+    message: 'You have opened a lot of tables. Please wait a moment before opening another.'
+});
+
+// Scheduling and result reporting both notify the other player, in-app and by
+// email. Generous enough that a real negotiation never touches it, low enough
+// that the notification path is not a way to bother somebody.
+const matchTrafficLimit = rateLimit({
+    name: 'tournament-match-traffic',
+    windowMs: 10 * 60 * 1000,
+    max: 60,
+    message: 'Too many match updates in a short time. Please wait a moment and try again.'
+});
+
 /**
  * ARCHON: native tournament engine API (Phase 7). Reads are public
  * (with optional auth for actor-specific flags and private events);
@@ -87,10 +108,14 @@ module.exports.init = function (server) {
         })
     );
 
-    const action = (path, handler) =>
+    // `limit` is optional: most of these are organizer tools behind an
+    // authorization check in the service, and the ones worth bounding are the
+    // ones any participant can call.
+    const action = (path, handler, limit) =>
         server.post(
             path,
             passport.authenticate('jwt', { session: false }),
+            ...(limit ? [limit] : []),
             wrapAsync(async (req, res) => {
                 res.send(await handler(req));
             })
@@ -185,38 +210,47 @@ module.exports.init = function (server) {
         tournamentService.adjustRoundClock(parseInt(req.params.id, 10), req.user, req.body.minutes)
     );
 
-    action('/api/tournaments/:id/matches/:matchId/result', (req) =>
-        tournamentService.reportResult(
-            parseInt(req.params.id, 10),
-            parseInt(req.params.matchId, 10),
-            parseInt(req.body.winnerId, 10),
-            req.user,
-            {
-                player1Wins: req.body.player1Wins,
-                player2Wins: req.body.player2Wins,
-                // ARCHON (N9): 'paper' for a result played across a table.
-                source: req.body.source
-            }
-        )
+    action(
+        '/api/tournaments/:id/matches/:matchId/result',
+        (req) =>
+            tournamentService.reportResult(
+                parseInt(req.params.id, 10),
+                parseInt(req.params.matchId, 10),
+                parseInt(req.body.winnerId, 10),
+                req.user,
+                {
+                    player1Wins: req.body.player1Wins,
+                    player2Wins: req.body.player2Wins,
+                    // ARCHON (N9): 'paper' for a result played across a table.
+                    source: req.body.source
+                }
+            ),
+        matchTrafficLimit
     );
 
     // ARCHON: the opponent's half of a reported result - agree with it, or
     // say it is wrong and put it in front of the organizer.
-    action('/api/tournaments/:id/matches/:matchId/confirm', (req) =>
-        tournamentService.confirmResult(
-            parseInt(req.params.id, 10),
-            parseInt(req.params.matchId, 10),
-            req.user
-        )
+    action(
+        '/api/tournaments/:id/matches/:matchId/confirm',
+        (req) =>
+            tournamentService.confirmResult(
+                parseInt(req.params.id, 10),
+                parseInt(req.params.matchId, 10),
+                req.user
+            ),
+        matchTrafficLimit
     );
 
-    action('/api/tournaments/:id/matches/:matchId/dispute', (req) =>
-        tournamentService.disputeResult(
-            parseInt(req.params.id, 10),
-            parseInt(req.params.matchId, 10),
-            req.user,
-            req.body.note
-        )
+    action(
+        '/api/tournaments/:id/matches/:matchId/dispute',
+        (req) =>
+            tournamentService.disputeResult(
+                parseInt(req.params.id, 10),
+                parseInt(req.params.matchId, 10),
+                req.user,
+                req.body.note
+            ),
+        matchTrafficLimit
     );
 
     action('/api/tournaments/:id/matches/:matchId/award', (req) =>
@@ -237,24 +271,30 @@ module.exports.init = function (server) {
         )
     );
 
-    action('/api/tournaments/:id/matches/:matchId/open-game', (req) =>
-        tournamentService.ensureGameForMatch(
-            parseInt(req.params.id, 10),
-            parseInt(req.params.matchId, 10),
-            req.user
-        )
+    action(
+        '/api/tournaments/:id/matches/:matchId/open-game',
+        (req) =>
+            tournamentService.ensureGameForMatch(
+                parseInt(req.params.id, 10),
+                parseInt(req.params.matchId, 10),
+                req.user
+            ),
+        openGameLimit
     );
 
     // ARCHON (N14): asynchronous events - the two players of a match agree
     // between themselves when to play it, inside the round's deadline.
-    action('/api/tournaments/:id/matches/:matchId/propose-time', (req) =>
-        tournamentService.proposeMatchTime(
-            parseInt(req.params.id, 10),
-            parseInt(req.params.matchId, 10),
-            req.user,
-            req.body.time,
-            req.body.note
-        )
+    action(
+        '/api/tournaments/:id/matches/:matchId/propose-time',
+        (req) =>
+            tournamentService.proposeMatchTime(
+                parseInt(req.params.id, 10),
+                parseInt(req.params.matchId, 10),
+                req.user,
+                req.body.time,
+                req.body.note
+            ),
+        matchTrafficLimit
     );
 
     action('/api/tournaments/:id/matches/:matchId/accept-time', (req) =>

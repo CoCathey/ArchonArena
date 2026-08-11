@@ -1169,6 +1169,12 @@ would notice first.
         organizer commits, and lists the settings that will not do anything. The deck rule moved
         out of the advanced panel to sit with format and pacing: it is enforced at the table now,
         so it is one of the few settings every player in the event feels directly.
+-   [x] **The participant-callable endpoints are bounded.** Creating an event was the only
+        tournament route with a ceiling. The rest are mostly organizer tools behind an
+        authorization check, which is a fair reason to leave them — but opening a table builds a
+        lobby game and broadcasts it to everyone in the lobby, and reporting, confirming, disputing
+        or proposing a time all notify the other player in-app and by email. Those five now have
+        ceilings no real player will meet.
 -   [x] **A whole event runs against real PostgreSQL.** Every other tournament test used an
         in-memory fake that routes on SQL fragments — good enough for lifecycle logic, but it
         agrees with itself by construction and cannot fail on a column the schema does not have or
