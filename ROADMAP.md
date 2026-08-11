@@ -907,12 +907,14 @@ keyteki card fixes need a routine path in.
 -   An upstream merge lands with the full card suite green and a recorded diff of gameplay changes.
 -   The documented per-node concurrent-game ceiling is backed by a load test.
 
-#### N11 — Guided tutorial and experience-based onboarding
+#### N11 — Guided tutorial and experience-based onboarding _(walkthrough done; branching open)_
 
-**Why:** KeyForge is a complex game and Archon Arena is a complex platform. Today a brand-new
-player lands in a lobby with no idea what to do, and `/learn` is a placeholder. Asking one
-question at sign-up lets the platform teach exactly what each player is missing and skip what
-they already know.
+**Why:** KeyForge is a complex game and Archon Arena is a complex platform. When this was
+written a brand-new player landed in a lobby with no idea what to do and `/learn` was a
+placeholder; the walkthrough below has since filled that in. What is still missing is the
+branching — the platform teaches every new player the same 93 steps, including the ones who
+have played KeyForge for years and only need to know where the deck importer is. Asking one
+question at sign-up is what lets it teach each player what they are actually missing.
 **Tasks**
 
 -   Onboarding step: "How well do you know KeyForge?" (new to it / played before). Players who
