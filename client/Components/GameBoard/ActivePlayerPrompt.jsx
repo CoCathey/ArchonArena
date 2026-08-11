@@ -325,6 +325,31 @@ const ActivePlayerPrompt = (props) => {
         controlSource = props.controls[0].source;
     }
 
+    // ARCHON (N15): a prompt that comes from a card has to say which card.
+    //
+    // `controlSource` was already read here, but only to fill a `{{card}}`
+    // placeholder - so a prompt whose text happens to mention the card read
+    // correctly and a prompt whose text does not showed nothing at all. That
+    // second case is the whole complaint: "choose a creature" with no way to
+    // tell whether it is Gateway to Dis asking or the Onyx Knight you played
+    // three plays ago.
+    //
+    // A `targeting` control renders the source itself (with its own caption),
+    // so this only fills the gap where no such control exists - a card-name or
+    // trait-name lookup, for instance, which replaces the targeting control
+    // entirely.
+    const hasTargetingControl = (props.controls || []).some(
+        (control) => control.type === 'targeting'
+    );
+    const sourceName = controlSource?.name || controlSource?.label;
+    const sourceCaption =
+        sourceName && !hasTargetingControl ? (
+            <div className='mb-2 text-xs leading-tight text-muted'>
+                {t('because of')}{' '}
+                <span className='font-semibold text-foreground'>{sourceName}</span>
+            </div>
+        ) : null;
+
     let promptTitle;
 
     if (props.promptTitle) {
@@ -375,6 +400,7 @@ const ActivePlayerPrompt = (props) => {
                 {promptTitle}
                 <div className='px-1 text-center'>
                     <h4 className='mb-2 text-base font-medium leading-snug'>{promptTexts}</h4>
+                    {sourceCaption}
                     <div className='space-y-1.5'>{getControls()}</div>
                     <div className='mt-2 space-y-1.5'>{getButtons()}</div>
                     {props.forcePassAvailable && (

@@ -1149,6 +1149,30 @@ pre {
     width: calc(var(--card-base-width) * var(--card-zoom-width-scale));
     height: calc(var(--card-base-height) * var(--card-zoom-height-scale));
 }
+/* ARCHON (N15): the cards acting on this one, as a strip across the bottom of
+   the zoom. Inside the box rather than under it because .card-zoom is a fixed
+   size with overflow hidden - anything appended below it is simply clipped -
+   and only rendered when there is something to say, so the art is unobscured
+   the rest of the time. */
+.card-zoom-effects {
+    position: absolute;
+    /* top:auto explicitly: something upstream resolves `top` to 0 on
+       absolutely-positioned children here, which stretches this to the full
+       height of the zoom and blacks out the card instead of captioning it. */
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    line-height: 1.1rem;
+    color: white;
+    background: rgba(0, 0, 0, 0.78);
+    text-align: center;
+}
+.card-zoom-effects-label {
+    opacity: 0.7;
+}
 .card-zoom.small {
     --card-zoom-width-scale: 3.9;
     --card-zoom-height-scale: 3.9;
@@ -1202,7 +1226,10 @@ pre {
     max-height: 100% !important;
     display: block;
 }
-.card-zoom > div {
+/* Sizes the card image to fill the zoom. Excludes the effects caption, which
+   is also a direct div child and would otherwise be stretched to the full
+   height by the !important and black out the whole card. */
+.card-zoom > div:not(.card-zoom-effects) {
     width: 100% !important;
     height: 100% !important;
 }
@@ -2228,8 +2255,19 @@ span.stat-digit {
     .role-previouswinner {
         @apply font-semibold text-fuchsia-600 dark:text-fuchsia-400;
     }
+    .ability-targeting-block {
+        @apply mb-2 flex w-full flex-col items-center gap-1;
+    }
+    /* ARCHON (N15): says what the card picture below it means. Without it the
+       source is an unlabelled image that changes between triggers. */
+    .ability-targeting-caption {
+        @apply text-xs leading-tight text-muted;
+    }
+    .ability-targeting-name {
+        @apply font-semibold text-foreground;
+    }
     .ability-targeting {
-        @apply mb-2 flex w-full flex-row items-center justify-center gap-2;
+        @apply flex w-full flex-row items-center justify-center gap-2;
     }
     .ability-targeting-source {
         @apply flex shrink-0 flex-row items-center gap-2;

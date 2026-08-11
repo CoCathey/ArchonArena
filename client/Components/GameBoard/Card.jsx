@@ -323,7 +323,12 @@ const Card = ({
                                               cardBack={cardBack}
                                           />
                                       ),
-                                      size: 'normal'
+                                      size: 'normal',
+                                      // ARCHON (N15): the cards currently
+                                      // acting on this one, so a creature
+                                      // that is not its printed size says
+                                      // why when you look at it.
+                                      effectSources: card.effectSources
                                   })
                             : undefined
                     }

@@ -1072,7 +1072,7 @@ the whole of what is left here.
 -   An admin can see and clear pending invite requests.
 -   The Android page links to an install that works on a clean device.
 
-#### N15 — Move-by-move clarity in the apps _(mobile done; web attribution and passive effects open)_
+#### N15 — Move-by-move clarity in the apps _(done on web; passive attribution open on mobile)_
 
 **Why:** the Expo app keeps the play-by-play behind a slide-up sheet (`LogSheet`), so on a phone
 it is easy to miss what the opponent just did. And on both clients a prompt often asks for a
@@ -1087,20 +1087,28 @@ show it.
         and buttons from `values` or the serialized card, and a "because of _<card>_" context row
         renders `controls[].source` above the prompt with a thumbnail. This also fixed a literal
         `{{card}}` rendering as button text when playing from archives.
--   [ ] **Web client: still only interpolates, never attributes.** `ActivePlayerPrompt` resolves
-        `controls[0].source` into `{{card}}` placeholders (`localizedText`), so a prompt whose text
-        happens to mention the card reads correctly — but a prompt whose text does _not_ name it
-        shows nothing, and that is exactly the case the item was written for. The mobile
-        "because of _<card>_" row is the model to port.
--   [ ] Same treatment for triggered and passive effects that change the board without prompting —
-        untouched on both clients.
+-   [x] **Web client: prompts name their card.** Two gaps, both closed. `AbilityTargeting`
+        showed the source as an unlabelled image with an arrow — readable on a turn with one
+        trigger, meaningless on a turn where three resolve in sequence — and now captions it
+        "because of _<card>_" like the Expo app. And where no `targeting` control exists at all
+        (a card-name or trait-name lookup replaces it), `ActivePlayerPrompt` renders the caption
+        on its own, which is the case the item was written for: "choose a creature" with nothing
+        saying whether it is Gateway to Dis asking or something played three plays ago.
+-   [x] **Passive effects say who is doing it, on web.** A persistent effect prompts nobody, and
+        only ~385 of the 2,600 card scripts define a log message, so a creature printed at 8
+        sitting at 9 was a number with no explanation anywhere. The engine has always known —
+        every effect carries the context of the card that applied it — and `getSummary` now
+        sends `effectSources`, which the card zoom lists as "Affected by ...". Self is excluded,
+        because a card naming itself would be on nearly every creature and says nothing.
+-   [ ] Same for the Expo app: it gets `effectSources` in the card summary for free, but nothing
+        renders it yet.
 
 **Depends on:** nothing hard — the engine already tracks each ability's source card.
 **Acceptance criteria**
 
 -   [x] On a phone, a player can follow the opponent's whole turn without opening the log sheet.
--   [ ] Every prompt that originates from a card names that card. True on mobile; on web only when
-        the prompt text carries a `{{card}}` placeholder.
+-   [x] Every prompt that originates from a card names that card, on both clients — no longer
+        only when the prompt text happens to carry a `{{card}}` placeholder.
 -   [x] Nothing about what the engine resolves changes — this is presentation only. The mobile work
         is client-side interpolation and display over data the server already sent.
 

@@ -1520,6 +1520,32 @@ class Card extends EffectSource {
         return result;
     }
 
+    /**
+     * The distinct names of other cards whose effects are on this one.
+     *
+     * Self is excluded: a creature's own printed ability listing itself tells
+     * the player nothing they cannot see, and it would be on almost every card.
+     * Names rather than summaries, because this rides along with every game
+     * state update and the client only needs to say who.
+     */
+    getEffectSourceNames() {
+        const names = [];
+
+        for (const effect of this.effects || []) {
+            const source = effect.context && effect.context.source;
+
+            if (!source || source === this || !source.name) {
+                continue;
+            }
+
+            if (!names.includes(source.name)) {
+                names.push(source.name);
+            }
+        }
+
+        return names;
+    }
+
     getSummary(activePlayer, hideWhenFaceup) {
         const isController = activePlayer === this.controller;
         const selectionState = activePlayer.getCardSelectionState(this);
@@ -1600,7 +1626,15 @@ class Card extends EffectSource {
             activeProphecy: this.activeProphecy,
             canActivateProphecy:
                 this.type === 'prophecy' ? this.controller.canActivateProphecy(this) : false,
-            accolades: (this.owner.deckData.accolades || []).filter((a) => a.shown)
+            accolades: (this.owner.deckData.accolades || []).filter((a) => a.shown),
+            // ARCHON (N15): which other cards are currently acting on this one.
+            //
+            // The board already shows a creature at 9 power when its card is
+            // printed 5, and has never shown why. The engine has known all
+            // along - every effect carries the card that applied it - and the
+            // summary simply never sent it, so the client had nothing to say
+            // beyond the number.
+            effectSources: this.getEffectSourceNames()
         };
 
         if (tokenCard && isController) {

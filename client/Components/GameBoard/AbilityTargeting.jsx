@@ -1,10 +1,23 @@
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons';
 import PropTypes from 'prop-types';
 import React, { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import Icon from '../Icon';
 import CardImage from './CardImage';
 
+/**
+ * ARCHON (N15): which card is asking.
+ *
+ * This showed the source card as a bare image with an arrow at the targets and
+ * nothing saying what the picture meant. On a turn with one trigger you can
+ * infer it; on a turn where three abilities resolve in sequence the image
+ * changes under you with no explanation, and the prompt above it often does not
+ * name the card either - the engine knows the source, the UI just never said
+ * it. The Expo app names it ("because of <card>"); this is that, on web.
+ */
 const AbilityTargeting = (props) => {
+    const { t } = useTranslation();
+
     const onMouseOver = useCallback(
         (card) => {
             if (card && props.onMouseOver) {
@@ -45,21 +58,32 @@ const AbilityTargeting = (props) => {
     const overlapMargin =
         count > 1 ? { marginLeft: `calc((100% - ${count} * 4rem) / ${count - 1})` } : undefined;
 
+    // The localized name when the client has one, the printed name otherwise.
+    // `source` here is a short summary, not a full card.
+    const sourceName = props.source?.name || props.source?.label;
+
     return (
-        <div className='ability-targeting'>
-            <div className='ability-targeting-source'>
-                {renderSimpleCard(props.source)}
-                {count > 0 && <Icon icon={faArrowRight} />}
-            </div>
-            {count > 0 && (
-                <div className={`ability-targeting-targets${count > 1 ? ' flex-1' : ''}`}>
-                    {props.targets.map((target, index) => (
-                        <React.Fragment key={target.uuid || index}>
-                            {renderSimpleCard(target, index > 0 ? overlapMargin : undefined)}
-                        </React.Fragment>
-                    ))}
+        <div className='ability-targeting-block'>
+            {sourceName && (
+                <div className='ability-targeting-caption'>
+                    {t('because of')} <span className='ability-targeting-name'>{sourceName}</span>
                 </div>
             )}
+            <div className='ability-targeting'>
+                <div className='ability-targeting-source'>
+                    {renderSimpleCard(props.source)}
+                    {count > 0 && <Icon icon={faArrowRight} />}
+                </div>
+                {count > 0 && (
+                    <div className={`ability-targeting-targets${count > 1 ? ' flex-1' : ''}`}>
+                        {props.targets.map((target, index) => (
+                            <React.Fragment key={target.uuid || index}>
+                                {renderSimpleCard(target, index > 0 ? overlapMargin : undefined)}
+                            </React.Fragment>
+                        ))}
+                    </div>
+                )}
+            </div>
         </div>
     );
 };
