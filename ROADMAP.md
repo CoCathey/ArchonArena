@@ -1062,7 +1062,7 @@ the whole of what is left here.
 -   An admin can see and clear pending invite requests.
 -   The Android page links to an install that works on a clean device.
 
-#### N15 — Move-by-move clarity in the apps _(mobile done; web attribution and passive effects open)_
+#### N15 — Move-by-move clarity in the apps _(mobile and web prompt attribution done; passive effects open)_
 
 **Why:** the Expo app keeps the play-by-play behind a slide-up sheet (`LogSheet`), so on a phone
 it is easy to miss what the opponent just did. And on both clients a prompt often asks for a
@@ -1077,22 +1077,30 @@ show it.
         and buttons from `values` or the serialized card, and a "because of _<card>_" context row
         renders `controls[].source` above the prompt with a thumbnail. This also fixed a literal
         `{{card}}` rendering as button text when playing from archives.
--   [ ] **Web client: still only interpolates, never attributes.** `ActivePlayerPrompt` resolves
-        `controls[0].source` into `{{card}}` placeholders (`localizedText`), so a prompt whose text
-        happens to mention the card reads correctly — but a prompt whose text does _not_ name it
-        shows nothing, and that is exactly the case the item was written for. The mobile
-        "because of _<card>_" row is the model to port.
+-   [x] **Web client now attributes too.** `ActivePlayerPrompt` still interpolates
+        `controls[0].source` into `{{card}}` placeholders for prompt text that mentions the card,
+        but now also renders an explicit "because of _<card>_" row — mirroring the Expo app's
+        context row — whenever `controls[0].source` is present, regardless of whether the prompt
+        text names it. Every prompt path that attaches a source (`HandlerMenuPrompt`,
+        `SelectCardPrompt`, `AllocateAmberPrompt`, `AllocateDamagePrompt`,
+        `forcedtriggeredabilitywindow`) sends it through the same `controls[0].source`, `type:
+    'targeting'` shape, so one render path covers all of them. The locale lookup
+        (`getLocalizedSourceName`, `client/Components/GameBoard/promptAttribution.js`) is
+        extracted from the component so it is unit-testable without a rendering harness the repo
+        does not otherwise carry — `test/client/promptAttribution.spec.js`.
 -   [ ] Same treatment for triggered and passive effects that change the board without prompting —
-        untouched on both clients.
+        untouched on both clients. Left open: distinguishing which silent board changes need
+        surfacing, and how, is a design call rather than a port of an existing pattern.
 
 **Depends on:** nothing hard — the engine already tracks each ability's source card.
 **Acceptance criteria**
 
 -   [x] On a phone, a player can follow the opponent's whole turn without opening the log sheet.
--   [ ] Every prompt that originates from a card names that card. True on mobile; on web only when
-        the prompt text carries a `{{card}}` placeholder.
+-   [x] Every prompt that originates from a card names that card, on both mobile and web,
+        independent of whether the prompt text itself carries a `{{card}}` placeholder.
 -   [x] Nothing about what the engine resolves changes — this is presentation only. The mobile work
-        is client-side interpolation and display over data the server already sent.
+        is client-side interpolation and display over data the server already sent; the web work
+        is the same, reusing `controls[0].source`, which every affected prompt class already sends.
 
 #### N16 — Visual redesign: make it look premium
 
@@ -1535,8 +1543,8 @@ much stronger deck pays less.
 -   [ ] Accessibility pass (keyboard nav, contrast, screen-reader landmarks) → **N6**.
 -   [ ] Replace the `/learn` placeholder with a tutorial that teaches inside a real game →
         **N11**, then the wider Learn hub → **F6**.
--   [ ] Name the card and ability responsible in every prompt ("…because of Gateway to Dis")
-        → **N15**.
+-   [x] Name the card and ability responsible in every prompt ("…because of Gateway to Dis")
+        → **N15**. Triggered/passive effects with no prompt at all remain open under N15.
 
 ## Phase 9 — Player identity & community
 

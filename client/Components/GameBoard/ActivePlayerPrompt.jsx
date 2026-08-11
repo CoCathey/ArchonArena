@@ -9,6 +9,7 @@ import OptionsSelect from './OptionsSelect';
 import TraitNameLookup from './TraitNameLookup';
 
 import CardImage from './CardImage';
+import { getLocalizedSourceName } from './promptAttribution';
 
 /**
  * @typedef ActivePlayerPromptProps
@@ -375,6 +376,19 @@ const ActivePlayerPrompt = (props) => {
                 {promptTitle}
                 <div className='px-1 text-center'>
                     <h4 className='mb-2 text-base font-medium leading-snug'>{promptTexts}</h4>
+                    {controlSource && (
+                        <div
+                            className='mb-2 text-xs text-foreground/70'
+                            onMouseOver={() => onMouseOver(controlSource)}
+                            onMouseOut={() => onMouseOut(controlSource)}
+                        >
+                            {t('because of')}{' '}
+                            <span className='font-semibold text-foreground'>
+                                {getLocalizedSourceName(controlSource, i18n.language) ||
+                                    t('a card effect')}
+                            </span>
+                        </div>
+                    )}
                     <div className='space-y-1.5'>{getControls()}</div>
                     <div className='mt-2 space-y-1.5'>{getButtons()}</div>
                     {props.forcePassAvailable && (
