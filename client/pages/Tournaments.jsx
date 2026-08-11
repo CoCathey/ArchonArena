@@ -342,6 +342,56 @@ const Tournaments = () => {
                                     <option value='5'>{t('Best of 5')}</option>
                                 </select>
                             </div>
+                            {/* ARCHON: the deck rule sits with format and
+                                pacing rather than behind "advanced". It is
+                                enforced at the table now, so it is one of the
+                                few settings every player in the event feels
+                                directly - and an organizer who never opens the
+                                advanced panel should not discover which of the
+                                three they got by accident. */}
+                            <div>
+                                <Label htmlFor='tournamentSwapPolicy'>{t('Deck rules')}</Label>
+                                <select
+                                    id='tournamentSwapPolicy'
+                                    className={selectClass}
+                                    value={form.triad ? 'triad' : form.deckSwapPolicy}
+                                    onChange={(event) => {
+                                        const value = event.target.value;
+                                        setForm({
+                                            ...form,
+                                            triad: value === 'triad',
+                                            deckSwapPolicy: value === 'triad' ? 'locked' : value,
+                                            requireDeckRegistration:
+                                                value === 'triad'
+                                                    ? true
+                                                    : form.requireDeckRegistration
+                                        });
+                                    }}
+                                >
+                                    <option value='locked'>
+                                        {t('One deck, locked for the event (Archon standard)')}
+                                    </option>
+                                    <option value='between-rounds'>
+                                        {t('Deck may change between rounds')}
+                                    </option>
+                                    <option value='triad'>
+                                        {t('Triad: 3 decks, opponent bans one each match')}
+                                    </option>
+                                </select>
+                                <div className='mt-1 text-xs text-muted'>
+                                    {form.triad
+                                        ? t(
+                                              'Each player registers three decks; opponents ban one of each pool before every match.'
+                                          )
+                                        : form.deckSwapPolicy === 'between-rounds'
+                                        ? t(
+                                              'Players may register a different deck between rounds. The table enforces whichever deck they are on when the round starts.'
+                                          )
+                                        : t(
+                                              'The registered deck is frozen when the event starts, and the table will not let a player pilot anything else.'
+                                          )}
+                                </div>
+                            </div>
                         </div>
 
                         <button
@@ -468,37 +518,6 @@ const Tournaments = () => {
                                         value={form.sasMax}
                                         onChange={set('sasMax')}
                                     />
-                                </div>
-                                <div>
-                                    <Label htmlFor='tournamentSwapPolicy'>{t('Deck rules')}</Label>
-                                    <select
-                                        id='tournamentSwapPolicy'
-                                        className={selectClass}
-                                        value={form.triad ? 'triad' : form.deckSwapPolicy}
-                                        onChange={(event) => {
-                                            const value = event.target.value;
-                                            setForm({
-                                                ...form,
-                                                triad: value === 'triad',
-                                                deckSwapPolicy:
-                                                    value === 'triad' ? 'locked' : value,
-                                                requireDeckRegistration:
-                                                    value === 'triad'
-                                                        ? true
-                                                        : form.requireDeckRegistration
-                                            });
-                                        }}
-                                    >
-                                        <option value='locked'>
-                                            {t('One deck, locked for the event (Archon standard)')}
-                                        </option>
-                                        <option value='between-rounds'>
-                                            {t('Deck may change between rounds')}
-                                        </option>
-                                        <option value='triad'>
-                                            {t('Triad: 3 decks, opponent bans one each match')}
-                                        </option>
-                                    </select>
                                 </div>
                                 <div>
                                     <Label htmlFor='tournamentChainsPerWin'>

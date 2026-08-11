@@ -260,6 +260,123 @@ describe('a tournament end to end, on real PostgreSQL', function () {
     );
 
     /**
+     * ARCHON: the other three formats, run to a champion on real rows.
+     *
+     * A bracket is where the SQL gets hardest: propagateBracket walks winners
+     * (and, in double elimination, losers) into matches that already exist by
+     * following P1SourceMatchId / P2SourceMatchId, and it is doing it against
+     * rows the same transaction just wrote. The fake resolves those links from
+     * an array it controls, which is a different thing entirely from resolving
+     * them from the table.
+     */
+    const runToCompletion = async (id, organizerUser) => {
+        // Bounded so a bracket that fails to advance ends the test rather than
+        // the run - an infinite loop here is a hang, not a failure.
+        for (let guard = 0; guard < 20; guard++) {
+            const played = await playRound(id);
+            const advanced = await service.nextRound(id, organizerUser);
+
+            if (!advanced.success) {
+                // Nothing left to pair: either the bracket is exhausted or the
+                // scheduled rounds are done.
+                if (played === 0) {
+                    break;
+                }
+
+                const finished = await service.finish(id, organizerUser);
+
+                if (finished.success) {
+                    return finished;
+                }
+
+                break;
+            }
+        }
+
+        return await service.finish(id, organizerUser);
+    };
+
+    maybe(
+        'runs single elimination, double elimination and round robin to a champion',
+        async function () {
+            const organizerUser = users.player1;
+
+            for (const format of ['single-elim', 'double-elim', 'round-robin']) {
+                const created = await service.create(organizerUser, {
+                    name: `Real ${format} Cup`,
+                    format,
+                    mode: 'online'
+                });
+
+                expect(created.success, `${format}: ${created.message}`).toBe(true);
+
+                for (const user of Object.values(users)) {
+                    expect(
+                        (await service.register(created.id, user, {})).success,
+                        `${format}: ${user.username} could not register`
+                    ).toBe(true);
+                }
+
+                expect(
+                    (await service.start(created.id, organizerUser)).success,
+                    `${format} would not start`
+                ).toBe(true);
+
+                const finished = await runToCompletion(created.id, organizerUser);
+                expect(finished.success, `${format}: ${finished.message}`).toBe(true);
+
+                const complete = await service.getDetail(created.id, organizerUser);
+
+                expect(complete.tournament.status, `${format} did not complete`).toBe('complete');
+
+                // Exactly one winner, and every entrant placed - a bracket that
+                // failed to propagate leaves players with no rank at all.
+                const ranks = complete.players.map((player) => player.finalRank);
+
+                expect(
+                    ranks.filter((rank) => rank === 1),
+                    `${format} champions`
+                ).toHaveLength(1);
+
+                // playRound gives every match to the lower user id, so the
+                // globally lowest never loses a game in any format and has to
+                // come first. A bracket that advanced the wrong side of a
+                // match would still produce one champion - just not this one.
+                const champion = complete.players.find((player) => player.finalRank === 1);
+                const lowestId = Math.min(...Object.values(users).map((user) => user.id));
+
+                expect(champion.userId, `${format} crowned the wrong player`).toBe(lowestId);
+                expect(
+                    ranks.every((rank) => rank !== null && rank !== undefined),
+                    `${format} left a player unplaced`
+                ).toBe(true);
+
+                // Every match that was created got decided.
+                const undecided = complete.matches.filter(
+                    (match) =>
+                        match.player1Id && match.player2Id && !match.winnerId && !match.resultType
+                );
+                expect(undecided, `${format} left matches open`).toHaveLength(0);
+
+                if (format !== 'round-robin') {
+                    // The bracket rows are what BracketView draws from; without
+                    // them the page has nothing to show.
+                    expect(
+                        complete.matches.some((match) => match.bracket),
+                        `${format} produced no bracket matches`
+                    ).toBe(true);
+                }
+
+                if (format === 'round-robin') {
+                    // Everyone met everyone: 8 players, 7 rounds, 28 matches.
+                    expect(complete.matches).toHaveLength(28);
+                }
+            }
+        },
+        240000
+    );
+
+    /**
      * The deck lock, over real rows. The window is defined by a join between
      * TournamentMatches and TournamentMatchGames, which is precisely the sort
      * of thing the fake answers from an array.

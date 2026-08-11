@@ -1166,14 +1166,20 @@ would notice first.
         runs and most only matter for some of the others; a top cut on a single-elimination
         bracket, a minutes clock on a league paced in days and a SAS band on a sealed event are
         all accepted and all ignored. The form now describes the event in plain English before the
-        organizer commits, and lists the settings that will not do anything.
+        organizer commits, and lists the settings that will not do anything. The deck rule moved
+        out of the advanced panel to sit with format and pacing: it is enforced at the table now,
+        so it is one of the few settings every player in the event feels directly.
 -   [x] **A whole event runs against real PostgreSQL.** Every other tournament test used an
         in-memory fake that routes on SQL fragments — good enough for lifecycle logic, but it
         agrees with itself by construction and cannot fail on a column the schema does not have or
         a constraint the code violates. `tournamentEndToEnd.spec.js` runs creation, registration,
         check-in, two Swiss rounds through recorded game results, a top-4 cut, the playoff and the
-        finish on the real schema, then the deck lock and the asynchronous round clock. Writing it
-        immediately turned up a unique index the fake had no way to model.
+        finish on the real schema, then single elimination, double elimination and round robin each
+        run to a champion, the deck lock, and the asynchronous round clock. The bracket cases are
+        the point of the exercise: `propagateBracket` walks winners and losers into matches that
+        already exist by following `P1SourceMatchId` / `P2SourceMatchId`, and resolving those links
+        from the table is a different thing from resolving them from an array the fake controls.
+        Writing it immediately turned up a unique index the fake had no way to model.
 
 #### N16 — Visual redesign: make it look premium
 
