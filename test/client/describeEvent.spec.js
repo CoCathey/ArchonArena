@@ -1,4 +1,4 @@
-import { describeEvent } from '../../client/Components/Tournaments/describeEvent';
+import { describeEvent, defaultEventForm } from '../../client/Components/Tournaments/describeEvent';
 
 /**
  * ARCHON: the create form's plain-English preview.
@@ -187,18 +187,30 @@ describe('describeEvent', function () {
             expect(noteFor({ mode: 'online', gameTimeLimit: '30' })).toEqual([]);
         });
 
-        it('flags a playoff series length with no playoff', function () {
-            expect(has(noteFor({ playoffBestOf: '3' }), /only applies once a top cut is set/)).toBe(
-                true
-            );
-            expect(noteFor({ playoffBestOf: '3', cutTo: '8' })).toEqual([]);
-        });
-
-        // The default form is the one every organizer starts from, and it must
-        // not open with a wall of warnings about itself.
-        it('says nothing about a form nobody has touched', function () {
+        /**
+         * The form an organizer actually opens, not a fixture standing in for
+         * it. That distinction is not pedantic: the first version of this
+         * panel opened with "The playoff best-of only applies once a top cut
+         * is set" on an untouched form, because the default carries a playoff
+         * best-of and no cut - and the partial fixture these tests were built
+         * on did not carry either, so nothing caught it. A warning about a
+         * field the form does not even render is exactly the noise this panel
+         * exists to remove.
+         */
+        it('says nothing about the form an organizer opens', function () {
+            expect(describeEvent(defaultEventForm).notes).toEqual([]);
             expect(describeEvent(form()).notes).toEqual([]);
             expect(describeEvent({}).notes).toEqual([]);
+        });
+
+        // ...and it still describes that form usefully rather than going quiet
+        // in both directions.
+        it('still describes the default form', function () {
+            const lines = describeEvent(defaultEventForm).summary;
+
+            expect(has(lines, /Swiss/)).toBe(true);
+            expect(has(lines, /One deck for the whole event/)).toBe(true);
+            expect(has(lines, /do not affect Amber/)).toBe(true);
         });
     });
 

@@ -7,7 +7,10 @@ import { useNavigate } from 'react-router-dom';
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
 import MySchedulePanel from '../Components/Tournaments/MySchedulePanel';
-import { describeEvent } from '../Components/Tournaments/describeEvent';
+import {
+    describeEvent,
+    defaultEventForm as defaultForm
+} from '../Components/Tournaments/describeEvent';
 import { Constants } from '../constants';
 import {
     useCreateTournamentMutation,
@@ -42,38 +45,6 @@ const houseOptions = [
     ['unfathomable', 'Unfathomable'],
     ['untamed', 'Untamed']
 ];
-
-const defaultForm = {
-    name: '',
-    description: '',
-    format: 'swiss',
-    gameFormat: 'archon',
-    mode: 'online',
-    pacing: 'live',
-    roundDeadlineDays: '3',
-    roundCount: '',
-    startTime: '',
-    playerCap: '',
-    bestOf: '1',
-    playoffBestOf: '3',
-    cutTo: '',
-    seedMethod: 'registration',
-    visibility: 'public',
-    roundTimerMinutes: '',
-    gameTimeLimit: '',
-    ratedGames: false,
-    requireDeckRegistration: false,
-    hideDecklists: false,
-    sasMin: '',
-    sasMax: '',
-    deckSwapPolicy: 'locked',
-    triad: false,
-    sasChainHandicap: false,
-    chainsPerMatchWin: '',
-    allowedSets: [],
-    bannedHouses: [],
-    requiredHouses: []
-};
 
 /**
  * ARCHON: tournament list + creation (Phase 7). Any logged-in player

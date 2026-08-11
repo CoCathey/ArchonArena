@@ -15,6 +15,44 @@
  * A pure function of the form, so it can be tested as one.
  */
 
+/**
+ * The create form's starting state, here rather than in the page so the
+ * preview can be tested against the form an organizer actually opens. It was
+ * a partial fixture that hid the first bug this panel had: the untouched form
+ * opened with a warning about a field it does not even render.
+ */
+export const defaultEventForm = {
+    name: '',
+    description: '',
+    format: 'swiss',
+    gameFormat: 'archon',
+    mode: 'online',
+    pacing: 'live',
+    roundDeadlineDays: '3',
+    roundCount: '',
+    startTime: '',
+    playerCap: '',
+    bestOf: '1',
+    playoffBestOf: '3',
+    cutTo: '',
+    seedMethod: 'registration',
+    visibility: 'public',
+    roundTimerMinutes: '',
+    gameTimeLimit: '',
+    ratedGames: false,
+    requireDeckRegistration: false,
+    hideDecklists: false,
+    sasMin: '',
+    sasMax: '',
+    deckSwapPolicy: 'locked',
+    triad: false,
+    sasChainHandicap: false,
+    chainsPerMatchWin: '',
+    allowedSets: [],
+    bannedHouses: [],
+    requiredHouses: []
+};
+
 const FORMAT_NAMES = {
     swiss: 'Swiss',
     'single-elim': 'single elimination',
@@ -263,9 +301,10 @@ export const describeEvent = (form = {}) => {
         notes.push('An in-person event has no game to put a clock on.');
     }
 
-    if (playoffBestOf > 1 && !cutTo) {
-        notes.push('The playoff best-of only applies once a top cut is set.');
-    }
+    // No note for a playoff best-of without a cut: the form only renders that
+    // input once a cut is chosen, so the default value can never be something
+    // the organizer did - and a warning about a field they cannot see is
+    // exactly the noise this panel exists to remove.
 
     return { summary, notes };
 };
