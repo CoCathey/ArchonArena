@@ -446,7 +446,12 @@ class ClubService {
             return result;
         }
 
-        return { success: true, id: rows[0].Id, name: rows[0].Name };
+        // `pending` has to survive this hop. Everywhere else the client already
+        // knows the club and can read its join policy; someone arriving with
+        // nothing but a code cannot, so if this drops the flag the only thing
+        // left to say is "joined" - to a player who is actually sitting in the
+        // owner's approval queue.
+        return { success: true, id: rows[0].Id, name: rows[0].Name, pending: !!result.pending };
     }
 
     async leave(clubId, actorId) {

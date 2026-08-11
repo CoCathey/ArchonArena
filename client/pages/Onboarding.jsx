@@ -7,6 +7,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import Panel from '../Components/Site/Panel';
 import Avatar from '../Components/Site/Avatar';
 import DokImport from '../Components/Decks/DokImport';
+import { clubJoinOutcome } from '../Components/Community/clubJoinOutcome';
 import { COUNTRIES, statesForCountry } from '../geo';
 import { toBase64 } from '../util.jsx';
 import {
@@ -124,13 +125,17 @@ const Onboarding = () => {
     const joinClubByCode = async () => {
         try {
             const result = await joinByCode(joinCode).unwrap();
+            const outcome = clubJoinOutcome(result);
 
-            if (result.success) {
-                toast.success(t('Joined {{name}}', { name: result.name }));
-                setJoinedClubs((current) => [...current, { id: result.id, name: result.name }]);
+            if (outcome.ok) {
+                toast.success(t(outcome.key, { name: outcome.name }));
+                setJoinedClubs((current) => [
+                    ...current,
+                    { id: result.id, name: outcome.name, pending: outcome.pending }
+                ]);
                 setJoinCode('');
             } else {
-                toast.danger(result.message || t('Could not join club'));
+                toast.danger(t(outcome.key));
             }
         } catch (err) {
             // Surface the server reason (e.g. "No club matches that join code")
@@ -141,13 +146,19 @@ const Onboarding = () => {
 
     const joinClub = async (club) => {
         try {
-            const result = await clubAction({ id: club.id, action: 'join' }).unwrap();
+            const outcome = clubJoinOutcome(
+                await clubAction({ id: club.id, action: 'join' }).unwrap(),
+                club.name
+            );
 
-            if (result.success) {
-                toast.success(t('Joined {{name}}', { name: club.name }));
-                setJoinedClubs((current) => [...current, { id: club.id, name: club.name }]);
+            if (outcome.ok) {
+                toast.success(t(outcome.key, { name: outcome.name }));
+                setJoinedClubs((current) => [
+                    ...current,
+                    { id: club.id, name: club.name, pending: outcome.pending }
+                ]);
             } else {
-                toast.danger(result.message || t('Could not join club'));
+                toast.danger(t(outcome.key));
             }
         } catch (err) {
             toast.danger(err?.data?.message || t('Could not join club'));
@@ -205,7 +216,10 @@ const Onboarding = () => {
 
     const stateOptions = statesForCountry(country);
     const clubs = (clubData?.clubs || []).slice(0, 6);
-    const joinedIds = joinedClubs.map((club) => club.id);
+    // Keyed by id so the list can say which of the two happened: a club with an
+    // approval policy files a request, and calling that "Joined" is how a player
+    // ends up believing they are in one they are not.
+    const joinedById = new Map(joinedClubs.map((club) => [club.id, club]));
 
     const steps = [
         t('Where are you from?'),
@@ -382,9 +396,17 @@ const Onboarding = () => {
                                             })}
                                         </div>
                                     </div>
-                                    {joinedIds.includes(club.id) ? (
-                                        <span className='text-sm font-semibold text-green-400'>
-                                            {t('Joined')}
+                                    {joinedById.has(club.id) ? (
+                                        <span
+                                            className={`text-sm font-semibold ${
+                                                joinedById.get(club.id).pending
+                                                    ? 'text-muted'
+                                                    : 'text-green-400'
+                                            }`}
+                                        >
+                                            {joinedById.get(club.id).pending
+                                                ? t('Requested')
+                                                : t('Joined')}
                                         </span>
                                     ) : (
                                         <HeroButton

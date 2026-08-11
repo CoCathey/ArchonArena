@@ -182,10 +182,18 @@ const ClubDetail = () => {
                         >
                             {t('Copy')}
                         </HeroButton>
+                        {/* "Instantly" is only true for an open club: with an
+                            approval policy a code produces a request, not a
+                            member, and the owner should know that is what they
+                            are handing out. */}
                         <span className='w-full text-xs text-muted'>
-                            {t(
-                                'Share this code so players can join instantly - even during sign-up.'
-                            )}
+                            {club.joinPolicy === 'approval'
+                                ? t(
+                                      'Share this code and players can apply from the Clubs page or during sign-up - you still approve each one.'
+                                  )
+                                : t(
+                                      'Share this code so players can join instantly, from the Clubs page or during sign-up.'
+                                  )}
                         </span>
                     </div>
                 )}

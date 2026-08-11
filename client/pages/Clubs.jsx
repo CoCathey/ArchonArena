@@ -6,7 +6,8 @@ import { useNavigate } from 'react-router-dom';
 
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
-import { useCreateClubMutation, useGetClubsQuery } from '../redux/api';
+import { clubJoinOutcome } from '../Components/Community/clubJoinOutcome';
+import { useCreateClubMutation, useGetClubsQuery, useJoinClubByCodeMutation } from '../redux/api';
 
 const inputClass =
     'w-full rounded-md border border-border/65 bg-surface-secondary/55 px-3 py-2 text-sm text-foreground focus:border-border/90 focus:outline-none dark:border-border/80 dark:bg-surface-secondary/85';
@@ -22,9 +23,11 @@ const Clubs = () => {
     const [query, setQuery] = useState('');
     const [showCreate, setShowCreate] = useState(false);
     const [form, setForm] = useState({ name: '', description: '' });
+    const [joinCode, setJoinCode] = useState('');
 
     const { data } = useGetClubsQuery(query ? { query } : undefined);
     const [createClub, createState] = useCreateClubMutation();
+    const [joinByCode, joinByCodeState] = useJoinClubByCodeMutation();
 
     const clubs = data?.clubs || [];
 
@@ -40,6 +43,34 @@ const Clubs = () => {
             }
         } catch {
             toast.danger(t('Could not create club'));
+        }
+    };
+
+    // ARCHON: club owners are shown an invite code and told to share it, and
+    // until this existed the only box to type one into was the sign-up wizard -
+    // which a player who already has an account never sees again. So a code
+    // handed to an existing member went nowhere.
+    const onJoinByCode = async () => {
+        try {
+            const result = await joinByCode(joinCode).unwrap();
+            const outcome = clubJoinOutcome(result);
+
+            if (!outcome.ok) {
+                toast.danger(t(outcome.key));
+
+                return;
+            }
+
+            toast.success(t(outcome.key, { name: outcome.name }));
+            setJoinCode('');
+            // Straight to the club either way: if the join is waiting on the
+            // owner, that page is where it says so.
+            navigate(`/community/clubs/${result.id}`);
+        } catch (err) {
+            // The server's reason - "No club matches that join code" - is worth
+            // far more than a generic failure when the difference is usually a
+            // typo in eight characters.
+            toast.danger(err?.data?.message || t('Could not join club'));
         }
     };
 
@@ -63,6 +94,36 @@ const Clubs = () => {
                         </HeroButton>
                     )}
                 </div>
+
+                {user && (
+                    <div className='mb-3 flex gap-2'>
+                        <Input
+                            className='flex-1'
+                            aria-label={t('Club invite code')}
+                            placeholder={t('Have an invite code? (e.g. XK7PQ2MB)')}
+                            value={joinCode}
+                            onChange={(event) => setJoinCode(event.target.value)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' && joinCode.trim()) {
+                                    onJoinByCode();
+                                }
+                            }}
+                        />
+                        {/* primary, matching Teams and the sign-up wizard: in
+                            `secondary` the enabled and disabled states are a
+                            few percent of saturation apart, so the button gives
+                            no clue whether it can be pressed. */}
+                        <HeroButton
+                            size='sm'
+                            variant='primary'
+                            isDisabled={!joinCode.trim()}
+                            isPending={joinByCodeState.isLoading}
+                            onPress={onJoinByCode}
+                        >
+                            {t('Join')}
+                        </HeroButton>
+                    </div>
+                )}
 
                 {showCreate && (
                     <div className='mb-4 space-y-3 rounded-md border border-border/60 bg-surface-secondary/50 p-3'>

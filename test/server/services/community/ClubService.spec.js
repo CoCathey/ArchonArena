@@ -22,7 +22,12 @@ const createFakeDb = () => {
                     Name: params[0],
                     Description: params[1],
                     OwnerId: params[2],
-                    JoinCode: params[3]
+                    JoinCode: params[3],
+                    // Recorded because the service reads it back to decide
+                    // whether a join is a membership or a request. A fake that
+                    // drops it makes every club look open, which is how the
+                    // approval path went untested.
+                    JoinPolicy: params[4]
                 };
                 state.clubs.push(club);
                 return [{ Id: club.Id }];
@@ -44,10 +49,16 @@ const createFakeDb = () => {
                     state.members.push({
                         ClubId: params[0],
                         UserId: params[1],
-                        Role: sql.includes("'owner'") ? 'owner' : 'member'
+                        Role: sql.includes("'owner'") ? 'owner' : 'member',
+                        // create() writes 'active' inline; join() passes it.
+                        Status: sql.includes("'owner'") ? 'active' : params[2]
                     });
                 }
-                return [];
+
+                // ON CONFLICT DO NOTHING ... RETURNING: rows only come back for
+                // an actual insert, which is what the owner notification keys
+                // off.
+                return exists ? [] : [{ Id: state.members.length }];
             }
 
             if (sql.includes('DELETE FROM "ClubMembers"')) {
@@ -69,6 +80,7 @@ const createFakeDb = () => {
                     .map((member) => ({
                         UserId: member.UserId,
                         Role: member.Role,
+                        Status: member.Status,
                         Username: `user${member.UserId}`,
                         Country: null
                     }));
@@ -170,6 +182,36 @@ describe('ClubService', function () {
 
         expect(result).toMatchObject({ success: true, id, name: 'Austin Archons' });
         expect(db.state.members.length).toBe(2);
+    });
+
+    // ARCHON: a club with an approval policy files a request rather than
+    // admitting anyone, and joinByCode used to rebuild its reply from scratch
+    // and drop that flag. Someone arriving with only a code has no club to read
+    // the policy from, so the server saying "success" was the whole story they
+    // got - and it was the wrong one.
+    it('reports a code join into an approval club as pending, not joined', async function () {
+        const { id, joinCode } = await service.create(1, {
+            name: 'Austin Archons',
+            joinPolicy: 'approval'
+        });
+
+        const result = await service.joinByCode(2, joinCode);
+
+        expect(result).toMatchObject({ success: true, id, name: 'Austin Archons', pending: true });
+        expect(db.state.members.find((member) => member.UserId === 2).Status).toBe('pending');
+
+        // ...and the applicant is not a member yet, which is the fact the flag
+        // exists to convey.
+        expect((await service.getDetail(id, 2)).club.isMember).toBe(false);
+    });
+
+    it('reports a code join into an open club as an actual join', async function () {
+        const { joinCode } = await service.create(1, { name: 'Austin Archons' });
+
+        const result = await service.joinByCode(2, joinCode);
+
+        expect(result).toMatchObject({ success: true, pending: false });
+        expect(db.state.members.find((member) => member.UserId === 2).Status).toBe('active');
     });
 
     it('rejects unknown or malformed join codes', async function () {
