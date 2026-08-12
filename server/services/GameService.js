@@ -49,8 +49,19 @@ class GameService {
         for (let player of game.players) {
             try {
                 await this.db.query(
+                    // ARCHON: the deck lookup is scoped to the player who owns
+                    // it. "Decks" is unique on ("Identity","UserId"), not on
+                    // "Identity" alone - a deck identity is shared by every
+                    // player who imports that deck - so the unscoped subquery
+                    // returned more than one row as soon as two people owned
+                    // the same deck, and the INSERT errored out. That aborted
+                    // the transaction and lost the whole game record.
+                    //
+                    // This is the form update() has always used; create() was
+                    // simply missing the second condition.
                     'INSERT INTO "GamePlayers" ("GameId", "PlayerId", "DeckId") VALUES ' +
-                        '($1, (SELECT "Id" FROM "Users" WHERE "Username" = $2), (SELECT "Id" FROM "Decks" WHERE "Identity" = $3))',
+                        '($1, (SELECT "Id" FROM "Users" WHERE "Username" = $2), ' +
+                        '(SELECT "Id" FROM "Decks" WHERE "Identity" = $3 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $2)))',
                     [gameId, player.name, player.deck]
                 );
             } catch (err) {

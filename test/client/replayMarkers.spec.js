@@ -1,4 +1,4 @@
-import { findKeyForges, orderPlayersForPerspective } from '../../client/replayMarkers';
+import { findKeyForges, keyCount, orderPlayersForPerspective } from '../../client/replayMarkers';
 
 describe('findKeyForges', function () {
     const snapshot = (messageIndex, keysByPlayer) => ({
@@ -83,5 +83,84 @@ describe('orderPlayersForPerspective', function () {
         expect(orderPlayersForPerspective(players, 'carol')).toBe(players);
         expect(orderPlayersForPerspective(players, null)).toBe(players);
         expect(orderPlayersForPerspective(undefined, 'alice')).toBeUndefined();
+    });
+});
+
+/**
+ * ARCHON: the engine's real key shape.
+ *
+ * Every case above passes `stats.keys` as a plain number, which is a shape the
+ * engine never produces - `player.getStats()` emits the per-colour map. That is
+ * why `Number(stats.keys)` (always NaN on a map) survived: the tests agreed
+ * with the bug rather than with the game.
+ *
+ * These cases use the map, so the fixture cannot drift back.
+ */
+describe('findKeyForges with the shape the engine actually emits', function () {
+    const keyMap = (count) => ({
+        red: count >= 1,
+        blue: count >= 2,
+        yellow: count >= 3
+    });
+
+    const snapshot = (messageIndex, keysByPlayer) => ({
+        messageIndex,
+        board: {
+            players: Object.entries(keysByPlayer).map(([name, count]) => ({
+                name,
+                stats: { keys: keyMap(count) }
+            }))
+        }
+    });
+
+    it('finds forges from the per-colour key map', function () {
+        const forges = findKeyForges([
+            snapshot(0, { alice: 0, bob: 0 }),
+            snapshot(12, { alice: 1, bob: 0 }),
+            snapshot(30, { alice: 1, bob: 1 }),
+            snapshot(48, { alice: 2, bob: 1 })
+        ]);
+
+        expect(forges).toEqual([
+            { messageIndex: 12, player: 'alice', keys: 1 },
+            { messageIndex: 30, player: 'bob', keys: 1 },
+            { messageIndex: 48, player: 'alice', keys: 2 }
+        ]);
+    });
+
+    it('counts a three-key winning game', function () {
+        const forges = findKeyForges([
+            snapshot(0, { alice: 0 }),
+            snapshot(5, { alice: 1 }),
+            snapshot(9, { alice: 2 }),
+            snapshot(14, { alice: 3 })
+        ]);
+
+        expect(forges.map((forge) => forge.keys)).toEqual([1, 2, 3]);
+    });
+
+    it('does not report a forge when the map is unchanged', function () {
+        const forges = findKeyForges([snapshot(0, { alice: 1 }), snapshot(4, { alice: 1 })]);
+
+        expect(forges).toEqual([]);
+    });
+});
+
+describe('keyCount', function () {
+    it('counts truthy colours in the engine map', function () {
+        expect(keyCount({ red: true, blue: false, yellow: true })).toBe(2);
+        expect(keyCount({ red: false, blue: false, yellow: false })).toBe(0);
+    });
+
+    it('still accepts a plain number', function () {
+        expect(keyCount(2)).toBe(2);
+        expect(keyCount(0)).toBe(0);
+    });
+
+    it('returns null for nothing countable', function () {
+        expect(keyCount(undefined)).toBeNull();
+        expect(keyCount(null)).toBeNull();
+        expect(keyCount(NaN)).toBeNull();
+        expect(keyCount('two')).toBeNull();
     });
 });
