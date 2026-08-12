@@ -43,6 +43,34 @@ const EventForm = ({ form, setForm, showAdvanced, setShowAdvanced }) => {
     const { t } = useTranslation();
     const set = (field) => (event) => setForm({ ...form, [field]: event.target.value });
 
+    const isSealed = form.gameFormat === 'sealed';
+    // Said back plainly, because a band is easy to set backwards or so narrow
+    // that nobody can enter - and the organizer finds out when players cannot
+    // register rather than when they set it.
+    const sasBandHint = (() => {
+        const min = form.sasMin === '' || form.sasMin == null ? null : Number(form.sasMin);
+        const max = form.sasMax === '' || form.sasMax == null ? null : Number(form.sasMax);
+
+        if (min === null && max === null) {
+            return t('Any deck may enter. Leave both blank for no restriction.');
+        }
+
+        if (min !== null && max !== null && min > max) {
+            return t('That range is backwards - the minimum is above the maximum.');
+        }
+
+        if (min !== null && max !== null) {
+            return t(
+                'Only decks rated {{min}}-{{max}} SAS may register. A deck Decks of KeyForge has not rated yet cannot enter.',
+                { min, max }
+            );
+        }
+
+        return min !== null
+            ? t('Only decks rated {{min}} SAS or above may register.', { min })
+            : t('Only decks rated {{max}} SAS or below may register.', { max });
+    })();
+
     return (
         <>
             <div className='grid gap-3 md:grid-cols-2'>
@@ -247,6 +275,43 @@ const EventForm = ({ form, setForm, showAdvanced, setShowAdvanced }) => {
                               )}
                     </div>
                 </div>
+
+                {/* ARCHON: the SAS band sits with the deck rule rather than
+                    behind "advanced". It is a deck rule - it decides which
+                    decks may enter at all - and it was the single most asked-
+                    for setting that nobody could find, because the advanced
+                    panel is the one place an organizer setting up their first
+                    event does not open. Sealed events deal their own decks, so
+                    the band cannot apply to them. */}
+                {!isSealed && (
+                    <div>
+                        <Label htmlFor='tournamentSasMin'>{t('Deck power (SAS) range')}</Label>
+                        <div className='flex items-center gap-2'>
+                            <Input
+                                id='tournamentSasMin'
+                                type='number'
+                                min='0'
+                                max='200'
+                                placeholder={t('Min')}
+                                aria-label={t('Minimum deck SAS')}
+                                value={form.sasMin}
+                                onChange={set('sasMin')}
+                            />
+                            <span className='text-sm text-muted'>{t('to')}</span>
+                            <Input
+                                id='tournamentSasMax'
+                                type='number'
+                                min='0'
+                                max='200'
+                                placeholder={t('Max')}
+                                aria-label={t('Maximum deck SAS')}
+                                value={form.sasMax}
+                                onChange={set('sasMax')}
+                            />
+                        </div>
+                        <div className='mt-1 text-xs text-muted'>{sasBandHint}</div>
+                    </div>
+                )}
             </div>
 
             <button
@@ -342,32 +407,6 @@ const EventForm = ({ form, setForm, showAdvanced, setShowAdvanced }) => {
                             />
                         </div>
                     )}
-                    <div>
-                        <Label htmlFor='tournamentSasMin'>
-                            {t('Minimum deck SAS (blank = none)')}
-                        </Label>
-                        <Input
-                            id='tournamentSasMin'
-                            type='number'
-                            min='0'
-                            max='200'
-                            value={form.sasMin}
-                            onChange={set('sasMin')}
-                        />
-                    </div>
-                    <div>
-                        <Label htmlFor='tournamentSasMax'>
-                            {t('Maximum deck SAS (blank = none)')}
-                        </Label>
-                        <Input
-                            id='tournamentSasMax'
-                            type='number'
-                            min='0'
-                            max='200'
-                            value={form.sasMax}
-                            onChange={set('sasMax')}
-                        />
-                    </div>
                     <div>
                         <Label htmlFor='tournamentChainsPerWin'>
                             {t('Chains gained per match win (Chainbound style)')}

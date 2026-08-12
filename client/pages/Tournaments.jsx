@@ -207,6 +207,17 @@ const Tournaments = () => {
                                     {tournament.bestOf > 1 ? ` - Bo${tournament.bestOf}` : ''}
                                     {tournament.mode === 'irl' ? ` - ${t('In Person')}` : ''}
                                 </span>
+                                {/* ARCHON: which decks may enter, before the
+                                    player clicks in and gets refused. */}
+                                {(tournament.sasMin != null || tournament.sasMax != null) && (
+                                    <span
+                                        className='rounded bg-amber-400/15 px-1.5 text-xs uppercase text-amber-300'
+                                        title={t('Registered decks must rate inside this SAS band')}
+                                    >
+                                        {t('SAS')} {tournament.sasMin ?? 0}-
+                                        {tournament.sasMax ?? '\u221e'}
+                                    </span>
+                                )}
                                 {tournament.pacing === 'async' && (
                                     <span
                                         className='rounded bg-sky-500/15 px-1.5 text-xs uppercase text-sky-300'

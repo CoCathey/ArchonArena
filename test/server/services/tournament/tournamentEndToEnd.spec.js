@@ -518,6 +518,82 @@ describe('a tournament end to end, on real PostgreSQL', function () {
     );
 
     /**
+     * ARCHON: the SAS band - the deck power range an event will accept.
+     *
+     * Enforced on registration through validateDeck, which means it is only as
+     * good as the join between Decks and DeckSas. That join is exactly what a
+     * fake db answers from an array, so it is worth proving on the real one:
+     * a deck's rating lives in a separate table keyed by Uuid, not on the deck
+     * row, and a deck DoK has never rated has no row there at all.
+     */
+    maybe(
+        'only lets decks inside the SAS band register',
+        async function () {
+            const alice = users.player1;
+
+            const rated = async (name, sas) => {
+                const deckId = await makeDeck(alice.id, name);
+                const [deck] = await db.query('SELECT "Uuid" FROM "Decks" WHERE "Id" = $1', [
+                    deckId
+                ]);
+
+                if (sas !== null) {
+                    await db.query(
+                        'INSERT INTO "DeckSas" ("Uuid", "SasRating", "FetchedAt") ' +
+                            "VALUES ($1, $2, now() AT TIME ZONE 'utc')",
+                        [deck.Uuid, sas]
+                    );
+                }
+
+                return deckId;
+            };
+
+            const weak = await rated('Weak deck', 45);
+            const justRight = await rated('Middling deck', 62);
+            const strong = await rated('Strong deck', 88);
+            const unrated = await rated('Unrated deck', null);
+
+            const banded = await service.create(alice, {
+                name: 'SAS Banded Cup',
+                format: 'swiss',
+                roundCount: 1,
+                sasMin: 50,
+                sasMax: 75
+            });
+
+            expect(banded.success, banded.message).toBe(true);
+            await service.register(banded.id, alice, {});
+
+            const below = await service.registerDeck(banded.id, alice, weak);
+            expect(below.success).toBe(false);
+            expect(below.message).toMatch(/below the event minimum of 50/i);
+
+            const above = await service.registerDeck(banded.id, alice, strong);
+            expect(above.success).toBe(false);
+            expect(above.message).toMatch(/above the event maximum of 75/i);
+
+            // A deck nobody has rated is refused rather than waved through -
+            // otherwise it would be the hole in the band.
+            const noRating = await service.registerDeck(banded.id, alice, unrated);
+            expect(noRating.success).toBe(false);
+            expect(noRating.message).toMatch(/no SAS rating yet/i);
+
+            const accepted = await service.registerDeck(banded.id, alice, justRight);
+            expect(accepted.success, accepted.message).toBe(true);
+
+            // And the band reaches the browse listing, so a player can tell
+            // which events their decks are eligible for before clicking in.
+            const listed = (await service.list('registration', alice)).find(
+                (event) => event.id === banded.id
+            );
+
+            expect(listed.sasMin).toBe(50);
+            expect(listed.sasMax).toBe(75);
+        },
+        120000
+    );
+
+    /**
      * ARCHON: the reminders that fire before something happens.
      *
      * Everything an async event used to send was a report of the past - a

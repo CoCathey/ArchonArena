@@ -780,6 +780,11 @@ class TournamentService {
                 't."CurrentRound", t."RoundCount", t."StartTime", t."PlayerCap", t."BestOf", ' +
                 't."CutTo", t."Stage", t."Visibility", t."RatedGames", t."CreatedAt", ' +
                 't."Pacing", t."RoundDeadlineDays", t."RoundEndsAt", ' +
+                // ARCHON: the SAS band belongs in the listing. A player
+                // scanning open events cannot otherwise tell which ones their
+                // decks are eligible for - they find out by clicking in and
+                // being refused at registration.
+                't."SasMin", t."SasMax", ' +
                 'u."Username" AS "Organizer", ' +
                 '(SELECT COUNT(*) FROM "TournamentPlayers" tp WHERE tp."TournamentId" = t."Id" ' +
                 'AND NOT tp."Waitlisted" AND tp."Dropped" IS NOT TRUE) AS "PlayerCount" ' +
@@ -809,6 +814,8 @@ class TournamentService {
             pacing: row.Pacing || 'live',
             roundDeadlineDays: row.RoundDeadlineDays,
             roundEndsAt: row.RoundEndsAt,
+            sasMin: row.SasMin,
+            sasMax: row.SasMax,
             organizer: row.Organizer,
             playerCount: parseInt(row.PlayerCount, 10)
         }));
