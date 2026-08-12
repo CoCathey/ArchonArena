@@ -1722,7 +1722,18 @@ class Game extends EventEmitter {
                 keys: player.keys,
                 name: player.name,
                 turn: player.turn,
-                wins: player.wins
+                wins: player.wins,
+                // ARCHON (N12): who took the first turn. The engine has always
+                // known this (FirstPlayerSelection sets game.firstPlayer) but
+                // never persisted it, so "do I win more going first?" could not
+                // be answered for any game ever played. Recorded from here on;
+                // historic games stay null and are excluded from that split
+                // rather than guessed at.
+                //
+                // Undefined rather than false when the game ended before first
+                // player was chosen, so "not recorded" stays distinguishable
+                // from "went second".
+                wentFirst: this.firstPlayer ? this.firstPlayer === player : undefined
             };
         });
 

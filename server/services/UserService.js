@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const EventEmitter = require('events');
 
 const logger = require('../log');
+const { membershipFromDbRow } = require('./membership/mapRow');
 const User = require('../models/User');
 const db = require('../db');
 const { expand } = require('../Array');
@@ -835,6 +836,26 @@ class UserService extends EventEmitter {
             user.permissions = this.mapPermissions(permissions);
         } else {
             user.permissions = {};
+        }
+
+        // ARCHON (N12): the premium membership, loaded here so that
+        // User.getWireSafeDetails can resolve entitlements synchronously and
+        // every path to the client agrees about them.
+        //
+        // Best-effort: a missing table (the migration has not run yet) or a
+        // failed query leaves membership undefined, which resolves to the free
+        // tier. Losing premium panels for one request is an acceptable failure;
+        // failing to load the user is not. Admins are unaffected either way -
+        // their override never reads this.
+        try {
+            const membership = await db.query('SELECT * FROM "Memberships" WHERE "UserId" = $1', [
+                user.id
+            ]);
+
+            user.membership = membershipFromDbRow(membership && membership[0]);
+        } catch (err) {
+            logger.warn('Failed to lookup membership for user', err);
+            user.membership = undefined;
         }
     }
 

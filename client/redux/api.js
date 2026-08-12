@@ -245,6 +245,44 @@ export const api = createApi({
                 method: 'POST'
             })
         }),
+        // ARCHON (N12): the tier price list and capability copy. Public, so the
+        // membership page renders for a logged-out visitor deciding to sign up.
+        getMembershipCatalog: builder.query({
+            query: () => '/membership/catalog'
+        }),
+        // The caller's own resolved entitlements. The user object already
+        // carries `capabilities`; this is for the membership page, which also
+        // wants provider/status/expiry detail.
+        getMyMembership: builder.query({
+            query: () => '/membership/me',
+            providesTags: [TAG_TYPES.MEMBERSHIP]
+        }),
+        getAdminMemberships: builder.query({
+            query: () => '/admin/memberships',
+            providesTags: [TAG_TYPES.MEMBERSHIP]
+        }),
+        grantMembership: builder.mutation({
+            query: (body) => ({ url: '/admin/memberships/grant', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.MEMBERSHIP]
+        }),
+        // ARCHON (N12): Archon Intelligence.
+        getDeckIntelligence: builder.query({
+            query: (deckId) => `/intelligence/deck/${deckId}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
+        getPlayerIntelligence: builder.query({
+            query: () => '/intelligence/player',
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
+        getMetaIntelligence: builder.query({
+            query: (days = 30) => `/intelligence/meta?days=${days}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
+        getTournamentLab: builder.query({
+            query: (deckIds = []) =>
+                `/intelligence/tournament-lab?decks=${encodeURIComponent(deckIds.join(','))}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
         // ARCHON (N12): is Patreon configured on this deployment, and where is
         // the campaign page. Public - the client renders no Patreon UI at all
         // when it comes back disabled.
@@ -1058,6 +1096,15 @@ export const {
     useActivateAccountMutation,
     useResendActivationMutation,
     useVerifyAuthenticationMutation,
+    // ARCHON (N12): premium membership + Archon Intelligence
+    useGetMembershipCatalogQuery,
+    useGetMyMembershipQuery,
+    useGetAdminMembershipsQuery,
+    useGrantMembershipMutation,
+    useGetDeckIntelligenceQuery,
+    useGetPlayerIntelligenceQuery,
+    useGetMetaIntelligenceQuery,
+    useGetTournamentLabQuery,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,
     useGetPatreonMembershipQuery,

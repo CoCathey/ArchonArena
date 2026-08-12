@@ -50,6 +50,10 @@ import NewsAdmin from './pages/NewsAdmin';
 import NodesAdmin from './pages/NodesAdmin';
 import NotFound from './pages/NotFound';
 import Patreon from './pages/Patreon';
+// ARCHON (N12): premium membership
+import Membership from './pages/Membership';
+import ArchonIntelligence from './pages/ArchonIntelligence';
+import TournamentLab from './pages/TournamentLab';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import Watch from './pages/Watch';
@@ -155,6 +159,13 @@ const AppRoutes = ({ currentGame, user }) => {
                 path='/admin/moderation'
                 element={requirePermission('canModerateChat', <ModerationQueue />)}
             />
+            {/* ARCHON (N12): membership pricing + the premium tools. All three
+                render for everyone; the premium ones show their value
+                proposition and a locked state rather than 404ing, which is
+                what makes them an upgrade moment instead of a dead end. */}
+            <Route path='/membership' element={<Membership />} />
+            <Route path='/intelligence' element={<ArchonIntelligence />} />
+            <Route path='/tournament-lab' element={<TournamentLab />} />
             {/* ARCHON (N12): Patreon's OAuth callback. `state` is checked
                 server-side against a signed cookie; `error` is set when the
                 player declined on Patreon's consent screen. */}

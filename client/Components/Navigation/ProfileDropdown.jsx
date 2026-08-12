@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Dropdown, Label } from '@heroui/react';
 import Icon from '../Icon';
 import { faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
 
 import Avatar from '../Site/Avatar';
+import { isPaidMember, tierNameOf, tierOf, TIER_BADGE_CLASS } from '../../membership';
 
 /**
  * @typedef ProfileMenuProps
@@ -79,6 +80,27 @@ const ProfileMenu = ({ menu, mobile = false, user }) => {
                 </span>
             </Dropdown.Trigger>
             <Dropdown.Popover className='min-w-[11rem] rounded-xl border border-border/70 bg-overlay/95 p-1 text-foreground'>
+                {/* ARCHON (N12): membership status where a player looks for
+                    their own account. Paid tiers get their badge; free accounts
+                    get a quiet upgrade entry rather than a nag. */}
+                <div className='mb-1 border-b border-border/60 px-3 py-1.5'>
+                    {isPaidMember(user) ? (
+                        <span
+                            className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                                TIER_BADGE_CLASS[tierOf(user)] || TIER_BADGE_CLASS.free
+                            }`}
+                        >
+                            {tierNameOf(user)}
+                        </span>
+                    ) : (
+                        <Link
+                            className='text-[11px] text-amber-600 hover:underline dark:text-amber-300'
+                            to='/membership'
+                        >
+                            {t('Upgrade to Archon+')}
+                        </Link>
+                    )}
+                </div>
                 <Dropdown.Menu
                     aria-label={t('Profile')}
                     onAction={(key) => {

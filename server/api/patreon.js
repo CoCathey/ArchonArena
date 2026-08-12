@@ -6,10 +6,12 @@ const { wrapAsync } = require('../util.js');
 const ConfigService = require('../services/ConfigService');
 const UserService = require('../services/UserService');
 const PatreonService = require('../services/PatreonService');
+const MembershipService = require('../services/membership/MembershipService');
 
 const configService = new ConfigService();
 const userService = new UserService(configService);
 const patreonService = new PatreonService(configService, userService);
+const membershipService = new MembershipService();
 
 const STATE_COOKIE = 'aa_patreon_state';
 
@@ -152,6 +154,10 @@ module.exports.init = function (server) {
             const membership = await patreonService.getMembershipForUser(user);
 
             await syncSupporterRole(user, membership.status === 'pledged');
+            // ARCHON (N12): record the membership so the entitlement system can
+            // resolve a tier from it. Patreon says what someone pays; tiers.js
+            // decides what that buys - nothing downstream sees this response.
+            await syncMembershipTier(user.id, membership);
 
             return res.send({ success: true, status: membership.status, tiers: membership.tiers });
         })
@@ -175,6 +181,10 @@ module.exports.init = function (server) {
             const user = await userService.getFullUserByUsername(req.user.username);
             if (user) {
                 await syncSupporterRole(user, false);
+                // Unlinking withdraws the proof of the pledge, so the tier goes
+                // with it. A manual comp is stored in different columns and is
+                // deliberately left alone.
+                await syncMembershipTier(user.id, { status: 'none' });
             }
 
             return res.send({ success: true });
@@ -224,6 +234,23 @@ function verifyLinkState({ stateToken, providedState, userId, secret }) {
  * `setSupporterStatus` reads the current role first and no-ops when it already
  * matches, so this does not need to compare before calling.
  */
+/**
+ * ARCHON (N12): mirror a Patreon membership into the Memberships table.
+ *
+ * Best-effort by design. A failure here must not fail the link the player just
+ * completed - the account is linked either way, the legacy Supporter role has
+ * already been reconciled above, and the next checkauth re-syncs. Losing the
+ * tier for a few minutes is recoverable; a link that reports failure after
+ * succeeding is confusing and sends people to support.
+ */
+async function syncMembershipTier(userId, patreonMembership, service = membershipService) {
+    try {
+        await service.syncFromPatreon(userId, patreonMembership);
+    } catch (err) {
+        logger.error('Failed to sync membership tier for user %s: %s', userId, err.message);
+    }
+}
+
 async function syncSupporterRole(user, isSupporter, users = userService) {
     const permissions = user.permissions || {};
 
@@ -244,3 +271,4 @@ module.exports.STATE_COOKIE = STATE_COOKIE;
 // Exported for tests: the two decisions in this file worth pinning down.
 module.exports.verifyLinkState = verifyLinkState;
 module.exports.syncSupporterRole = syncSupporterRole;
+module.exports.syncMembershipTier = syncMembershipTier;
