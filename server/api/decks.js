@@ -21,6 +21,11 @@ const catalogService = new CatalogService(configService);
 
 // ARCHON: collection imports run as a resumable server-side job so closing the
 // modal no longer abandons them half-done (docs/design/dok-import.md).
+// ARCHON: deleting a deck must not quietly unpin a tournament seat - see
+// findLiveEventDeckCommitments.
+const TournamentService = require('../services/tournament/TournamentService');
+const tournamentService = new TournamentService();
+
 const DeckImportJobService = require('../services/deckimport/DeckImportJobService');
 const deckImportService = new DeckImportJobService(configService);
 
@@ -537,6 +542,23 @@ module.exports.init = function (server) {
                 return res.status(401).send({ message: 'Unauthorized' });
             }
 
+            // ARCHON: a deck committed to a live event is not the player's
+            // to delete yet. The foreign key is ON DELETE SET NULL, so the
+            // delete would succeed and silently unpin their tournament seat -
+            // handing them a free deck choice at a table the event had locked,
+            // with none of the event's legality rules applied to what they
+            // pick next. Dropping from the event releases it.
+            const committed = await tournamentService.findLiveEventDeckCommitments(req.user.id, [
+                id
+            ]);
+
+            if (committed.length > 0) {
+                return res.status(409).send({
+                    success: false,
+                    message: `That deck is registered for ${committed[0].tournamentName}. Drop from the event first, or wait for it to finish.`
+                });
+            }
+
             await deckService.delete(id);
             res.send({ success: true, message: 'Deck deleted successfully', deckId: id });
         })
@@ -567,6 +589,22 @@ module.exports.init = function (server) {
 
             if (!ownershipCheck.allOwned) {
                 return res.status(401).send({ message: 'Unauthorized' });
+            }
+
+            const committed = await tournamentService.findLiveEventDeckCommitments(
+                req.user.id,
+                deckIds
+            );
+
+            if (committed.length > 0) {
+                const names = [...new Set(committed.map((entry) => entry.tournamentName))];
+
+                return res.status(409).send({
+                    success: false,
+                    message: `${committed.length} of those decks are registered for ${names.join(
+                        ', '
+                    )}. Drop from the event first, or wait for it to finish.`
+                });
             }
 
             await deckService.deleteMany(deckIds);

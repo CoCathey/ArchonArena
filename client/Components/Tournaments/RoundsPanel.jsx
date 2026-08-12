@@ -541,10 +541,19 @@ const RoundsPanel = ({ tournament, matches, user, act, actionPending, onPrint })
                                 className='!h-7 !px-2 text-xs'
                                 isDisabled={actionPending}
                                 onPress={() => {
+                                    // ARCHON: the old wording promised a draw,
+                                    // which this has never done - a level
+                                    // match is recorded as a loss for both
+                                    // players, and the scoring model has no
+                                    // draw in it at all. At an event that
+                                    // takes paper results it also cannot
+                                    // decide a match nobody has reported yet,
+                                    // because 0-0 there means "not told", not
+                                    // "level".
                                     if (
                                         !window.confirm(
                                             t(
-                                                'Time in the round: decide all {{count}} open match(es) on the current game score? Level matches become a draw.',
+                                                'Time in the round: decide all {{count}} open match(es) on the game score so far? A match that is level goes down as a loss for both players.',
                                                 { count: openMatches.length }
                                             )
                                         )
@@ -552,10 +561,18 @@ const RoundsPanel = ({ tournament, matches, user, act, actionPending, onPrint })
                                         return;
                                     }
 
-                                    act(
-                                        'resolve-unfinished',
-                                        {},
-                                        t('Open matches resolved on time')
+                                    act('resolve-unfinished', {}, (result) =>
+                                        result.undecidable?.length
+                                            ? t(
+                                                  '{{resolved}} decided; {{left}} still need you - nobody has reported a score for them.',
+                                                  {
+                                                      resolved: result.resolved,
+                                                      left: result.undecidable.length
+                                                  }
+                                              )
+                                            : t('{{resolved}} open match(es) resolved on time', {
+                                                  resolved: result.resolved
+                                              })
                                     );
                                 }}
                             >

@@ -19,7 +19,52 @@ const allianceRestrictedRules = {
     'winds-of-death': { expansions: [600, 609] }
 };
 
+/**
+ * ARCHON: the sealed pool, as a table rather than a chain of eighteen ifs.
+ *
+ * Keyed by the set code the new-game form sends, valued by the
+ * "Expansions"."ExpansionId" the decks carry. Deliberately not sourced from
+ * server/constants.js: that list has no codes on it and omits several sets.
+ */
+const sealedExpansionIds = {
+    cota: 341,
+    aoa: 435,
+    wc: 452,
+    mm: 479,
+    dt: 496,
+    woe: 600,
+    vm2023: 609,
+    gr: 700,
+    vm2024: 737,
+    as: 800,
+    toc: 855,
+    momu: 874,
+    pv: 886,
+    disc: 907,
+    cc: 918,
+    dm: 928,
+    vm2025: 939,
+    vm2026: 964
+};
+
 class DeckService {
+    /**
+     * ARCHON: the set-code map a sealed table needs, from the expansion ids an
+     * event stores in AllowedSets. An empty or absent list means the whole
+     * pool - see getSealedDeck.
+     */
+    static sealedExpansionsFromIds(expansionIds) {
+        if (!Array.isArray(expansionIds) || expansionIds.length === 0) {
+            return undefined;
+        }
+
+        const wanted = new Set(expansionIds.map((id) => Number(id)));
+        const codes = Object.entries(sealedExpansionIds).filter(([, id]) => wanted.has(id));
+
+        // A restriction we cannot express is not silently the whole pool.
+        return codes.length > 0 ? Object.fromEntries(codes.map(([code]) => [code, true])) : null;
+    }
+
     constructor(configService, cardService) {
         this.configService = configService;
         this.cardService = cardService;
@@ -315,86 +360,34 @@ class DeckService {
         return this.insertDeck(deck);
     }
 
+    /**
+     * ARCHON: deal a random sealed deck.
+     *
+     * `expansions` is the set list the table was built with, as a map of set
+     * code to boolean - the shape the new-game form sends. A TOURNAMENT table
+     * is built by the lobby rather than by that form, and an event whose
+     * organizer restricted no sets has no list at all, so both "undefined" and
+     * "empty" have to mean the whole sealed pool. They used to mean a
+     * TypeError on `expansions.aoa` and a SQL `IN()` with nothing in it
+     * respectively, which is why an online sealed event could never deal a
+     * deck and so could never start a single game.
+     */
     async getSealedDeck(expansions) {
-        let dbExpansions = [];
-
-        if (expansions.aoa) {
-            dbExpansions.push(435);
-        }
-
-        if (expansions.cota) {
-            dbExpansions.push(341);
-        }
-
-        if (expansions.wc) {
-            dbExpansions.push(452);
-        }
-
-        if (expansions.mm) {
-            dbExpansions.push(479);
-        }
-
-        if (expansions.dt) {
-            dbExpansions.push(496);
-        }
-
-        if (expansions.woe) {
-            dbExpansions.push(600);
-        }
-
-        if (expansions.gr) {
-            dbExpansions.push(700);
-        }
-
-        if (expansions.as) {
-            dbExpansions.push(800);
-        }
-
-        if (expansions.toc) {
-            dbExpansions.push(855);
-        }
-
-        if (expansions.momu) {
-            dbExpansions.push(874);
-        }
-
-        if (expansions.disc) {
-            dbExpansions.push(907);
-        }
-
-        if (expansions.vm2023) {
-            dbExpansions.push(609);
-        }
-
-        if (expansions.vm2024) {
-            dbExpansions.push(737);
-        }
-
-        if (expansions.vm2025) {
-            dbExpansions.push(939);
-        }
-
-        if (expansions.vm2026) {
-            dbExpansions.push(964);
-        }
-
-        if (expansions.pv) {
-            dbExpansions.push(886);
-        }
-
-        if (expansions.cc) {
-            dbExpansions.push(918);
-        }
-
-        if (expansions.dm) {
-            dbExpansions.push(928);
-        }
+        const dbExpansions = Object.entries(sealedExpansionIds)
+            .filter(([code]) => expansions && expansions[code])
+            .map(([, id]) => id);
 
         let deck;
-        let expansionStr = dbExpansions.join(',');
+        // No sets chosen means every set, not none: `IN()` is a syntax error.
+        const setFilter =
+            dbExpansions.length > 0
+                ? ` AND d."ExpansionId" IN (SELECT "Id" FROM "Expansions" WHERE "ExpansionId" IN(${dbExpansions.join(
+                      ','
+                  )}))`
+                : '';
         try {
             deck = await db.query(
-                `SELECT d.*, e."ExpansionId" AS "Expansion" from "Decks" d JOIN "Expansions" e on e."Id" = d."ExpansionId" WHERE d."ExpansionId" IN (SELECT "Id" FROM "Expansions" WHERE "ExpansionId" IN(${expansionStr})) AND "IncludeInSealed" = True ORDER BY random() LIMIT 1`
+                `SELECT d.*, e."ExpansionId" AS "Expansion" from "Decks" d JOIN "Expansions" e on e."Id" = d."ExpansionId" WHERE "IncludeInSealed" = True${setFilter} ORDER BY random() LIMIT 1`
             );
         } catch (err) {
             logger.error('Failed to fetch random deck', err);

@@ -1169,6 +1169,40 @@ would notice first.
         organizer commits, and lists the settings that will not do anything. The deck rule moved
         out of the advanced panel to sit with format and pacing: it is enforced at the table now,
         so it is one of the few settings every player in the event feels directly.
+-   [x] **Defects found by audit and fixed.** An adversarial audit of the whole platform, re-verified
+        finding by finding against the tree (five of twenty claims were refuted on inspection — the
+        Start dialog's Cancel does pick the non-destructive branch, and non-bracket ranking is
+        documented intent). What survived and is now fixed:
+    -   **Accepting an async match time was permanently broken off UTC.** `acceptMatchTime` bound the
+        proposal it had just read as a JS `Date`; node-postgres serialises a Date parameter with the
+        host's offset and Postgres drops that offset when casting to an unzoned column, so the
+        compare-and-swap hunted a time hours from the stored one and told both players "the proposal
+        changed while you were looking" — forever. Reproduced against real PostgreSQL under two
+        timezones before touching it. The regression test runs in a child process with `TZ` set at
+        spawn, because vitest's `pool: 'threads'` means an in-process `process.env.TZ` assignment
+        does not move V8's timezone — the obvious version of the test passed against the bug.
+    -   **The check-in kiosk QR pointed at a route that did not exist**, so every player scanning the
+        printed poster at a live event got the 404 page. Server, service, tests and even the RTK
+        mutation were all built; the mutation was exported with zero consumers.
+    -   **Two more holes in the deck lock.** `startTournamentGameIfReady` was not "the only place a
+        tournament game starts": player one of a pairing owns the table, so the ordinary Start button
+        reaches `launchGame`, which had no pin check. And a rematch rebuilt the pending game from a
+        field list that never carried the tournament block — no match id (result unreportable) and no
+        pin (free deck choice in a locked event). Deleting a registered deck was a third: the foreign
+        key is `ON DELETE SET NULL`, and a null pin reads as _unpinned_, not as "locked, deck
+        missing".
+    -   **"Time in the round" recorded a double loss for every unreported match at a paper event.**
+        Per-game scores are only ever written for tables the platform itself ran, so at an in-person
+        or hybrid event every table that has not reached the desk is 0-0 — which the level branch
+        read as a tie and both players took a loss for. Neither could undo it: the match was then
+        decided and written as confirmed. Silence is no longer a score, and the organiser is told
+        what was left for them instead of a flat success toast.
+    -   **Online sealed events could never start.** The table was built with no set list, and
+        `getSealedDeck` threw on `expansions.aoa` — an absent list now means the whole pool, and the
+        event's legal sets are passed through.
+    -   **Finishing an event asks first when rounds remain.** It stamps final placings, publishes
+        them to profiles and rates the ladder, nothing reopens a complete event, and the button sits
+        beside the one pressed at the end of every round.
 -   [x] **The participant-callable endpoints are bounded.** Creating an event was the only
         tournament route with a ceiling. The rest are mostly organizer tools behind an
         authorization check, which is a fair reason to leave them — but opening a table builds a

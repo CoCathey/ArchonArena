@@ -364,7 +364,10 @@ module.exports.init = function (server) {
     );
 
     action('/api/tournaments/:id/finish', (req) =>
-        tournamentService.finish(parseInt(req.params.id, 10), req.user)
+        tournamentService.finish(parseInt(req.params.id, 10), req.user, {
+            // ARCHON: the organizer confirming an early finish. See finish().
+            force: !!req.body.force
+        })
     );
 
     action('/api/tournaments/:id/cancel', (req) =>

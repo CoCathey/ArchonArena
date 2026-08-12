@@ -76,17 +76,30 @@ const TournamentDetail = () => {
 
     const { tournament, players, matches, standings, staff } = data;
 
+    /**
+     * ARCHON: `successMessage` may be a function of the server's reply, and
+     * the reply itself is handed back rather than a bare boolean.
+     *
+     * Some of these actions answer with more than "it worked" - resolving open
+     * matches reports how many it decided and which it refused to - and the
+     * flat toast reported success even when the count was zero. Callers that
+     * only check truthiness are unaffected: an object is truthy where `true`
+     * was.
+     */
     const act = async (action, body, successMessage) => {
         try {
             const result = await runAction({ id, action, body }).unwrap();
 
             if (result.success) {
-                if (successMessage) {
-                    toast.success(successMessage);
+                const message =
+                    typeof successMessage === 'function' ? successMessage(result) : successMessage;
+
+                if (message) {
+                    toast.success(message);
                 }
                 refetch();
 
-                return true;
+                return result;
             }
 
             toast.danger(result.message || t('Action failed'));
@@ -152,6 +165,46 @@ const TournamentDetail = () => {
 
         setShowDeckPicker(false);
         await act('register-deck', { deckId: deck.id }, t('Deck registered'));
+    };
+
+    /**
+     * ARCHON: finishing is irreversible, and the server refuses an early
+     * finish once rather than deciding for the organizer.
+     *
+     * A slipped click on this button - it sits next to "Pair Next Round" -
+     * used to end the event outright. Ending early is a real thing organizers
+     * need (the venue closes, the room empties), so the server answers
+     * `earlyFinish` with the round counts and the page asks; a deliberate yes
+     * resends with `force`.
+     */
+    const finishTournament = async () => {
+        const outcome = await runAction({ id, action: 'finish', body: {} })
+            .unwrap()
+            .catch(() => null);
+
+        if (outcome?.success) {
+            toast.success(t('Tournament complete'));
+            refetch();
+
+            return;
+        }
+
+        if (!outcome?.earlyFinish) {
+            toast.danger(outcome?.message || t('Action failed'));
+
+            return;
+        }
+
+        const confirmed = window.confirm(
+            t(
+                'Only {{played}} of {{planned}} rounds have been played. Finish the event now? Final placings are published and this cannot be undone.',
+                { played: outcome.roundsPlayed, planned: outcome.roundsPlanned }
+            )
+        );
+
+        if (confirmed) {
+            act('finish', { force: true }, t('Tournament complete'));
+        }
     };
 
     const startTournament = () => {
@@ -504,10 +557,17 @@ const TournamentDetail = () => {
                                             {t('Pair Next Round')}
                                         </HeroButton>
                                     )}
+                                    {/* ARCHON: finishing cannot be undone - it
+                                        stamps final placings, publishes them
+                                        to profiles and rates the ladder - and
+                                        this button sits beside the one pressed
+                                        at the end of every round. It was the
+                                        only destructive action on the page
+                                        that fired straight off the click. */}
                                     <HeroButton
                                         size='sm'
                                         variant='tertiary'
-                                        onPress={() => act('finish', {}, t('Tournament complete'))}
+                                        onPress={() => finishTournament()}
                                     >
                                         {t('Finish')}
                                     </HeroButton>

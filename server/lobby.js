@@ -2308,6 +2308,11 @@ class Lobby {
             gameFormat: matchInfo.gameFormat,
             gameTimeLimit: matchInfo.gameTimeLimit || undefined,
             useGameTimeLimit: !!matchInfo.gameTimeLimit,
+            // ARCHON: a sealed event deals its decks at the table, so the
+            // table needs the event's legal sets. Without this the pool was
+            // `undefined`, which getSealedDeck used to throw on - an online
+            // sealed event could never deal a deck and so never start a game.
+            expansions: DeckService.sealedExpansionsFromIds(matchInfo.allowedSets),
             hideDeckLists: matchInfo.hideDecklists,
             muteSpectators: true,
             name: name,

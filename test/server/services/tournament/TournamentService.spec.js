@@ -1864,7 +1864,9 @@ describe('TournamentService', function () {
             expect(db.state.matches[0].ResultType).toBe('time');
         });
 
-        it('makes a level unfinished match a draw', async function () {
+        // Not "a draw", whatever the button used to promise: the scoring model
+        // has no draw in it, and both players take a loss.
+        it('makes a level unfinished match a loss for both players', async function () {
             const id = await createSwiss(2, { bestOf: 3 });
             await service.start(id, organizer);
 
@@ -1872,6 +1874,72 @@ describe('TournamentService', function () {
 
             expect(db.state.matches[0].ResultType).toBe('double-loss');
             expect(db.state.matches[0].WinnerId).toBe(null);
+        });
+
+        /**
+         * ARCHON: at an event that takes paper results, 0-0 means "nobody has
+         * told us", not "level".
+         *
+         * Per-game scores are only ever written by recordGameWin, for a table
+         * this platform ran itself; a paper result is typed in whole at
+         * completion. So every table in a paper round that has not reached the
+         * desk reads as a tie - including the ones still being played, which
+         * is precisely the situation the button exists for. Deciding them puts
+         * a loss and zero points on both players for a game one of them
+         * plainly won, and neither can undo it: the match is then decided and
+         * written as confirmed, so the report buttons go away and the server
+         * refuses a participant's correction.
+         */
+        it('will not call an unreported match at an in-person event', async function () {
+            const created = await service.create(organizer, {
+                name: 'Paper Cup',
+                format: 'swiss',
+                mode: 'irl',
+                roundCount: 2
+            });
+
+            await service.register(created.id, { id: 1 });
+            await service.register(created.id, { id: 2 });
+            await service.start(created.id, organizer);
+
+            const outcome = await service.resolveUnfinished(created.id, organizer);
+
+            expect(outcome.success).toBe(true);
+            expect(outcome.resolved).toBe(0);
+            // Handed back to the organizer rather than decided.
+            expect(outcome.undecidable).toHaveLength(1);
+
+            const match = db.state.matches.find((entry) => entry.TournamentId === created.id);
+
+            expect(match.ResultType).toBeFalsy();
+            expect(match.WinnerId).toBeFalsy();
+        });
+
+        // The half of the round that HAS a score is still callable - the point
+        // is only that silence is not a score.
+        it('still decides a paper match that has a game score on it', async function () {
+            const created = await service.create(organizer, {
+                name: 'Paper Cup With Scores',
+                format: 'swiss',
+                mode: 'irl',
+                bestOf: 3,
+                roundCount: 2
+            });
+
+            await service.register(created.id, { id: 1 });
+            await service.register(created.id, { id: 2 });
+            await service.start(created.id, organizer);
+
+            const match = db.state.matches.find((entry) => entry.TournamentId === created.id);
+
+            match.Player1Wins = 1;
+            match.Player2Wins = 0;
+
+            const outcome = await service.resolveUnfinished(created.id, organizer);
+
+            expect(outcome.resolved).toBe(1);
+            expect(match.WinnerId).toBe(match.Player1Id);
+            expect(match.ResultType).toBe('time');
         });
 
         it('unblocks the next round', async function () {
@@ -2069,6 +2137,63 @@ describe('TournamentService', function () {
             const detail = await service.getDetail(id, organizer);
 
             expect(detail.tournament.allowPaperResults).toBe(true);
+        });
+    });
+
+    /**
+     * ARCHON: finishing an event cannot be undone.
+     *
+     * It stamps a FinalRank on every player, publishes those to the profile
+     * trophy walls and rates the team ladder; nothing reopens a complete event
+     * and cancel() refuses one. The button sits in the same row as "Pair Next
+     * Round" - the one pressed at the end of every round - and fired straight
+     * off the click, so mid-event a slipped click ended the tournament.
+     *
+     * The gate is a confirmation, not a ban: ending early is a real thing
+     * organizers need when the venue closes.
+     */
+    describe('finishing early', function () {
+        it('refuses the first time, and says how far in the event actually is', async function () {
+            const id = await createSwiss(4, { roundCount: 3 });
+            await service.start(id, organizer);
+
+            for (const match of db.state.matches.filter((entry) => entry.Round === 1)) {
+                await service.reportResult(id, match.Id, match.Player1Id, organizer);
+            }
+
+            const refused = await service.finish(id, organizer);
+
+            expect(refused.success).toBe(false);
+            expect(refused.earlyFinish).toBe(true);
+            expect(refused.roundsPlayed).toBe(1);
+            expect(refused.roundsPlanned).toBe(3);
+
+            const tournament = db.state.tournaments.find((entry) => entry.Id === id);
+            expect(tournament.Status).toBe('active');
+        });
+
+        it('goes through when the organizer confirms', async function () {
+            const id = await createSwiss(4, { roundCount: 3 });
+            await service.start(id, organizer);
+
+            for (const match of db.state.matches.filter((entry) => entry.Round === 1)) {
+                await service.reportResult(id, match.Id, match.Player1Id, organizer);
+            }
+
+            expect((await service.finish(id, organizer, { force: true })).success).toBe(true);
+            expect(db.state.tournaments.find((entry) => entry.Id === id).Status).toBe('complete');
+        });
+
+        // The normal case must not have grown a hoop to jump through.
+        it('does not ask when the event has run its rounds', async function () {
+            const id = await createSwiss(4, { roundCount: 1 });
+            await service.start(id, organizer);
+
+            for (const match of db.state.matches.filter((entry) => entry.Round === 1)) {
+                await service.reportResult(id, match.Id, match.Player1Id, organizer);
+            }
+
+            expect((await service.finish(id, organizer)).success).toBe(true);
         });
     });
 

@@ -1549,6 +1549,52 @@ class TournamentService {
     }
 
     /**
+     * ARCHON: the live events these decks are committed to.
+     *
+     * TournamentPlayers."DeckId" is ON DELETE SET NULL and
+     * TournamentPlayerDecks."DeckId" is ON DELETE CASCADE, so deleting a
+     * registered deck does not fail - it silently unpins the player. And a
+     * null pin is not "a locked seat whose deck went missing", it is an
+     * UNPINNED seat: Lobby.tournamentDeckFor reads null as "this event pins
+     * nothing", the table's deck picker goes live again, and none of
+     * validateDeck's event rules are applied to whatever gets chosen. So
+     * deleting a deck was a way through the deck lock, and an accidental one
+     * at that - the player cannot even put it back, because registerDeck
+     * refuses a change once a locked event is under way.
+     *
+     * Dropped players are excluded on purpose: withdrawing from the event is
+     * the player's own way to release a deck they want rid of.
+     */
+    async findLiveEventDeckCommitments(userId, deckIds) {
+        const ids = (deckIds || []).map((id) => Number(id)).filter((id) => !Number.isNaN(id));
+
+        if (ids.length === 0) {
+            return [];
+        }
+
+        const rows = await this.db.query(
+            'SELECT tp."DeckId", t."Id" AS "TournamentId", t."Name" AS "TournamentName" ' +
+                'FROM "TournamentPlayers" tp ' +
+                'JOIN "Tournaments" t ON t."Id" = tp."TournamentId" ' +
+                'WHERE tp."UserId" = $1 AND tp."DeckId" = ANY($2) AND NOT tp."Dropped" ' +
+                "AND t.\"Status\" IN ('registration', 'active') " +
+                'UNION ' +
+                'SELECT tpd."DeckId", t2."Id", t2."Name" ' +
+                'FROM "TournamentPlayerDecks" tpd ' +
+                'JOIN "Tournaments" t2 ON t2."Id" = tpd."TournamentId" ' +
+                'WHERE tpd."UserId" = $1 AND tpd."DeckId" = ANY($2) ' +
+                "AND t2.\"Status\" IN ('registration', 'active')",
+            [userId, ids]
+        );
+
+        return (rows || []).map((row) => ({
+            deckId: row.DeckId,
+            tournamentId: row.TournamentId,
+            tournamentName: row.TournamentName
+        }));
+    }
+
+    /**
      * Register or change the deck a player will pilot. Open through the
      * registration window; after that it is the event's DeckSwapPolicy that
      * decides - 'locked' freezes the deck for the whole run (the Archon
@@ -2517,6 +2563,23 @@ class TournamentService {
         const resolved = [];
         const undecidable = [];
 
+        // ARCHON: at an event where matches can be played away from the
+        // platform, 0-0 does not mean "level" - it means "nobody has told us
+        // yet". Per-game scores are only ever written by recordGameWin, for a
+        // table this platform ran itself; a paper result is typed in whole, at
+        // completion. So every table in a paper round that has not reached the
+        // desk reads as a tie, and the level branch would put a loss and zero
+        // points on BOTH players for a game one of them plainly won - a result
+        // neither of them can undo, because the match is then decided and
+        // written as already confirmed. Those go back to the organizer
+        // alongside the bracket matches.
+        //
+        // AllowPaperResults is the gate rather than the mode, because it is
+        // exactly the flag that says "a result may exist that we have not
+        // seen": it is forced on for irl and hybrid events, and an online
+        // event can opt in.
+        const scoresMayBeSilent = !!tournament.AllowPaperResults;
+
         for (const match of open) {
             const p1Wins = match.Player1Wins || 0;
             const p2Wins = match.Player2Wins || 0;
@@ -2524,7 +2587,7 @@ class TournamentService {
             if (p1Wins === p2Wins) {
                 // Level on games. A bracket has to produce somebody to
                 // advance, so it is not ours to call.
-                if (match.Bracket || tieBreak === 'leader') {
+                if (match.Bracket || tieBreak === 'leader' || (scoresMayBeSilent && !p1Wins)) {
                     undecidable.push(match.Id);
                     continue;
                 }
@@ -4219,7 +4282,7 @@ class TournamentService {
         return ranks;
     }
 
-    async finish(tournamentId, actor) {
+    async finish(tournamentId, actor, options = {}) {
         const tournament = await this.getTournamentRow(tournamentId);
 
         if (!tournament) {
@@ -4250,6 +4313,30 @@ class TournamentService {
                     message: 'The bracket still has undecided matches'
                 };
             }
+        } else if (
+            !options.force &&
+            tournament.RoundCount &&
+            tournament.CurrentRound < tournament.RoundCount
+        ) {
+            // ARCHON: finishing is the one organizer action with no way back.
+            // It stamps a FinalRank on every player, publishes those to the
+            // profile trophy walls and rates the team ladder; nothing reopens
+            // a complete event, and cancel() refuses one outright. The button
+            // sits in the same row as "Pair Next Round" - the button pressed
+            // at the end of every round - so mid-event a slipped click is the
+            // likely input rather than the intended one.
+            //
+            // Ending early is legitimate (the venue closes, the room empties),
+            // so this is a confirmation gate and not a ban: the client re-asks
+            // and sends it again with force. Bracket events are left alone,
+            // because the completeness check above is already stronger.
+            return {
+                success: false,
+                earlyFinish: true,
+                roundsPlayed: tournament.CurrentRound,
+                roundsPlanned: tournament.RoundCount,
+                message: `Only ${tournament.CurrentRound} of ${tournament.RoundCount} rounds have been played`
+            };
         }
 
         const ranks = await this.computeFinalRanks(tournament);
@@ -4500,6 +4587,10 @@ class TournamentService {
                 // event did not pin: "locked for the event" and "change it on
                 // the event page first" are different instructions.
                 deckSwapPolicy: tournament.DeckSwapPolicy || 'locked',
+                // ARCHON: a sealed table deals from the event's legal sets.
+                // Nothing chosen means the whole sealed pool; the lobby turns
+                // these expansion ids into the set codes DeckService wants.
+                allowedSets: this.parseJsonColumn(tournament.AllowedSets),
                 gameNumber: (match.Player1Wins || 0) + (match.Player2Wins || 0) + 1,
                 knownGameUuids: games.map((game) => game.GameUuid),
                 previousWinner: previousWinnerId ? playerById[previousWinnerId]?.Username : null,

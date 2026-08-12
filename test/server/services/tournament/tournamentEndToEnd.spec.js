@@ -518,6 +518,56 @@ describe('a tournament end to end, on real PostgreSQL', function () {
     );
 
     /**
+     * ARCHON: deleting a deck you are registered with.
+     *
+     * TournamentPlayers."DeckId" is ON DELETE SET NULL, so the delete does not
+     * fail - it silently unpins the seat, and a null pin is not "locked but
+     * missing", it is UNPINNED: the table's deck picker goes live again with
+     * none of the event's rules applied to what gets chosen next. That made
+     * deleting a deck a way through the deck lock. The behaviour turns
+     * entirely on what the real schema does with the foreign key, which is
+     * exactly what a fake cannot tell you.
+     */
+    maybe(
+        'a registered deck is still registered after someone tries to delete it',
+        async function () {
+            const alice = users.player7;
+            const doomed = await makeDeck(alice.id, 'Doomed deck');
+
+            const locked = await service.create(alice, {
+                name: 'Deck Deletion Cup',
+                format: 'swiss',
+                roundCount: 1,
+                deckSwapPolicy: 'locked'
+            });
+
+            await service.register(locked.id, alice, { deckId: doomed });
+            await service.register(locked.id, users.player8, {});
+            await service.start(locked.id, alice);
+
+            // The guard the delete routes consult.
+            const committed = await service.findLiveEventDeckCommitments(alice.id, [doomed]);
+
+            expect(committed).toHaveLength(1);
+            expect(committed[0].tournamentId).toBe(locked.id);
+            expect(committed[0].tournamentName).toBe('Deck Deletion Cup');
+
+            // And this is what it is protecting against: the raw delete the
+            // route would otherwise have performed unpins the seat rather than
+            // failing, which is why a guard is needed at all.
+            await db.query('DELETE FROM "Decks" WHERE "Id" = $1', [doomed]);
+
+            const after = await db.query(
+                'SELECT "DeckId" FROM "TournamentPlayers" WHERE "TournamentId" = $1 AND "UserId" = $2',
+                [locked.id, alice.id]
+            );
+
+            expect(after[0].DeckId, 'the FK really is ON DELETE SET NULL').toBeNull();
+        },
+        120000
+    );
+
+    /**
      * ARCHON: accepting a time on a host that is not UTC.
      *
      * Every timestamp column here is `timestamp without time zone` holding UTC
