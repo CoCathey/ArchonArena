@@ -14,19 +14,27 @@
  * if missed. A round pairing you do not see costs you the match, so it mails by
  * default; "your friend request was accepted" is pleasant but never urgent, so
  * it does not.
+ *
+ * `push` is a stricter test than email, because it interrupts. It is on only
+ * where the notification is worth a buzz in someone's pocket AND worth little
+ * an hour later: pairings, event starts, match scheduling, deadlines, a paper
+ * result waiting on your report, and a sanction on your account. Everything
+ * sociable - friend requests, club joins - is deliberately off. A phone that
+ * buzzes for things that could have waited gets its notifications turned off
+ * wholesale, taking the pairings with them.
  */
 const CATEGORIES = {
     'tournament.pairing': {
         group: 'Tournaments',
         label: 'Round pairings',
         description: 'You have been paired for a new round and your table is ready.',
-        defaults: { inApp: true, email: true }
+        defaults: { inApp: true, email: true, push: true }
     },
     'tournament.start': {
         group: 'Tournaments',
         label: 'Event start',
         description: 'An event you are registered for has begun.',
-        defaults: { inApp: true, email: true }
+        defaults: { inApp: true, email: true, push: true }
     },
     // ARCHON (N14): asynchronous events run on these two. Scheduling mails by
     // default for the same reason pairings do - an offer of "Thursday 8pm?"
@@ -37,32 +45,32 @@ const CATEGORIES = {
         label: 'Match scheduling',
         description:
             'Your opponent proposed, accepted or cleared a time for your tournament match.',
-        defaults: { inApp: true, email: true }
+        defaults: { inApp: true, email: true, push: true }
     },
     'tournament.deadline': {
         group: 'Tournaments',
         label: 'Round deadlines',
         description:
             'A round deadline in an asynchronous event has passed with your match unplayed, or (for organizers) with matches outstanding.',
-        defaults: { inApp: true, email: true }
+        defaults: { inApp: true, email: true, push: true }
     },
     'friend.request': {
         group: 'Community',
         label: 'Friend requests',
         description: 'Someone has sent you a friend request.',
-        defaults: { inApp: true, email: true }
+        defaults: { inApp: true, email: true, push: false }
     },
     'friend.accepted': {
         group: 'Community',
         label: 'Friend requests accepted',
         description: 'Someone accepted the friend request you sent.',
-        defaults: { inApp: true, email: false }
+        defaults: { inApp: true, email: false, push: false }
     },
     'club.join': {
         group: 'Community',
         label: 'Club joins',
         description: 'Someone joined a club you own.',
-        defaults: { inApp: true, email: false }
+        defaults: { inApp: true, email: false, push: false }
     },
     // Mails by default for the same reason a friend request does: it is
     // addressed to one person, it is waiting on them, and an invitation nobody
@@ -72,7 +80,7 @@ const CATEGORIES = {
         group: 'Community',
         label: 'Club invitations',
         description: 'A club owner invited you to join their club.',
-        defaults: { inApp: true, email: true }
+        defaults: { inApp: true, email: true, push: false }
     },
     // ARCHON (N13): an in-person game is stuck until the other player files
     // their report, and neither of them is on the site when it happens - the
@@ -83,7 +91,7 @@ const CATEGORIES = {
         label: 'In-person games',
         description:
             'Someone recorded a paper game with you, your report is needed, or a result was confirmed or disputed.',
-        defaults: { inApp: true, email: true }
+        defaults: { inApp: true, email: true, push: true }
     },
     // ARCHON (N5). Deliberately the two categories a player CANNOT opt out
     // of in practice: a sanction nobody told you about is indistinguishable
@@ -96,14 +104,14 @@ const CATEGORIES = {
         label: 'Moderation actions on your account',
         description:
             'A moderator has warned, muted, timed out or suspended your account - or lifted one of those.',
-        defaults: { inApp: true, email: true }
+        defaults: { inApp: true, email: true, push: true }
     },
     'moderation.update': {
         group: 'Account',
         label: 'Updates on reports you filed',
         description:
             'A report you submitted has been reviewed. You are told it was handled, never what was done to the other account.',
-        defaults: { inApp: true, email: false }
+        defaults: { inApp: true, email: false, push: false }
     }
 };
 
@@ -124,7 +132,7 @@ function isKnownCategory(category) {
 function categoryDefaults(category) {
     return isKnownCategory(category)
         ? { ...CATEGORIES[category].defaults }
-        : { inApp: true, email: false };
+        : { inApp: true, email: false, push: false };
 }
 
 /** The taxonomy as a list, for the preferences UI. */

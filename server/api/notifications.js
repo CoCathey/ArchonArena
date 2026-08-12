@@ -1,6 +1,7 @@
 const passport = require('passport');
 
 const notificationService = require('../services/notifications');
+const { pushService } = require('../services/notifications');
 const { wrapAsync } = require('../util.js');
 
 const jwt = passport.authenticate('jwt', { session: false });
@@ -66,9 +67,41 @@ module.exports.init = function (server) {
             res.send(
                 await notificationService.setPreference(req.user.id, req.body.category, {
                     inApp: req.body.inApp,
-                    email: req.body.email
+                    email: req.body.email,
+                    push: req.body.push
                 })
             );
+        })
+    );
+
+    /**
+     * ARCHON: device registration for mobile push.
+     *
+     * Sent on every launch, not only the first: a token can be rotated by the
+     * OS, and re-registering is also what moves it to the signed-in account
+     * when a phone changes hands.
+     */
+    server.post(
+        '/api/notifications/push-token',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(
+                await pushService.registerToken(req.user.id, req.body.token, {
+                    platform: req.body.platform,
+                    deviceName: req.body.deviceName
+                })
+            );
+        })
+    );
+
+    // Sign-out. Deliberately not scoped to the caller's own rows: the point is
+    // that this device stops receiving anything, and the token may already
+    // have been reassigned.
+    server.post(
+        '/api/notifications/push-token/remove',
+        jwt,
+        wrapAsync(async (req, res) => {
+            res.send(await pushService.removeToken(req.user.id, req.body.token, { any: true }));
         })
     );
 };
