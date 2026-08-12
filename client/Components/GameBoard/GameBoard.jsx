@@ -11,6 +11,7 @@ import ActivePlayerPrompt from './ActivePlayerPrompt';
 import GameResultPanel from './GameResultPanel';
 import CardZoom from './CardZoom';
 import { canShowDeckName, getMatchRecord, isSpectating, normalizePlayer } from './gameboardUtils';
+import { playerNeedsInput } from './handVisibility';
 import GameChat from './GameChat';
 import GameConfigurationModal from './GameConfigurationModal';
 import PlayerBoard from './PlayerBoard';
@@ -341,6 +342,12 @@ export const GameBoard = () => {
                         onMouseOver={onMouseOver}
                         rowDirection='default'
                         activePlayer={thisPlayer.activePlayer}
+                        // ARCHON: the player's own comfort setting - hide my
+                        // hand while the opponent is playing. Read off the
+                        // PLAYER state rather than the user record so the
+                        // in-game settings toggle takes effect immediately.
+                        hideHandOnOpponentTurn={!!thisPlayer.optionSettings?.hideHandOnOpponentTurn}
+                        needsInput={playerNeedsInput(thisPlayer)}
                         tide={thisPlayer.stats.tide}
                         user={user}
                     />

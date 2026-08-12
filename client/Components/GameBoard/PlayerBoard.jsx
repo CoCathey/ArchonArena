@@ -92,6 +92,8 @@ const PlayerBoard = (props) => {
                     onMouseOver={props.onMouseOver}
                     isActivePlayer={props.isMe && props.activePlayer}
                     hasActiveHouse={props.hasActiveHouse}
+                    hideOnOpponentTurn={props.hideHandOnOpponentTurn}
+                    needsInput={props.needsInput}
                 />
             )}
         </div>
@@ -109,6 +111,9 @@ PlayerBoard.propTypes = {
     onMouseOut: PropTypes.func,
     onMouseOver: PropTypes.func,
     activePlayer: PropTypes.bool,
+    // ARCHON: hide my own hand while the opponent plays - see handVisibility.js
+    hideHandOnOpponentTurn: PropTypes.bool,
+    needsInput: PropTypes.bool,
     rowDirection: PropTypes.oneOf(['default', 'reverse']),
     tide: PropTypes.string,
     user: PropTypes.object

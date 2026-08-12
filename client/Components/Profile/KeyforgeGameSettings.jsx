@@ -24,7 +24,11 @@ const KeyforgeGameSettings = ({ formProps }) => {
     ];
     const displayOptions = [
         ['useHalfSizedCards', t('Use half sized card images')],
-        ['showAccolades', t('Show deck accolades')]
+        ['showAccolades', t('Show deck accolades')],
+        // ARCHON: a comfort setting - your own hand can pull the eye while
+        // there is nothing you can do with it. It comes straight back the
+        // moment the game asks you anything, and one click looks anyway.
+        ['hideHandOnOpponentTurn', t("Hide my hand during the opponent's turn")]
     ];
 
     const renderOption = ([id, text]) => (

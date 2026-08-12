@@ -26,6 +26,11 @@ const GameConfiguration = ({ optionSettings, onOptionSettingToggle }) => {
             id: 'useHalfSizedCards',
             key: 'useHalfSizedCards',
             label: t('Use half sized card images')
+        },
+        {
+            id: 'hideHandOnOpponentTurn',
+            key: 'hideHandOnOpponentTurn',
+            label: t("Hide my hand during the opponent's turn")
         }
     ];
 

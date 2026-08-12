@@ -212,7 +212,8 @@ class UserService extends EventEmitter {
         let query =
             'UPDATE "Users" SET "Username" = $1, "Email" = $2, "Verified" = $3, "Disabled" = $4, "Settings_Avatar" = $5, ' +
             '"Settings_CardSize" = $6, "Settings_Background" = $7, "Settings_OrderAbilities" = $8, "Settings_ConfirmOneClick" = $9, "Settings_UseHalfSizedCards" = $10, ' +
-            '"Settings_ShowAccolades" = $11, "PatreonToken" = $12, "Settings_CustomBackground" = $13 WHERE "Id" = $14';
+            '"Settings_ShowAccolades" = $11, "PatreonToken" = $12, "Settings_CustomBackground" = $13, ' +
+            '"Settings_HideHandOnOpponentTurn" = $14 WHERE "Id" = $15';
 
         try {
             await db.queryTran(client, query, [
@@ -231,6 +232,10 @@ class UserService extends EventEmitter {
                     : true,
                 user.patreon ? this.secretBox.encrypt(JSON.stringify(user.patreon)) : null,
                 user.settings.customBackground,
+                // ARCHON: hide your own hand on the opponent's turn. Defaults
+                // off, so an account that has never touched it keeps the
+                // behaviour it has always had.
+                !!user.settings.optionSettings.hideHandOnOpponentTurn,
                 user.id
             ]);
         } catch (err) {
@@ -853,7 +858,8 @@ class UserService extends EventEmitter {
                     showAccolades:
                         dbUser.Settings_ShowAccolades !== undefined
                             ? dbUser.Settings_ShowAccolades
-                            : true
+                            : true,
+                    hideHandOnOpponentTurn: !!dbUser.Settings_HideHandOnOpponentTurn
                 }
             },
             verified: dbUser.Verified,

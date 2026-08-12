@@ -75,7 +75,9 @@ const initialValues = {
         confirmOneClick: false,
         orderForcedAbilities: false,
         useHalfSizedCards: false,
-        showAccolades: true
+        showAccolades: true,
+        // Off: everyone keeps the board they already have until they ask.
+        hideHandOnOpponentTurn: false
     }
 };
 

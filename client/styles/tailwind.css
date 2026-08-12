@@ -2002,6 +2002,49 @@ pre {
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
 
+/* ARCHON: the hand stood down while the opponent plays (an opt-in setting).
+   It occupies the row rather than collapsing it, so the board does not jump
+   every time the turn changes - the point of the setting is to be calmer, and
+   a layout that reflows twice a turn is the opposite. */
+.player-home-row-container .hand-hidden {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    /* Sized to the hand it stands in for, so the board does not jump when the
+       turn changes. A row that reflows twice a turn is a worse distraction
+       than the hand this setting exists to quieten. The panel adds a title bar
+       and padding above the cards, hence the extra allowance. */
+    min-width: 22rem;
+    min-height: calc(var(--card-base-height) * var(--card-scale-normal, 1) + 1.1rem);
+    padding: 0.5rem 1.5rem;
+    border: 1px dashed rgba(255, 255, 255, 0.16);
+    border-radius: 0.375rem;
+    background: rgba(0, 0, 0, 0.16);
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.player-home-row-container .hand-hidden:hover,
+.player-home-row-container .hand-hidden:focus-visible {
+    border-color: rgba(255, 255, 255, 0.32);
+    background: rgba(0, 0, 0, 0.24);
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.player-home-row-container .hand-hidden-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.player-home-row-container .hand-hidden-hint {
+    font-size: 0.7rem;
+    opacity: 0.7;
+}
+
 .keys {
     --keys-scale: var(--card-scale-normal);
     --keys-card-height: calc(var(--card-base-height) * var(--keys-scale));
