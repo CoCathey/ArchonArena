@@ -11,6 +11,11 @@ const SelectDeckModal = ({
     onClose,
     onDeckSelected,
     sasBound,
+    // ARCHON: an event's rules, in words. Some of them the list can filter on
+    // and some it cannot (house requirements need the deck's houses, which the
+    // list does not carry) - so they are all stated here rather than the
+    // player discovering them one red toast at a time.
+    eventNotes = [],
     expansions = Constants.Expansions
 }) => {
     const standaloneDecks = useSelector((state) => state.cards.standaloneDecks);
@@ -33,6 +38,16 @@ const SelectDeckModal = ({
                                 )}
                             </div>
                         ) : null}
+                        {eventNotes.length > 0 && (
+                            <div className='rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300'>
+                                <div className='font-semibold'>{t('This event requires:')}</div>
+                                <ul className='list-disc pl-4'>
+                                    {eventNotes.map((note) => (
+                                        <li key={note}>{note}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                         <DeckList
                             deckFilter={deckFilter}
                             hideActionButtons

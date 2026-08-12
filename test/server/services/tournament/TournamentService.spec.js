@@ -22,6 +22,7 @@ const createFakeDb = () => {
         Dropped: false,
         Seed: null,
         DeckId: null,
+        DeckReleasedAt: null,
         CheckedIn: false,
         Waitlisted: false,
         FinalRank: null,
@@ -295,6 +296,11 @@ const createFakeDb = () => {
                 );
                 if (player) {
                     player.DeckId = null;
+                    // A judge's release stamps the column; a player clearing
+                    // their own deck leaves it alone.
+                    if (sql.includes("now() AT TIME ZONE 'utc'")) {
+                        player.DeckReleasedAt = new Date();
+                    }
                 }
                 return [];
             }
@@ -305,6 +311,8 @@ const createFakeDb = () => {
                 );
                 if (player) {
                     player.DeckId = params[2];
+                    // Registering spends the release it was granted for.
+                    player.DeckReleasedAt = null;
                 }
                 return [];
             }
@@ -1640,8 +1648,18 @@ describe('TournamentService', function () {
             expect(match.WinnerId).toBe(match.Player1Id);
             expect(match.ResultType).toBe('no-show');
 
+            // ARCHON: the organizer may overrule their own ruling. This used
+            // to be refused as "already decided", which is what made a
+            // disputed match impossible to rule a forfeit or a no-show - see
+            // 'judging a match that already has a result'.
             const again = await service.awardWin(id, match.Id, match.Player2Id, organizer);
-            expect(again.success).toBe(false); // already decided
+            expect(again.success).toBe(true);
+            expect(match.WinnerId).toBe(match.Player2Id);
+
+            // A stranger still cannot, decided or not.
+            expect((await service.awardWin(id, match.Id, match.Player1Id, stranger)).success).toBe(
+                false
+            );
         });
 
         it('records double losses in swiss but never in brackets', async function () {
@@ -2163,6 +2181,210 @@ describe('TournamentService', function () {
      * a phone, an account they were signed into, and the event page, and every
      * player who could not manage that was dropped as a no-show at start.
      */
+    /**
+     * ARCHON: ruling on a match that already has a result.
+     *
+     * A disputed match is by definition decided - somebody objected to a
+     * result that is on the row - and disputes very often resolve to "my
+     * opponent never showed up" or "we both ran out of time". Those are
+     * exactly what the judge tools record, and they refused a decided match,
+     * so the correct outcome was unrecordable. The only lever left was
+     * re-reporting a normal played win: a false result type in the record the
+     * standings and the audit are built from, and Chainbound chains paid out
+     * for a game nobody played.
+     */
+    /**
+     * ARCHON: repeat pairings reach the organizer.
+     *
+     * pairSwissRound already computes which pairs have met before - a field
+     * thinned by drops, or more rounds booked than the field supports, can
+     * leave no rematch-free matching. The service dropped that on the floor,
+     * so the organizer posted the sheet and heard about it from two players
+     * already sitting at the table.
+     */
+    /**
+     * ARCHON: the organizer ruling on somebody's deck.
+     *
+     * The refusal a locked event gives a player says to ask the organizer -
+     * and the organizer could do nothing about it. A deck registered wrong, or
+     * one that turns out to be illegal, was stuck for the whole event.
+     */
+    describe('the organizer changing a deck', function () {
+        let id;
+
+        beforeEach(async function () {
+            db.state.decks.push(
+                { Id: 201, UserId: 2, Name: 'Registered', Uuid: 'u-201', SasRating: 60 },
+                { Id: 202, UserId: 2, Name: 'Replacement', Uuid: 'u-202', SasRating: 61 }
+            );
+
+            id = await createSwiss(2);
+            await service.registerDeck(id, { id: 2 }, 201);
+            await service.start(id, organizer);
+        });
+
+        const deckOf = (userId) =>
+            db.state.players.find((entry) => entry.TournamentId === id && entry.UserId === userId)
+                .DeckId;
+
+        // The player themselves still cannot: the lock is the lock.
+        it('still refuses the player in a locked event', async function () {
+            expect((await service.registerDeck(id, { id: 2 }, 202)).success).toBe(false);
+            expect(deckOf(2)).toBe(201);
+        });
+
+        it('lets the organizer release a frozen deck', async function () {
+            expect((await service.registerDeck(id, organizer, null, 2)).success).toBe(true);
+            expect(deckOf(2)).toBeNull();
+        });
+
+        // Released, the player re-registers through their own picker - so
+        // every legality rule still runs on what they choose.
+        it('reopens the lock for exactly one registration', async function () {
+            await service.registerDeck(id, organizer, null, 2);
+
+            expect((await service.registerDeck(id, { id: 2 }, 202)).success).toBe(true);
+            expect(deckOf(2)).toBe(202);
+
+            // And it closes again behind them.
+            expect((await service.registerDeck(id, { id: 2 }, 201)).success).toBe(false);
+            expect(deckOf(2)).toBe(202);
+        });
+
+        it('lets the organizer set a deck directly', async function () {
+            expect((await service.registerDeck(id, organizer, 202, 2)).success).toBe(true);
+            expect(deckOf(2)).toBe(202);
+        });
+
+        // Player 2 is in the event but does not run it. (Player 1 is the
+        // organizer in this fixture, so they are no use as the intruder.)
+        it('refuses a player trying to change somebody else', async function () {
+            const refused = await service.registerDeck(id, { id: 2 }, 202, 1);
+
+            expect(refused.success).toBe(false);
+            expect(refused.message).toMatch(/only the organizer/i);
+            expect(deckOf(2)).toBe(201);
+        });
+
+        // A judge is not exempt from the event's own legality rules.
+        it('still validates the deck the organizer picks', async function () {
+            db.state.decks.push({
+                Id: 203,
+                UserId: 3,
+                Name: 'Not theirs',
+                Uuid: 'u-203',
+                SasRating: 62
+            });
+
+            const refused = await service.registerDeck(id, organizer, 203, 2);
+
+            expect(refused.success).toBe(false);
+            expect(deckOf(2)).toBe(201);
+        });
+    });
+
+    describe('repeat pairings', function () {
+        it('reports the pairs who have met before', async function () {
+            // Two players, two rounds: round two has nobody new to pair.
+            const id = await createSwiss(2, { roundCount: 2 });
+            await service.start(id, organizer);
+
+            const first = db.state.matches[0];
+            await service.reportResult(id, first.Id, first.Player1Id, organizer);
+
+            const second = await service.nextRound(id, organizer);
+
+            expect(second.success).toBe(true);
+            expect(second.rematches).toHaveLength(1);
+        });
+
+        it('says nothing when everyone has a fresh opponent', async function () {
+            const id = await createSwiss(4, { roundCount: 2 });
+            await service.start(id, organizer);
+
+            for (const match of db.state.matches.filter((entry) => entry.Round === 1)) {
+                await service.reportResult(id, match.Id, match.Player1Id, organizer);
+            }
+
+            const second = await service.nextRound(id, organizer);
+
+            expect(second.success).toBe(true);
+            expect(second.rematches).toEqual([]);
+        });
+    });
+
+    describe('judging a match that already has a result', function () {
+        let id;
+        let match;
+
+        beforeEach(async function () {
+            id = await createSwiss(2);
+            await service.start(id, organizer);
+            match = db.state.matches[0];
+
+            // A result, then the opponent objecting to it.
+            await service.reportResult(id, match.Id, match.Player1Id, { id: match.Player1Id });
+            await service.disputeResult(id, match.Id, { id: match.Player2Id }, 'never showed');
+        });
+
+        it('can rule a disputed result a no-show', async function () {
+            const ruled = await service.awardWin(
+                id,
+                match.Id,
+                match.Player2Id,
+                organizer,
+                'no-show'
+            );
+
+            expect(ruled.success, ruled.message).toBe(true);
+            expect(match.WinnerId).toBe(match.Player2Id);
+            expect(match.ResultType).toBe('no-show');
+            // And the objection is retired with the result it was against.
+            expect(match.DisputedBy).toBeFalsy();
+        });
+
+        it('can rule a disputed result a double loss', async function () {
+            const ruled = await service.doubleLoss(id, match.Id, organizer);
+
+            expect(ruled.success, ruled.message).toBe(true);
+            expect(match.ResultType).toBe('double-loss');
+            expect(match.WinnerId).toBeFalsy();
+        });
+
+        // The award is not a played result, so a series score left over from
+        // the thing being overruled must not survive it.
+        it('replaces the series score rather than keeping the old one', async function () {
+            const series = await createSwiss(2, { bestOf: 3 });
+            await service.start(series, organizer);
+
+            const bo3 = db.state.matches.find((entry) => entry.TournamentId === series);
+
+            await service.reportResult(series, bo3.Id, bo3.Player1Id, organizer, {
+                player1Wins: 2,
+                player2Wins: 1
+            });
+
+            await service.awardWin(series, bo3.Id, bo3.Player2Id, organizer, 'forfeit');
+
+            expect(bo3.WinnerId).toBe(bo3.Player2Id);
+            expect(bo3.Player2Wins).toBe(2);
+            expect(bo3.Player1Wins).toBe(0);
+        });
+
+        it('still refuses somebody who is not running the event', async function () {
+            const refused = await service.awardWin(
+                id,
+                match.Id,
+                match.Player2Id,
+                { id: match.Player2Id },
+                'no-show'
+            );
+
+            expect(refused.success).toBe(false);
+            expect(refused.message).toMatch(/only the organizer/i);
+        });
+    });
+
     describe('checking somebody else in', function () {
         let id;
 

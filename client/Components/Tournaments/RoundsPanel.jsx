@@ -297,9 +297,15 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
                                 {scheduledAt ? t('Reschedule') : t('Schedule…')}
                             </HeroButton>
                         )}
+                    {/* ARCHON: available on a decided match too. A disputed
+                        result is by definition decided - somebody objected to
+                        it - and the ruling is often "my opponent never showed
+                        up" or "we both ran out of time", which is exactly what
+                        these tools record. Gated on !decided, the only lever
+                        left was re-reporting a played win, which files a false
+                        result type. */}
                     {tournament.canManage &&
                         tournament.status === 'active' &&
-                        !decided &&
                         match.player1Id &&
                         match.player2Id && (
                             <HeroButton
@@ -308,7 +314,7 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
                                 className='!h-6 !px-2 text-xs'
                                 onPress={() => setShowTools((open) => !open)}
                             >
-                                {t('Judge…')}
+                                {decided ? t('Judge (change)…') : t('Judge…')}
                             </HeroButton>
                         )}
                 </span>

@@ -17,6 +17,9 @@ import RoundsPanel from '../Components/Tournaments/RoundsPanel';
 import StandingsPanel from '../Components/Tournaments/StandingsPanel';
 import PlayersPanel from '../Components/Tournaments/PlayersPanel';
 import printPairings from '../Components/Tournaments/printPairings';
+// ARCHON: the picker offers what the event will accept - see the module.
+import { buildTournamentDeckFilter } from '../Components/Tournaments/tournamentDeckFilter';
+import { Constants } from '../constants';
 import { useGetEventDetailQuery, useTournamentActionMutation } from '../redux/api';
 
 const formatNames = {
@@ -260,6 +263,10 @@ const TournamentDetail = () => {
                   !match.resultType
           )
         : null;
+
+    // ARCHON: the event's own legality rules, as a picker filter plus the
+    // ones that cannot be filtered and have to be said instead.
+    const eventDeckRules = buildTournamentDeckFilter(tournament, Constants.Expansions);
 
     const startTimeLabel = tournament.startTime
         ? new Date(tournament.startTime).toLocaleString()
@@ -551,7 +558,23 @@ const TournamentDetail = () => {
                                             variant='primary'
                                             isPending={actionState.isLoading}
                                             onPress={() =>
-                                                act('next-round', {}, t('Next round paired'))
+                                                /* ARCHON: a thinned field can
+                                                   run out of fresh opponents;
+                                                   the pairer says which pairs
+                                                   repeat and this is the only
+                                                   moment the organizer can act
+                                                   on it. */
+                                                act('next-round', {}, (result) =>
+                                                    result.rematches?.length
+                                                        ? t(
+                                                              'Round {{round}} paired - {{count}} pair(s) have met before; no rematch-free pairing was available.',
+                                                              {
+                                                                  round: result.round,
+                                                                  count: result.rematches.length
+                                                              }
+                                                          )
+                                                        : t('Next round paired')
+                                                )
                                             }
                                         >
                                             {t('Pair Next Round')}
@@ -786,6 +809,8 @@ const TournamentDetail = () => {
                 <SelectDeckModal
                     onClose={() => setShowDeckPicker(false)}
                     onDeckSelected={onDeckSelected}
+                    deckFilter={eventDeckRules.deckFilter}
+                    eventNotes={eventDeckRules.notes}
                 />
             )}
         </div>

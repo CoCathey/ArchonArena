@@ -140,7 +140,10 @@ module.exports.init = function (server) {
         tournamentService.registerDeck(
             parseInt(req.params.id, 10),
             req.user,
-            req.body.deckId ? parseInt(req.body.deckId, 10) : null
+            req.body.deckId ? parseInt(req.body.deckId, 10) : null,
+            // ARCHON: an organizer ruling on somebody else's deck. Authorized
+            // in the service, like every other judge action.
+            req.body.userId ? parseInt(req.body.userId, 10) : null
         )
     );
 

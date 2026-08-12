@@ -1605,7 +1605,7 @@ class TournamentService {
      * lobby pins the seat to it (see Lobby.tournamentDeckFor), so the
      * pre-game deck picker cannot be used to get around the policy.
      */
-    async registerDeck(tournamentId, actor, deckId) {
+    async registerDeck(tournamentId, actor, deckId, targetUserId = null) {
         const tournament = await this.getTournamentRow(tournamentId);
 
         if (!tournament) {
@@ -1616,57 +1616,109 @@ class TournamentService {
             return { success: false, message: 'This event uses three-deck Triad pools' };
         }
 
-        // Deck swap policy: 'locked' events freeze decks at start (the
-        // Archon standard); 'between-rounds' events let players bring a
-        // different deck to their next pairing.
-        const swapAllowed =
-            tournament.Status === 'active' && tournament.DeckSwapPolicy === 'between-rounds';
+        // ARCHON: the organizer changing somebody's deck.
+        //
+        // The refusal a locked event gives a player tells them to ask the
+        // organizer - and the organizer had no way to do anything about it.
+        // A judge ruling on a deck (it was registered wrong, it turned out to
+        // be illegal, the physical deck is not the one on the sheet) is
+        // adjudication, and it is the same authority they already have over a
+        // recorded result. The policy gates below apply to a player acting on
+        // their own seat, never to a judge.
+        const target = targetUserId ? Number(targetUserId) : actor.id;
+        const asManager = target !== actor.id;
 
-        if (tournament.Status !== 'registration' && !swapAllowed) {
+        if (asManager && !(await this.canManage(actor, tournament))) {
             return {
                 success: false,
-                message: 'This event locks you to one deck - decks were frozen when it started'
-            };
-        }
-
-        if (swapAllowed && (await this.roundUnderwayFor(tournament, actor.id))) {
-            return {
-                success: false,
-                message:
-                    'Your match for this round has already started. You can change deck once it is finished.'
+                message: "Only the organizer can change another player's deck"
             };
         }
 
         const playerRows = await this.db.query(
             'SELECT * FROM "TournamentPlayers" WHERE "TournamentId" = $1 AND "UserId" = $2',
-            [tournamentId, actor.id]
+            [tournamentId, target]
         );
 
         if (!playerRows || playerRows.length === 0 || playerRows[0].Dropped) {
             return { success: false, message: 'Register for the event first' };
         }
 
+        // Deck swap policy: 'locked' events freeze decks at start (the
+        // Archon standard); 'between-rounds' events let players bring a
+        // different deck to their next pairing.
+        const swapAllowed =
+            tournament.Status === 'active' && tournament.DeckSwapPolicy === 'between-rounds';
+
+        // ARCHON: there is deliberately no "they have no deck yet" exception.
+        // It looks humane and it is a hole: in a locked event a player could
+        // withhold their deck, read the pairings, and only then choose. A late
+        // entrant sets their deck on the way in - register already takes one.
+        //
+        // A deck a JUDGE released is different, and is recorded as such
+        // (DeckReleasedAt) precisely because "released" and "never registered"
+        // both look like a null DeckId otherwise. The permission is spent by
+        // the registration it was granted for.
+        const released = !playerRows[0].DeckId && !!playerRows[0].DeckReleasedAt;
+
+        if (!asManager && !released) {
+            if (tournament.Status !== 'registration' && !swapAllowed) {
+                return {
+                    success: false,
+                    message: 'This event locks you to one deck - decks were frozen when it started'
+                };
+            }
+
+            if (swapAllowed && (await this.roundUnderwayFor(tournament, target))) {
+                return {
+                    success: false,
+                    message:
+                        'Your match for this round has already started. You can change deck once it is finished.'
+                };
+            }
+        }
+
+        // Whose deck is being set, for the lobby's re-pin - which is keyed by
+        // username. A judge acting on somebody else's seat must re-pin THAT
+        // seat, not their own, and the player row is a raw TournamentPlayers
+        // select with no username on it.
+        let subject = { id: actor.id, username: actor.username };
+
+        if (asManager) {
+            const userRows = await this.db.query('SELECT "Username" FROM "Users" WHERE "Id" = $1', [
+                target
+            ]);
+
+            subject = { id: target, username: userRows?.[0]?.Username };
+        }
+
         if (!deckId) {
+            // A judge clearing somebody's deck is a release: it grants that
+            // player one registration back. A player clearing their own is
+            // not, or the lock would be trivially reopenable.
             await this.db.query(
-                'UPDATE "TournamentPlayers" SET "DeckId" = NULL WHERE "TournamentId" = $1 AND "UserId" = $2',
-                [tournamentId, actor.id]
+                'UPDATE "TournamentPlayers" SET "DeckId" = NULL, "DeckReleasedAt" = ' +
+                    (asManager ? "now() AT TIME ZONE 'utc'" : '"DeckReleasedAt"') +
+                    ' WHERE "TournamentId" = $1 AND "UserId" = $2',
+                [tournamentId, target]
             );
-            this.emitDeckRegistered(tournamentId, actor, null);
+            this.emitDeckRegistered(tournamentId, subject, null);
 
             return { success: true };
         }
 
-        const deckCheck = await this.validateDeck(tournament, actor.id, deckId);
+        const deckCheck = await this.validateDeck(tournament, target, deckId);
 
         if (!deckCheck.success) {
             return deckCheck;
         }
 
         await this.db.query(
-            'UPDATE "TournamentPlayers" SET "DeckId" = $3 WHERE "TournamentId" = $1 AND "UserId" = $2',
-            [tournamentId, actor.id, deckId]
+            'UPDATE "TournamentPlayers" SET "DeckId" = $3, "DeckReleasedAt" = NULL ' +
+                'WHERE "TournamentId" = $1 AND "UserId" = $2',
+            [tournamentId, target, deckId]
         );
-        this.emitDeckRegistered(tournamentId, actor, deckId);
+        this.emitDeckRegistered(tournamentId, subject, deckId);
 
         return { success: true };
     }
@@ -2249,7 +2301,7 @@ class TournamentService {
         }
 
         const ordered = round === 1 ? foldOrder(state) : state;
-        const { pairings, bye } = pairSwissRound(ordered);
+        const { pairings, bye, rematches, exhausted } = pairSwissRound(ordered);
 
         if (pairings.length === 0 && !bye) {
             return { error: 'Not enough players to pair' };
@@ -2263,7 +2315,25 @@ class TournamentService {
             tournament.BestOf || 1
         );
 
-        return {};
+        // ARCHON: a Swiss round can run out of fresh opponents - a field
+        // thinned by drops, or more rounds booked than the field supports.
+        // pairSwissRound pairs anyway and says which pairs repeat, and
+        // carrying that out of here is the whole point of computing it.
+        // Dropped on the floor, the organizer posts the sheet and hears about
+        // the repeat from two players already sitting at the table.
+        //
+        // `exhausted` stays in the log rather than going to the organizer: it
+        // is the operator's distinction between "no rematch-free matching
+        // exists" (normal, forced) and "the bounded search gave up" (worth a
+        // look), and neither changes what the organizer does next.
+        if (rematches && rematches.length > 0) {
+            logger.warn(
+                `Tournament ${tournament.Id} round ${round}: ${rematches.length} repeat pairing(s)` +
+                    (exhausted ? ' (rematch-free search hit its budget)' : '')
+            );
+        }
+
+        return { rematches: rematches || [] };
     }
 
     async hasBracketMatches(tournamentId) {
@@ -3062,7 +3132,9 @@ class TournamentService {
 
         this.emitRoundPaired(tournamentId);
 
-        return { success: true, round };
+        // The organizer is told about repeat pairings at the moment they pair,
+        // which is the only moment they can do anything about them.
+        return { success: true, round, rematches: result.rematches || [] };
     }
 
     async advanceBracketWave(tournament, round) {
@@ -3733,14 +3805,40 @@ class TournamentService {
             return { success: false, message: 'Winner must be one of the match players' };
         }
 
-        if (match.WinnerId || match.ResultType) {
-            return { success: false, message: 'This match already has a result' };
+        // ARCHON: an organizer ruling on a match that already has a result is
+        // adjudicating, not reporting - the same authority reportResult
+        // already grants them over a recorded result.
+        //
+        // Refusing here did not protect anything. It just meant that when a
+        // dispute turned out to be "my opponent never showed up", the correct
+        // outcome was unrecordable: the only lever left was re-reporting a
+        // normal played win, which puts a false result type into the record
+        // the standings and the audit are built from, and pays out Chainbound
+        // chains for a game nobody played.
+        const decided = !!match.WinnerId || !!match.ResultType;
+
+        if (decided && match.Bracket && (await this.bracketResultLocked(tournament, match))) {
+            return {
+                success: false,
+                message: 'Later bracket matches already have results - correct those first'
+            };
         }
+
+        if (decided && match.Bracket) {
+            await this.clearDownstream(tournament, match);
+        }
+
+        // An award supersedes whatever series score was on the row: the match
+        // was not played out, so the games recorded against it are not the
+        // result any more.
+        const needed = matchWinsNeeded(match.BestOf);
 
         await this.completeMatch(tournament, match, {
             winnerId,
             resultType,
-            reporterId: actor.id
+            reporterId: actor.id,
+            p1Wins: winnerId === match.Player1Id ? needed : 0,
+            p2Wins: winnerId === match.Player2Id ? needed : 0
         });
 
         return { success: true };
@@ -3782,9 +3880,10 @@ class TournamentService {
             return { success: false, message: 'Byes cannot take a double loss' };
         }
 
-        if (match.WinnerId || match.ResultType) {
-            return { success: false, message: 'This match already has a result' };
-        }
+        // ARCHON: as with awardWin - an organizer ruling that a disputed match
+        // was nobody's win is adjudicating a result, not competing with one.
+        // Brackets are already excluded above, so there is no downstream to
+        // clear here.
 
         await this.completeMatch(tournament, match, {
             winnerId: null,

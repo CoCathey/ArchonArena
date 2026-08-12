@@ -110,6 +110,44 @@ const PlayersPanel = ({ tournament, players, act }) => {
                     </span>
                 ))
             )}
+            {/* ARCHON: the judge releasing a frozen deck. A locked event tells
+                a player to "ask the organizer" if they need to change deck,
+                and the organizer had no way to do anything about it - a deck
+                registered wrong, or one that turns out to be illegal, was
+                stuck for the whole event. Clearing it reopens the lock for
+                exactly one registration: the player re-picks through their own
+                picker, so every legality rule still applies. */}
+            {tournament.canManage &&
+                !tournament.triad &&
+                player.hasDeck &&
+                tournament.status === 'active' && (
+                    <HeroButton
+                        size='sm'
+                        variant='tertiary'
+                        className='!h-5 !min-w-0 !px-1.5 text-xs'
+                        title={t('Let this player register a different deck')}
+                        onPress={() => {
+                            if (
+                                window.confirm(
+                                    t(
+                                        "Release {{player}}'s deck? They will be able to register a different one.",
+                                        { player: player.username }
+                                    )
+                                )
+                            ) {
+                                act(
+                                    'register-deck',
+                                    { userId: player.userId, deckId: null },
+                                    t('Deck released - {{player}} can register another', {
+                                        player: player.username
+                                    })
+                                );
+                            }
+                        }}
+                    >
+                        {t('Release deck')}
+                    </HeroButton>
+                )}
             {tournament.canManage && (
                 <HeroButton
                     size='sm'
