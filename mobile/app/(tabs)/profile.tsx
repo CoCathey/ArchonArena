@@ -1,10 +1,18 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { router } from 'expo-router';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { avatarUrl, logout, updateAvatar } from '../../src/api/client';
+import {
+    avatarUrl,
+    fetchNotificationPreferences,
+    logout,
+    setNotificationPreference,
+    updateAvatar,
+    type NotificationPreference
+} from '../../src/api/client';
 import { disconnectLobby } from '../../src/net/lobbySocket';
+import { unregisterPush } from '../../src/push';
 import { closeGameSocket } from '../../src/net/gameSocket';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
@@ -40,16 +48,63 @@ export default function ProfileScreen() {
 
     const [busy, setBusy] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const [preferences, setPreferences] = useState<NotificationPreference[]>([]);
     const [error, setError] = useState<string | undefined>();
     const [notice, setNotice] = useState<string | undefined>();
 
     const avatar = avatarUrl(user?.avatar);
+
+    const loadPreferences = useCallback(async () => {
+        try {
+            const result = await fetchNotificationPreferences();
+            setPreferences(result.preferences ?? []);
+        } catch {
+            // The rest of the screen still works without them.
+        }
+    }, []);
+
+    useEffect(() => {
+        loadPreferences();
+    }, [loadPreferences]);
+
+    /**
+     * Flip one channel. Written through immediately and optimistically — the
+     * server stores the whole row, so the other two channels are sent as they
+     * currently stand rather than left to a default.
+     */
+    const setChannel = async (
+        preference: NotificationPreference,
+        channel: 'inApp' | 'email' | 'push',
+        value: boolean
+    ) => {
+        const next = { ...preference, [channel]: value };
+        setPreferences((rows) =>
+            rows.map((row) => (row.category === preference.category ? next : row))
+        );
+
+        try {
+            await setNotificationPreference(preference.category, {
+                inApp: next.inApp,
+                email: next.email,
+                push: next.push
+            });
+        } catch {
+            // Put it back rather than showing a lie.
+            setPreferences((rows) =>
+                rows.map((row) => (row.category === preference.category ? preference : row))
+            );
+        }
+    };
 
     const signOut = async () => {
         setBusy(true);
         try {
             closeGameSocket();
             disconnectLobby();
+            // Withdraw this device first: once the session is gone the call
+            // has no credentials, and a token left behind keeps delivering
+            // this account's pairings to whoever signs in next.
+            await unregisterPush();
             await logout();
             router.replace('/login');
         } finally {
@@ -163,6 +218,38 @@ export default function ProfileScreen() {
                 />
             </Card>
 
+            {preferences.length > 0 ? (
+                <Card style={{ marginBottom: spacing.md }}>
+                    <Text style={styles.sectionTitle}>Notifications</Text>
+                    <Text style={styles.hint}>
+                        Push reaches this phone while the app is closed. Tournament pairings and
+                        match times are on by default; nothing sociable is.
+                    </Text>
+                    {preferences.map((preference) => (
+                        <View key={preference.category} style={styles.prefRow}>
+                            <View style={{ flex: 1, paddingRight: spacing.md }}>
+                                <Text style={styles.settingLabel}>{preference.label}</Text>
+                                <Text style={styles.hint}>{preference.description}</Text>
+                            </View>
+                            <View style={styles.prefToggle}>
+                                <Text style={styles.prefChannel}>push</Text>
+                                <Switch
+                                    value={preference.push}
+                                    onValueChange={(value) =>
+                                        setChannel(preference, 'push', value)
+                                    }
+                                    trackColor={{
+                                        true: colors.brandDark,
+                                        false: colors.surfaceHover
+                                    }}
+                                    thumbColor={preference.push ? colors.brand : colors.textFaint}
+                                />
+                            </View>
+                        </View>
+                    ))}
+                </Card>
+            ) : null}
+
             <Button title='Sign out' variant='danger' onPress={signOut} loading={busy} />
 
             <Text style={styles.footer}>
@@ -224,6 +311,23 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontWeight: '700',
         marginBottom: 6
+    },
+    prefRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 8,
+        borderTopColor: 'rgba(42, 54, 80, 0.5)',
+        borderTopWidth: StyleSheet.hairlineWidth
+    },
+    prefToggle: {
+        alignItems: 'center',
+        gap: 2
+    },
+    prefChannel: {
+        color: colors.textFaint,
+        fontSize: 9,
+        fontWeight: '700',
+        textTransform: 'uppercase'
     },
     settingRow: {
         flexDirection: 'row',

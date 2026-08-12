@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, AppState, Pressable, Text, View } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { checkAuth, refreshAuthToken } from '../src/api/client';
+import { registerForPush, routeForNotification } from '../src/push';
 import { resyncGame } from '../src/net/gameSocket';
 import { connectLobby } from '../src/net/lobbySocket';
 import { useAuthStore } from '../src/stores/authStore';
@@ -40,6 +42,46 @@ export default function RootLayout() {
         })();
         return () => clearTimeout(safety);
     }, [authHydrated, settingsHydrated, booted]);
+
+    // Register this device for push once there is a session to attach it to,
+    // and again whenever the account changes — the token follows the account,
+    // not the install.
+    const token = useAuthStore((state) => state.token);
+    useEffect(() => {
+        if (token) {
+            registerForPush();
+        }
+    }, [token]);
+
+    // A tapped notification opens what it is about. Both paths are needed:
+    // `getLastNotificationResponseAsync` covers a cold start (the tap launched
+    // the app), the listener covers a tap while it is already running.
+    useEffect(() => {
+        if (!booted) {
+            return undefined;
+        }
+
+        let cancelled = false;
+
+        const open = (response: Notifications.NotificationResponse | null) => {
+            const data = response?.notification?.request?.content?.data as
+                | Record<string, unknown>
+                | undefined;
+            const route = routeForNotification(data);
+
+            if (route && !cancelled) {
+                router.push(route);
+            }
+        };
+
+        Notifications.getLastNotificationResponseAsync().then(open);
+        const sub = Notifications.addNotificationResponseReceivedListener(open);
+
+        return () => {
+            cancelled = true;
+            sub.remove();
+        };
+    }, [booted]);
 
     // iOS suspends sockets in the background; reconnect on return to foreground.
     useEffect(() => {
@@ -104,6 +146,14 @@ export default function RootLayout() {
                 <Stack.Screen
                     name='pending'
                     options={{ title: 'Game lobby', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='tournament/[id]'
+                    options={{ title: 'Event', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='tournament/new'
+                    options={{ title: 'New event', presentation: 'modal' }}
                 />
                 <Stack.Screen
                     name='deck/[id]'

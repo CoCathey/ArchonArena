@@ -75,6 +75,8 @@
         "core-js": "^3.6.4",
         "emoji-js": "^3.5.0",
         "event-source-polyfill": "^1.0.12",
+        "expo-device": "~57.0.1",
+        "expo-notifications": "~57.0.10",
         "express": "^4.22.2",
         "fabric": "^7.4.0",
         "formik": "^2.1.4",
