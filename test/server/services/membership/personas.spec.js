@@ -361,3 +361,60 @@ describe('membership personas', function () {
         });
     });
 });
+
+/**
+ * ARCHON (N12): the filter must not mutate what it was handed.
+ *
+ * StatisticsService memoises its payloads (`cached(key, producer)`), so every
+ * caller gets the SAME object. If the premium filter stripped fields in place,
+ * the first free request would permanently remove them from the cache and every
+ * paying member - and every admin - would silently lose those panels until the
+ * TTL expired. It would look like an intermittent product bug, not a bug here.
+ */
+describe('premium filtering does not corrupt the shared stats cache', function () {
+    const {
+        resolveEntitlements: resolve
+    } = require('../../../../server/services/membership/entitlements');
+    const User = require('../../../../server/models/User');
+
+    const freeUser = () => new User({ id: 9, username: 'free', settings: {}, permissions: {} });
+
+    it("leaves the caller's object untouched when stripping player stats", function () {
+        const cached = { overall: { wins: 1 }, formats: ['a'], houses: ['b'] };
+
+        filterFields(cached, PLAYER_PREMIUM, resolve({ user: freeUser() }));
+
+        expect(cached.formats).toEqual(['a']);
+        expect(cached.houses).toEqual(['b']);
+    });
+
+    it('leaves the cached deck rows untouched when stripping premium columns', function () {
+        const cached = {
+            decks: [{ name: 'A', wins: 1, expectedWinRate: 55, sasDelta: 3 }],
+            bestDeck: { name: 'A' }
+        };
+
+        filterDeckStats(cached, resolve({ user: freeUser() }));
+
+        // The nested row objects are the ones most easily mutated by accident.
+        expect(cached.decks[0].expectedWinRate).toBe(55);
+        expect(cached.decks[0].sasDelta).toBe(3);
+        expect(cached.bestDeck).toEqual({ name: 'A' });
+    });
+
+    it('still serves the full payload to an admin after a free request filtered it', function () {
+        const cached = { overall: {}, formats: ['a'], houses: ['b'] };
+        const admin = new User({
+            id: 1,
+            username: 'a',
+            settings: {},
+            permissions: { isAdmin: true }
+        });
+
+        filterFields(cached, PLAYER_PREMIUM, resolve({ user: freeUser() }));
+        const { stats } = filterFields(cached, PLAYER_PREMIUM, resolve({ user: admin }));
+
+        expect(stats.formats).toEqual(['a']);
+        expect(stats.houses).toEqual(['b']);
+    });
+});
