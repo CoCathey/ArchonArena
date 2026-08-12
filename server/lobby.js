@@ -1520,6 +1520,13 @@ class Lobby {
             return;
         }
 
+        // ARCHON: the deck lock. A tournament table's owner is player one of
+        // the pairing, so this owner-driven path can start an event game too -
+        // it is not only startTournamentGameIfReady.
+        if (this.refuseUnpinnedStart(game)) {
+            return;
+        }
+
         let gameNode = this.router.startGame(game);
         if (!gameNode) {
             socket.send('gameerror', 'No game nodes available. Try again later.');
@@ -1766,6 +1773,49 @@ class Lobby {
         return game.tournament?.deckSwapPolicy === 'between-rounds'
             ? 'This event runs on the deck you registered for this round. Change it on the event page before your match starts.'
             : 'This event locks you to the deck you registered. Ask the organizer if you need to change it.';
+    }
+
+    /**
+     * ARCHON: the deck lock, second gate.
+     *
+     * onSelectDeck refuses a deck the event did not pin, but a deck can reach
+     * a player by other routes, so the check is repeated where a game actually
+     * starts. There are TWO such places, not one: tournament tables normally
+     * launch themselves through startTournamentGameIfReady, but player one of
+     * a pairing is also the table's owner (ensureTournamentGame builds the
+     * PendingGame from users[0]), so the ordinary owner-driven Start button
+     * reaches launchGame as well. Both call this.
+     *
+     * Returns true when the start was refused.
+     */
+    refuseUnpinnedStart(game) {
+        if (!game || !game.tournament) {
+            return false;
+        }
+
+        const wrongSeat = Object.values(game.getPlayers()).find((player) => {
+            const pinned = this.tournamentDeckFor(game, player.name);
+
+            return pinned && player.deck && Number(player.deck.id) !== Number(pinned);
+        });
+
+        if (!wrongSeat) {
+            return false;
+        }
+
+        // Never a silent hang: the players are sitting there waiting for a
+        // table that has decided not to start.
+        logger.error(
+            `Tournament game ${game.id} not started: ${wrongSeat.name} is holding deck ${
+                wrongSeat.deck.id
+            }, not the registered ${this.tournamentDeckFor(game, wrongSeat.name)}`
+        );
+
+        for (const player of Object.values(game.getPlayers())) {
+            this.sockets[player.id]?.send('gameerror', this.pinnedDeckMessage(game));
+        }
+
+        return true;
     }
 
     onSelectDeck(socket, gameId, deckId, isStandalone) {
@@ -2348,30 +2398,8 @@ class Lobby {
             return;
         }
 
-        // ARCHON: the deck lock, second gate. onSelectDeck refuses a deck the
-        // event did not pin, but this is the only place a tournament game
-        // actually starts - so checking here means no other route into a
-        // player's deck (a rematch, a reconnect, a selection path added
-        // later) can start an event game on the wrong one.
-        const wrongSeat = players.find((player) => {
-            const pinned = this.tournamentDeckFor(game, player.name);
-
-            return pinned && Number(player.deck.id) !== Number(pinned);
-        });
-
-        if (wrongSeat) {
-            // Never a silent hang: the players are sitting there waiting for
-            // a table that has decided not to start.
-            logger.error(
-                `Tournament game ${game.id} not started: ${wrongSeat.name} is holding deck ${
-                    wrongSeat.deck.id
-                }, not the registered ${this.tournamentDeckFor(game, wrongSeat.name)}`
-            );
-
-            for (const player of Object.values(game.getPlayers())) {
-                this.sockets[player.id]?.send('gameerror', this.pinnedDeckMessage(game));
-            }
-
+        // ARCHON: the deck lock, second gate - see refuseUnpinnedStart.
+        if (this.refuseUnpinnedStart(game)) {
             return;
         }
 
@@ -2405,6 +2433,16 @@ class Lobby {
         let game = this.games[gameId];
 
         if (!game) {
+            return;
+        }
+
+        // ARCHON: a tournament table is not ours to replace. The chat command
+        // already refuses, but this handler is the destructive half - it drops
+        // the table out of this.games - and a table the event is still
+        // tracking must not disappear because a message arrived.
+        if (game.tournament) {
+            logger.warn(`Ignored a rematch request for tournament table ${gameId}`);
+
             return;
         }
 
@@ -2536,6 +2574,16 @@ class Lobby {
         let game = this.games[gameId];
 
         if (!game) {
+            return;
+        }
+
+        // ARCHON: a tournament table is not ours to replace. The chat command
+        // already refuses, but this handler is the destructive half - it drops
+        // the table out of this.games - and a table the event is still
+        // tracking must not disappear because a message arrived.
+        if (game.tournament) {
+            logger.warn(`Ignored a rematch request for tournament table ${gameId}`);
+
             return;
         }
 

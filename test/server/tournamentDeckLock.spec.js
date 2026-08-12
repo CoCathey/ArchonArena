@@ -89,6 +89,7 @@ describe('tournament deck lock', function () {
                 'socket-alice': socketFor(alice),
                 'socket-bob': socketFor(bob)
             },
+            socketsByName: { alice: socketFor(alice), bob: socketFor(bob) },
             configService: { getValueForSection: () => 1000 },
             cardService: { getAllCards: vi.fn().mockResolvedValue({}) },
             deckService,
@@ -102,8 +103,16 @@ describe('tournament deck lock', function () {
             tournamentDeckFor: Lobby.prototype.tournamentDeckFor,
             pinnedDeckMessage: Lobby.prototype.pinnedDeckMessage,
             onSelectDeck: Lobby.prototype.onSelectDeck,
+            refuseUnpinnedStart: Lobby.prototype.refuseUnpinnedStart,
             startTournamentGameIfReady: Lobby.prototype.startTournamentGameIfReady,
-            onTournamentDeckRegistered: Lobby.prototype.onTournamentDeckRegistered
+            onTournamentDeckRegistered: Lobby.prototype.onTournamentDeckRegistered,
+            // The owner-driven Start button, which reaches a tournament table
+            // because player one of a pairing owns it.
+            onStartGame: Lobby.prototype.onStartGame,
+            launchGame: Lobby.prototype.launchGame,
+            rollLuckyDiceDecks: Lobby.prototype.rollLuckyDiceDecks,
+            onGameRematch: Lobby.prototype.onGameRematch,
+            onGameRematchWithNewDecks: Lobby.prototype.onGameRematchWithNewDecks
         };
     });
 
@@ -205,6 +214,93 @@ describe('tournament deck lock', function () {
             // And both players are told, rather than left staring at a table
             // that has quietly decided not to start.
             expect(errors()).toHaveLength(2);
+        });
+
+        /**
+         * There are two ways into a running tournament game, not one.
+         *
+         * ensureTournamentGame builds the table's PendingGame from the first
+         * player of the pairing, which makes that player its OWNER - so the
+         * ordinary Start button is on screen for them and goes through
+         * onStartGame/launchGame, not through startTournamentGameIfReady at
+         * all. The pin check lived only in the latter.
+         */
+        it('refuses the owner-driven Start button on the wrong deck too', function () {
+            const game = makeTable();
+
+            expect(game.isOwner('alice'), 'player one should own the table').toBe(true);
+
+            game.selectDeck('alice', dbDeck(999));
+            game.selectDeck('bob', dbDeck(201));
+
+            lobby.onStartGame(socketFor(alice), game.id);
+
+            expect(game.started).toBeFalsy();
+            expect(lobby.router.startGame).not.toHaveBeenCalled();
+            expect(errors().some((message) => /locks you to the deck/i.test(message))).toBe(true);
+        });
+
+        it('still lets the owner start the table on the registered decks', function () {
+            const game = makeTable();
+
+            game.selectDeck('alice', dbDeck(101));
+            game.selectDeck('bob', dbDeck(201));
+
+            lobby.onStartGame(socketFor(alice), game.id);
+
+            expect(game.started).toBe(true);
+        });
+    });
+
+    /**
+     * ARCHON: a rematch at a tournament table.
+     *
+     * The rematch handlers delete the table out of this.games and build a
+     * replacement PendingGame from a fixed list of fields - a list that never
+     * included the tournament block. So the replacement had no match id, which
+     * means its result could never be reported (recordGameWin needs
+     * gameSave.tournament), and no deck pin, which means both players got a
+     * free choice of deck in an event that had locked them. The event mean-
+     * while opened the real next game itself, so the players ended up with two
+     * tables and played the one that did not count.
+     */
+    describe('a rematch at a tournament table', function () {
+        it('does not replace the table, for either rematch flavour', function () {
+            for (const handler of ['onGameRematch', 'onGameRematchWithNewDecks']) {
+                const game = makeTable();
+
+                lobby[handler]({ gameId: game.id, winner: 'alice' });
+
+                expect(lobby.games[game.id], `${handler} dropped the table`).toBe(game);
+                expect(game.tournament.matchId).toBe(5);
+                // Nothing was announced to the lobby either - the table is
+                // still standing and still the event's.
+                expect(lobby.broadcastGameMessage).not.toHaveBeenCalled();
+            }
+        });
+
+        // The control: the guard has to be about tournament tables, not about
+        // rematches. Only the decision point is driven here - retiring the old
+        // game is the first thing past the guard - because building out the
+        // whole rematch flow would be testing the rematch, not the guard.
+        it('leaves ordinary games alone', function () {
+            const game = new PendingGame(alice, { gameFormat: 'normal' });
+
+            game.newGame('socket-alice', alice, undefined, true);
+            game.join('socket-bob', bob);
+            game.selectDeck('alice', dbDeck(1));
+            game.selectDeck('bob', dbDeck(2));
+            lobby.games[game.id] = game;
+
+            try {
+                lobby.onGameRematch({ gameId: game.id, winner: 'alice' });
+            } catch {
+                // The rest of the handler wants more of the lobby than this
+                // seam provides; it got past the guard, which is the claim.
+            }
+
+            expect(lobby.games[game.id]).toBeUndefined();
+            expect(lobby.broadcastGameMessage).toHaveBeenCalled();
         });
     });
 

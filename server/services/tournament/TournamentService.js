@@ -2680,12 +2680,26 @@ class TournamentService {
         // The accept must consume the exact proposal it read: if a
         // counter-offer lands between the read and this write, accepting
         // nothing is right and agreeing to a time nobody saw is not.
+        //
+        // ARCHON: the proposal is bound back as a normalised UTC string, not
+        // as the Date it was read as. Every timestamp column here is
+        // `timestamp without time zone` holding UTC wall-clock, and db/index.js
+        // parses it back as UTC - but node-postgres serialises a Date
+        // parameter using the HOST's offset, and Postgres casting that to an
+        // unzoned column keeps the wall clock and discards the offset. On any
+        // host that is not UTC the comparison therefore looked for a time two
+        // (or six, or nine) hours from the one stored, matched nothing, and
+        // told both players "the proposal changed while you were looking" -
+        // forever. proposeMatchTime already writes a normalised string, which
+        // is why the write it makes is fine and the one that reads it back was
+        // not. Deployment runs UTC, so this was invisible there and total
+        // anywhere else.
         const updated = await this.db.query(
             'UPDATE "TournamentMatches" SET "ScheduledAt" = "ProposedTime", ' +
                 '"ProposedTime" = NULL, "ProposedBy" = NULL ' +
                 'WHERE "Id" = $1 AND "ProposedTime" = $2 AND "ProposedBy" = $3 ' +
                 'RETURNING "ScheduledAt"',
-            [matchId, match.ProposedTime, match.ProposedBy]
+            [matchId, new Date(match.ProposedTime).toISOString(), match.ProposedBy]
         );
 
         if (!updated || updated.length === 0) {

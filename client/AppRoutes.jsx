@@ -17,6 +17,8 @@ import Logout from './pages/Logout';
 // ARCHON: new navigation targets
 import CommunityNews from './pages/CommunityNews';
 import ContentPageGuard from './Components/Navigation/ContentPageGuard';
+// ARCHON (N9): the kiosk QR's landing page - see pages/CheckIn.jsx
+import CheckIn from './pages/CheckIn';
 import Replay from './pages/Replay';
 import SharedReplay from './pages/SharedReplay';
 import Stats from './pages/Stats';
@@ -226,6 +228,12 @@ const AppRoutes = ({ currentGame, user }) => {
             />
             <Route path='/tournaments' element={<Tournaments />} />
             <Route path='/tournaments/:id' element={<TournamentDetail />} />
+            {/* ARCHON (N9): what the printed check-in QR points at. Both
+                forms exist because the poster advertises both: the scan
+                carries the code, and the card next to it tells players
+                they can type it instead. */}
+            <Route path='/check-in' element={<CheckIn />} />
+            <Route path='/check-in/:code' element={<CheckIn />} />
             <Route path='/learn' element={<Learn />} />
             <Route path='/watch' element={<Watch />} />
             <Route path='/welcome' element={<Onboarding />} />

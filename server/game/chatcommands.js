@@ -402,6 +402,22 @@ class ChatCommands {
     }
 
     queueRematch(player, mode) {
+        // ARCHON: not at a tournament table. A rematch builds a fresh pending
+        // game, and the replacement carried none of the event with it: no
+        // match id, so its result could never be reported (recordGameWin needs
+        // gameSave.tournament), and no deck pin, so both players got a free
+        // choice of deck in an event that had locked them. Meanwhile the event
+        // would open the real next game itself, leaving two tables. What comes
+        // after a tournament game is the event's decision, not a chat command.
+        if (this.game.tournament) {
+            this.game.addAlert(
+                'warning',
+                '{0} tried to start a rematch, but this is a tournament table - the event opens your next game.',
+                player
+            );
+            return;
+        }
+
         const opponentLeft = this.game.getPlayers().some((other) => other !== player && other.left);
         if (opponentLeft) {
             this.game.addAlert(

@@ -3,6 +3,9 @@
 // `this` and drops the per-test timeout argument. Starting a PostgreSQL and
 // loading sixty schema files does not fit in the default 5s.
 import { it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Pool, types } from 'pg';
 
 import scratchPostgres from '../../../helpers/scratchPostgres.js';
@@ -510,6 +513,97 @@ describe('a tournament end to end, on real PostgreSQL', function () {
                 (entry) => entry.id === match.id
             );
             expect(scheduled.scheduledAt).toBeTruthy();
+        },
+        120000
+    );
+
+    /**
+     * ARCHON: accepting a time on a host that is not UTC.
+     *
+     * Every timestamp column here is `timestamp without time zone` holding UTC
+     * wall-clock, and db/index.js parses it back as UTC. But node-postgres
+     * serialises a Date PARAMETER using the host's offset, and Postgres
+     * casting that to an unzoned column keeps the wall clock and throws the
+     * offset away. acceptMatchTime bound the proposal it had just read as a
+     * Date, so its compare-and-swap looked for a time hours from the one
+     * stored, matched nothing, and told both players "the proposal changed
+     * while you were looking" - every time, forever, on any host outside UTC.
+     *
+     * This is the test that could catch it: a real Postgres, and a process
+     * clock that is not UTC. A mocked db compares JS values and agrees with
+     * itself, and CI runs UTC where the bug is invisible - which is exactly
+     * how it survived.
+     *
+     * It runs in a CHILD PROCESS with TZ set at spawn, which is not
+     * ceremony: vitest uses `pool: 'threads'`, and setting process.env.TZ
+     * inside a worker thread does not move V8's timezone, so the obvious
+     * version of this test passes just as happily against the bug.
+     */
+    maybe(
+        'accepts a proposed time on a host whose clock is not UTC',
+        async function () {
+            const alice = users.player5;
+            const bob = users.player6;
+
+            const league = await service.create(alice, {
+                name: 'Off-UTC League',
+                format: 'swiss',
+                roundCount: 1,
+                pacing: 'async',
+                roundDeadlineDays: 7
+            });
+
+            await service.register(league.id, alice, {});
+            await service.register(league.id, bob, {});
+            await service.start(league.id, alice);
+
+            const match = (await service.getDetail(league.id, alice)).matches.find(
+                (entry) => entry.player1Id && entry.player2Id
+            );
+            const when = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
+
+            // Six hours off UTC, and not a whole-day offset, so a shifted
+            // binding cannot land on the right value by accident.
+            const output = execFileSync(
+                process.execPath,
+                [
+                    path.join(
+                        path.dirname(fileURLToPath(import.meta.url)),
+                        'offUtcScheduleProbe.cjs'
+                    )
+                ],
+                {
+                    encoding: 'utf8',
+                    env: {
+                        ...process.env,
+                        TZ: 'America/Chicago',
+                        PROBE_PG_URI: `${pg.uri}/${DB}`,
+                        PROBE_TOURNAMENT: String(league.id),
+                        PROBE_MATCH: String(match.id),
+                        PROBE_PROPOSER: String(alice.id),
+                        PROBE_ACCEPTER: String(bob.id),
+                        PROBE_TIME: when
+                    }
+                }
+            );
+
+            const result = JSON.parse(output.trim().split('\n').pop());
+
+            expect(result.offsetMinutes, 'the child did not actually run off UTC').not.toBe(0);
+            expect(result.proposed.success, result.proposed.message).toBe(true);
+            expect(result.accepted.success, result.accepted.message).toBe(true);
+
+            // And the time agreed is the time offered, not one shifted by the
+            // host's offset.
+            const after = (await service.getDetail(league.id, alice)).matches.find(
+                (entry) => entry.id === match.id
+            );
+
+            expect(after.scheduledAt).toBeTruthy();
+            expect(after.proposedTime).toBeFalsy();
+            expect(Math.abs(new Date(after.scheduledAt).getTime() - new Date(when).getTime())).toBe(
+                0
+            );
         },
         120000
     );

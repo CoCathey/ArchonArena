@@ -91,6 +91,10 @@ describe('Lobby deck rules', function () {
             // nothing to say here - see tournamentDeckLock.spec.js.
             tournamentDeckFor: Lobby.prototype.tournamentDeckFor,
             pinnedDeckMessage: Lobby.prototype.pinnedDeckMessage,
+            // launchGame consults this too - a tournament table's owner is
+            // player one of the pairing, so the ordinary Start button can
+            // reach an event game. None of these games is one.
+            refuseUnpinnedStart: Lobby.prototype.refuseUnpinnedStart,
             onSelectDeck: Lobby.prototype.onSelectDeck,
             onSelectRandomDeck: Lobby.prototype.onSelectRandomDeck,
             onStartGame: Lobby.prototype.onStartGame,
