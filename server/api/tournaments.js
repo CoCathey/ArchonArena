@@ -169,7 +169,11 @@ module.exports.init = function (server) {
     );
 
     action('/api/tournaments/:id/check-in', (req) =>
-        tournamentService.checkIn(parseInt(req.params.id, 10), req.user)
+        tournamentService.checkIn(parseInt(req.params.id, 10), req.user, {
+            // ARCHON: the desk marking somebody present. Authorized in the
+            // service - only staff may name a player other than themselves.
+            userId: req.body.userId ? parseInt(req.body.userId, 10) : null
+        })
     );
 
     action('/api/tournaments/:id/seeds', (req) =>

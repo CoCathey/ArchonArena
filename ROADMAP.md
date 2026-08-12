@@ -1200,6 +1200,11 @@ would notice first.
     -   **Online sealed events could never start.** The table was built with no set list, and
         `getSealedDeck` threw on `expansions.aoa` — an absent list now means the whole pool, and the
         event's legal sets are passed through.
+    -   **An organiser can check a player in.** `checkIn` only ever wrote `actor.id`, so the desk at
+        an in-person event had no way to mark anyone present — the player needed a phone, an account
+        they were signed into and the event page, and anyone who could not manage that was dropped as
+        a no-show at start. The roster showed the status and offered no way to change it.
+        `CheckedInVia` records `staff` so the audit trail still says who did it.
     -   **Finishing an event asks first when rounds remain.** It stamps final placings, publishes
         them to profiles and rates the ladder, nothing reopens a complete event, and the button sits
         beside the one pressed at the end of every round.

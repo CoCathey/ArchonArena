@@ -318,6 +318,9 @@ const createFakeDb = () => {
                 );
                 if (player) {
                     player.CheckedIn = true;
+                    // Who did it: 'self', 'kiosk' or 'staff'. The fake stopped
+                    // at the boolean, so the audit trail could not be asserted.
+                    player.CheckedInVia = params[2];
                     return [{ Id: player.Id }];
                 }
                 return [];
@@ -2152,6 +2155,58 @@ describe('TournamentService', function () {
      * The gate is a confirmation, not a ban: ending early is a real thing
      * organizers need when the venue closes.
      */
+    /**
+     * ARCHON: the desk checking a player in.
+     *
+     * checkIn only ever wrote actor.id, so an in-person organizer running the
+     * door from a laptop had no way to mark anyone present - the player needed
+     * a phone, an account they were signed into, and the event page, and every
+     * player who could not manage that was dropped as a no-show at start.
+     */
+    describe('checking somebody else in', function () {
+        let id;
+
+        beforeEach(async function () {
+            id = await createSwiss(2);
+            await service.openCheckIn(id, organizer);
+        });
+
+        it('lets the organizer mark a player present', async function () {
+            expect((await service.checkIn(id, organizer, { userId: 2 })).success).toBe(true);
+
+            const player = db.state.players.find(
+                (entry) => entry.TournamentId === id && entry.UserId === 2
+            );
+
+            expect(player.CheckedIn).toBe(true);
+            // Still distinguishable from a player who checked themselves in.
+            expect(player.CheckedInVia).toBe('staff');
+        });
+
+        it('refuses a player trying to check anybody else in', async function () {
+            const refused = await service.checkIn(id, { id: 2 }, { userId: 1 });
+
+            expect(refused.success).toBe(false);
+            expect(refused.message).toMatch(/only the organizer/i);
+
+            const player = db.state.players.find(
+                (entry) => entry.TournamentId === id && entry.UserId === 1
+            );
+            expect(player.CheckedIn).toBeFalsy();
+        });
+
+        it('still lets a player check themselves in', async function () {
+            expect((await service.checkIn(id, { id: 2 })).success).toBe(true);
+
+            const player = db.state.players.find(
+                (entry) => entry.TournamentId === id && entry.UserId === 2
+            );
+
+            expect(player.CheckedIn).toBe(true);
+            expect(player.CheckedInVia).toBe('self');
+        });
+    });
+
     describe('finishing early', function () {
         it('refuses the first time, and says how far in the event actually is', async function () {
             const id = await createSwiss(4, { roundCount: 3 });

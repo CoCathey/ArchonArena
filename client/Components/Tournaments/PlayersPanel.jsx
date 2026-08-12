@@ -52,6 +52,27 @@ const PlayersPanel = ({ tournament, players, act }) => {
                     <span className='rounded bg-emerald-500/15 px-1.5 text-xs text-emerald-400'>
                         {t('checked in')}
                     </span>
+                ) : tournament.canManage ? (
+                    /* ARCHON: the desk marking a player present. The roster
+                       showed the status and offered no way to change it, so an
+                       in-person organizer running the door from a laptop had
+                       no working way to check anybody in - the player needed a
+                       phone, an account they were signed into, and the event
+                       page, or they were dropped as a no-show at start. */
+                    <HeroButton
+                        size='sm'
+                        variant='tertiary'
+                        className='!h-5 !min-w-0 !px-1.5 text-xs'
+                        onPress={() =>
+                            act(
+                                'check-in',
+                                { userId: player.userId },
+                                t('{{player}} checked in', { player: player.username })
+                            )
+                        }
+                    >
+                        {t('Check in')}
+                    </HeroButton>
                 ) : (
                     <span className='rounded bg-surface-tertiary/70 px-1.5 text-xs text-muted'>
                         {t('not checked in')}

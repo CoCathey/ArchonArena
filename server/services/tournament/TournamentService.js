@@ -1830,11 +1830,38 @@ class TournamentService {
             return { success: false, message: 'Check-in is not open' };
         }
 
+        // ARCHON: an organizer may check somebody else in.
+        //
+        // This only ever wrote actor.id, so the desk at an in-person event had
+        // no way to mark a player present: the player had to own a phone, be
+        // signed in, and find the event page themselves, and anyone who could
+        // not was dropped as a no-show at start. A staffed desk is the normal
+        // way a paper event runs, and the kiosk QR does not replace it -
+        // between them they cover the player who scans and the player who
+        // hands over a decklist and walks to their table.
+        //
+        // 'staff' rather than 'self' in CheckedInVia, so the audit trail still
+        // distinguishes who did it.
+        let targetId = actor.id;
+        let via = options.via === 'kiosk' ? 'kiosk' : 'self';
+
+        if (options.userId && Number(options.userId) !== actor.id) {
+            if (!(await this.canManage(actor, tournament))) {
+                return {
+                    success: false,
+                    message: 'Only the organizer can check another player in'
+                };
+            }
+
+            targetId = Number(options.userId);
+            via = 'staff';
+        }
+
         const rows = await this.db.query(
             'UPDATE "TournamentPlayers" SET "CheckedIn" = true, ' +
                 '"CheckedInAt" = now() AT TIME ZONE \'utc\', "CheckedInVia" = $3 ' +
                 'WHERE "TournamentId" = $1 AND "UserId" = $2 AND NOT "Dropped" RETURNING "Id"',
-            [tournamentId, actor.id, options.via === 'kiosk' ? 'kiosk' : 'self']
+            [tournamentId, targetId, via]
         );
 
         if (!rows || rows.length === 0) {
