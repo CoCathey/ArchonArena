@@ -1208,6 +1208,24 @@ would notice first.
     -   **Finishing an event asks first when rounds remain.** It stamps final placings, publishes
         them to profiles and rates the ladder, nothing reopens a complete event, and the button sits
         beside the one pressed at the end of every round.
+-   [x] **The rest of the audit's findings.** Judge tools (forfeit / no-show / double loss) refused a
+        decided match, and a disputed match is decided by definition — so a dispute that resolved to
+        "he never showed up" was unrecordable, and the only lever left filed a false result type.
+        Swiss repeat pairings were computed and discarded. The organiser could not change a deck,
+        which is what a locked event's own refusal tells players to ask for — that needed a column,
+        because "released by a judge" and "never registered" both look like a null `DeckId`, and
+        treating them alike would let a player withhold their deck, read the pairings, and only then
+        choose. The deck picker listed the whole collection with none of the event's rules applied.
+        A misconfigured event could never be corrected (the create form is now shared with an edit
+        panel, rather than a second form that would drift). A latecomer could not be admitted at all.
+        Asynchronous events reminded nobody of anything before it happened, and two players could
+        agree a time after their round had ended. And **Adaptive Bo3 never swapped a deck**: the
+        bidding worked, the resolved bid was written to the match row, and nothing downstream read
+        it — worse once the deck lock shipped, because the table then held both players to the wrong
+        decks. Note one new stall mode: game three now waits for the bid, so a pair who neither bid
+        nor pass leave the round waiting on them. That is the right trade against dealing decks the
+        bid is about to contradict, and the organiser can still award or take a paper result, but
+        `adaptiveBid`/`adaptivePass` have no timeout or force-resolve and should get one.
 -   [x] **The participant-callable endpoints are bounded.** Creating an event was the only
         tournament route with a ceiling. The rest are mostly organizer tools behind an
         authorization check, which is a fair reason to leave them — but opening a table builds a

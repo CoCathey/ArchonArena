@@ -317,6 +317,16 @@ const createFakeDb = () => {
                 return [];
             }
 
+            // ARCHON (N9): the Adaptive chain bid, which getMatchesNeedingGames
+            // now reads to seat game three's decks.
+            if (sql.includes('UPDATE "TournamentMatches" SET "AdaptiveState"')) {
+                const match = state.matches.find((entry) => entry.Id === params[0]);
+                if (match) {
+                    match.AdaptiveState = params[1];
+                }
+                return [];
+            }
+
             if (sql.includes('UPDATE "TournamentPlayers" SET "CheckedIn" = true')) {
                 const player = state.players.find(
                     (entry) =>
@@ -2218,6 +2228,99 @@ describe('TournamentService', function () {
      * build it again. Swiss pairs on record, so a late entrant starts on zero
      * and is paired from there.
      */
+    /**
+     * ARCHON (N9): Adaptive Bo3 - the decks move between seats.
+     *
+     * Game one is own decks, game two is the straight swap, and at 1-1 the two
+     * players bid chains for the right to pilot the nominated deck. The
+     * bidding worked, the UI worked, the resolved bid was written to the match
+     * row - and nothing downstream ever read it. Every game of every Adaptive
+     * event dealt the decks the players registered, unswapped and unchained,
+     * because getMatchesNeedingGames took each seat's deck straight off the
+     * player row regardless of game number.
+     *
+     * Worse than merely absent once the deck lock shipped: the table pins
+     * whatever comes back from there, so the lock was actively holding both
+     * players to the wrong decks.
+     */
+    describe('Adaptive Bo3 decks', function () {
+        let id;
+        let match;
+
+        const createAdaptive = async () => {
+            db.state.decks.push(
+                { Id: 301, UserId: 1, Name: 'Alice deck', Uuid: 'u-301', SasRating: 60 },
+                { Id: 302, UserId: 2, Name: 'Bob deck', Uuid: 'u-302', SasRating: 61 }
+            );
+
+            const created = await service.create(organizer, {
+                name: 'Adaptive Cup',
+                format: 'swiss',
+                bestOf: 3,
+                adaptiveBo3: true
+            });
+
+            await service.register(created.id, { id: 1 });
+            await service.register(created.id, { id: 2 });
+            await service.registerDeck(created.id, { id: 1 }, 301);
+            await service.registerDeck(created.id, { id: 2 }, 302);
+            await service.start(created.id, organizer);
+
+            id = created.id;
+            match = db.state.matches.find((entry) => entry.TournamentId === id);
+        };
+
+        const seatDecks = async () => {
+            const needing = await service.getMatchesNeedingGames(id);
+
+            return needing[0]?.players.map((player) => player.deckId);
+        };
+
+        beforeEach(createAdaptive);
+
+        it('deals each player their own deck in game one', async function () {
+            expect(await seatDecks()).toEqual([301, 302]);
+        });
+
+        // The swap the format is named for.
+        it('swaps the decks for game two', async function () {
+            match.Player1Wins = 1;
+
+            expect(await seatDecks()).toEqual([302, 301]);
+        });
+
+        it('will not open game three until the bid is settled', async function () {
+            match.Player1Wins = 1;
+            match.Player2Wins = 1;
+
+            expect(await service.getMatchesNeedingGames(id)).toEqual([]);
+        });
+
+        it('deals game three the decks the bid settled, with the bid as chains', async function () {
+            match.Player1Wins = 1;
+            match.Player2Wins = 1;
+
+            // Player 1 bids 3 chains for player 1's deck; player 2 passes.
+            await service.adaptiveBid(id, match.Id, { id: 1 }, 3);
+            await service.adaptivePass(id, match.Id, { id: 2 });
+
+            const needing = await service.getMatchesNeedingGames(id);
+
+            expect(needing).toHaveLength(1);
+
+            const [info] = needing;
+            const state = JSON.parse(match.AdaptiveState);
+            const bidWinner = state.highBidderId;
+
+            // The bid winner pilots the nominated deck and carries the chains;
+            // the other player takes the remaining deck unchained.
+            expect(new Set(info.players.map((player) => player.deckId))).toEqual(
+                new Set([301, 302])
+            );
+            expect(info.startingChains[`user${bidWinner}`]).toBe(3);
+        });
+    });
+
     describe('late registration', function () {
         let id;
 

@@ -911,7 +911,13 @@ class TournamentService {
                 'm."P1SourceMatchId", m."P1SourceIsLoser", m."P2SourceMatchId", ' +
                 'm."P2SourceIsLoser", m."Player1Wins", m."Player2Wins", m."BestOf", ' +
                 'm."ResultType", m."P1BannedDeckId", m."P2BannedDeckId", m."P1DeckId", ' +
-                'm."P2DeckId", m."ReportedBy", m."ConfirmedBy", m."ConfirmedAt", ' +
+                // ARCHON (N9): AdaptiveState carries the in-progress chain bid,
+                // and getMatchesNeedingGames needs it to seat the right decks.
+                // getDetail maps matches field by field, so it does NOT reach
+                // the client - if that mapping is ever changed to a spread,
+                // the live bid becomes public to both players and spectators.
+                'm."P2DeckId", m."AdaptiveState", m."ReportedBy", m."ConfirmedBy", ' +
+                'm."ConfirmedAt", ' +
                 'm."DisputedBy", m."DisputeNote", ' +
                 'm."ScheduledAt", m."ProposedTime", m."ProposedBy", m."ScheduleNote", ' +
                 'u1."Username" AS "Player1", u2."Username" AS "Player2" ' +
@@ -4794,18 +4800,75 @@ class TournamentService {
                 match.Player1Id &&
                 match.Player2Id &&
                 // Triad matches wait for both ban/pick steps.
-                (!tournament.Triad || (match.P1DeckId && match.P2DeckId))
+                (!tournament.Triad || (match.P1DeckId && match.P2DeckId)) &&
+                // ARCHON (N9): game three of an Adaptive Bo3 waits for the
+                // chain bid, because the bid is what decides which deck each
+                // seat plays. Opening the table first would deal decks the bid
+                // is about to contradict - and the deck lock would then hold
+                // the players to the wrong ones.
+                //
+                // This does mean a pair who neither bid nor pass leave their
+                // table unopened and the round waiting on them. That is the
+                // right trade against dealing the wrong decks, and the
+                // organizer can still award or take a paper result - but it is
+                // a new way for a round to sit still.
+                (!tournament.AdaptiveBo3 ||
+                    (match.Player1Wins || 0) + (match.Player2Wins || 0) + 1 !== 3 ||
+                    this.parseJsonColumn(match.AdaptiveState)?.resolved === true)
         );
 
         // SAS lookup for the decks actually being piloted (triad picks
         // can differ from the registered deck on the player row).
-        const deckIdFor = (match, side) => {
+        const nextGameNumber = (match) => (match.Player1Wins || 0) + (match.Player2Wins || 0) + 1;
+
+        const registeredDeckFor = (match, side) =>
+            playerById[side === 1 ? match.Player1Id : match.Player2Id]?.DeckId || null;
+
+        const adaptiveStateFor = (match) =>
+            (tournament.AdaptiveBo3 && this.parseJsonColumn(match.AdaptiveState)) || {};
+
+        /**
+         * ARCHON (N9): in an Adaptive Bo3 the DECKS move between seats, so
+         * which deck a seat plays is a function of the game number rather than
+         * of the player row: game one your own, game two your opponent's, game
+         * three whatever the chain bid settled.
+         *
+         * This is the only place that swap can happen. The lobby pins whatever
+         * comes back from here and the deck lock then enforces it - so a swap
+         * the event page promises and this function does not deliver is a swap
+         * the table actively refuses, which is exactly what it did: the format
+         * was offered, the bidding UI worked, and every game dealt the decks
+         * the players registered.
+         */
+        const deckIdFor = (match, side, gameNumber) => {
             if (tournament.Triad) {
                 return side === 1 ? match.P1DeckId : match.P2DeckId;
             }
 
+            if (!tournament.AdaptiveBo3) {
+                return registeredDeckFor(match, side);
+            }
+
+            // Game one is own decks; game two is the straight swap.
+            if (gameNumber === 1) {
+                return registeredDeckFor(match, side);
+            }
+
+            if (gameNumber === 2) {
+                return registeredDeckFor(match, side === 1 ? 2 : 1);
+            }
+
+            // Game three: the bid decides. decks maps each PLAYER to the id of
+            // the player whose deck they pilot.
+            const state = adaptiveStateFor(match);
             const playerId = side === 1 ? match.Player1Id : match.Player2Id;
-            return playerById[playerId]?.DeckId || null;
+            const ownerId = state.decks?.[playerId];
+
+            if (!ownerId) {
+                return null;
+            }
+
+            return registeredDeckFor(match, ownerId === match.Player1Id ? 1 : 2);
         };
 
         const sasByDeckId = {};
@@ -4814,7 +4877,14 @@ class TournamentService {
             const deckIds = [
                 ...new Set(
                     playable
-                        .flatMap((match) => [deckIdFor(match, 1), deckIdFor(match, 2)])
+                        .flatMap((match) => {
+                            const gameNumber = nextGameNumber(match);
+
+                            return [
+                                deckIdFor(match, 1, gameNumber),
+                                deckIdFor(match, 2, gameNumber)
+                            ];
+                        })
                         .filter((id) => !!id)
                 )
             ];
@@ -4837,7 +4907,8 @@ class TournamentService {
             const lastDecided = [...games].reverse().find((game) => game.WinnerId);
             const previousWinnerId = lastDecided ? lastDecided.WinnerId : null;
 
-            const deckIds = [deckIdFor(match, 1), deckIdFor(match, 2)];
+            const gameNumber = nextGameNumber(match);
+            const deckIds = [deckIdFor(match, 1, gameNumber), deckIdFor(match, 2, gameNumber)];
             const playerIds = [match.Player1Id, match.Player2Id];
 
             // Starting chains: SAS handicap (the stronger deck starts
@@ -4854,7 +4925,19 @@ class TournamentService {
 
                 let chains = 0;
 
-                if (tournament.SasChainHandicap) {
+                // ARCHON (N9): in Adaptive game three the winning bid IS the
+                // handicap - the bidder said what a deck is worth in chains,
+                // and that price is the whole mechanism. The SAS handicap is
+                // suppressed rather than stacked on top of it: two handicaps
+                // for the same imbalance would double-count it.
+                const adaptiveChains =
+                    gameNumber === 3
+                        ? adaptiveStateFor(match).chains?.[playerIds[side]] || 0
+                        : null;
+
+                if (adaptiveChains !== null) {
+                    chains = adaptiveChains;
+                } else if (tournament.SasChainHandicap) {
                     const ownSas = sasByDeckId[deckIds[side]];
                     const oppSas = sasByDeckId[deckIds[1 - side]];
 
@@ -4895,7 +4978,7 @@ class TournamentService {
                 // Nothing chosen means the whole sealed pool; the lobby turns
                 // these expansion ids into the set codes DeckService wants.
                 allowedSets: this.parseJsonColumn(tournament.AllowedSets),
-                gameNumber: (match.Player1Wins || 0) + (match.Player2Wins || 0) + 1,
+                gameNumber,
                 knownGameUuids: games.map((game) => game.GameUuid),
                 previousWinner: previousWinnerId ? playerById[previousWinnerId]?.Username : null,
                 startingChains: Object.keys(startingChains).length > 0 ? startingChains : null,
