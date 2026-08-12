@@ -76,6 +76,12 @@ const createFakeDb = () => {
                     AdaptiveBo3: params[33],
                     Pacing: params[34],
                     RoundDeadlineDays: params[35],
+                    // The announced buy-in and prize split. Recorded only - no
+                    // money moves through the platform.
+                    EntryFeeCents: params[36],
+                    PrizeCurrency: params[37],
+                    PrizeSplits: params[38],
+                    PrizeNote: params[39],
                     Status: 'registration',
                     Stage: 'main',
                     CurrentRound: 0,
@@ -130,7 +136,17 @@ const createFakeDb = () => {
                         BannedHouses: params[25],
                         SasChainHandicap: params[26],
                         ChainsPerMatchWin: params[27],
-                        Triad: params[28]
+                        Triad: params[28],
+                        // Every column the settings UPDATE actually writes. The
+                        // fake stopped at Triad, so a setting the real UPDATE
+                        // rewrites - and can therefore rewrite to null - looked
+                        // untouched here no matter what the service did with it.
+                        Pacing: params[29],
+                        RoundDeadlineDays: params[30],
+                        EntryFeeCents: params[31],
+                        PrizeCurrency: params[32],
+                        PrizeSplits: params[33],
+                        PrizeNote: params[34]
                     });
                 }
                 return [];
@@ -3155,6 +3171,140 @@ describe('TournamentService', function () {
 
             const asStranger = await service.getDetail(created.id, stranger);
             expect(asStranger.tournament.joinCode).toBeUndefined();
+        });
+    });
+
+    /**
+     * ARCHON: the announced buy-in and how the pot divides.
+     *
+     * The platform records these and holds none of the money. Validation is
+     * worth having anyway, because the moment it matters is an organizer typing
+     * a prize table in front of people who have already paid into it - and a
+     * table that adds up to 120% is one somebody has to explain at the end of
+     * the night.
+     */
+    describe('the prize pool', function () {
+        const withPrize = (options) =>
+            service.create(organizer, { name: 'Prize Night', format: 'swiss', ...options });
+
+        it('records the fee, currency, note and split, sorted by place', async function () {
+            const created = await withPrize({
+                entryFeeCents: 1000,
+                prizeCurrency: 'gbp',
+                prizeNote: '  Paid out in store credit.  ',
+                prizeSplits: [
+                    { rank: 3, bps: 1000 },
+                    { rank: 1, bps: 6500 },
+                    { rank: 2, bps: 2000 }
+                ]
+            });
+
+            const { tournament } = await service.getDetail(created.id, organizer);
+
+            expect(tournament.entryFeeCents).toBe(1000);
+            expect(tournament.prizeCurrency).toBe('GBP');
+            expect(tournament.prizeNote).toBe('Paid out in store credit.');
+            expect(tournament.prizeSplits).toEqual([
+                { rank: 1, bps: 6500 },
+                { rank: 2, bps: 2000 },
+                { rank: 3, bps: 1000 }
+            ]);
+        });
+
+        it('refuses a prize table that cannot be paid', async function () {
+            const over = await withPrize({
+                entryFeeCents: 1000,
+                prizeSplits: [
+                    { rank: 1, bps: 7500 },
+                    { rank: 2, bps: 5000 }
+                ]
+            });
+
+            expect(over.success).toBe(false);
+            expect(over.message).toMatch(/125\.00%/);
+
+            // Under 100% is not an error - it is the cut the venue keeps.
+            const under = await withPrize({
+                entryFeeCents: 1000,
+                prizeSplits: [{ rank: 1, bps: 9500 }]
+            });
+
+            expect(under.success, under.message).toBe(true);
+        });
+
+        it('refuses two prizes for the same place', async function () {
+            const duplicate = await withPrize({
+                prizeSplits: [
+                    { rank: 1, bps: 5000 },
+                    { rank: 1, bps: 3000 }
+                ]
+            });
+
+            expect(duplicate.success).toBe(false);
+            expect(duplicate.message).toMatch(/both for place 1/i);
+        });
+
+        it('refuses a place or share that is not a number it can pay', async function () {
+            for (const splits of [
+                [{ rank: 0, bps: 5000 }],
+                [{ rank: 1, bps: 0 }],
+                [{ rank: 1, bps: 10001 }],
+                [{ rank: 'first', bps: 5000 }]
+            ]) {
+                const result = await withPrize({ prizeSplits: splits });
+
+                expect(result.success, JSON.stringify(splits)).toBe(false);
+            }
+        });
+
+        // Every supported currency has two minor digits, because the whole
+        // calculation is integer cents. One that does not would be wrong by a
+        // factor of a hundred and look perfectly fine.
+        it('refuses a currency it cannot count in cents', async function () {
+            const yen = await withPrize({ entryFeeCents: 1000, prizeCurrency: 'JPY' });
+
+            expect(yen.success).toBe(false);
+            expect(yen.message).toMatch(/currency/i);
+        });
+
+        it('refuses an entry fee that is negative or absurd', async function () {
+            expect((await withPrize({ entryFeeCents: -500 })).success).toBe(false);
+            expect((await withPrize({ entryFeeCents: 100000000 })).success).toBe(false);
+        });
+
+        // "Free" and "never configured" have to be the same state, or the page
+        // ends up with a $0.00 buy-in badge on every event nobody charges for.
+        it('stores a zero fee as no fee at all', async function () {
+            const free = await withPrize({ entryFeeCents: 0 });
+            const { tournament } = await service.getDetail(free.id, organizer);
+
+            expect(tournament.entryFeeCents).toBeNull();
+            expect(tournament.prizeSplits).toBeNull();
+        });
+
+        it('defaults to no prize pool and US dollars', async function () {
+            const plain = await withPrize({});
+            const { tournament } = await service.getDetail(plain.id, organizer);
+
+            expect(tournament.entryFeeCents).toBeNull();
+            expect(tournament.prizeSplits).toBeNull();
+            expect(tournament.prizeNote).toBeNull();
+            expect(tournament.prizeCurrency).toBe('USD');
+        });
+
+        // Money is frozen once play starts - people have paid against the
+        // split that was announced. updateSettings already refuses everything
+        // but the announcement and round timer mid-event; this pins that the
+        // prize fields are on the frozen side of that line.
+        it('will not change the money once the event is under way', async function () {
+            const id = await createSwiss(4, { entryFeeCents: 1000, roundCount: 1 });
+
+            await service.start(id, organizer);
+
+            const late = await service.updateSettings(id, organizer, { entryFeeCents: 2000 });
+
+            expect(late.success).toBe(false);
+            expect((await service.getDetail(id, organizer)).tournament.entryFeeCents).toBe(1000);
         });
     });
 });

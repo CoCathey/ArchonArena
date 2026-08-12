@@ -214,6 +214,76 @@ describe('describeEvent', function () {
         });
     });
 
+    /**
+     * The buy-in is the one setting a player can be out of pocket over, so the
+     * preview says it in whole sentences rather than leaving the organizer to
+     * infer it from a number in a box - including, every time, that the
+     * platform is not the one collecting it.
+     */
+    describe('the money', function () {
+        it('says nothing at all when the event is free', function () {
+            const free = describeEvent(form()).summary;
+
+            expect(has(free, /to enter/)).toBe(false);
+            expect(has(free, /[Pp]rize/)).toBe(false);
+        });
+
+        it('names the fee and who is actually collecting it', function () {
+            const paid = describeEvent(form({ entryFee: '10' })).summary;
+
+            expect(has(paid, /\$10\.00 to enter/)).toBe(true);
+            expect(has(paid, /does not take payments or pay prizes out/)).toBe(true);
+        });
+
+        it('reads the split back as places and shares', function () {
+            const paid = describeEvent(
+                form({
+                    entryFee: '10',
+                    playerCap: '8',
+                    prizeSplits: [
+                        { rank: 1, bps: 7500 },
+                        { rank: 2, bps: 2000 }
+                    ]
+                })
+            ).summary;
+
+            expect(has(paid, /top 2: 1st 75%, 2nd 20%/)).toBe(true);
+            // Eight players at $10 is an $80 pot, of which 5% - $4.00 - is not
+            // handed out. Both numbers stated, because "where did the rest go"
+            // is the question this panel exists to pre-empt.
+            expect(has(paid, /\$80\.00 at a full 8/)).toBe(true);
+            expect(has(paid, /\$4\.00 of that is not handed out/)).toBe(true);
+        });
+
+        it('says so when a fee is set with no split behind it', function () {
+            const paid = describeEvent(form({ entryFee: '5' })).summary;
+
+            expect(has(paid, /whole pot stays with you/)).toBe(true);
+        });
+
+        it('flags a split with no fee to divide', function () {
+            const notes = describeEvent(form({ prizeSplits: [{ rank: 1, bps: 10000 }] })).notes;
+
+            expect(has(notes, /no entry fee/)).toBe(true);
+        });
+
+        // The server refuses this outright. Saying so here is the difference
+        // between fixing it now and being told after filling in everything else.
+        it('warns before the server refuses a table that adds up to more than the pot', function () {
+            const notes = describeEvent(
+                form({
+                    entryFee: '10',
+                    prizeSplits: [
+                        { rank: 1, bps: 7500 },
+                        { rank: 2, bps: 5000 }
+                    ]
+                })
+            ).notes;
+
+            expect(has(notes, /125\.00%/)).toBe(true);
+        });
+    });
+
     it('describes an empty form without falling over', function () {
         const empty = describeEvent();
 

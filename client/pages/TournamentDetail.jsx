@@ -18,6 +18,9 @@ import StandingsPanel from '../Components/Tournaments/StandingsPanel';
 import PlayersPanel from '../Components/Tournaments/PlayersPanel';
 import printPairings from '../Components/Tournaments/printPairings';
 import EventForm from '../Components/Tournaments/EventForm';
+// ARCHON: the buy-in and prize split, recorded and shown - never held.
+import PrizePanel from '../Components/Tournaments/PrizePanel';
+import { amountFromCents, centsFromAmount } from '../Components/Tournaments/prizePool';
 // ARCHON: the picker offers what the event will accept - see the module.
 import { buildTournamentDeckFilter } from '../Components/Tournaments/tournamentDeckFilter';
 import { Constants } from '../constants';
@@ -227,7 +230,12 @@ const TournamentDetail = () => {
             chainsPerMatchWin: text(tournament.chainsPerMatchWin),
             allowedSets: tournament.allowedSets || [],
             bannedHouses: tournament.bannedHouses || [],
-            requiredHouses: tournament.requiredHouses || []
+            requiredHouses: tournament.requiredHouses || [],
+            // The buy-in comes back in cents and is edited in whole currency.
+            entryFee: amountFromCents(tournament.entryFeeCents),
+            prizeCurrency: tournament.prizeCurrency || 'USD',
+            prizeSplits: tournament.prizeSplits || [],
+            prizeNote: text(tournament.prizeNote)
         };
     };
 
@@ -248,7 +256,17 @@ const TournamentDetail = () => {
         chainsPerMatchWin: settings.chainsPerMatchWin || undefined,
         allowedSets: settings.allowedSets.length > 0 ? settings.allowedSets : undefined,
         bannedHouses: settings.bannedHouses.length > 0 ? settings.bannedHouses : undefined,
-        requiredHouses: settings.requiredHouses.length > 0 ? settings.requiredHouses : undefined
+        requiredHouses: settings.requiredHouses.length > 0 ? settings.requiredHouses : undefined,
+        // Money goes over the wire in integer cents. This form is populated
+        // from the event and sends every field back, so clearing the fee here
+        // really does mean "this event is free now" - which is why the split
+        // goes with it rather than lingering as a table that divides nothing.
+        entryFeeCents: centsFromAmount(settings.entryFee) || undefined,
+        prizeCurrency: settings.prizeCurrency,
+        prizeSplits: centsFromAmount(settings.entryFee)
+            ? (settings.prizeSplits || []).filter((split) => split.bps > 0)
+            : [],
+        prizeNote: settings.prizeNote || undefined
     });
 
     const finishTournament = async () => {
@@ -689,6 +707,16 @@ const TournamentDetail = () => {
                     )}
                 </div>
 
+                {/* ARCHON: what it costs and what it pays, before a player
+                    registers and again once the placings are final. Sits above
+                    the announcement because it is the thing somebody is out of
+                    pocket over. */}
+                {tournament.entryFeeCents > 0 && (
+                    <div className='mt-3'>
+                        <PrizePanel tournament={tournament} players={players} />
+                    </div>
+                )}
+
                 {tournament.announcement && editingAnnouncement === null && (
                     <div className='mt-3 rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-amber-200'>
                         <span className='mr-2 font-bold uppercase tracking-wide text-amber-300'>
@@ -708,6 +736,13 @@ const TournamentDetail = () => {
                             setForm={setEditingSettings}
                             showAdvanced={showAdvancedSettings}
                             setShowAdvanced={setShowAdvancedSettings}
+                            // The pot preview prices against who has actually
+                            // registered rather than a guess, once there is a
+                            // real number to use.
+                            entrantCount={
+                                players.filter((player) => !player.waitlisted && !player.dropped)
+                                    .length
+                            }
                         />
                         <div className='flex gap-2'>
                             <HeroButton

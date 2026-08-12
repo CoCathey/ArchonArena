@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import Panel from '../Site/Panel';
 import AmberValue from '../Site/AmberValue';
+import { computePayouts, formatCents } from './prizePool';
 
 const trophyColors = ['text-amber-300', 'text-zinc-300', 'text-amber-600'];
 
@@ -43,6 +44,31 @@ const StandingsPanel = ({ tournament, standings, players, currentUsername }) => 
     const complete = tournament.status === 'complete';
     const showDeckColumn = players.some((player) => player.deckName);
 
+    /**
+     * ARCHON: the prize beside the placing that earned it.
+     *
+     * Only once the event is over - a running total would be a promise about
+     * standings that are still moving. The amounts are computed from the
+     * announced buy-in and split; the organizer hands the money over
+     * themselves, and the platform holds none of it.
+     */
+    const showPrizes = complete && tournament.entryFeeCents > 0;
+    const payoutByUser = new Map();
+
+    if (showPrizes) {
+        const settled = computePayouts({
+            entryFeeCents: tournament.entryFeeCents,
+            splits: tournament.prizeSplits || [],
+            players: players.filter((player) => !player.waitlisted)
+        });
+
+        for (const payout of settled.payouts) {
+            payoutByUser.set(payout.userId, payout);
+        }
+    }
+
+    const showPrizeColumn = payoutByUser.size > 0;
+
     return (
         <Panel title={complete ? t('Final Standings') : t('Standings')}>
             <div className='overflow-x-auto'>
@@ -53,6 +79,22 @@ const StandingsPanel = ({ tournament, standings, players, currentUsername }) => 
                             <th className='px-2 py-1.5'>{t('Player')}</th>
                             <th className='px-2 py-1.5 text-right'>{t('Record')}</th>
                             <th className='px-2 py-1.5 text-right'>{t('Points')}</th>
+                            {/* ARCHON: beside the placing, not behind three
+                                tiebreaker percentages and the deck name. This
+                                table sits in a half-width column on the event
+                                page, so a last column is a column nobody sees
+                                without scrolling sideways - and what somebody
+                                won is not a footnote to their OMW%. */}
+                            {showPrizeColumn && (
+                                <th
+                                    className='px-2 py-1.5 text-right'
+                                    title={t(
+                                        'Paid out by the organizer - ArchonArena does not handle the money'
+                                    )}
+                                >
+                                    {t('Prize')}
+                                </th>
+                            )}
                             <th
                                 className='px-2 py-1.5 text-right'
                                 title={t(
@@ -128,6 +170,16 @@ const StandingsPanel = ({ tournament, standings, players, currentUsername }) => 
                                     <td className='px-2 py-1.5 text-right font-bold text-amber-300'>
                                         {entry.points}
                                     </td>
+                                    {showPrizeColumn && (
+                                        <td className='whitespace-nowrap px-2 py-1.5 text-right font-semibold text-emerald-300'>
+                                            {payoutByUser.has(entry.id)
+                                                ? formatCents(
+                                                      payoutByUser.get(entry.id).amountCents,
+                                                      tournament.prizeCurrency
+                                                  )
+                                                : ''}
+                                        </td>
+                                    )}
                                     <td className='px-2 py-1.5 text-right tabular-nums text-muted'>
                                         {percent(entry.opponentMatchWinRate)}
                                     </td>

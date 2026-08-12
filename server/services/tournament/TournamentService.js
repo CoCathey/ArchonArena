@@ -67,6 +67,35 @@ const LOBBY_FORMAT_BY_EVENT = {
     'adaptive-bo1': 'adaptive-bo1'
 };
 const DECK_SWAP_POLICIES = ['locked', 'between-rounds'];
+// ARCHON: prize pools are RECORDED, never held. The platform takes no money
+// and moves none; an event states its buy-in and how the pot divides, and the
+// organizer collects and pays out the way they already do. See migration 59.
+//
+// Every currency here has exactly two minor digits, because the whole
+// calculation is integer cents. Adding one that does not (JPY, KRW) would make
+// the arithmetic silently wrong by a factor of a hundred, so the list is the
+// validation - not a convenience.
+const PRIZE_CURRENCIES = [
+    'USD',
+    'EUR',
+    'GBP',
+    'CAD',
+    'AUD',
+    'NZD',
+    'MXN',
+    'BRL',
+    'SEK',
+    'NOK',
+    'DKK',
+    'PLN',
+    'CZK',
+    'ZAR'
+];
+// $10,000 in cents. Not a policy about how big an event may be - a typo guard,
+// since the field is minor units and somebody will eventually type the dollars.
+const MAX_ENTRY_FEE_CENTS = 1000000;
+/** 100% in basis points. Mirrors FULL_SHARE in client prizePool.js. */
+const FULL_SHARE_BPS = 10000;
 // House codes as stored in the Houses table.
 const HOUSE_CODES = [
     'brobnar',
@@ -530,7 +559,121 @@ class TournamentService {
 
         out.alliancePolicy = alliancePolicy;
 
+        Object.assign(out, this.parsePrizePool(options, errors));
+
         return { errors, values: out };
+    }
+
+    /**
+     * ARCHON: the buy-in and how the pot divides.
+     *
+     * Recorded, never held. The platform does not take, move or hold any money
+     * - these are the numbers the organizer announced, so that nobody has to do
+     * the arithmetic in their head at the end of the night and so that the
+     * split everyone agreed to at sign-up is the one still on the screen when
+     * the prizes are handed out.
+     *
+     * The validation earns its keep at exactly one moment: an organizer typing
+     * splits that do not add up, in front of people who have already paid. So
+     * the sum is checked against 100% and a table that over-allocates is
+     * refused outright - under-allocating is fine and meaningful, it is the cut
+     * the venue keeps.
+     */
+    parsePrizePool(options, errors) {
+        const out = {};
+
+        const feeGiven =
+            options.entryFeeCents !== undefined &&
+            options.entryFeeCents !== null &&
+            options.entryFeeCents !== '';
+        const fee = feeGiven ? parseInt(options.entryFeeCents, 10) : null;
+
+        if (fee !== null && (Number.isNaN(fee) || fee < 0 || fee > MAX_ENTRY_FEE_CENTS)) {
+            errors.push(
+                `Entry fee must be between 0 and ${MAX_ENTRY_FEE_CENTS / 100} in whole cents`
+            );
+        }
+
+        // Zero is not a buy-in, it is the absence of one - stored as null so
+        // "free event" and "never configured" are the same state everywhere
+        // downstream rather than two that render differently.
+        out.entryFeeCents = fee || null;
+
+        const currency = String(options.prizeCurrency || 'USD').toUpperCase();
+
+        if (!PRIZE_CURRENCIES.includes(currency)) {
+            errors.push('Unsupported prize currency');
+        }
+
+        out.prizeCurrency = PRIZE_CURRENCIES.includes(currency) ? currency : 'USD';
+        out.prizeNote = (options.prizeNote || '').trim().slice(0, 500) || null;
+
+        const rawSplits = options.prizeSplits;
+
+        if (rawSplits === undefined || rawSplits === null || rawSplits === '') {
+            out.prizeSplits = null;
+
+            return out;
+        }
+
+        if (!Array.isArray(rawSplits)) {
+            errors.push('Prize splits must be a list');
+            out.prizeSplits = null;
+
+            return out;
+        }
+
+        if (rawSplits.length > 32) {
+            errors.push('A prize table can pay at most 32 places');
+        }
+
+        const splits = [];
+        const seenRanks = new Set();
+        let malformed = false;
+        let total = 0;
+
+        for (const entry of rawSplits.slice(0, 32)) {
+            const rank = parseInt(entry?.rank, 10);
+            const bps = parseInt(entry?.bps, 10);
+
+            if (
+                Number.isNaN(rank) ||
+                rank < 1 ||
+                rank > 128 ||
+                Number.isNaN(bps) ||
+                bps < 1 ||
+                bps > FULL_SHARE_BPS
+            ) {
+                malformed = true;
+                continue;
+            }
+
+            if (seenRanks.has(rank)) {
+                errors.push(`Two prizes are both for place ${rank}`);
+                continue;
+            }
+
+            seenRanks.add(rank);
+            total += bps;
+            splits.push({ rank, bps });
+        }
+
+        if (malformed) {
+            errors.push('Every prize needs a place and a share between 0.01% and 100%');
+        }
+
+        // Over 100% is the error worth catching: it is a table that cannot be
+        // paid, and the organizer finds out when they try to pay it.
+        if (total > FULL_SHARE_BPS) {
+            errors.push(
+                `Prize shares add up to ${(total / 100).toFixed(2)}% - they cannot exceed 100%`
+            );
+        }
+
+        splits.sort((a, b) => a.rank - b.rank);
+        out.prizeSplits = splits.length > 0 ? splits : null;
+
+        return out;
     }
 
     async create(actor, options) {
@@ -554,10 +697,13 @@ class TournamentService {
                 // and Adaptive Bo3 (N9).
                 '"Triad", "TeamEvent", "TeamSize", "AllowPaperResults", "AlliancePolicy", ' +
                 // ARCHON (N14): async pacing.
-                '"AdaptiveBo3", "Pacing", "RoundDeadlineDays", "CreatedAt") ' +
+                '"AdaptiveBo3", "Pacing", "RoundDeadlineDays", ' +
+                // ARCHON: the announced buy-in and prize split. Recorded only -
+                // the platform never holds or moves the money.
+                '"EntryFeeCents", "PrizeCurrency", "PrizeSplits", "PrizeNote", "CreatedAt") ' +
                 'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ' +
                 '$16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, ' +
-                '$30, $31, $32, $33, $34, $35, $36, ' +
+                '$30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, ' +
                 'now() AT TIME ZONE \'utc\') RETURNING "Id"',
             [
                 values.name,
@@ -595,7 +741,11 @@ class TournamentService {
                 values.alliancePolicy ? JSON.stringify(values.alliancePolicy) : null,
                 values.adaptiveBo3,
                 values.pacing,
-                values.roundDeadlineDays
+                values.roundDeadlineDays,
+                values.entryFeeCents,
+                values.prizeCurrency,
+                values.prizeSplits ? JSON.stringify(values.prizeSplits) : null,
+                values.prizeNote
             ]
         );
 
@@ -667,6 +817,16 @@ class TournamentService {
                 triad: tournament.Triad,
                 pacing: tournament.Pacing,
                 roundDeadlineDays: tournament.RoundDeadlineDays,
+                // Every column the UPDATE below writes has to be seeded from
+                // the row first: an organizer editing one field re-sends the
+                // whole settings object, and anything missing here would be
+                // parsed as "not set" and written back as null. A prize pool
+                // silently emptied by a name change is the exact failure this
+                // shape invites.
+                entryFeeCents: tournament.EntryFeeCents,
+                prizeCurrency: tournament.PrizeCurrency,
+                prizeSplits: this.parseJsonColumn(tournament.PrizeSplits),
+                prizeNote: tournament.PrizeNote,
                 ...options
             };
 
@@ -693,7 +853,8 @@ class TournamentService {
                     '"HideDecklists" = $21, "GameTimeLimit" = $22, "DeckSwapPolicy" = $23, ' +
                     '"AllowedSets" = $24, "RequiredHouses" = $25, "BannedHouses" = $26, ' +
                     '"SasChainHandicap" = $27, "ChainsPerMatchWin" = $28, "Triad" = $29, ' +
-                    '"Pacing" = $30, "RoundDeadlineDays" = $31 ' +
+                    '"Pacing" = $30, "RoundDeadlineDays" = $31, "EntryFeeCents" = $32, ' +
+                    '"PrizeCurrency" = $33, "PrizeSplits" = $34, "PrizeNote" = $35 ' +
                     'WHERE "Id" = $1',
                 [
                     tournamentId,
@@ -726,7 +887,11 @@ class TournamentService {
                     values.chainsPerMatchWin,
                     values.triad,
                     values.pacing,
-                    values.roundDeadlineDays
+                    values.roundDeadlineDays,
+                    values.entryFeeCents,
+                    values.prizeCurrency,
+                    values.prizeSplits ? JSON.stringify(values.prizeSplits) : null,
+                    values.prizeNote
                 ]
             );
 
@@ -804,6 +969,10 @@ class TournamentService {
                 // decks are eligible for - they find out by clicking in and
                 // being refused at registration.
                 't."SasMin", t."SasMax", ' +
+                // ARCHON: the buy-in, for the same reason. Nobody should have
+                // to open an event to find out it costs money to enter. The
+                // split itself is not here - that is detail for the event page.
+                't."EntryFeeCents", t."PrizeCurrency", ' +
                 'u."Username" AS "Organizer", ' +
                 '(SELECT COUNT(*) FROM "TournamentPlayers" tp WHERE tp."TournamentId" = t."Id" ' +
                 'AND NOT tp."Waitlisted" AND tp."Dropped" IS NOT TRUE) AS "PlayerCount" ' +
@@ -835,6 +1004,8 @@ class TournamentService {
             roundEndsAt: row.RoundEndsAt,
             sasMin: row.SasMin,
             sasMax: row.SasMax,
+            entryFeeCents: row.EntryFeeCents,
+            prizeCurrency: row.PrizeCurrency || 'USD',
             organizer: row.Organizer,
             playerCount: parseInt(row.PlayerCount, 10)
         }));
@@ -1114,6 +1285,13 @@ class TournamentService {
                 sasChainHandicap: !!tournament.SasChainHandicap,
                 chainsPerMatchWin: tournament.ChainsPerMatchWin || 0,
                 triad: !!tournament.Triad,
+                // ARCHON: the announced buy-in and split. The platform records
+                // these and nothing else - it never holds or moves the money,
+                // and the page says so where players can see it.
+                entryFeeCents: tournament.EntryFeeCents,
+                prizeCurrency: tournament.PrizeCurrency || 'USD',
+                prizeSplits: this.parseJsonColumn(tournament.PrizeSplits),
+                prizeNote: tournament.PrizeNote,
                 organizer: organizerRows[0]?.Username,
                 canManage,
                 isOrganizer: actor ? actor.id === tournament.OrganizerId : false,

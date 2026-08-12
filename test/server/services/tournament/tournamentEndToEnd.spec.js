@@ -912,4 +912,115 @@ describe('a tournament end to end, on real PostgreSQL', function () {
         },
         120000
     );
+
+    /**
+     * ARCHON: the buy-in and prize split survive being written and re-read.
+     *
+     * Three things here can only be checked against a real database. The
+     * INSERT gained four more placeholders, and a miscount is not a wrong
+     * answer but a thrown query - the same class of bug that made the event
+     * listing 500 for exactly the people allowed to see every event. The splits
+     * are jsonb, so what comes back out is not necessarily the shape that went
+     * in. And updateSettings re-writes every column from a merged snapshot of
+     * the row: a column present in the UPDATE but missing from that snapshot is
+     * parsed as "not set" and written back null, which would mean an organizer
+     * fixing a typo in the event name silently deletes the prize table that
+     * everybody paid into.
+     */
+    maybe(
+        'records the buy-in and prize split, and does not lose them on an unrelated edit',
+        async function () {
+            const alice = users.player1;
+
+            const created = await service.create(alice, {
+                name: 'Prize Pool Cup',
+                format: 'swiss',
+                roundCount: 1,
+                entryFeeCents: 1000,
+                prizeCurrency: 'USD',
+                prizeSplits: [
+                    { rank: 2, bps: 2000 },
+                    { rank: 1, bps: 7500 }
+                ],
+                prizeNote: 'Cash at the counter, paid out on the night.'
+            });
+
+            expect(created.success, created.message).toBe(true);
+
+            const detail = await service.getDetail(created.id, alice);
+
+            expect(detail.tournament.entryFeeCents).toBe(1000);
+            expect(detail.tournament.prizeCurrency).toBe('USD');
+            expect(detail.tournament.prizeNote).toMatch(/Cash at the counter/);
+            // Sorted by place on the way in, so the prize table reads top-down
+            // wherever it is rendered.
+            expect(detail.tournament.prizeSplits).toEqual([
+                { rank: 1, bps: 7500 },
+                { rank: 2, bps: 2000 }
+            ]);
+
+            // The buy-in reaches the browse listing: nobody should have to open
+            // an event to find out it costs money to enter.
+            const listed = (await service.list('registration', alice)).find(
+                (event) => event.id === created.id
+            );
+
+            expect(listed.entryFeeCents).toBe(1000);
+            expect(listed.prizeCurrency).toBe('USD');
+
+            // Now the edit that must not touch the money.
+            const renamed = await service.updateSettings(created.id, alice, {
+                name: 'Prize Pool Cup (Friday)'
+            });
+
+            expect(renamed.success, renamed.message).toBe(true);
+
+            const afterEdit = await service.getDetail(created.id, alice);
+
+            expect(afterEdit.tournament.name).toBe('Prize Pool Cup (Friday)');
+            expect(afterEdit.tournament.entryFeeCents).toBe(1000);
+            expect(afterEdit.tournament.prizeSplits).toEqual([
+                { rank: 1, bps: 7500 },
+                { rank: 2, bps: 2000 }
+            ]);
+            expect(afterEdit.tournament.prizeNote).toMatch(/Cash at the counter/);
+
+            // A table that cannot be paid is refused rather than stored, and
+            // the message says the number so the organizer can see what they
+            // typed.
+            const overAllocated = await service.updateSettings(created.id, alice, {
+                prizeSplits: [
+                    { rank: 1, bps: 8000 },
+                    { rank: 2, bps: 4000 }
+                ]
+            });
+
+            expect(overAllocated.success).toBe(false);
+            expect(overAllocated.message).toMatch(/120\.00%/);
+
+            // And the refusal changed nothing.
+            const untouched = await service.getDetail(created.id, alice);
+
+            expect(untouched.tournament.prizeSplits).toEqual([
+                { rank: 1, bps: 7500 },
+                { rank: 2, bps: 2000 }
+            ]);
+
+            // Once the event is under way the money is frozen, because people
+            // have already paid against the announced split.
+            await service.register(created.id, alice, {});
+            await service.register(created.id, users.player2, {});
+            await service.start(created.id, alice);
+
+            const lateChange = await service.updateSettings(created.id, alice, {
+                entryFeeCents: 2000
+            });
+
+            expect(lateChange.success).toBe(false);
+            expect((await service.getDetail(created.id, alice)).tournament.entryFeeCents).toBe(
+                1000
+            );
+        },
+        120000
+    );
 });

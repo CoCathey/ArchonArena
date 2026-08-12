@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Input, Label } from '@heroui/react';
 
 import { Constants } from '../../constants';
+import PrizePoolFields from './PrizePoolFields';
 
 const selectClass =
     'w-full rounded-md border border-border/65 bg-surface-secondary/55 px-3 py-2 text-sm text-foreground focus:border-border/90 focus:outline-none dark:border-border/80 dark:bg-surface-secondary/85';
@@ -39,7 +40,7 @@ const houseOptions = [
  * that drifts would be the one that only runs when somebody has already made a
  * mistake.
  */
-const EventForm = ({ form, setForm, showAdvanced, setShowAdvanced }) => {
+const EventForm = ({ form, setForm, showAdvanced, setShowAdvanced, entrantCount }) => {
     const { t } = useTranslation();
     const set = (field) => (event) => setForm({ ...form, [field]: event.target.value });
 
@@ -313,6 +314,12 @@ const EventForm = ({ form, setForm, showAdvanced, setShowAdvanced }) => {
                     </div>
                 )}
             </div>
+
+            {/* ARCHON: the buy-in sits in the open rather than behind
+                "advanced". It is the setting a player is most entitled to know
+                about before they register, and an organizer who never opens the
+                advanced panel should not be unable to find it. */}
+            <PrizePoolFields form={form} setForm={setForm} entrantCount={entrantCount} />
 
             <button
                 type='button'

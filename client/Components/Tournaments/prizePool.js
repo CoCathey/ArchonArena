@@ -29,6 +29,51 @@ export const formatCents = (cents, currency = 'USD') => {
     return symbol ? `${symbol}${amount}` : `${amount} ${currency}`;
 };
 
+/**
+ * A typed decimal to its hundredths, as an integer.
+ *
+ * Dollars to cents and percent to basis points are the same operation, and it
+ * is the one place a float would quietly cost somebody a penny: (10.10 * 100)
+ * is 1009.9999999999999 in IEEE754, and Math.round hides that for a while and
+ * then does not. So the string is split rather than multiplied.
+ *
+ * Extra digits are truncated, not rounded - there is no half-cent to round.
+ */
+const hundredthsOf = (value) => {
+    const text = String(value ?? '')
+        .trim()
+        .replace(/[^0-9.]/g, '');
+
+    if (!text || text === '.') {
+        return null;
+    }
+
+    const [whole, fraction = ''] = text.split('.');
+    const units = Number(whole || 0);
+    const parts = Number(`${fraction}00`.slice(0, 2));
+
+    return Number.isFinite(units) && Number.isFinite(parts) ? units * 100 + parts : null;
+};
+
+/** "10.50" -> 1050. Null when there is nothing to read. */
+export const centsFromAmount = hundredthsOf;
+
+/** 1050 -> "10.50", for putting back in the input. */
+export const amountFromCents = (cents) =>
+    cents === null || cents === undefined ? '' : (cents / 100).toFixed(2);
+
+/** "7.5" -> 750 basis points. */
+export const bpsFromPercent = hundredthsOf;
+
+/** 750 -> "7.5". Trailing zeros trimmed, so 7500 reads as "75", not "75.00". */
+export const percentFromBps = (bps) => {
+    if (bps === null || bps === undefined) {
+        return '';
+    }
+
+    return String(Number((bps / 100).toFixed(2)));
+};
+
 /** Splits sorted by place, with anything unusable dropped. */
 const cleanSplits = (splits) =>
     (Array.isArray(splits) ? splits : [])
@@ -167,6 +212,102 @@ export const computePayouts = ({ entryFeeCents, splits, players } = {}) => {
     };
 };
 
+/**
+ * The rows a prize table shows, which are NOT the same before and after.
+ *
+ * Before the event settles, a row is a place and what that place is worth.
+ * After it, a row is a person and what they are actually owed - and those two
+ * lists have different shapes, because a shared placing pools the prizes for
+ * the positions it occupies: two players tied for 1st in a 75/20 event take 95%
+ * between them, occupying 1st AND 2nd. Rendering the promised table alongside
+ * the settled one would show that 2nd-place prize twice, once inside the tie
+ * and once beside an empty place.
+ *
+ * So this returns one list or the other, never a blend, and the caller renders
+ * whatever it gets.
+ *
+ * @returns {{settled: boolean, rows: Array, poolCents, retainedCents, unallocatedCents}}
+ */
+export const prizeRows = ({ entryFeeCents, splits, players, finished } = {}) => {
+    const entrants = (players || []).filter((player) => !player.waitlisted);
+    const pool = computePrizePool({ entryFeeCents, splits, entrantCount: entrants.length });
+
+    if (!finished) {
+        return {
+            settled: false,
+            rows: cleanSplits(splits).map((split) => ({
+                rank: split.rank,
+                bps: split.bps,
+                amountCents:
+                    pool.places.find((place) => place.rank === split.rank)?.amountCents || 0
+            })),
+            poolCents: pool.poolCents,
+            retainedCents: pool.retainedCents,
+            unallocatedCents: 0
+        };
+    }
+
+    const settled = computePayouts({ entryFeeCents, splits, players: entrants });
+    const byRank = new Map();
+
+    for (const payout of settled.payouts) {
+        if (!byRank.has(payout.rank)) {
+            byRank.set(payout.rank, { rank: payout.rank, winners: [] });
+        }
+
+        byRank.get(payout.rank).winners.push(payout);
+    }
+
+    return {
+        settled: true,
+        rows: [...byRank.values()].sort((a, b) => a.rank - b.rank),
+        poolCents: settled.poolCents,
+        retainedCents: settled.retainedCents,
+        unallocatedCents: settled.unallocatedCents
+    };
+};
+
+/**
+ * The currencies a buy-in may be denominated in. Every one has exactly two
+ * minor digits, because the whole calculation is integer cents - one that does
+ * not (JPY, KRW) would be wrong by a factor of a hundred and look fine. Kept in
+ * step with PRIZE_CURRENCIES in the tournament service, which is what actually
+ * refuses anything else.
+ */
+export const PRIZE_CURRENCIES = [
+    'USD',
+    'EUR',
+    'GBP',
+    'CAD',
+    'AUD',
+    'NZD',
+    'MXN',
+    'BRL',
+    'SEK',
+    'NOK',
+    'DKK',
+    'PLN',
+    'CZK',
+    'ZAR'
+];
+
+/** "1st", "2nd", "3rd", "4th"... for naming a place in a prize table. */
+export const ordinal = (rank) => {
+    const value = Number(rank);
+
+    if (!Number.isInteger(value) || value < 1) {
+        return String(rank);
+    }
+
+    // 11th, 12th and 13th break the last-digit rule.
+    const suffix =
+        value % 100 >= 11 && value % 100 <= 13
+            ? 'th'
+            : { 1: 'st', 2: 'nd', 3: 'rd' }[value % 10] || 'th';
+
+    return `${value}${suffix}`;
+};
+
 /** The presets that cover almost every local event. */
 export const PRIZE_PRESETS = [
     { id: 'none', label: 'No prize pool', splits: [] },
@@ -177,6 +318,14 @@ export const PRIZE_PRESETS = [
         splits: [
             { rank: 1, bps: 7500 },
             { rank: 2, bps: 2500 }
+        ]
+    },
+    {
+        id: 'top2-cut',
+        label: 'Top 2, 5% held back (75 / 20)',
+        splits: [
+            { rank: 1, bps: 7500 },
+            { rank: 2, bps: 2000 }
         ]
     },
     {
@@ -195,5 +344,19 @@ export const PRIZE_PRESETS = [
             { rank: 1, bps: 6500 },
             { rank: 2, bps: 2500 }
         ]
-    }
+    },
+    { id: 'custom', label: 'Custom split…', splits: null }
 ];
+
+/** The preset whose table matches these splits, or 'custom'. */
+export const presetIdFor = (splits) => {
+    const key = (list) =>
+        (list || [])
+            .map((split) => `${split.rank}:${split.bps}`)
+            .sort()
+            .join(',');
+    const wanted = key(splits);
+    const match = PRIZE_PRESETS.find((preset) => preset.splits && key(preset.splits) === wanted);
+
+    return match ? match.id : 'custom';
+};

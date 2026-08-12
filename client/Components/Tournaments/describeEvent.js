@@ -15,6 +15,14 @@
  * A pure function of the form, so it can be tested as one.
  */
 
+import {
+    centsFromAmount,
+    computePrizePool,
+    formatCents,
+    ordinal,
+    percentFromBps
+} from './prizePool';
+
 /**
  * The create form's starting state, here rather than in the page so the
  * preview can be tested against the form an organizer actually opens. It was
@@ -50,7 +58,14 @@ export const defaultEventForm = {
     chainsPerMatchWin: '',
     allowedSets: [],
     bannedHouses: [],
-    requiredHouses: []
+    requiredHouses: [],
+    // The announced buy-in and split. Recorded only - the platform never
+    // collects or pays out. `entryFee` is what the organizer typed, in whole
+    // currency; it is converted to integer cents on the way to the server.
+    entryFee: '',
+    prizeCurrency: 'USD',
+    prizeSplits: [],
+    prizeNote: ''
 };
 
 const FORMAT_NAMES = {
@@ -235,6 +250,45 @@ export const describeEvent = (form = {}) => {
         summary.push(`Every match win adds ${chainsPerWin} chains for the rest of the event.`);
     }
 
+    // --- the money -------------------------------------------------------
+    //
+    // Said in whole sentences, because this is the one setting a player can be
+    // out of pocket over. The platform records it and collects nothing.
+    const entryFeeCents = centsFromAmount(form.entryFee);
+    const prizeSplits = (form.prizeSplits || []).filter((split) => split.bps > 0);
+
+    if (entryFeeCents > 0) {
+        const currency = form.prizeCurrency || 'USD';
+        const pool = computePrizePool({
+            entryFeeCents,
+            splits: prizeSplits,
+            entrantCount: cap || 8
+        });
+
+        summary.push(
+            `${formatCents(entryFeeCents, currency)} to enter, collected by you - the platform ` +
+                `does not take payments or pay prizes out.`
+        );
+
+        if (prizeSplits.length > 0) {
+            summary.push(
+                `Prizes go to the top ${prizeSplits.length}: ${prizeSplits
+                    .map((split) => `${ordinal(split.rank)} ${percentFromBps(split.bps)}%`)
+                    .join(', ')}${
+                    cap ? ` - ${formatCents(pool.poolCents, currency)} at a full ${cap}` : ''
+                }.`
+            );
+
+            if (pool.retainedCents > 0 && cap) {
+                summary.push(
+                    `${formatCents(pool.retainedCents, currency)} of that is not handed out.`
+                );
+            }
+        } else {
+            summary.push('No prize split is set, so the whole pot stays with you.');
+        }
+    }
+
     // --- the rest --------------------------------------------------------
     summary.push(
         form.ratedGames ? 'Games move Amber ratings.' : 'Games do not affect Amber ratings.'
@@ -299,6 +353,25 @@ export const describeEvent = (form = {}) => {
 
     if (mode === 'irl' && gameClock) {
         notes.push('An in-person event has no game to put a clock on.');
+    }
+
+    if (prizeSplits.length > 0 && !entryFeeCents) {
+        notes.push(
+            'There is no entry fee, so the prize split has nothing to divide - every share works out at zero.'
+        );
+    }
+
+    const allocatedBps = prizeSplits.reduce((sum, split) => sum + split.bps, 0);
+
+    // Not a note but a refusal in waiting: the server rejects this outright, so
+    // saying so here is the difference between fixing it now and being told
+    // "Prize shares add up to 125.00%" after filling in everything else.
+    if (allocatedBps > 10000) {
+        notes.push(
+            `The prize shares add up to ${(allocatedBps / 100).toFixed(
+                2
+            )}% - more than the pot holds, and the event will not save until they come down.`
+        );
     }
 
     // No note for a playoff best-of without a cut: the form only renders that

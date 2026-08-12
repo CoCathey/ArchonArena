@@ -12,6 +12,7 @@ import {
     describeEvent,
     defaultEventForm as defaultForm
 } from '../Components/Tournaments/describeEvent';
+import { centsFromAmount, formatCents } from '../Components/Tournaments/prizePool';
 import {
     useCreateTournamentMutation,
     useGetTournamentHistoryQuery,
@@ -80,6 +81,15 @@ const Tournaments = () => {
                 gameTimeLimit: form.gameTimeLimit || undefined,
                 sasMin: form.sasMin || undefined,
                 sasMax: form.sasMax || undefined,
+                // Money crosses the wire in integer cents; the form holds what
+                // the organizer typed. A split with no fee behind it is
+                // dropped rather than stored - it would divide nothing.
+                entryFeeCents: centsFromAmount(form.entryFee) || undefined,
+                prizeCurrency: form.prizeCurrency,
+                prizeSplits: centsFromAmount(form.entryFee)
+                    ? form.prizeSplits.filter((split) => split.bps > 0)
+                    : undefined,
+                prizeNote: form.prizeNote || undefined,
                 chainsPerMatchWin: form.chainsPerMatchWin || undefined,
                 allowedSets: form.allowedSets.length > 0 ? form.allowedSets : undefined,
                 bannedHouses: form.bannedHouses.length > 0 ? form.bannedHouses : undefined,
@@ -219,6 +229,21 @@ const Tournaments = () => {
                                     >
                                         {t('SAS')} {tournament.sasMin ?? 0}-
                                         {tournament.sasMax ?? '\u221e'}
+                                    </span>
+                                )}
+                                {/* ARCHON: nobody should have to open an event
+                                    to find out it costs money to enter. */}
+                                {tournament.entryFeeCents > 0 && (
+                                    <span
+                                        className='rounded bg-emerald-500/15 px-1.5 text-xs uppercase text-emerald-300'
+                                        title={t(
+                                            'Buy-in, collected by the organizer - ArchonArena does not take payments'
+                                        )}
+                                    >
+                                        {formatCents(
+                                            tournament.entryFeeCents,
+                                            tournament.prizeCurrency
+                                        )}
                                     </span>
                                 )}
                                 {tournament.pacing === 'async' && (
