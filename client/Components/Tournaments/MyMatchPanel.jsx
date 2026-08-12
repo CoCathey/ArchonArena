@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton } from '@heroui/react';
@@ -18,6 +18,9 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
     const socket = useSelector((state) => state.lobby.socket);
     const lobbyGames = useSelector((state) => state.lobby.games);
     const currentGameId = useSelector((state) => state.games.gameId);
+    // The table request is a round trip that used to be invisible. See the
+    // button.
+    const [opening, setOpening] = useState(false);
 
     if (!user || tournament.status !== 'active' || !tournament.isRegistered) {
         return null;
@@ -66,9 +69,28 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
     const myWins = myMatch.player1Id === user.id ? myMatch.player1Wins : myMatch.player2Wins;
     const theirWins = myMatch.player1Id === user.id ? myMatch.player2Wins : myMatch.player1Wins;
 
-    const lobbyGame = (lobbyGames || []).find(
+    /**
+     * ARCHON: the table for the game being played NOW, not the first one found.
+     *
+     * A best-of-three has a table per game and the finished ones stay in the
+     * lobby list, so matching on the match id alone returns whichever arrived
+     * first - which after game one is always the game that just ended. The
+     * button then offered to rejoin a finished game, or to open a table that
+     * already existed, and a player who pressed it again got another table.
+     *
+     * The game number is derivable here: games played plus one, exactly as the
+     * server numbers them.
+     */
+    const currentGameNumber = (myMatch.player1Wins || 0) + (myMatch.player2Wins || 0) + 1;
+    const tablesForMatch = (lobbyGames || []).filter(
         (game) => game.tournament && game.tournament.matchId === myMatch.id
     );
+    const lobbyGame =
+        tablesForMatch.find((game) => game.tournament.gameNumber === currentGameNumber) ||
+        // No table for this game number yet. Anything unstarted is still worth
+        // offering - a single-game match has no numbering to speak of, and an
+        // older build's table carries none.
+        tablesForMatch.find((game) => !game.started && !game.tournament.gameNumber);
 
     // Triad ban/pick state for this match (official KeyForge format:
     // ban one of your opponent's three decks, then pilot one of your
@@ -184,15 +206,36 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                             <HeroButton
                                 size='sm'
                                 variant='primary'
-                                onPress={() =>
-                                    act(
-                                        `matches/${myMatch.id}/open-game`,
-                                        {},
-                                        t('Table requested - it appears in a moment')
-                                    )
-                                }
+                                // ARCHON: pressed once, and it says so while it
+                                // works. The request now waits for the table to
+                                // exist rather than returning the moment it is
+                                // asked for, and it hands back the table's id -
+                                // so this walks straight in instead of leaving
+                                // somebody looking at an unchanged button
+                                // wondering whether the click registered. That
+                                // wondering is what built four tables for one
+                                // game of one match.
+                                isPending={opening}
+                                isDisabled={opening}
+                                onPress={async () => {
+                                    setOpening(true);
+
+                                    try {
+                                        const result = await act(
+                                            `matches/${myMatch.id}/open-game`,
+                                            {},
+                                            t('Your table is ready')
+                                        );
+
+                                        if (result?.gameId && socket) {
+                                            socket.emit('joingame', result.gameId);
+                                        }
+                                    } finally {
+                                        setOpening(false);
+                                    }
+                                }}
                             >
-                                {t('Open my table')}
+                                {opening ? t('Opening your table…') : t('Open my table')}
                             </HeroButton>
                         )
                     ) : (

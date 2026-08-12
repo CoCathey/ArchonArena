@@ -2168,9 +2168,55 @@ class Lobby {
     // pairing; GAMEWIN results flow back into the tournament service;
     // best-of series spin up their next game.
 
-    findTournamentGame(matchId) {
+    /**
+     * ARCHON: a tournament table is identified by MATCH AND GAME NUMBER, never
+     * by the match alone.
+     *
+     * A best-of-three match has up to three tables over its life and the
+     * finished ones stay in `this.games` until they are reaped, so "the game
+     * for match 7" is an ambiguous question with a misleading answer: it
+     * returns whichever was inserted first, which after game one is always the
+     * FINISHED game one.
+     *
+     * That single ambiguity produced all three symptoms of a live Bo3 that went
+     * wrong. The guard in ensureTournamentGame compared that stale table's game
+     * number against the one being asked for, found them different, and built
+     * another table - every single time anything asked, which is how one match
+     * ended up with four tables for game two. The player's own match panel
+     * looked up the same way and pointed them back at the game they had just
+     * finished, so the button appeared to do nothing and they clicked again,
+     * making yet another.
+     *
+     * @param {number} matchId
+     * @param {number} [gameNumber] omit to find any table for the match
+     */
+    findTournamentGame(matchId, gameNumber) {
         return Object.values(this.games).find(
-            (game) => game.tournament && game.tournament.matchId === matchId
+            (game) =>
+                game.tournament &&
+                game.tournament.matchId === matchId &&
+                (gameNumber === undefined || game.tournament.gameNumber === gameNumber)
+        );
+    }
+
+    /**
+     * Every table for a match other than the one being kept.
+     *
+     * A finished game's table lingers so its players can read the result and
+     * leave in their own time, and that is worth keeping. What is not worth
+     * keeping is an UNSTARTED table for a game that is no longer next - a
+     * duplicate somebody's second click created, or the previous game's table
+     * when the series has moved on. Those are indistinguishable from the real
+     * one in the lobby list, and joining the wrong one means sitting at a table
+     * the event will never look at.
+     */
+    staleTournamentTables(matchId, keepGameId) {
+        return Object.values(this.games).filter(
+            (game) =>
+                game.tournament &&
+                game.tournament.matchId === matchId &&
+                game.id !== keepGameId &&
+                !game.started
         );
     }
 
@@ -2190,16 +2236,28 @@ class Lobby {
         }
     }
 
+    /**
+     * Answers `ensureMatchGame`, which is a REQUEST rather than an
+     * announcement: a player is waiting on the table this returns. The game is
+     * handed back so the service can give its id to the client, which then
+     * walks straight to the table instead of waiting to notice it appear.
+     */
     async onTournamentEnsureMatchGame({ tournamentId, matchId }) {
         try {
             const matches = await this.tournamentService.getMatchesNeedingGames(tournamentId);
             const matchInfo = matches.find((entry) => entry.matchId === matchId);
 
             if (matchInfo) {
-                await this.ensureTournamentGame(matchInfo);
+                return await this.ensureTournamentGame(matchInfo);
             }
+
+            // Nothing needs a game: the match already has its table, and the
+            // player should be sent to it rather than told nothing happened.
+            return this.findTournamentGame(matchId);
         } catch (err) {
             logger.error(`Failed to open game for tournament match ${matchId}`, err);
+
+            return null;
         }
     }
 
@@ -2285,15 +2343,42 @@ class Lobby {
      * both players are seated with decks.
      */
     async ensureTournamentGame(matchInfo) {
-        const existing = this.findTournamentGame(matchInfo.matchId);
+        // The table for THIS game of the match. Anything else - the finished
+        // previous game, a duplicate - is not it. See findTournamentGame.
+        const existing = this.findTournamentGame(matchInfo.matchId, matchInfo.gameNumber);
 
-        if (
-            existing &&
-            (!existing.started || existing.tournament.gameNumber === matchInfo.gameNumber)
-        ) {
-            return;
+        if (existing) {
+            return existing;
         }
 
+        /**
+         * ARCHON: one creation at a time per game of a match.
+         *
+         * There is real work between the check above and the insert below - two
+         * user lookups - and every one of the several things that can ask for a
+         * table can ask at the same moment: a player pressing the button twice
+         * because nothing visibly happened, the automatic open after a game is
+         * won, and the round-paired sweep. Without this they each find nothing,
+         * each wait on the database, and each create a table.
+         */
+        this.pendingTournamentTables = this.pendingTournamentTables || new Set();
+
+        const key = `${matchInfo.matchId}:${matchInfo.gameNumber}`;
+
+        if (this.pendingTournamentTables.has(key)) {
+            return null;
+        }
+
+        this.pendingTournamentTables.add(key);
+
+        try {
+            return await this.createTournamentGame(matchInfo);
+        } finally {
+            this.pendingTournamentTables.delete(key);
+        }
+    }
+
+    async createTournamentGame(matchInfo) {
         const users = await Promise.all(
             matchInfo.players.map((player) => this.userService.getUserByUsername(player.username))
         );
@@ -2305,7 +2390,7 @@ class Lobby {
                     .join(', ')}`
             );
 
-            return;
+            return null;
         }
 
         const tableLabel = matchInfo.table ? ` T${matchInfo.table}` : '';
@@ -2392,12 +2477,30 @@ class Lobby {
             }
         }
 
+        /**
+         * Clear away any unstarted table left over for this match.
+         *
+         * Belt and braces next to the guards above, and it also repairs a
+         * lobby that already has duplicates from before those guards existed -
+         * which is not hypothetical, since that is how this was reported. A
+         * started table is never touched: its players are in it.
+         */
+        for (const stale of this.staleTournamentTables(matchInfo.matchId, game.id)) {
+            logger.info(
+                `Removing duplicate tournament table ${stale.id} for match ${matchInfo.matchId}`
+            );
+            this.broadcastGameMessage('removegame', stale);
+            delete this.games[stale.id];
+        }
+
         this.broadcastGameMessage('newgame', game);
         this.sendGameState(game);
 
         logger.info(`Created tournament game ${game.id} for match ${matchInfo.matchId} (${name})`);
 
         this.startTournamentGameIfReady(game);
+
+        return game;
     }
 
     /**

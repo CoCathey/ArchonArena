@@ -5356,9 +5356,21 @@ class TournamentService {
         }
 
         try {
-            tournamentEvents.emit('ensureMatchGame', { tournamentId, matchId: match.Id });
+            // Waited on, not fired and forgotten: the caller is a player who
+            // pressed a button and is looking at it. Returning before the table
+            // exists is what made them press it again - see tournamentEvents.
+            const game = await tournamentEvents.request('ensureMatchGame', {
+                tournamentId,
+                matchId: match.Id
+            });
+
+            if (game && game.id) {
+                // The id lets the client walk straight to the table instead of
+                // waiting to notice it in the lobby list.
+                return { success: true, gameId: game.id };
+            }
         } catch (err) {
-            logger.error(`Failed to emit ensureMatchGame for match ${match.Id}`, err);
+            logger.error(`Failed to open the table for match ${match.Id}`, err);
         }
 
         return { success: true };
