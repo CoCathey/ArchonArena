@@ -111,6 +111,32 @@ const explain = (err) => {
         );
     }
 
+    if (/domain is not verified|Domain not found/i.test(message)) {
+        return (
+            'Resend rejected the send because the sending domain is not verified.\n' +
+            '  Add the domain in the Resend dashboard and publish the DNS records it\n' +
+            '  gives you, then make sure EMAIL_FROM_ADDRESS is an address AT that\n' +
+            '  domain. Resend will not send from a domain you have not proved you own.'
+        );
+    }
+
+    if (/API key is invalid|Missing API key|restricted to only send/i.test(message)) {
+        return (
+            'Resend rejected the API key.\n' +
+            '  Check RESEND_API_KEY in .env.production. A key created for a different\n' +
+            '  domain, or one with sending permission removed, fails exactly like this.'
+        );
+    }
+
+    if (/daily quota|rate_limit_exceeded|Too many requests/i.test(message)) {
+        return (
+            "Resend's plan limit has been reached.\n" +
+            '  The free plan is 100 emails a day and 3,000 a month. EMAIL_DAILY_LIMIT\n' +
+            '  in .env.production should match your plan so notification mail yields\n' +
+            '  before the provider starts refusing activation mail too.'
+        );
+    }
+
     if (/not verified/i.test(message)) {
         return (
             'SES rejected the send because an address is not a verified identity.\n' +
@@ -148,7 +174,11 @@ async function main() {
     say(`  from                  ${configuration.from || '(not set)'}`);
     say(`  reply-to              ${configuration.replyTo || '(not set)'}`);
 
-    if (configuration.transport === 'smtp') {
+    if (configuration.transport === 'resend') {
+        // Never the key itself - this output gets pasted into issues and chats.
+        say(`  resend api key        ${configuration.resendKeySet ? 'set' : '(not set)'}`);
+        say('  endpoint              https://api.resend.com/emails');
+    } else if (configuration.transport === 'smtp') {
         say(`  smtp host             ${configuration.smtpHost || '(not set)'}`);
         say(
             `  smtp port             ${configuration.smtpPort} ` +

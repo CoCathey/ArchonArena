@@ -307,9 +307,21 @@ done
 email_state="$($DC exec -T lobby node -e "
 const ConfigService = require('./server/services/ConfigService');
 const EmailService = require('./server/services/EmailService');
-const c = new EmailService(new ConfigService()).describeConfiguration();
-const where = c.transport === 'smtp' ? (c.smtpHost || 'no host') : (c.sesRegion || 'no region');
-console.log([c.ready ? 'READY' : 'NOTREADY', c.transport, where, c.problems.join(' ')].join('|'));
+const service = new EmailService(new ConfigService());
+const c = service.describeConfiguration();
+const where =
+    c.transport === 'resend' ? (c.resendKeySet ? 'api key set' : 'no api key')
+    : c.transport === 'smtp' ? (c.smtpHost || 'no host')
+    : (c.sesRegion || 'no region');
+// The send budget too: mail silently throttled because the day's plan ran out
+// looks exactly like mail that is broken, and only this can tell them apart.
+service.budget ? service.budget.describe().then(print) : print({ enabled: false });
+function print(b) {
+    const quota = b.enabled ? b.sentToday + '/' + b.dailyLimit + ' today, ' +
+        b.sentThisMonth + '/' + b.monthlyLimit + ' this month' + (b.bulkStopped ? ' BULKSTOPPED' : '')
+        : 'uncapped';
+    console.log([c.ready ? 'READY' : 'NOTREADY', c.transport, where, c.problems.join(' '), quota].join('|'));
+}
 " 2>/dev/null | tail -1)"
 
 if grep -qE "^REQUIRE_ACTIVATION=false" .env.production 2>/dev/null; then
@@ -324,7 +336,22 @@ case "$email_state" in
     READY*)
         email_transport="$(echo "$email_state" | cut -d'|' -f2)"
         email_where="$(echo "$email_state" | cut -d'|' -f3)"
+        email_quota="$(echo "$email_state" | cut -d'|' -f5)"
         ok "email configured (${email_transport} via ${email_where})"
+        # Throttled mail looks exactly like broken mail from the outside, so the
+        # plan's state is reported whether or not it is a problem yet.
+        case "$email_quota" in
+            *BULKSTOPPED*)
+                warn "email plan nearly spent - ${email_quota%% BULKSTOPPED}" \
+                    "notification mail (pairings, scheduling) is being held back so activation and password reset still work. It resumes at UTC midnight; raise EMAIL_DAILY_LIMIT in .env.production if you have upgraded your plan"
+                ;;
+            uncapped)
+                ok "email send budget: no cap set (paid plan or own relay)"
+                ;;
+            *)
+                ok "email send budget: ${email_quota}"
+                ;;
+        esac
         # Configured is not working. Only a send proves that, and a health check
         # must not send mail on every run.
         ok "prove it actually sends: $DC exec lobby npm run check:email -- you@example.com"

@@ -12,8 +12,14 @@ const createClient = () => ({ send: vi.fn(async () => ({})) });
 describe('EmailService', function () {
     describe('configuration', function () {
         it('reads the sender from lobby.emailFromAddress', function () {
+            // A region as well as a sender: SES with neither a region here nor
+            // one in the environment is not a configuration that can send, and
+            // this test is about which key the sender is read from.
             const service = new EmailService(
-                createConfigService({ emailFromAddress: 'noreply@archonarena.com' }),
+                createConfigService({
+                    emailFromAddress: 'noreply@archonarena.com',
+                    awsSesRegion: 'us-east-1'
+                }),
                 createClient()
             );
 
@@ -45,7 +51,8 @@ describe('EmailService', function () {
             const service = new EmailService(
                 createConfigService({
                     emailFromAddress: 'noreply@archonarena.com',
-                    emailReplyTo: 'support@archonarena.com'
+                    emailReplyTo: 'support@archonarena.com',
+                    awsSesRegion: 'us-east-1'
                 }),
                 client
             );
@@ -66,7 +73,10 @@ describe('EmailService', function () {
         it('omits ReplyToAddresses when no reply-to is configured', async function () {
             const client = createClient();
             const service = new EmailService(
-                createConfigService({ emailFromAddress: 'noreply@archonarena.com' }),
+                createConfigService({
+                    emailFromAddress: 'noreply@archonarena.com',
+                    awsSesRegion: 'us-east-1'
+                }),
                 client
             );
 
@@ -292,16 +302,77 @@ describe('EmailService', function () {
         // A missing SES region is NOT fatal: the AWS SDK still resolves one from
         // AWS_REGION or an instance profile, and refusing to send would break a
         // deployment that has been working off that all along.
-        it('warns about a missing SES region without blocking the send', function () {
-            const service = new EmailService(
-                createConfigService({ emailFromAddress: 'noreply@archonarena.com' }),
-                createClient()
-            );
-            const description = service.describeConfiguration();
+        /**
+         * ARCHON: a missing SES region is a warning only when the SDK can still
+         * find one somewhere.
+         *
+         * This pair used to be a single test asserting ready:true whatever the
+         * environment held, and the reasoning behind it was half right: the
+         * SESv2 client does resolve a region from AWS_REGION, AWS_DEFAULT_REGION
+         * or an instance profile, so refusing to send would break a deployment
+         * quietly living off one of those.
+         *
+         * What it missed is that SES is also the FALLBACK transport - the one
+         * chosen when nothing at all is configured - and the sender address is
+         * hardcoded in default.json5. So a deployment that had configured no
+         * email whatsoever reported ready:true, the health check printed "email
+         * configured", and every send then died inside the AWS SDK where only an
+         * error log saw it. A green board and no mail, with nothing on screen
+         * suggesting email was even worth looking at.
+         */
+        it('warns about a missing SES region when the environment supplies one', function () {
+            const previous = process.env.AWS_REGION;
 
-            expect(description.ready).toBe(true);
-            expect(description.warnings.join(' ')).toMatch(/AWS_SES_REGION/);
-            expect(description.problems).toEqual([]);
+            process.env.AWS_REGION = 'us-east-1';
+
+            try {
+                const description = new EmailService(
+                    createConfigService({ emailFromAddress: 'noreply@archonarena.com' }),
+                    createClient()
+                ).describeConfiguration();
+
+                expect(description.ready).toBe(true);
+                expect(description.warnings.join(' ')).toMatch(/us-east-1/);
+                expect(description.problems).toEqual([]);
+            } finally {
+                if (previous === undefined) {
+                    delete process.env.AWS_REGION;
+                } else {
+                    process.env.AWS_REGION = previous;
+                }
+            }
+        });
+
+        it('refuses to claim it is configured when nothing at all is set', function () {
+            const previousRegion = process.env.AWS_REGION;
+            const previousDefault = process.env.AWS_DEFAULT_REGION;
+
+            delete process.env.AWS_REGION;
+            delete process.env.AWS_DEFAULT_REGION;
+
+            try {
+                // Exactly the state a fresh deployment is in: the sender comes
+                // from default.json5 and the operator has set nothing.
+                const description = new EmailService(
+                    createConfigService({ emailFromAddress: 'noreply@archonarena.com' }),
+                    createClient()
+                ).describeConfiguration();
+
+                expect(description.ready).toBe(false);
+                expect(description.problems.join(' ')).toMatch(/No email transport is configured/);
+                // And it names the two ways out, because "not configured" with
+                // no next step is the same as no message at all.
+                expect(description.problems.join(' ')).toMatch(/RESEND_API_KEY/);
+                expect(description.problems.join(' ')).toMatch(/SMTP_HOST/);
+            } finally {
+                if (previousRegion !== undefined) {
+                    process.env.AWS_REGION = previousRegion;
+                }
+
+                if (previousDefault !== undefined) {
+                    process.env.AWS_DEFAULT_REGION = previousDefault;
+                }
+            }
         });
 
         it('treats a missing sender as fatal on either transport', function () {
@@ -314,6 +385,307 @@ describe('EmailService', function () {
                 expect(description.ready).toBe(false);
                 expect(description.problems.join(' ')).toMatch(/sender address/i);
             }
+        });
+    });
+
+    /**
+     * ARCHON: Resend over its HTTP API.
+     *
+     * One setting instead of four, and no SMTP at all - which is the reason to
+     * have it rather than just pointing the SMTP transport at smtp.resend.com.
+     * A great many hosts block outbound 587 and 465 by default, and what that
+     * produces is a connection that hangs rather than an error that says what
+     * is wrong. An HTTPS POST goes out wherever the rest of the app already
+     * reaches the internet.
+     */
+    describe('Resend', function () {
+        const resendConfig = {
+            emailFromAddress: 'noreply@archonarena.com',
+            resendApiKey: 're_test_key'
+        };
+
+        it('is chosen as soon as an API key is set', function () {
+            const service = new EmailService(createConfigService(resendConfig), null, {
+                budget: null
+            });
+
+            expect(service.transport).toBe('resend');
+            expect(service.isConfigured()).toBe(true);
+        });
+
+        // A key beats a host: a deployment that set both has said which one it
+        // wants by setting the one that needs no other settings.
+        it('is preferred over SMTP when both are configured', function () {
+            const service = new EmailService(
+                createConfigService({ ...resendConfig, smtpHost: 'smtp.example.com' }),
+                null,
+                { budget: null }
+            );
+
+            expect(service.transport).toBe('resend');
+        });
+
+        it('can be forced off in favour of SMTP', function () {
+            const service = new EmailService(
+                createConfigService({
+                    ...resendConfig,
+                    smtpHost: 'smtp.example.com',
+                    emailTransport: 'smtp'
+                }),
+                null,
+                { budget: null }
+            );
+
+            expect(service.transport).toBe('smtp');
+        });
+
+        it('says what is missing when the transport is forced without a key', function () {
+            const description = new EmailService(
+                createConfigService({
+                    emailFromAddress: 'noreply@archonarena.com',
+                    emailTransport: 'resend'
+                }),
+                null,
+                { budget: null }
+            ).describeConfiguration();
+
+            expect(description.ready).toBe(false);
+            expect(description.problems.join(' ')).toMatch(/RESEND_API_KEY/);
+        });
+
+        it('never puts the API key in the description', function () {
+            const description = new EmailService(createConfigService(resendConfig), null, {
+                budget: null
+            }).describeConfiguration();
+
+            // check:email and the health check both print this object.
+            expect(JSON.stringify(description)).not.toContain('re_test_key');
+            expect(description.resendKeySet).toBe(true);
+        });
+
+        describe('the send itself', function () {
+            let fetchMock;
+            const originalFetch = global.fetch;
+
+            beforeEach(function () {
+                fetchMock = vi.fn(async () => ({
+                    ok: true,
+                    status: 200,
+                    json: async () => ({ id: 'msg_1' }),
+                    text: async () => ''
+                }));
+                global.fetch = fetchMock;
+            });
+
+            afterEach(function () {
+                global.fetch = originalFetch;
+            });
+
+            it('posts the message and reports success', async function () {
+                const service = new EmailService(
+                    createConfigService({
+                        ...resendConfig,
+                        emailReplyTo: 'support@archonarena.com'
+                    }),
+                    null,
+                    { budget: null }
+                );
+
+                const sent = await service.sendEmail(
+                    'player@example.com',
+                    'Subject',
+                    'Body',
+                    '<p>Body</p>'
+                );
+
+                expect(sent).toBe(true);
+                expect(fetchMock).toHaveBeenCalledTimes(1);
+
+                const [url, init] = fetchMock.mock.calls[0];
+
+                expect(url).toBe('https://api.resend.com/emails');
+                expect(init.method).toBe('POST');
+                expect(init.headers.Authorization).toBe('Bearer re_test_key');
+
+                const body = JSON.parse(init.body);
+
+                expect(body.from).toBe('noreply@archonarena.com');
+                expect(body.to).toEqual(['player@example.com']);
+                expect(body.reply_to).toBe('support@archonarena.com');
+                expect(body.subject).toBe('Subject');
+                expect(body.text).toBe('Body');
+                expect(body.html).toBe('<p>Body</p>');
+            });
+
+            it('omits the html part when none is supplied', async function () {
+                const service = new EmailService(createConfigService(resendConfig), null, {
+                    budget: null
+                });
+
+                await service.sendEmail('player@example.com', 'Subject', 'Body');
+
+                expect(JSON.parse(fetchMock.mock.calls[0][1].body).html).toBeUndefined();
+            });
+
+            /**
+             * Resend refuses for three reasons in practice - an unverified
+             * sending domain, a key from the wrong environment, and the free
+             * plan's cap - and it says which in the response body. Losing that
+             * body would leave an operator with "email doesn't work" and no
+             * thread to pull.
+             */
+            it('reports failure instead of throwing, keeping the provider reason', async function () {
+                const logger = require('../../../server/log');
+                const errors = [];
+
+                vi.spyOn(logger, 'error').mockImplementation((...args) => errors.push(args));
+
+                global.fetch = vi.fn(async () => ({
+                    ok: false,
+                    status: 403,
+                    text: async () => '{"message":"The archonarena.com domain is not verified."}',
+                    json: async () => ({})
+                }));
+
+                const service = new EmailService(createConfigService(resendConfig), null, {
+                    budget: null
+                });
+
+                const sent = await service.sendEmail('player@example.com', 'Subject', 'Body');
+
+                expect(sent).toBe(false);
+
+                const logged = errors.flat().join(' ');
+
+                expect(logged).toMatch(/not verified/);
+                expect(logged).toMatch(/403/);
+                // And which transport refused, so an operator knows where to
+                // look without reading the config first.
+                expect(logged).toMatch(/resend/);
+
+                vi.restoreAllMocks();
+            });
+        });
+    });
+
+    /**
+     * ARCHON: the provider's plan is a cliff.
+     *
+     * Past a free plan's daily cap the provider refuses ALL mail, and
+     * registration rolls an account back when its activation email fails - so
+     * an afternoon of pairing emails can stop new sign-ups entirely. The budget
+     * makes notification mail run out first. The arithmetic is MailBudget's;
+     * what matters here is that sendEmail consults it and honours the answer.
+     */
+    describe('the send budget', function () {
+        const allow = () => ({
+            claim: vi.fn(async () => ({ ok: true })),
+            release: vi.fn(async () => {})
+        });
+        const refuse = () => ({
+            claim: vi.fn(async () => ({
+                ok: false,
+                reason: 'daily',
+                sentToday: 80,
+                sentThisMonth: 80,
+                dailyLimit: 100,
+                monthlyLimit: 3000
+            })),
+            release: vi.fn(async () => {})
+        });
+        const sesConfig = {
+            emailFromAddress: 'noreply@archonarena.com',
+            awsSesRegion: 'us-east-1'
+        };
+
+        it('sends nothing when the budget refuses', async function () {
+            const client = createClient();
+            const budget = refuse();
+            const service = new EmailService(createConfigService(sesConfig), client, { budget });
+
+            const sent = await service.sendEmail('a@b.com', 'Subject', 'Body', undefined, {
+                priority: 'bulk'
+            });
+
+            expect(sent).toBe(false);
+            expect(client.send).not.toHaveBeenCalled();
+        });
+
+        it('classes a send as transactional unless told otherwise', async function () {
+            const budget = allow();
+            const service = new EmailService(createConfigService(sesConfig), createClient(), {
+                budget
+            });
+
+            await service.sendEmail('a@b.com', 'Subject', 'Body');
+
+            expect(budget.claim).toHaveBeenCalledWith('transactional');
+        });
+
+        it('passes the callers priority through', async function () {
+            const budget = allow();
+            const service = new EmailService(createConfigService(sesConfig), createClient(), {
+                budget
+            });
+
+            await service.sendEmail('a@b.com', 'Subject', 'Body', undefined, { priority: 'bulk' });
+
+            expect(budget.claim).toHaveBeenCalledWith('bulk');
+        });
+
+        // The claim is optimistic - it has to be, or two sends race and both
+        // read the same count. A provider outage must not then eat the day's
+        // quota and leave activation mail refused after it recovers.
+        it('gives the claim back when the provider refuses the message', async function () {
+            const budget = allow();
+            const service = new EmailService(
+                createConfigService(sesConfig),
+                {
+                    send: vi.fn(async () => {
+                        throw new Error('SES down');
+                    })
+                },
+                { budget }
+            );
+
+            expect(await service.sendEmail('a@b.com', 'Subject', 'Body')).toBe(false);
+            expect(budget.release).toHaveBeenCalledTimes(1);
+        });
+
+        it('keeps the claim when the send succeeds', async function () {
+            const budget = allow();
+            const service = new EmailService(createConfigService(sesConfig), createClient(), {
+                budget
+            });
+
+            expect(await service.sendEmail('a@b.com', 'Subject', 'Body')).toBe(true);
+            expect(budget.release).not.toHaveBeenCalled();
+        });
+
+        // A deployment on a paid plan or its own relay configures no limits and
+        // must be unaffected.
+        it('is absent entirely when no limits are configured', function () {
+            const service = new EmailService(createConfigService(sesConfig), createClient());
+
+            expect(service.budget).toBeNull();
+        });
+
+        it('is built from the configured limits', function () {
+            const service = new EmailService(
+                createConfigService({
+                    ...sesConfig,
+                    emailDailyLimit: 100,
+                    emailMonthlyLimit: 3000,
+                    emailBulkReserve: 0.2
+                }),
+                createClient(),
+                { db: { query: vi.fn() } }
+            );
+
+            expect(service.budget).toBeTruthy();
+            expect(service.budget.dailyLimit).toBe(100);
+            expect(service.budget.monthlyLimit).toBe(3000);
+            expect(service.budget.ceilingFor('bulk', 100)).toBe(80);
         });
     });
 });

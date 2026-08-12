@@ -27,10 +27,34 @@
         appName: 'Archon Arena',
         emailFromAddress: 'noreply@archonarena.com',
         // ARCHON: which transport sends the mail. 'auto' (the default) picks
-        // SMTP when smtpHost is set and AWS SES otherwise, so an existing SES
-        // deployment is unaffected and a new one only fills in what it has.
-        // Force it with 'smtp' or 'ses' if the automatic choice is wrong.
+        // Resend when resendApiKey is set, SMTP when smtpHost is, and AWS SES
+        // otherwise - so an existing deployment on either is unaffected and a
+        // new one only fills in what it has. Force it with 'resend', 'smtp' or
+        // 'ses' if the automatic choice is wrong.
         emailTransport: 'auto',
+        // Resend over its HTTP API: paste the key, verify the sending domain in
+        // Resend's dashboard, done. No SMTP ports involved, which is the point -
+        // many hosts block outbound 587 and 465.
+        resendApiKey: '',
+        // ARCHON: the provider's plan, as a cap this site will not exceed.
+        //
+        // Every entry plan is a hard limit with a cliff at the end of it, and
+        // past it the provider refuses ALL mail - not just the notification
+        // that pushed it over. Registration rolls an account back when its
+        // activation mail fails, so an exhausted plan stops new sign-ups
+        // entirely. One sixteen-player Swiss is 64 pairing emails, so this is
+        // reachable in an afternoon.
+        //
+        // Defaults match Resend's free plan, and are what the automatic
+        // transport would be pointed at. Set to 0 for no cap - a paid plan, or
+        // a relay of your own.
+        emailDailyLimit: 100,
+        emailMonthlyLimit: 3000,
+        // The share of each cap held back from notification mail, so the last
+        // slice of the day belongs to activation and password reset. 0.2 of a
+        // 100/day plan stops pairing emails at 80 and keeps 20 for the front
+        // door.
+        emailBulkReserve: 0.2,
         // SMTP, for any provider that speaks it - Resend, Brevo, Postmark,
         // Mailgun, a company relay. Blank host means SES is used instead.
         // smtpSecure is inferred from the port when unset: implicit TLS on 465,

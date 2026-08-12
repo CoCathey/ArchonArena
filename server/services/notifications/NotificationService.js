@@ -267,7 +267,14 @@ class NotificationService {
             recipient.Email,
             `${this.appName}: ${title}`,
             renderTextEmail(content),
-            renderHtmlEmail(content)
+            renderHtmlEmail(content),
+            // Bulk: this is the site telling somebody something, and the in-app
+            // notification has already landed regardless. When the provider's
+            // daily plan runs low these are what yields, so that the activation
+            // link for the next person to register still goes out. Volume lives
+            // here - one sixteen-player Swiss is 64 pairing emails - so if
+            // anything is going to exhaust a free plan it is this path.
+            { priority: 'bulk' }
         );
     }
 

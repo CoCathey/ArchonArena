@@ -54,20 +54,65 @@ If you are not ready, that is fine, but make it a decision: set `REQUIRE_ACTIVAT
 in `.env.production`, accepting that people can play under addresses they do not own until
 you turn it back on.
 
-There are two transports. `lobby.emailTransport` defaults to `auto`, which picks **SMTP** when
-`SMTP_HOST` is set and **SES** otherwise — so you configure one of the two and nothing else.
+There are three transports. `lobby.emailTransport` defaults to `auto`, which picks **Resend**
+when `RESEND_API_KEY` is set, **SMTP** when `SMTP_HOST` is, and **SES** otherwise — so you
+configure one of the three and nothing else.
 
-|                    | **SMTP** (§3a)                        | **AWS SES** (§3b)                      |
-| ------------------ | ------------------------------------- | -------------------------------------- |
-| Account            | Sign up with an email address         | Needs an AWS account (card required)   |
-| Setup              | DNS records, then paste an API key    | DNS records, IAM user, sandbox request |
-| Time to first send | Under an hour                         | About a day (sandbox approval)         |
-| Cost               | Free tiers usually cover a small site | Cheapest at volume (~$0.10 per 1,000)  |
+|                    | **Resend** (§3a)                   | **SMTP** (§3b)                        | **AWS SES** (§3c)                      |
+| ------------------ | ---------------------------------- | ------------------------------------- | -------------------------------------- |
+| Settings needed    | One (`RESEND_API_KEY`)             | Four (host, port, user, password)     | Region plus IAM credentials            |
+| Account            | Sign up with an email address      | Sign up with an email address         | Needs an AWS account (card required)   |
+| Setup              | DNS records, then paste an API key | DNS records, then paste credentials   | DNS records, IAM user, sandbox request |
+| Time to first send | Under an hour                      | Under an hour                         | About a day (sandbox approval)         |
+| Blocked ports      | None — sends over HTTPS            | Needs outbound 587 or 465             | None — sends over HTTPS                |
+| Cost               | Free tier: 100/day, 3,000/month    | Free tiers usually cover a small site | Cheapest at volume (~$0.10 per 1,000)  |
 
-**Take SMTP unless you already use AWS.** SES is meaningfully cheaper only at volumes this
-site is nowhere near.
+**Take Resend unless you already use AWS.** SES is meaningfully cheaper only at volumes this
+site is nowhere near, and the "blocked ports" row is not hypothetical: a great many hosts
+block outbound 587 and 465 by default, and what that produces is a connection that hangs
+rather than an error saying what is wrong.
 
-### 3a. SMTP (recommended)
+### 3a. Resend (recommended)
+
+1. Sign up at [resend.com](https://resend.com).
+2. **Add your domain** and publish the DNS records it shows you (an MX record and two TXT
+   records, for DKIM and SPF). Resend will not send from a domain you have not proved you own.
+3. **Create an API key**, then in `.env.production`:
+
+    ```bash
+    EMAIL_FROM_ADDRESS=noreply@yourdomain.com   # must be AT the verified domain
+    EMAIL_REPLY_TO=support@yourdomain.com       # optional
+    RESEND_API_KEY=re_...
+    ```
+
+    Leave `SMTP_HOST` blank. Setting `RESEND_API_KEY` is all it takes to select this.
+
+4. Restart and prove it (§3d).
+
+#### Staying inside the free plan
+
+The free plan is **100 emails a day and 3,000 a month**, and past either the provider refuses
+_all_ mail — including the activation link a new player is waiting on. That matters more than
+it sounds, because notification mail is where the volume is: a sixteen-player Swiss pairs four
+rounds, which is 64 pairing emails before anyone proposes a match time.
+
+So the app enforces the plan itself rather than discovering it:
+
+```bash
+EMAIL_DAILY_LIMIT=100     # 0 for no cap (a paid plan, or your own relay)
+EMAIL_MONTHLY_LIMIT=3000
+EMAIL_BULK_RESERVE=0.2    # share of each cap kept for activation and reset
+```
+
+Notification mail (pairings, scheduling, deadlines) stops at 80 sends a day and the last 20
+stay available for activation and password reset. Players still get every notification in the
+in-app centre regardless — only the email is held back. `deploy/healthcheck.sh` reports the
+day's usage, and warns once notification mail is being held back, because throttled mail and
+broken mail look identical from the outside.
+
+Raise the limits to match if you upgrade your plan.
+
+### 3b. SMTP
 
 Works with any provider that speaks SMTP — Resend, Brevo, Postmark, Mailgun, Mailjet, a
 company relay. The steps are the same for all of them:
@@ -102,9 +147,9 @@ company relay. The steps are the same for all of them:
 
     Most providers want an **API key** as the password, not your account password.
 
-4. **Restart and prove it** — §3c.
+4. **Restart and prove it** — §3d.
 
-### 3b. AWS SES (alternative)
+### 3c. AWS SES (alternative)
 
 Only worth it if you already have an AWS account or expect real volume.
 
@@ -140,7 +185,7 @@ Only worth it if you already have an AWS account or expect real volume.
     in `eu-west-1`, and the send is rejected as unverified — which reads like a DNS problem
     and is not.
 
-### 3c. Prove it works
+### 3d. Prove it works
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d lobby

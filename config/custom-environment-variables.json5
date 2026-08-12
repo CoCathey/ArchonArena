@@ -24,9 +24,22 @@
         // player who forgets their password cannot recover their account.
         emailFromAddress: 'EMAIL_FROM_ADDRESS',
         emailReplyTo: 'EMAIL_REPLY_TO',
-        // 'auto' | 'smtp' | 'ses'. Rarely needed - leaving it unset picks SMTP
-        // when SMTP_HOST is set and SES otherwise.
+        // 'auto' | 'resend' | 'smtp' | 'ses'. Rarely needed - leaving it unset
+        // picks Resend when RESEND_API_KEY is set, SMTP when SMTP_HOST is, and
+        // SES otherwise.
         emailTransport: 'EMAIL_TRANSPORT',
+        // Resend over its HTTP API. One setting and no SMTP at all, which
+        // matters because a great many hosts block outbound 587 and 465 and the
+        // failure that produces is a connection that hangs rather than an error
+        // saying what is wrong.
+        resendApiKey: 'RESEND_API_KEY',
+        // The provider's plan, as a cap. Resend's free plan is 100 a day and
+        // 3,000 a month; past it the provider refuses ALL mail, including the
+        // activation link registration depends on. Set these and notification
+        // mail yields before that happens. Unset means no cap.
+        emailDailyLimit: { __name: 'EMAIL_DAILY_LIMIT', __format: 'json' },
+        emailMonthlyLimit: { __name: 'EMAIL_MONTHLY_LIMIT', __format: 'json' },
+        emailBulkReserve: { __name: 'EMAIL_BULK_RESERVE', __format: 'json' },
         smtpHost: 'SMTP_HOST',
         // __format json so these arrive as a number and a boolean. A bare string
         // mapping would hand the config "587" and "false", and "false" is truthy.
