@@ -759,12 +759,23 @@ class TournamentService {
         }
 
         if (actor) {
-            params.push(actor.id);
-            const actorParam = `$${params.length}`;
             const canSeeAll =
                 !!actor.permissions?.canManageTournaments || !!actor.permissions?.isAdmin;
 
+            // ARCHON: the parameter is bound ONLY when a placeholder uses it.
+            //
+            // This used to push actor.id unconditionally and then skip the
+            // clause that referenced it for a site TO or admin - leaving a
+            // bound value with nothing to bind to, which Postgres rejects
+            // outright ("bind message supplies 1 parameters, but prepared
+            // statement requires 0"). So every tournament listing threw for
+            // exactly the people who can see every event, and for nobody else:
+            // the site owner got an empty list and "create the first one!"
+            // while their players saw the events perfectly well.
             if (!canSeeAll) {
+                params.push(actor.id);
+                const actorParam = `$${params.length}`;
+
                 where.push(
                     `(t."Visibility" = 'public' OR t."OrganizerId" = ${actorParam} OR ` +
                         `EXISTS(SELECT 1 FROM "TournamentStaff" ts WHERE ts."TournamentId" = t."Id" AND ts."UserId" = ${actorParam}) OR ` +

@@ -518,6 +518,56 @@ describe('a tournament end to end, on real PostgreSQL', function () {
     );
 
     /**
+     * ARCHON: the tournament listing, for every kind of caller.
+     *
+     * list() builds its WHERE clause conditionally and binds parameters to
+     * match. It used to push actor.id and then, for a site TO or admin, skip
+     * the clause that referenced it - leaving a bound value with no
+     * placeholder, which Postgres rejects outright. Every listing therefore
+     * threw for exactly the people who can see every event and for nobody
+     * else, so the site owner got "No tournaments here yet - create the first
+     * one!" while their players saw the events perfectly well.
+     *
+     * A fake database cannot catch this in principle: it is handed the SQL and
+     * the parameter array and never checks that they agree. Only a real server
+     * refuses the bind.
+     */
+    maybe(
+        'lists events for anonymous, player, organiser and admin callers alike',
+        async function () {
+            const organiserUser = users.player1;
+            const listed = await service.create(organiserUser, {
+                name: 'Visible To Everyone Cup',
+                format: 'swiss',
+                visibility: 'public'
+            });
+
+            expect(listed.success, listed.message).toBe(true);
+
+            const seenBy = async (actor, status) =>
+                (await service.list(status, actor)).some((event) => event.id === listed.id);
+
+            // Anonymous, and an ordinary signed-in player.
+            expect(await seenBy(null)).toBe(true);
+            expect(await seenBy(users.player2)).toBe(true);
+
+            // The two permission shapes that skip the visibility clause. Each
+            // is checked with and without a status filter, because the
+            // parameter count differs between the two.
+            for (const permissions of [{ canManageTournaments: true }, { isAdmin: true }]) {
+                const staff = { ...users.player3, permissions };
+
+                expect(await seenBy(staff), `${JSON.stringify(permissions)} / all`).toBe(true);
+                expect(
+                    await seenBy(staff, 'registration'),
+                    `${JSON.stringify(permissions)} / filtered`
+                ).toBe(true);
+            }
+        },
+        120000
+    );
+
+    /**
      * ARCHON: the SAS band - the deck power range an event will accept.
      *
      * Enforced on registration through validateDeck, which means it is only as
