@@ -126,7 +126,12 @@ module.exports.init = function (server) {
             joinCode: req.body.joinCode,
             deckId: req.body.deckId ? parseInt(req.body.deckId, 10) : null,
             // ARCHON (N7): which team the player is entering under.
-            teamId: req.body.teamId ? parseInt(req.body.teamId, 10) : null
+            teamId: req.body.teamId ? parseInt(req.body.teamId, 10) : null,
+            // ARCHON: an organizer entering somebody - the only way a player
+            // can join an event that has already started. Authorized in the
+            // service, like every other judge action.
+            userId: req.body.userId ? parseInt(req.body.userId, 10) : null,
+            username: req.body.username || null
         })
     );
 

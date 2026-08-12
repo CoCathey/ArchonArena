@@ -1174,7 +1174,54 @@ class TournamentService {
             return { success: false, message: 'No such tournament' };
         }
 
-        if (tournament.Status !== 'registration') {
+        // Whose entry this is. Normally the caller's own; for a late entry an
+        // organizer names the player - by username, because that is what an
+        // organizer standing at a desk knows. Nobody signs anybody else up for
+        // an event without running it - during the registration window either.
+        let entrantId = options.userId ? Number(options.userId) : actor.id;
+
+        if (options.username && !options.userId) {
+            const named = await this.db.query('SELECT "Id" FROM "Users" WHERE "Username" = $1', [
+                (options.username || '').trim()
+            ]);
+
+            if (!named || named.length === 0) {
+                return { success: false, message: 'No such user' };
+            }
+
+            entrantId = named[0].Id;
+        }
+
+        if (entrantId !== actor.id && !(await this.canManage(actor, tournament))) {
+            return { success: false, message: 'Only the organizer can register another player' };
+        }
+
+        // ARCHON: late registration, at the organizer's discretion.
+        //
+        // A player who turns up at round two of a five-round event is normal
+        // at a local scene - the shop was busy, the bus was late - and there
+        // was no way to admit them at all: registration closed at start, full
+        // stop, and the only workaround was to cancel the event and rebuild
+        // it. Swiss pairs on record, so a late entrant simply starts on zero
+        // and is paired from there.
+        //
+        // Only the organizer, and only into an event still running: this is a
+        // judge admitting somebody, never a player letting themselves in after
+        // seeing the field.
+        const lateEntry = tournament.Status === 'active';
+
+        if (lateEntry) {
+            if (!(await this.canManage(actor, tournament))) {
+                return { success: false, message: 'Registration is closed' };
+            }
+
+            if (!options.userId && !options.username) {
+                return {
+                    success: false,
+                    message: 'Registration is closed - add the player from the roster instead'
+                };
+            }
+        } else if (tournament.Status !== 'registration') {
             return { success: false, message: 'Registration is closed' };
         }
 
@@ -1188,7 +1235,7 @@ class TournamentService {
         }
 
         if (options.deckId) {
-            const deckCheck = await this.validateDeck(tournament, actor.id, options.deckId);
+            const deckCheck = await this.validateDeck(tournament, entrantId, options.deckId);
 
             if (!deckCheck.success) {
                 return deckCheck;
@@ -1209,7 +1256,7 @@ class TournamentService {
 
             const membership = await this.db.query(
                 'SELECT 1 FROM "TeamMembers" WHERE "TeamId" = $1 AND "UserId" = $2',
-                [teamId, actor.id]
+                [teamId, entrantId]
             );
 
             if (!membership || membership.length === 0) {
@@ -1221,7 +1268,7 @@ class TournamentService {
                     'SELECT COUNT(*) AS "Count" FROM "TournamentPlayers" ' +
                         'WHERE "TournamentId" = $1 AND "TeamId" = $2 AND "UserId" <> $3 ' +
                         'AND NOT "Dropped"',
-                    [tournamentId, teamId, actor.id]
+                    [tournamentId, teamId, entrantId]
                 );
 
                 if (parseInt(roster[0].Count, 10) >= tournament.TeamSize) {
@@ -1239,7 +1286,7 @@ class TournamentService {
             const rows = await this.db.query(
                 'SELECT COUNT(*) AS "Count" FROM "TournamentPlayers" ' +
                     'WHERE "TournamentId" = $1 AND NOT "Waitlisted" AND "UserId" <> $2',
-                [tournamentId, actor.id]
+                [tournamentId, entrantId]
             );
 
             waitlisted = parseInt(rows[0].Count, 10) >= tournament.PlayerCap;
@@ -1251,7 +1298,7 @@ class TournamentService {
                 'ON CONFLICT ("TournamentId", "UserId") DO UPDATE SET "Dropped" = false, ' +
                 '"DeckId" = COALESCE(EXCLUDED."DeckId", "TournamentPlayers"."DeckId"), ' +
                 '"TeamId" = COALESCE(EXCLUDED."TeamId", "TournamentPlayers"."TeamId")',
-            [tournamentId, actor.id, waitlisted, options.deckId || null, teamId]
+            [tournamentId, entrantId, waitlisted, options.deckId || null, teamId]
         );
 
         return { success: true, waitlisted };

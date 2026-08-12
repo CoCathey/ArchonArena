@@ -2209,6 +2209,67 @@ describe('TournamentService', function () {
      * and the organizer could do nothing about it. A deck registered wrong, or
      * one that turns out to be illegal, was stuck for the whole event.
      */
+    /**
+     * ARCHON: late registration.
+     *
+     * A player turning up at round two of a five-round event is normal at a
+     * local scene, and there was no way to admit them: registration closed at
+     * start, full stop, and the only workaround was to cancel the event and
+     * build it again. Swiss pairs on record, so a late entrant starts on zero
+     * and is paired from there.
+     */
+    describe('late registration', function () {
+        let id;
+
+        beforeEach(async function () {
+            id = await createSwiss(2, { roundCount: 3 });
+            await service.start(id, organizer);
+        });
+
+        const rosterFor = (userId) =>
+            db.state.players.find((entry) => entry.TournamentId === id && entry.UserId === userId);
+
+        it('lets the organizer add a player by username after the start', async function () {
+            const added = await service.register(id, organizer, { username: 'user7' });
+
+            expect(added.success, added.message).toBe(true);
+            expect(rosterFor(7)).toBeTruthy();
+        });
+
+        // The point of the restriction: a player cannot let themselves in
+        // after seeing the field.
+        it('still refuses a player registering themselves', async function () {
+            const refused = await service.register(id, { id: 7 }, {});
+
+            expect(refused.success).toBe(false);
+            expect(refused.message).toMatch(/registration is closed/i);
+            expect(rosterFor(7)).toBeFalsy();
+        });
+
+        it('refuses a player trying to add somebody else', async function () {
+            const refused = await service.register(id, { id: 2 }, { username: 'user7' });
+
+            expect(refused.success).toBe(false);
+            expect(rosterFor(7)).toBeFalsy();
+        });
+
+        it('says so when the username is not a user', async function () {
+            const refused = await service.register(id, organizer, { username: 'nobody' });
+
+            expect(refused.success).toBe(false);
+            expect(refused.message).toMatch(/no such user/i);
+        });
+
+        // Nobody may sign anybody else up, started or not.
+        it('refuses one player registering another during the open window', async function () {
+            const open = await createSwiss(2);
+            const refused = await service.register(open, { id: 2 }, { username: 'user7' });
+
+            expect(refused.success).toBe(false);
+            expect(refused.message).toMatch(/only the organizer/i);
+        });
+    });
+
     describe('the organizer changing a deck', function () {
         let id;
 

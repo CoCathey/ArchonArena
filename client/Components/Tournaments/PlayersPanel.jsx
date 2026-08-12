@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from '../Navigation/Link';
 import { useTranslation } from 'react-i18next';
-import { Button as HeroButton } from '@heroui/react';
+import { Button as HeroButton, Input } from '@heroui/react';
 
 import Panel from '../Site/Panel';
 import AmberValue from '../Site/AmberValue';
@@ -13,6 +13,7 @@ import AmberValue from '../Site/AmberValue';
  */
 const PlayersPanel = ({ tournament, players, act }) => {
     const { t } = useTranslation();
+    const [lateEntrant, setLateEntrant] = React.useState('');
 
     const roster = players.filter((player) => !player.waitlisted && !player.dropped);
     const waitlist = players.filter((player) => player.waitlisted && !player.dropped);
@@ -190,6 +191,42 @@ const PlayersPanel = ({ tournament, players, act }) => {
             {manualSeeds && roster.length > 0 && (
                 <div className='mt-2 text-xs text-muted'>
                     {t('Manual seeding: enter seed numbers (1 = top); blank seeds go last.')}
+                </div>
+            )}
+            {/* ARCHON: late registration. A player turning up at round two of
+                a five-round event is normal at a local scene - the shop was
+                busy, the bus was late - and there was no way to admit them at
+                all: registration closed at start, and the only workaround was
+                to cancel the event and build it again. Swiss pairs on record,
+                so a late entrant starts on zero and is paired from there. */}
+            {tournament.canManage && tournament.status === 'active' && (
+                <div className='mt-3 flex flex-wrap items-center gap-2 border-t border-border/50 pt-2'>
+                    <span className='text-xs text-muted'>{t('Add a late entrant')}:</span>
+                    <Input
+                        aria-label={t('Username')}
+                        className='w-40'
+                        value={lateEntrant}
+                        placeholder={t('Username')}
+                        onChange={(event) => setLateEntrant(event.target.value)}
+                    />
+                    <HeroButton
+                        size='sm'
+                        variant='tertiary'
+                        isDisabled={!lateEntrant.trim()}
+                        onPress={async () => {
+                            const added = await act(
+                                'register',
+                                { username: lateEntrant.trim() },
+                                t('{{player}} added to the event', { player: lateEntrant.trim() })
+                            );
+
+                            if (added) {
+                                setLateEntrant('');
+                            }
+                        }}
+                    >
+                        {t('Add player')}
+                    </HeroButton>
                 </div>
             )}
         </Panel>

@@ -17,6 +17,7 @@ import RoundsPanel from '../Components/Tournaments/RoundsPanel';
 import StandingsPanel from '../Components/Tournaments/StandingsPanel';
 import PlayersPanel from '../Components/Tournaments/PlayersPanel';
 import printPairings from '../Components/Tournaments/printPairings';
+import EventForm from '../Components/Tournaments/EventForm';
 // ARCHON: the picker offers what the event will accept - see the module.
 import { buildTournamentDeckFilter } from '../Components/Tournaments/tournamentDeckFilter';
 import { Constants } from '../constants';
@@ -64,6 +65,8 @@ const TournamentDetail = () => {
     const [triadPicks, setTriadPicks] = useState(null); // in-progress 3-deck pool
     const [editingAnnouncement, setEditingAnnouncement] = useState(null);
     const [staffName, setStaffName] = useState('');
+    const [editingSettings, setEditingSettings] = useState(null);
+    const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
 
     if (!data?.success) {
         return (
@@ -180,6 +183,74 @@ const TournamentDetail = () => {
      * `earlyFinish` with the round counts and the page asks; a deliberate yes
      * resends with `force`.
      */
+    /**
+     * ARCHON: the event as the settings form wants it, and back again.
+     *
+     * getDetail speaks in the API's shape (nulls, numbers, absent keys); the
+     * form speaks in strings and empty strings, because that is what inputs
+     * hold. These two are the seam between them, and they are the reason the
+     * edit form can be the SAME component as the create form rather than a
+     * second one that drifts.
+     */
+    const settingsFromEvent = () => {
+        const text = (value) => (value === null || value === undefined ? '' : String(value));
+
+        return {
+            name: text(tournament.name),
+            description: text(tournament.description),
+            format: tournament.format,
+            gameFormat: tournament.gameFormat,
+            mode: tournament.mode,
+            pacing: tournament.pacing || 'live',
+            roundDeadlineDays: text(tournament.roundDeadlineDays || 3),
+            roundCount: text(tournament.roundCount),
+            // datetime-local wants 'YYYY-MM-DDTHH:mm' and nothing after it.
+            startTime: tournament.startTime
+                ? new Date(tournament.startTime).toISOString().slice(0, 16)
+                : '',
+            playerCap: text(tournament.playerCap),
+            bestOf: text(tournament.bestOf || 1),
+            playoffBestOf: text(tournament.playoffBestOf || 3),
+            cutTo: text(tournament.cutTo),
+            seedMethod: tournament.seedMethod,
+            visibility: tournament.visibility,
+            roundTimerMinutes: text(tournament.roundTimerMinutes),
+            gameTimeLimit: text(tournament.gameTimeLimit),
+            ratedGames: !!tournament.rated,
+            requireDeckRegistration: !!tournament.requireDeckRegistration,
+            hideDecklists: !!tournament.hideDecklists,
+            sasMin: text(tournament.sasMin),
+            sasMax: text(tournament.sasMax),
+            deckSwapPolicy: tournament.deckSwapPolicy || 'locked',
+            triad: !!tournament.triad,
+            sasChainHandicap: !!tournament.sasChainHandicap,
+            chainsPerMatchWin: text(tournament.chainsPerMatchWin),
+            allowedSets: tournament.allowedSets || [],
+            bannedHouses: tournament.bannedHouses || [],
+            requiredHouses: tournament.requiredHouses || []
+        };
+    };
+
+    const settingsForServer = (settings) => ({
+        ...settings,
+        roundCount: settings.roundCount || undefined,
+        roundDeadlineDays:
+            settings.pacing === 'async' ? settings.roundDeadlineDays || undefined : undefined,
+        startTime: settings.startTime || undefined,
+        playerCap: settings.playerCap || undefined,
+        cutTo: settings.format === 'swiss' ? settings.cutTo || undefined : undefined,
+        playoffBestOf:
+            settings.format === 'swiss' && settings.cutTo ? settings.playoffBestOf : undefined,
+        roundTimerMinutes: settings.roundTimerMinutes || undefined,
+        gameTimeLimit: settings.gameTimeLimit || undefined,
+        sasMin: settings.sasMin || undefined,
+        sasMax: settings.sasMax || undefined,
+        chainsPerMatchWin: settings.chainsPerMatchWin || undefined,
+        allowedSets: settings.allowedSets.length > 0 ? settings.allowedSets : undefined,
+        bannedHouses: settings.bannedHouses.length > 0 ? settings.bannedHouses : undefined,
+        requiredHouses: settings.requiredHouses.length > 0 ? settings.requiredHouses : undefined
+    });
+
     const finishTournament = async () => {
         const outcome = await runAction({ id, action: 'finish', body: {} })
             .unwrap()
@@ -622,6 +693,46 @@ const TournamentDetail = () => {
                     </div>
                 )}
 
+                {tournament.canManage && editingSettings && (
+                    <div className='mt-3 space-y-3 rounded-md border border-border/60 bg-surface-secondary/50 p-3'>
+                        <div className='text-xs font-semibold uppercase tracking-wide text-muted'>
+                            {t('Event settings')}
+                        </div>
+                        <EventForm
+                            form={editingSettings}
+                            setForm={setEditingSettings}
+                            showAdvanced={showAdvancedSettings}
+                            setShowAdvanced={setShowAdvancedSettings}
+                        />
+                        <div className='flex gap-2'>
+                            <HeroButton
+                                size='sm'
+                                variant='primary'
+                                onPress={async () => {
+                                    const saved = await act(
+                                        'update',
+                                        settingsForServer(editingSettings),
+                                        t('Event settings updated')
+                                    );
+
+                                    if (saved) {
+                                        setEditingSettings(null);
+                                    }
+                                }}
+                            >
+                                {t('Save settings')}
+                            </HeroButton>
+                            <HeroButton
+                                size='sm'
+                                variant='tertiary'
+                                onPress={() => setEditingSettings(null)}
+                            >
+                                {t('Cancel')}
+                            </HeroButton>
+                        </div>
+                    </div>
+                )}
+
                 {tournament.canManage && (
                     <div className='mt-3 space-y-2 border-t border-border/50 pt-2'>
                         {editingAnnouncement === null ? (
@@ -637,6 +748,23 @@ const TournamentDetail = () => {
                                         ? t('Edit announcement')
                                         : t('Post announcement')}
                                 </button>
+                                {/* ARCHON: updateSettings has always accepted a
+                                    full re-configuration while an event is in
+                                    registration, and nothing reached it - the
+                                    announcement was the only editable field on
+                                    the page. An organizer who picked the wrong
+                                    format, round count or deck rule had to
+                                    cancel the event and build it again, losing
+                                    everyone already registered. */}
+                                {tournament.status === 'registration' && (
+                                    <button
+                                        type='button'
+                                        className='text-muted underline-offset-2 hover:text-foreground hover:underline'
+                                        onClick={() => setEditingSettings(settingsFromEvent())}
+                                    >
+                                        {t('Edit event settings')}
+                                    </button>
+                                )}
                                 {tournament.visibility === 'private' && tournament.joinCode && (
                                     <span className='text-muted'>
                                         {t('Join code')}:{' '}
