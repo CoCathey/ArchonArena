@@ -243,7 +243,7 @@ const Membership = () => {
                                 })}
                             </span>
                         )}
-                        <Link className='text-xs text-primary hover:underline' to='/profile'>
+                        <Link className='text-xs text-accent hover:underline' to='/profile'>
                             {t('Manage your Patreon link')}
                         </Link>
                     </div>

@@ -418,3 +418,74 @@ describe('premium filtering does not corrupt the shared stats cache', function (
         expect(stats.houses).toEqual(['b']);
     });
 });
+
+/**
+ * ARCHON (N12): checkauth must not ship a new role with stale capabilities.
+ *
+ * checkauth serializes the user at the TOP of the handler, then reconciles the
+ * Patreon supporter role further down. Because getWireSafeDetails hands out a
+ * COPY of the permissions object (server/settings.js `getUserWithDefaultsSet`),
+ * mutating the serialized user does not change what the model resolves from -
+ * so a pledge that starts on that very request shipped `isSupporter: true`
+ * alongside `capabilities: []`.
+ *
+ * The player experience of that bug is the worst possible one: you pay, the
+ * badge appears, and the features you paid for stay locked until something
+ * else triggers a refresh. It reads as the payment not having worked.
+ */
+describe('checkauth re-resolves entitlements after the supporter sweep', function () {
+    const User = require('../../../../server/models/User');
+
+    const freshUser = () =>
+        new User({ id: 4, username: 'newpatron', settings: {}, permissions: {} });
+
+    it('hands out a copy of permissions, so mutating the wire object is not enough', function () {
+        const user = freshUser();
+        const wire = user.getWireSafeDetails();
+
+        wire.permissions.isSupporter = true;
+
+        // The model is unchanged - this is the trap.
+        expect(user.getEntitlements().tierId).toBe(TIER_IDS.FREE);
+    });
+
+    it('setPermission updates what getEntitlements reads', function () {
+        const user = freshUser();
+
+        user.setPermission('isSupporter', true);
+
+        expect(user.getEntitlements().tierId).toBe(TIER_IDS.SUPPORTER);
+    });
+
+    it('re-resolving after the sweep ships the role AND its capabilities together', function () {
+        const user = freshUser();
+        const userDetails = user.getWireSafeDetails();
+
+        expect(userDetails.capabilities).toEqual([]);
+
+        // What checkauth now does when a pledge starts on this request.
+        user.setPermission('isSupporter', true);
+        Object.assign(userDetails, user.getMembershipSummary());
+
+        expect(userDetails.membership.tier).toBe(TIER_IDS.SUPPORTER);
+        expect(userDetails.capabilities).toContain(CAPABILITIES.ELO_HISTORY);
+    });
+
+    it('drops capabilities in the same breath when a pledge lapses', function () {
+        const user = new User({
+            id: 5,
+            username: 'lapsed',
+            settings: {},
+            permissions: { isSupporter: true }
+        });
+        const userDetails = user.getWireSafeDetails();
+
+        expect(userDetails.capabilities).toContain(CAPABILITIES.ELO_HISTORY);
+
+        user.setPermission('isSupporter', false);
+        Object.assign(userDetails, user.getMembershipSummary());
+
+        expect(userDetails.membership.tier).toBe(TIER_IDS.FREE);
+        expect(userDetails.capabilities).toEqual([]);
+    });
+});

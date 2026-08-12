@@ -204,7 +204,7 @@ const TournamentLab = () => {
                     )}
                 />
                 <div className='mt-3'>
-                    <Link className='text-sm text-primary hover:underline' to='/membership'>
+                    <Link className='text-sm text-accent hover:underline' to='/membership'>
                         {t('See what the Tournament Lab does')}
                     </Link>
                 </div>
@@ -315,7 +315,7 @@ const TournamentLab = () => {
                                         </div>
                                         <div className='h-2 flex-1 overflow-hidden rounded bg-surface-secondary'>
                                             <div
-                                                className='h-full bg-primary/60'
+                                                className='h-full bg-accent/60'
                                                 style={{
                                                     width: `${Math.round(
                                                         (row.prevalence ?? 0) * 100 * 3

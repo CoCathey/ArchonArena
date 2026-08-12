@@ -774,6 +774,21 @@ module.exports.init = function (server, options) {
                         userDetails.permissions.isSupporter = req.user.permissions.isSupporter =
                             isSupporter;
                         await userService.setSupporterStatus(user.id, isSupporter);
+
+                        // ARCHON (N12): capabilities were resolved at the top of
+                        // this handler, from the permissions as they stood
+                        // BEFORE this sweep. A pledge that starts or lapses on
+                        // this very request would otherwise ship the new role
+                        // with the old capabilities - premium panels staying
+                        // locked for someone who just started paying, which
+                        // reads as the payment not having worked.
+                        //
+                        // The model's own copy has to be updated first:
+                        // getWireSafeDetails hands out a COPY of the permissions
+                        // object (server/settings.js), so mutating userDetails
+                        // above does not change what getEntitlements() reads.
+                        user.setPermission('isSupporter', isSupporter);
+                        Object.assign(userDetails, user.getMembershipSummary());
                     }
                 }
             } else if (user.patreon && user.patreon.access_token) {

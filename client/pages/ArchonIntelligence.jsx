@@ -133,7 +133,7 @@ const ArchonIntelligence = () => {
                     )}
                 />
                 <div className='mt-3'>
-                    <Link className='text-sm text-primary hover:underline' to='/membership'>
+                    <Link className='text-sm text-accent hover:underline' to='/membership'>
                         {t('See what Archon Intelligence covers')}
                     </Link>
                 </div>

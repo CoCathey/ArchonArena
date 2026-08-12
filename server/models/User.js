@@ -166,6 +166,43 @@ class User {
         return resolveEntitlements({ user: this, membership: this.userData.membership });
     }
 
+    /**
+     * The membership block as the client receives it.
+     *
+     * Split out of getWireSafeDetails so a caller that changes this account's
+     * roles mid-request can re-resolve without writing the shape a second time
+     * - see the supporter sweep in api/account.js checkauth, which is exactly
+     * that case.
+     *
+     * @param {import('../services/membership/entitlements').Entitlements} [entitlements]
+     */
+    getMembershipSummary(entitlements = this.getEntitlements()) {
+        return {
+            membership: {
+                tier: entitlements.tierId,
+                tierName: entitlements.tierName,
+                rank: entitlements.rank,
+                isAdmin: entitlements.isAdmin,
+                complimentary: entitlements.complimentary,
+                expiresAt: entitlements.expiresAt,
+                source: entitlements.source
+            },
+            capabilities: entitlements.capabilities
+        };
+    }
+
+    /**
+     * Update the permission flags this model resolves entitlements from.
+     *
+     * Needed because getWireSafeDetails hands out a COPY of the permissions
+     * object (server/settings.js `getUserWithDefaultsSet`), so mutating the
+     * serialized user does not change what `getEntitlements()` will read.
+     */
+    setPermission(name, value) {
+        this.userData.permissions = this.userData.permissions || {};
+        this.userData.permissions[name] = value;
+    }
+
     getWireSafeDetails() {
         const entitlements = this.getEntitlements();
 
@@ -185,16 +222,7 @@ class User {
             // `capabilities` and never re-derives it from the tier - the server
             // is the only thing that decides, so a hand-edited client cannot
             // grant itself anything the API would not also allow.
-            membership: {
-                tier: entitlements.tierId,
-                tierName: entitlements.tierName,
-                rank: entitlements.rank,
-                isAdmin: entitlements.isAdmin,
-                complimentary: entitlements.complimentary,
-                expiresAt: entitlements.expiresAt,
-                source: entitlements.source
-            },
-            capabilities: entitlements.capabilities
+            ...this.getMembershipSummary(entitlements)
         };
 
         user = Settings.getUserWithDefaultsSet(user);
