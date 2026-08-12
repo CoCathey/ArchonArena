@@ -91,7 +91,15 @@ async function main() {
     }
 
     if (!commit) {
-        console.log('\nDry run - nothing was written. Re-run with --commit to rate these.');
+        console.log('\nDry run - nothing was written. To rate these, run:\n');
+        // ARCHON: the bare `--` is the whole point of printing a command rather
+        // than naming a flag. `npm run backfill:ratings --commit` takes the flag
+        // as npm's own and never forwards it, so the script sees no argument and
+        // prints this same dry run again - which reads as the command having
+        // silently done nothing.
+        console.log('  npm run backfill:ratings -- --commit');
+        console.log('\nThe bare -- is required: without it npm keeps the flag for itself');
+        console.log('and this dry run repeats.');
         console.log('They will be processed oldest-first, as the live hook would have.');
 
         return;
