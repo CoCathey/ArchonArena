@@ -70,6 +70,18 @@ services:
             # all. Run `npm run check:email` after any change here.
             - EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-}
             - EMAIL_REPLY_TO=${EMAIL_REPLY_TO:-}
+            # Resend over its HTTP API. Setting RESEND_API_KEY alone selects it,
+            # ahead of SMTP and SES. Same trap as the block above: a key set in
+            # .env.production and not forwarded here reaches nothing, and the
+            # symptom is mail that silently does not send.
+            - RESEND_API_KEY=${RESEND_API_KEY:-}
+            # The provider's plan, as a cap. Past a free plan's limit the
+            # provider refuses ALL mail including activation, so notification
+            # mail is made to yield first. Unset falls back to the defaults in
+            # config/default.json5, which match Resend's free plan.
+            - EMAIL_DAILY_LIMIT=${EMAIL_DAILY_LIMIT:-}
+            - EMAIL_MONTHLY_LIMIT=${EMAIL_MONTHLY_LIMIT:-}
+            - EMAIL_BULK_RESERVE=${EMAIL_BULK_RESERVE:-}
             # SMTP: any provider that speaks it. Setting SMTP_HOST is what
             # selects this over SES; EMAIL_TRANSPORT only needs setting to
             # override that choice.
