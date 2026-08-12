@@ -58,18 +58,26 @@ describe('Lobby.runRoundDeadlineSweep', function () {
     });
 
     it('does not run two sweeps at once', async function () {
-        let release;
-        db.query.mockImplementation(() => new Promise((resolve) => (release = () => resolve([]))));
+        // Held open: a tick issues several queries (the deadline scan, then
+        // the two reminder passes), and this must not resolve any of them
+        // until the concurrency claim has been checked.
+        const resolvers = [];
+        db.query.mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
 
         const lobby = makeLobby(tournamentService);
         const first = lobby.runRoundDeadlineSweep();
 
         // The in-flight flag is set synchronously, so a second tick landing
-        // mid-sweep returns without starting a second scan.
+        // mid-sweep returns without starting a second scan - the first is
+        // still blocked on its very first query.
         await lobby.runRoundDeadlineSweep();
         expect(db.query).toHaveBeenCalledTimes(1);
 
-        release();
+        // Let the tick finish: later queries answer immediately, and the one
+        // it is currently blocked on is released.
+        db.query.mockResolvedValue([]);
+        resolvers.forEach((resolve) => resolve([]));
+
         await first;
     });
 
@@ -82,9 +90,15 @@ describe('Lobby.runRoundDeadlineSweep', function () {
 
         await expect(lobby.runRoundDeadlineSweep()).resolves.toBeUndefined();
 
+        const afterFirstTick = db.query.mock.calls.length;
+
+        expect(afterFirstTick).toBeGreaterThan(0);
+
         db.query.mockResolvedValue([]);
         await lobby.runRoundDeadlineSweep();
 
-        expect(db.query).toHaveBeenCalledTimes(2);
+        // The second tick ran: the count moved. Asserting on a total would be
+        // asserting on how many passes a tick happens to make.
+        expect(db.query.mock.calls.length).toBeGreaterThan(afterFirstTick);
     });
 });

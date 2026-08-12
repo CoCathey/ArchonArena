@@ -145,6 +145,63 @@ function install({ tournamentService, notificationService }) {
         }
     };
 
+    /**
+     * ARCHON: the two reminders that fire BEFORE something happens, rather
+     * than after it. Everything else this event sends is a report of the past.
+     */
+    const onRoundDeadlineApproaching = async (payload) => {
+        for (const match of payload.openMatches || []) {
+            for (const userId of [match.player1Id, match.player2Id]) {
+                if (!userId) {
+                    continue;
+                }
+
+                try {
+                    await notificationService.notify({
+                        userId,
+                        category: 'tournament.schedule',
+                        title: `Round ends tomorrow - ${payload.tournamentName}`,
+                        body: `Round ${payload.round} closes ${utcLabel(
+                            payload.roundEndsAt
+                        )}. Your match is still unplayed - arrange a time or it may be decided without you.`,
+                        url: scheduleUrl(payload),
+                        data: { tournamentId: payload.tournamentId, matchId: match.matchId },
+                        dedupeKey: `tournament.schedule:${match.matchId}:deadline-warning`
+                    });
+                } catch (err) {
+                    logger.error(
+                        `Failed to warn player ${userId} about round ${payload.round}`,
+                        err
+                    );
+                }
+            }
+        }
+    };
+
+    const onMatchTimeApproaching = async (payload) => {
+        for (const userId of [payload.player1Id, payload.player2Id]) {
+            if (!userId) {
+                continue;
+            }
+
+            try {
+                await notificationService.notify({
+                    userId,
+                    category: 'tournament.schedule',
+                    title: `Your match starts soon - ${payload.tournamentName}`,
+                    body: `Round ${payload.round}: you agreed to play at ${utcLabel(
+                        payload.time
+                    )}.`,
+                    url: scheduleUrl(payload),
+                    data: { tournamentId: payload.tournamentId, matchId: payload.matchId },
+                    dedupeKey: `tournament.schedule:${payload.matchId}:starting`
+                });
+            } catch (err) {
+                logger.error(`Failed to remind player ${userId} of match ${payload.matchId}`, err);
+            }
+        }
+    };
+
     const onMatchScheduleCleared = async (payload) => {
         try {
             await notificationService.notify({
@@ -232,6 +289,12 @@ function install({ tournamentService, notificationService }) {
     tournamentEvents.on('roundDeadlinePassed', (payload) => {
         onRoundDeadlinePassed(payload);
     });
+    tournamentEvents.on('roundDeadlineApproaching', (payload) => {
+        onRoundDeadlineApproaching(payload);
+    });
+    tournamentEvents.on('matchTimeApproaching', (payload) => {
+        onMatchTimeApproaching(payload);
+    });
 
     return {
         onRoundPaired,
@@ -239,7 +302,9 @@ function install({ tournamentService, notificationService }) {
         onMatchTimeProposed,
         onMatchTimeAccepted,
         onMatchScheduleCleared,
-        onRoundDeadlinePassed
+        onRoundDeadlinePassed,
+        onRoundDeadlineApproaching,
+        onMatchTimeApproaching
     };
 }
 

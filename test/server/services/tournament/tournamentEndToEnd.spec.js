@@ -518,6 +518,95 @@ describe('a tournament end to end, on real PostgreSQL', function () {
     );
 
     /**
+     * ARCHON: the reminders that fire before something happens.
+     *
+     * Everything an async event used to send was a report of the past - a
+     * round was paired, a time was agreed, a deadline had passed. Two players
+     * agreed to meet on Thursday and nothing reminded either of them; a round
+     * ended on Sunday and the first anyone heard was Monday, when matches
+     * started being decided by the clock instead of by play.
+     *
+     * These are pure SQL time windows over real timestamp columns, which is
+     * precisely what a fake db cannot check: it would compare whatever JS
+     * values the fake chose to store.
+     */
+    maybe(
+        'warns before a round deadline and before an agreed match time, once each',
+        async function () {
+            const alice = users.player1;
+            const bob = users.player2;
+
+            {
+                const league = await service.create(alice, {
+                    name: 'Reminder League',
+                    format: 'swiss',
+                    roundCount: 1,
+                    pacing: 'async',
+                    roundDeadlineDays: 7
+                });
+
+                await service.register(league.id, alice, {});
+                await service.register(league.id, bob, {});
+                await service.start(league.id, alice);
+
+                // Nothing is close yet, so nothing fires.
+                expect(await service.sweepScheduleReminders()).toEqual({
+                    warned: 0,
+                    reminded: 0
+                });
+
+                // Bring the round deadline inside the warning window and the
+                // agreed match time inside the reminder window.
+                await db.query(
+                    'UPDATE "Tournaments" SET "RoundEndsAt" = ' +
+                        "(now() AT TIME ZONE 'utc') + interval '2 hours' WHERE \"Id\" = $1",
+                    [league.id]
+                );
+
+                const match = (await service.getDetail(league.id, alice)).matches.find(
+                    (entry) => entry.player1Id && entry.player2Id
+                );
+
+                await db.query(
+                    'UPDATE "TournamentMatches" SET "ScheduledAt" = ' +
+                        "(now() AT TIME ZONE 'utc') + interval '10 minutes' WHERE \"Id\" = $1",
+                    [match.id]
+                );
+
+                const swept = await service.sweepScheduleReminders();
+
+                expect(swept.warned).toBe(1);
+                expect(swept.reminded).toBe(1);
+
+                // Once each, ever: the write that announces IS the claim, so a
+                // second sweep - or a second lobby process - says nothing. The
+                // markers are the mechanism, so they are what is asserted on.
+                expect(await service.sweepScheduleReminders()).toEqual({
+                    warned: 0,
+                    reminded: 0
+                });
+
+                const [stamped] = await db.query(
+                    'SELECT "DeadlineWarnedAt" FROM "Tournaments" WHERE "Id" = $1',
+                    [league.id]
+                );
+                expect(stamped.DeadlineWarnedAt).toBeTruthy();
+
+                // Rescheduling is a new thing to be reminded about.
+                await service.clearMatchSchedule(league.id, match.id, alice);
+                await db.query(
+                    'UPDATE "TournamentMatches" SET "ScheduledAt" = ' +
+                        "(now() AT TIME ZONE 'utc') + interval '10 minutes' WHERE \"Id\" = $1",
+                    [match.id]
+                );
+
+                expect((await service.sweepScheduleReminders()).reminded).toBe(1);
+            }
+        },
+        120000
+    );
+
+    /**
      * ARCHON: deleting a deck you are registered with.
      *
      * TournamentPlayers."DeckId" is ON DELETE SET NULL, so the delete does not

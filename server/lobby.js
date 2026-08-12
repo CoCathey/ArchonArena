@@ -645,6 +645,19 @@ class Lobby {
             if (result && result.notified > 0) {
                 logger.info(`Flagged ${result.notified} tournament round deadline(s) as passed`);
             }
+
+            // ARCHON: the same tick also fires the reminders that go out
+            // BEFORE a deadline or an agreed match time - on the same
+            // schedule, because they are the same kind of clock-watching and
+            // a second timer would be a second thing to get wrong.
+            const reminders = await this.tournamentService.sweepScheduleReminders();
+
+            if (reminders && (reminders.warned > 0 || reminders.reminded > 0)) {
+                logger.info(
+                    `Tournament reminders: ${reminders.warned} round deadline(s) approaching, ` +
+                        `${reminders.reminded} match(es) starting soon`
+                );
+            }
         } catch (err) {
             logger.error('Tournament round deadline sweep failed', err);
         } finally {

@@ -34,6 +34,11 @@ const MAX_ROUND_DEADLINE_DAYS = 30;
 // How far ahead a match may be scheduled. Generous on purpose: it bounds
 // typos (a proposal for next year), not planning.
 const MAX_SCHEDULE_AHEAD_DAYS = 60;
+// How far ahead the reminders fire. A day's notice on a round deadline is
+// enough to actually arrange something; half an hour on an agreed match time
+// is enough to get to a computer without being a nag.
+const DEADLINE_WARNING_HOURS = 24;
+const MATCH_REMINDER_MINUTES = 30;
 
 // The round clock, in one place. Async events count their deadline in days;
 // live events in minutes; an event with neither runs unclocked. Every round
@@ -2847,6 +2852,31 @@ class TournamentService {
             };
         }
 
+        // ARCHON: not after the round is over.
+        //
+        // The only ceiling here was the typo guard - 60 days - so two players
+        // in an async league could agree, in good faith and with the platform
+        // confirming it, on a time days past the deadline their round actually
+        // ends on. Nothing told them; they found out when the deadline sweep
+        // flagged the round and the organizer decided the match without them.
+        //
+        // The round's own deadline is the real bound, and it is the number the
+        // players were shown when they were told how long they had.
+        const roundEndsAt = context.tournament?.RoundEndsAt;
+
+        if (roundEndsAt && when.getTime() > new Date(roundEndsAt).getTime()) {
+            return {
+                success: false,
+                message: `This round ends ${new Date(roundEndsAt)
+                    .toISOString()
+                    .replace('T', ' ')
+                    .slice(
+                        0,
+                        16
+                    )} UTC - pick a time before then, or ask the organizer for more time`
+            };
+        }
+
         const cleanNote = (note || '').toString().slice(0, 280) || null;
 
         await this.db.query(
@@ -2903,7 +2933,8 @@ class TournamentService {
         // anywhere else.
         const updated = await this.db.query(
             'UPDATE "TournamentMatches" SET "ScheduledAt" = "ProposedTime", ' +
-                '"ProposedTime" = NULL, "ProposedBy" = NULL ' +
+                // A newly agreed time is a new thing to be reminded about.
+                '"ProposedTime" = NULL, "ProposedBy" = NULL, "ScheduleRemindedAt" = NULL ' +
                 'WHERE "Id" = $1 AND "ProposedTime" = $2 AND "ProposedBy" = $3 ' +
                 'RETURNING "ScheduledAt"',
             [matchId, new Date(match.ProposedTime).toISOString(), match.ProposedBy]
@@ -2945,7 +2976,8 @@ class TournamentService {
 
         await this.db.query(
             'UPDATE "TournamentMatches" SET "ScheduledAt" = NULL, "ProposedTime" = NULL, ' +
-                '"ProposedBy" = NULL, "ScheduleNote" = NULL WHERE "Id" = $1',
+                '"ProposedBy" = NULL, "ScheduleNote" = NULL, "ScheduleRemindedAt" = NULL ' +
+                'WHERE "Id" = $1',
             [matchId]
         );
 
@@ -3030,6 +3062,105 @@ class TournamentService {
      * is one click away - an automatic forfeit could never know which player
      * ghosted whom.
      */
+    /**
+     * ARCHON: the reminders an asynchronous event owes its players.
+     *
+     * Everything this event ever told anyone was about something that had
+     * already happened: a round was paired, a time was agreed, a deadline had
+     * passed. Nobody was ever told anything was ABOUT to. Two players agree to
+     * meet on Thursday at eight and nothing reminds either of them; a round
+     * ends on Sunday and the first anyone hears is Monday, when matches start
+     * being decided by the clock instead of by play.
+     *
+     * Both passes claim their row with the write that announces, so several
+     * lobby processes stay one voice and a restart cannot replay a reminder.
+     */
+    async sweepScheduleReminders() {
+        let warned = 0;
+        let reminded = 0;
+
+        // --- rounds whose deadline is close -----------------------------
+        try {
+            const closing = await this.db.query(
+                'UPDATE "Tournaments" SET "DeadlineWarnedAt" = now() AT TIME ZONE \'utc\' ' +
+                    'WHERE "Status" = \'active\' AND "Pacing" = \'async\' ' +
+                    'AND "RoundEndsAt" IS NOT NULL ' +
+                    'AND "RoundEndsAt" > now() AT TIME ZONE \'utc\' ' +
+                    'AND "RoundEndsAt" < (now() AT TIME ZONE \'utc\') + ' +
+                    `interval '${DEADLINE_WARNING_HOURS} hours' ` +
+                    'AND ("DeadlineWarnedAt" IS NULL OR "DeadlineWarnedAt" < "RoundStartedAt") ' +
+                    'RETURNING "Id", "Name", "OrganizerId", "CurrentRound", "RoundEndsAt"'
+            );
+
+            for (const tournament of closing || []) {
+                const matches = await this.getMatches(tournament.Id);
+                const open = matches.filter(
+                    (match) =>
+                        match.Round === tournament.CurrentRound &&
+                        match.Player1Id &&
+                        match.Player2Id &&
+                        !match.WinnerId &&
+                        !match.ResultType
+                );
+
+                if (open.length === 0) {
+                    continue;
+                }
+
+                warned++;
+                tournamentEvents.emit('roundDeadlineApproaching', {
+                    tournamentId: tournament.Id,
+                    tournamentName: tournament.Name,
+                    organizerId: tournament.OrganizerId,
+                    round: tournament.CurrentRound,
+                    roundEndsAt: tournament.RoundEndsAt,
+                    openMatches: open.map((match) => ({
+                        matchId: match.Id,
+                        player1Id: match.Player1Id,
+                        player2Id: match.Player2Id
+                    }))
+                });
+            }
+        } catch (err) {
+            logger.error('Failed to warn about approaching tournament deadlines', err);
+        }
+
+        // --- matches whose agreed time is close --------------------------
+        try {
+            const soon = await this.db.query(
+                'UPDATE "TournamentMatches" SET "ScheduleRemindedAt" = now() AT TIME ZONE \'utc\' ' +
+                    'WHERE "Id" IN (SELECT m."Id" FROM "TournamentMatches" m ' +
+                    'JOIN "Tournaments" t ON t."Id" = m."TournamentId" ' +
+                    'WHERE t."Status" = \'active\' AND m."ScheduledAt" IS NOT NULL ' +
+                    'AND m."WinnerId" IS NULL AND m."ResultType" IS NULL ' +
+                    'AND m."ScheduledAt" > now() AT TIME ZONE \'utc\' ' +
+                    'AND m."ScheduledAt" < (now() AT TIME ZONE \'utc\') + ' +
+                    `interval '${MATCH_REMINDER_MINUTES} minutes' ` +
+                    'AND m."ScheduleRemindedAt" IS NULL) ' +
+                    'RETURNING "Id", "TournamentId", "Round", "Player1Id", "Player2Id", "ScheduledAt"'
+            );
+
+            for (const match of soon || []) {
+                const tournament = await this.getTournamentRow(match.TournamentId);
+
+                reminded++;
+                tournamentEvents.emit('matchTimeApproaching', {
+                    tournamentId: match.TournamentId,
+                    tournamentName: tournament?.Name,
+                    matchId: match.Id,
+                    round: match.Round,
+                    player1Id: match.Player1Id,
+                    player2Id: match.Player2Id,
+                    time: match.ScheduledAt
+                });
+            }
+        } catch (err) {
+            logger.error('Failed to remind players of scheduled matches', err);
+        }
+
+        return { warned, reminded };
+    }
+
     async sweepRoundDeadlines() {
         let due;
 
