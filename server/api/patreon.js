@@ -245,9 +245,11 @@ function verifyLinkState({ stateToken, providedState, userId, secret }) {
  */
 async function syncMembershipTier(userId, patreonMembership, service = membershipService) {
     try {
-        await service.syncFromPatreon(userId, patreonMembership);
+        return await service.syncFromPatreon(userId, patreonMembership);
     } catch (err) {
         logger.error('Failed to sync membership tier for user %s: %s', userId, err.message);
+
+        return null;
     }
 }
 

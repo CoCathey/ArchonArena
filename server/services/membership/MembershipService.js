@@ -3,6 +3,12 @@ const { membershipFromDbRow } = require('./mapRow');
 const { TIER_IDS, tierFromPatreonMembership, tierById } = require('./tiers');
 const { resolveEntitlements, anonymousEntitlements } = require('./entitlements');
 
+// How stale LastSyncedAt may get before an unchanged membership is rewritten
+// anyway, purely so the column keeps meaning "we heard from the provider this
+// recently". One hour: often enough to spot a dead sync, rare enough that it is
+// not a write on every auth refresh.
+const SYNC_HEARTBEAT_MS = 60 * 60 * 1000;
+
 /**
  * ARCHON (N12): reads and writes the Memberships table, and turns a provider's
  * answer into a stored membership.
@@ -143,6 +149,26 @@ class MembershipService {
     async syncFromPatreon(userId, patreonMembership) {
         const pledged = patreonMembership && patreonMembership.status === 'pledged';
         const tier = pledged ? tierFromPatreonMembership(patreonMembership) : TIER_IDS.FREE;
+        const status = pledged ? 'active' : 'expired';
+
+        // This runs on every auth refresh, which for an active player is every
+        // few minutes. Writing the row each time would turn a read-mostly table
+        // into one write per user per token refresh, for a value that changes
+        // perhaps twice a year. So the write is skipped when nothing has
+        // actually changed - unless LastSyncedAt has gone stale, which is what
+        // makes "the sync has quietly stopped running" visible to an operator
+        // rather than indistinguishable from "nobody's membership changed".
+        const existing = await this.getMembership(userId);
+
+        if (existing && existing.tier === tier && existing.status === status) {
+            const lastSynced = existing.lastSyncedAt
+                ? new Date(existing.lastSyncedAt).getTime()
+                : 0;
+
+            if (Date.now() - lastSynced < SYNC_HEARTBEAT_MS) {
+                return existing;
+            }
+        }
 
         return this.recordProviderMembership(userId, {
             provider: 'patreon',
@@ -151,7 +177,7 @@ class MembershipService {
             // 'linked' (connected, not pledging) and 'none' both mean not
             // paying. Recorded rather than deleted so the admin view can tell
             // "lapsed" from "never subscribed".
-            status: pledged ? 'active' : 'expired',
+            status,
             startedAt: null,
             expiresAt: (patreonMembership && patreonMembership.expiresAt) || null
         });
