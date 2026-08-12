@@ -1224,8 +1224,12 @@ would notice first.
         it — worse once the deck lock shipped, because the table then held both players to the wrong
         decks. Note one new stall mode: game three now waits for the bid, so a pair who neither bid
         nor pass leave the round waiting on them. That is the right trade against dealing decks the
-        bid is about to contradict, and the organiser can still award or take a paper result, but
-        `adaptiveBid`/`adaptivePass` have no timeout or force-resolve and should get one.
+        bid is about to contradict. **Force-resolve added**: a judge tool
+        (`forceResolveAdaptiveBid`, `POST .../adaptive-force-resolve`) settles the bid exactly as if
+        whoever is on the clock had passed — the same two outcomes `adaptivePass` already produces —
+        so the organiser gets a lever without being able to hand either player a deck or a chain
+        count neither of them could have reached themselves. Surfaced as "Force-resolve bid" in the
+        judge tools on the open 1-1 match, beside forfeit/no-show/double-loss.
 -   [x] **The participant-callable endpoints are bounded.** Creating an event was the only
         tournament route with a ceiling. The rest are mostly organizer tools behind an
         authorization check, which is a fair reason to leave them — but opening a table builds a

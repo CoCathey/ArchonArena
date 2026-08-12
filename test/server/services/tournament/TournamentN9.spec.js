@@ -503,6 +503,96 @@ describe('Tournament Adaptive Bo3', function () {
         expect(result.success).toBe(false);
     });
 
+    describe('force-resolving a stalled bid', function () {
+        const organizer = { id: 9 };
+
+        it('is refused to anyone but the organizer, staff, or an admin', async function () {
+            const result = await service.forceResolveAdaptiveBid(1, 3, {
+                id: 77,
+                permissions: {}
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.message).toMatch(/only the organizer/i);
+        });
+
+        it('is refused before game three', async function () {
+            match.Player1Wins = 0;
+            match.Player2Wins = 0;
+
+            const result = await service.forceResolveAdaptiveBid(1, 3, organizer);
+
+            expect(result.success).toBe(false);
+            expect(result.message).toMatch(/before game three/i);
+        });
+
+        it('is refused on a non-Adaptive event', async function () {
+            tournament.AdaptiveBo3 = false;
+
+            const result = await service.forceResolveAdaptiveBid(1, 3, organizer);
+
+            expect(result.success).toBe(false);
+            expect(result.message).toMatch(/no chain bidding/i);
+        });
+
+        it('is refused once the bid is already settled', async function () {
+            match.AdaptiveState = {
+                resolved: true,
+                currentBid: 4,
+                highBidderId: 1,
+                turnUserId: null
+            };
+
+            const result = await service.forceResolveAdaptiveBid(1, 3, organizer);
+
+            expect(result.success).toBe(false);
+            expect(result.message).toMatch(/already settled/i);
+        });
+
+        // The organizer's ruling has to land on one of the same two outcomes a
+        // voluntary pass would - never a deck or a chain count neither player
+        // could have reached themselves.
+        it('gives the deck away at zero, same as the stalled player passing, when nobody has bid', async function () {
+            const state = await service.getAdaptiveState(1, 3, organizer);
+            const onTheClock = state.bidding.turnUserId;
+
+            const result = await service.forceResolveAdaptiveBid(1, 3, organizer);
+
+            expect(result.success).toBe(true);
+            expect(result.resolved).toBe(true);
+            expect(result.chains).toBe(0);
+            expect(result.winnerOfBid).not.toBe(onTheClock);
+
+            const saved = savedState();
+
+            expect(saved.resolved).toBe(true);
+            expect(saved.turnUserId).toBeNull();
+        });
+
+        it('hands the deck to the standing high bidder at their bid, same as the opponent passing', async function () {
+            match.AdaptiveState = {
+                bidDeckOwnerId: 1,
+                currentBid: 4,
+                highBidderId: 1,
+                turnUserId: 2
+            };
+
+            const result = await service.forceResolveAdaptiveBid(1, 3, organizer);
+
+            expect(result.success).toBe(true);
+            expect(result.resolved).toBe(true);
+            expect(result.winnerOfBid).toBe(1);
+            expect(result.chains).toBe(4);
+
+            const saved = savedState();
+
+            expect(saved.chains['1']).toBe(4);
+            expect(saved.chains['2']).toBe(0);
+            expect(saved.decks['1']).toBe(1);
+            expect(saved.decks['2']).toBe(2);
+        });
+    });
+
     it('forces a three-game series when Adaptive is on', function () {
         const parsed = service.parseEventOptions(
             { name: 'Adaptive event', format: 'swiss', adaptiveBo3: true, bestOf: 1 },

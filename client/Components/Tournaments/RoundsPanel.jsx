@@ -435,6 +435,32 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
                             {t('Reopen table')}
                         </HeroButton>
                     )}
+                    {/* ARCHON (N9 follow-up): game 3 of an Adaptive Bo3 waits
+                        for the chain bid before a table opens, and a pair who
+                        neither bid nor pass leave the round stuck on them with
+                        no other lever than ending the whole series. This
+                        settles the bid as if whoever is on the clock passed,
+                        so the round can move on without deciding the match. */}
+                    {tournament.adaptiveBo3 &&
+                        !decided &&
+                        match.player1Wins === 1 &&
+                        match.player2Wins === 1 && (
+                            <HeroButton
+                                size='sm'
+                                variant='tertiary'
+                                className='!h-6 !px-2 text-xs'
+                                onPress={() => {
+                                    act(
+                                        `matches/${match.id}/adaptive-force-resolve`,
+                                        {},
+                                        t('Bid resolved')
+                                    );
+                                    setShowTools(false);
+                                }}
+                            >
+                                {t('Force-resolve bid')}
+                            </HeroButton>
+                        )}
                 </div>
             )}
         </div>

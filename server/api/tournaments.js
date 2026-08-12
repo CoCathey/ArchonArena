@@ -375,6 +375,16 @@ module.exports.init = function (server) {
         )
     );
 
+    // ARCHON (N9 follow-up): organizer force-resolve for a chain bid nobody
+    // is answering - settles it as if the player on the clock had passed.
+    action('/api/tournaments/:id/matches/:matchId/adaptive-force-resolve', (req) =>
+        tournamentService.forceResolveAdaptiveBid(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user
+        )
+    );
+
     action('/api/tournaments/:id/finish', (req) =>
         tournamentService.finish(parseInt(req.params.id, 10), req.user, {
             // ARCHON: the organizer confirming an early finish. See finish().

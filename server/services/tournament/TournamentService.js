@@ -4287,11 +4287,22 @@ class TournamentService {
             return { success: false, message: 'It is not your turn' };
         }
 
+        return this.resolveAdaptiveBidByPassing(match, state, actor.id);
+    }
+
+    /**
+     * ARCHON (N9 follow-up): settles a chain bid as if the given player had
+     * just passed - shared by the voluntary pass above and by the
+     * organizer's force-resolve below, so a forced outcome is never one a
+     * player could not have reached themselves by passing.
+     */
+    async resolveAdaptiveBidByPassing(match, state, passingPlayerId) {
         if (!state.highBidderId) {
             // Nobody has bid. Passing first concedes the choice: the opponent
             // takes the nominated deck at zero chains rather than the series
             // deadlocking on two players who both refuse to open.
-            const opponentId = actor.id === match.Player1Id ? match.Player2Id : match.Player1Id;
+            const opponentId =
+                passingPlayerId === match.Player1Id ? match.Player2Id : match.Player1Id;
             const bidDeckOwnerId = state.bidDeckOwnerId ?? match.Player1Id;
 
             const resolved = {
@@ -4301,10 +4312,10 @@ class TournamentService {
                 highBidderId: opponentId,
                 turnUserId: null,
                 resolved: true,
-                chains: { [opponentId]: 0, [actor.id]: 0 },
+                chains: { [opponentId]: 0, [passingPlayerId]: 0 },
                 decks: {
                     [opponentId]: bidDeckOwnerId,
-                    [actor.id]:
+                    [passingPlayerId]:
                         bidDeckOwnerId === match.Player1Id ? match.Player2Id : match.Player1Id
                 }
             };
@@ -4324,8 +4335,8 @@ class TournamentService {
             resolved: true,
             // The high bidder pilots the nominated deck carrying the chains
             // they bid; the other player takes the remaining deck unchained.
-            chains: { [state.highBidderId]: state.currentBid ?? 0, [actor.id]: 0 },
-            decks: { [state.highBidderId]: bidDeckOwnerId, [actor.id]: otherDeckOwnerId }
+            chains: { [state.highBidderId]: state.currentBid ?? 0, [passingPlayerId]: 0 },
+            decks: { [state.highBidderId]: bidDeckOwnerId, [passingPlayerId]: otherDeckOwnerId }
         };
 
         await this.saveAdaptiveState(match.Id, resolved);
@@ -4336,6 +4347,59 @@ class TournamentService {
             winnerOfBid: state.highBidderId,
             chains: state.currentBid ?? 0
         };
+    }
+
+    /**
+     * ARCHON (N9 follow-up): the organizer's lever for a stalled chain bid.
+     * Game three of an Adaptive Bo3 waits for the bid before a table can
+     * open (see the `playable` filter above), and unlike every other stall
+     * this one had no round-clock fallback: "time in the round"
+     * (resolveUnfinished) reads the match as a plain 1-1 tie and ends the
+     * whole series, when the actual problem is the bid step, not the match.
+     *
+     * Force-resolving settles the bid exactly as if whoever's turn it is
+     * had passed - the same two outcomes `adaptivePass` already produces -
+     * so the organizer cannot hand a player a deck or a chain count they
+     * could not have reached themselves.
+     */
+    async forceResolveAdaptiveBid(tournamentId, matchId, actor) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament) {
+            return { success: false, message: 'No such tournament' };
+        }
+
+        if (!(await this.canManage(actor, tournament))) {
+            return { success: false, message: 'Only the organizer can force-resolve a bid' };
+        }
+
+        if (tournament.Status !== 'active') {
+            return { success: false, message: 'Tournament is not active' };
+        }
+
+        if (!tournament.AdaptiveBo3) {
+            return { success: false, message: 'This event has no chain bidding' };
+        }
+
+        const match = await this.getMatchRow(tournamentId, matchId);
+
+        if (!match || !match.Player1Id || !match.Player2Id) {
+            return { success: false, message: 'No such match' };
+        }
+
+        if (this.adaptiveGameNumber(match) !== 3) {
+            return { success: false, message: 'Bidding only happens before game three' };
+        }
+
+        const state = this.parseJsonColumn(match.AdaptiveState) || {};
+
+        if (state.resolved) {
+            return { success: false, message: 'The bid is already settled' };
+        }
+
+        const turnUserId = state.turnUserId ?? this.adaptiveFirstBidder(match);
+
+        return this.resolveAdaptiveBidByPassing(match, state, turnUserId);
     }
 
     /**
