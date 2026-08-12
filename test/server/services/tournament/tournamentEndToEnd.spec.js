@@ -568,6 +568,46 @@ describe('a tournament end to end, on real PostgreSQL', function () {
     );
 
     /**
+     * ARCHON: a cancelled event is a tombstone, not a listing.
+     *
+     * Nobody can register for one or play in one, and they accumulate at the
+     * top of the browse page - a scene that tries a few configurations before
+     * its first real event ends up with a list that is mostly abandoned
+     * drafts. They stay reachable by their own URL and by asking for them.
+     */
+    maybe(
+        'keeps cancelled events out of the listing unless asked for',
+        async function () {
+            const alice = users.player1;
+            const live = await service.create(alice, {
+                name: 'Still Running Cup',
+                format: 'swiss'
+            });
+            const dead = await service.create(alice, { name: 'Abandoned Cup', format: 'swiss' });
+
+            expect((await service.cancel(dead.id, alice)).success).toBe(true);
+
+            const ids = async (status) =>
+                (await service.list(status, alice)).map((event) => event.id);
+
+            const browsing = await ids();
+
+            expect(browsing).toContain(live.id);
+            expect(browsing).not.toContain(dead.id);
+
+            // Asked for by name, it is still there - an organizer looking for
+            // the one they cancelled can find it.
+            expect(await ids('cancelled')).toContain(dead.id);
+
+            // And an anonymous visitor sees the same thing.
+            const anonymous = (await service.list(undefined, null)).map((event) => event.id);
+
+            expect(anonymous).not.toContain(dead.id);
+        },
+        120000
+    );
+
+    /**
      * ARCHON: the SAS band - the deck power range an event will accept.
      *
      * Enforced on registration through validateDeck, which means it is only as

@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
 import { useCheckInByCodeMutation } from '../redux/api';
+import { serverMessage } from '../redux/apiError';
 
 /**
  * ARCHON: the other end of the check-in kiosk (N9).
@@ -52,15 +53,13 @@ const CheckIn = () => {
         try {
             const result = await checkInByCode(entered).unwrap();
 
-            if (result.success) {
-                navigate(`/tournaments/${result.tournamentId}`, { replace: true });
-
-                return;
-            }
-
-            setError(result.message || t('That code did not check you in'));
-        } catch {
-            setError(t('That code did not check you in'));
+            navigate(`/tournaments/${result.tournamentId}`, { replace: true });
+        } catch (err) {
+            // The server's own reason - "Register for the event first",
+            // "Check-in is not open", "No event matches that check-in code" -
+            // arrives on the thrown value, because this API treats a
+            // {success:false} body as a refusal. See redux/apiError.js.
+            setError(serverMessage(err, t('That code did not check you in')));
         }
     };
 

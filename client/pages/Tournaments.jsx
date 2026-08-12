@@ -58,7 +58,10 @@ const Tournaments = () => {
         ['', t('All')],
         ['registration', t('Open Registration')],
         ['active', t('In Progress')],
-        ['complete', t('Completed')]
+        ['complete', t('Completed')],
+        // ARCHON: cancelled events are hidden from "All" - they are tombstones
+        // nobody can enter - but reachable for an organizer looking for one.
+        ['cancelled', t('Cancelled')]
     ];
 
     const onCreate = async () => {

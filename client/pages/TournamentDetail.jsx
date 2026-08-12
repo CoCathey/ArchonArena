@@ -22,6 +22,7 @@ import EventForm from '../Components/Tournaments/EventForm';
 import { buildTournamentDeckFilter } from '../Components/Tournaments/tournamentDeckFilter';
 import { Constants } from '../constants';
 import { useGetEventDetailQuery, useTournamentActionMutation } from '../redux/api';
+import { serverMessage, serverPayload } from '../redux/apiError';
 
 const formatNames = {
     swiss: 'Swiss',
@@ -95,22 +96,21 @@ const TournamentDetail = () => {
     const act = async (action, body, successMessage) => {
         try {
             const result = await runAction({ id, action, body }).unwrap();
+            const message =
+                typeof successMessage === 'function' ? successMessage(result) : successMessage;
 
-            if (result.success) {
-                const message =
-                    typeof successMessage === 'function' ? successMessage(result) : successMessage;
-
-                if (message) {
-                    toast.success(message);
-                }
-                refetch();
-
-                return result;
+            if (message) {
+                toast.success(message);
             }
+            refetch();
 
-            toast.danger(result.message || t('Action failed'));
-        } catch {
-            toast.danger(t('Action failed'));
+            return result;
+        } catch (err) {
+            // A refusal the server explained arrives HERE, not as a resolved
+            // value: this API treats a {success:false} body as an error, so
+            // reading result.message after unwrap() never ran. Every refusal
+            // on this page used to read "Action failed". See redux/apiError.js.
+            toast.danger(serverMessage(err, t('Action failed')));
         }
 
         return false;
@@ -252,22 +252,27 @@ const TournamentDetail = () => {
     });
 
     const finishTournament = async () => {
-        const outcome = await runAction({ id, action: 'finish', body: {} })
-            .unwrap()
-            .catch(() => null);
+        let refusal = null;
 
-        if (outcome?.success) {
+        try {
+            await runAction({ id, action: 'finish', body: {} }).unwrap();
             toast.success(t('Tournament complete'));
             refetch();
 
             return;
+        } catch (err) {
+            // The early-finish gate answers with a refusal carrying the round
+            // counts, and a refusal is thrown rather than returned.
+            refusal = serverPayload(err);
+
+            if (!refusal?.earlyFinish) {
+                toast.danger(serverMessage(err, t('Action failed')));
+
+                return;
+            }
         }
 
-        if (!outcome?.earlyFinish) {
-            toast.danger(outcome?.message || t('Action failed'));
-
-            return;
-        }
+        const outcome = refusal;
 
         const confirmed = window.confirm(
             t(

@@ -756,6 +756,14 @@ class TournamentService {
         if (status) {
             params.push(status);
             where.push(`t."Status" = $${params.length}`);
+        } else {
+            // ARCHON: a cancelled event is not a listing, it is a tombstone.
+            // Nobody can register for one or play in one, and they pile up at
+            // the top of the page - a scene that tries a few configurations
+            // before its first real event ends up with a browse list that is
+            // mostly abandoned drafts. They stay reachable by their own URL,
+            // and by asking for them explicitly with ?status=cancelled.
+            where.push(`t."Status" <> 'cancelled'`);
         }
 
         if (actor) {
