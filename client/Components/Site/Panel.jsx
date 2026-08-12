@@ -47,8 +47,28 @@ const Panel = ({
 }) => {
     const baseClass =
         'min-h-0 flex flex-col !p-0 !gap-0 rounded-md border border-border/75 !bg-surface !text-foreground shadow-[var(--surface-shadow)]';
+    /**
+     * ARCHON: `flex-auto`, not `flex-1`, and it is not a style preference.
+     *
+     * `flex-1` is `flex: 1 1 0%` - a zero basis, which tells the layout to size
+     * this box WITHOUT REGARD TO ITS CONTENT. With `overflow-hidden` on top,
+     * the panel's intrinsic height became its header alone, so a Panel sitting
+     * in a grid row beside another one got stretched to whatever the OTHER
+     * column needed and then silently cut its own content off at that line -
+     * no scrollbar, no indication, just missing.
+     *
+     * On the tournament page that meant an organizer whose Rounds panel was
+     * taller than the Standings beside it lost the bottom of the current round:
+     * the report buttons and the withdraw control were sliced through the
+     * middle and could not be reached or scrolled to. The taller the round, the
+     * more was gone.
+     *
+     * `flex-auto` is `flex: 1 1 auto` - same grow and shrink, but the content's
+     * own height is the basis. The panel still fills a height it is given, and
+     * now it also asks for the height it needs.
+     */
     let contentClass =
-        'min-h-0 flex flex-1 flex-col overflow-hidden px-3 py-2 text-foreground [&_label]:!text-foreground [&_.form-label]:!text-foreground';
+        'min-h-0 flex flex-auto flex-col overflow-hidden px-3 py-2 text-foreground [&_label]:!text-foreground [&_.form-label]:!text-foreground';
     if (contentClassName) {
         contentClass += ` ${contentClassName}`;
     }
