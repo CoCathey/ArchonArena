@@ -63,6 +63,11 @@ export function CardZoomOverlay(props: { card?: CardSummary; onClose: () => void
                         ))}
                     </View>
                 ) : null}
+                {(shown.effectSources?.length ?? 0) > 0 ? (
+                    <Text style={styles.zoomEffectSources}>
+                        Affected by {shown.effectSources!.join(', ')}
+                    </Text>
+                ) : null}
                 {underneath ? (
                     <Pressable
                         onPress={() => setShowToken((token) => !token)}
@@ -260,6 +265,13 @@ const styles = StyleSheet.create({
         width: 70,
         height: Math.round(70 * CARD_ASPECT),
         borderRadius: 6
+    },
+    zoomEffectSources: {
+        color: colors.textDim,
+        textAlign: 'center',
+        marginTop: spacing.sm,
+        fontSize: 12,
+        paddingHorizontal: 24
     },
     flipButton: {
         marginTop: spacing.md,

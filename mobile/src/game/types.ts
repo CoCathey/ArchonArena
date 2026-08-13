@@ -12,6 +12,8 @@ export interface CardSummary {
     maverick?: string;
     anomaly?: string;
     enhancements?: string[];
+    /** Names of the cards whose persistent effects apply to this card (self excluded). */
+    effectSources?: string[];
     facedown?: boolean;
     exhausted?: boolean;
     stunned?: boolean;

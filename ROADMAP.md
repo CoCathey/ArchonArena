@@ -1091,7 +1091,7 @@ the whole of what is left here.
 -   An admin can see and clear pending invite requests.
 -   The Android page links to an install that works on a clean device.
 
-#### N15 — Move-by-move clarity in the apps _(done on web; passive attribution open on mobile)_
+#### N15 — Move-by-move clarity in the apps _(done)_
 
 **Why:** the Expo app keeps the play-by-play behind a slide-up sheet (`LogSheet`), so on a phone
 it is easy to miss what the opponent just did. And on both clients a prompt often asks for a
@@ -1119,8 +1119,11 @@ show it.
         every effect carries the context of the card that applied it — and `getSummary` now
         sends `effectSources`, which the card zoom lists as "Affected by ...". Self is excluded,
         because a card naming itself would be on nearly every creature and says nothing.
--   [ ] Same for the Expo app: it gets `effectSources` in the card summary for free, but nothing
-        renders it yet.
+-   [x] **Same for the Expo app.** `CardZoomOverlay` (`mobile/src/game/GameModals.tsx`) now
+        renders an "Affected by ..." caption from `effectSources` beneath the zoomed card, tracking
+        whichever face (token or the card underneath) is currently shown. `CardSummary` gained the
+        typed `effectSources?: string[]` field it was missing (the raw data was already arriving
+        under the catch-all index signature).
 
 **Depends on:** nothing hard — the engine already tracks each ability's source card.
 **Acceptance criteria**
