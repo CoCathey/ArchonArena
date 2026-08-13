@@ -235,7 +235,9 @@ const TournamentDetail = () => {
             entryFee: amountFromCents(tournament.entryFeeCents),
             prizeCurrency: tournament.prizeCurrency || 'USD',
             prizeSplits: tournament.prizeSplits || [],
-            prizeNote: text(tournament.prizeNote)
+            prizeNote: text(tournament.prizeNote),
+            paymentInstructions: text(tournament.paymentInstructions),
+            requirePayment: !!tournament.requirePayment
         };
     };
 
@@ -266,7 +268,9 @@ const TournamentDetail = () => {
         prizeSplits: centsFromAmount(settings.entryFee)
             ? (settings.prizeSplits || []).filter((split) => split.bps > 0)
             : [],
-        prizeNote: settings.prizeNote || undefined
+        prizeNote: settings.prizeNote || undefined,
+        paymentInstructions: settings.paymentInstructions || undefined,
+        requirePayment: !!settings.requirePayment
     });
 
     const finishTournament = async () => {

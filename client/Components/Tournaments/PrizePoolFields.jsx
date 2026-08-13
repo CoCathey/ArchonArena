@@ -305,6 +305,59 @@ const PrizePoolFields = ({ form, setForm, entrantCount }) => {
                         </div>
                     </div>
 
+                    <div>
+                        <Label htmlFor='tournamentPaymentInstructions'>
+                            {t('How players pay you (shown to everyone)')}
+                        </Label>
+                        <div className='flex'>
+                            <Input
+                                id='tournamentPaymentInstructions'
+                                className='w-full'
+                                maxLength={1000}
+                                placeholder={t('Cash at the counter, or @yourhandle before Friday')}
+                                value={form.paymentInstructions}
+                                onChange={(event) =>
+                                    setForm((current) => ({
+                                        ...current,
+                                        paymentInstructions: event.target.value
+                                    }))
+                                }
+                            />
+                        </div>
+                        <div className='mt-1 text-xs text-muted'>
+                            {t(
+                                'A fee with no way to pay it is the most obvious question an event can leave open.'
+                            )}
+                        </div>
+                    </div>
+
+                    {/* ARCHON: separate from the fee existing, because "there is
+                        a buy-in" and "nobody plays until they have paid" are
+                        different decisions. A weekly event among friends may
+                        well collect as people arrive and not want the start
+                        button arguing about it. */}
+                    <label className='flex items-start gap-2 text-sm text-foreground'>
+                        <input
+                            type='checkbox'
+                            className='mt-1'
+                            checked={!!form.requirePayment}
+                            onChange={(event) =>
+                                setForm((current) => ({
+                                    ...current,
+                                    requirePayment: event.target.checked
+                                }))
+                            }
+                        />
+                        <span>
+                            {t('Everyone must be marked paid before the event can start')}
+                            <span className='block text-xs text-muted'>
+                                {t(
+                                    'You and your judges tick players off on the roster. Starting names anyone still unpaid rather than removing them.'
+                                )}
+                            </span>
+                        </span>
+                    </label>
+
                     {/* ARCHON: unmissable, and beside the money rather than in a
                         policy page. Nobody should be able to set a buy-in here
                         and believe the platform is going to collect it. */}

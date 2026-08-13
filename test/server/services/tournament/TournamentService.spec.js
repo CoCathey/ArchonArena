@@ -82,6 +82,8 @@ const createFakeDb = () => {
                     PrizeCurrency: params[37],
                     PrizeSplits: params[38],
                     PrizeNote: params[39],
+                    PaymentInstructions: params[40],
+                    RequirePayment: params[41],
                     Status: 'registration',
                     Stage: 'main',
                     CurrentRound: 0,
@@ -146,7 +148,9 @@ const createFakeDb = () => {
                         EntryFeeCents: params[31],
                         PrizeCurrency: params[32],
                         PrizeSplits: params[33],
-                        PrizeNote: params[34]
+                        PrizeNote: params[34],
+                        PaymentInstructions: params[35],
+                        RequirePayment: params[36]
                     });
                 }
                 return [];

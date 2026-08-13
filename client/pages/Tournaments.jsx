@@ -90,6 +90,8 @@ const Tournaments = () => {
                     ? form.prizeSplits.filter((split) => split.bps > 0)
                     : undefined,
                 prizeNote: form.prizeNote || undefined,
+                paymentInstructions: form.paymentInstructions || undefined,
+                requirePayment: !!form.requirePayment,
                 chainsPerMatchWin: form.chainsPerMatchWin || undefined,
                 allowedSets: form.allowedSets.length > 0 ? form.allowedSets : undefined,
                 bannedHouses: form.bannedHouses.length > 0 ? form.bannedHouses : undefined,

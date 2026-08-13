@@ -184,6 +184,17 @@ module.exports.init = function (server) {
         })
     );
 
+    // ARCHON: the entry-payment register. Staff only - authorized in the
+    // service, where the "not the player themselves" rule lives.
+    action('/api/tournaments/:id/set-paid', (req) =>
+        tournamentService.setPaid(
+            parseInt(req.params.id, 10),
+            req.user,
+            req.body.userId,
+            req.body.paid !== false
+        )
+    );
+
     action('/api/tournaments/:id/seeds', (req) =>
         tournamentService.setSeeds(parseInt(req.params.id, 10), req.user, req.body.seeds)
     );
@@ -304,17 +315,39 @@ module.exports.init = function (server) {
                 parseInt(req.params.matchId, 10),
                 req.user,
                 req.body.time,
-                req.body.note
+                req.body.note,
+                // The browser's own zone, so an offer can be shown as "8pm
+                // your time, 3am theirs". Advisory - see cleanZone.
+                req.body.zone
             ),
         matchTrafficLimit
     );
 
-    action('/api/tournaments/:id/matches/:matchId/accept-time', (req) =>
-        tournamentService.acceptMatchTime(
-            parseInt(req.params.id, 10),
-            parseInt(req.params.matchId, 10),
-            req.user
-        )
+    action(
+        '/api/tournaments/:id/matches/:matchId/accept-time',
+        (req) =>
+            tournamentService.acceptMatchTime(
+                parseInt(req.params.id, 10),
+                parseInt(req.params.matchId, 10),
+                req.user,
+                // Which of the offered times. Absent means "the only one",
+                // which is what an older client sends.
+                req.body.slotId
+            ),
+        matchTrafficLimit
+    );
+
+    // Take one of your own offers back without clearing the rest.
+    action(
+        '/api/tournaments/:id/matches/:matchId/withdraw-time',
+        (req) =>
+            tournamentService.withdrawMatchTime(
+                parseInt(req.params.id, 10),
+                parseInt(req.params.matchId, 10),
+                req.user,
+                req.body.slotId
+            ),
+        matchTrafficLimit
     );
 
     action('/api/tournaments/:id/matches/:matchId/clear-time', (req) =>

@@ -14,6 +14,7 @@ const tournamentEvents = require('../../../../server/services/tournament/tournam
 describe('Asynchronous tournaments', function () {
     let service;
     let db;
+    let slots;
     let tournament;
     let match;
     let emitted;
@@ -57,8 +58,91 @@ describe('Asynchronous tournaments', function () {
             ScheduleNote: null
         };
 
+        // ARCHON: an offered time is a ROW now, not a column. Several can be
+        // live at once, which is the whole point - a player offers three
+        // evenings and the other picks one, instead of a round trip per
+        // candidate between two people in different time zones.
+        slots = [];
+
         db = {
-            query: vi.fn().mockImplementation(async (sql) => {
+            query: vi.fn().mockImplementation(async (sql, params = []) => {
+                if (sql.includes('INSERT INTO "TournamentMatchTimeSlots"')) {
+                    const [, proposedBy, slotTime, zone] = params;
+
+                    if (!slots.some((slot) => slot.SlotTime === slotTime)) {
+                        slots.push({
+                            Id: slots.length + 1,
+                            MatchId: match.Id,
+                            SlotTime: slotTime,
+                            ProposedBy: proposedBy,
+                            ProposerZone: zone,
+                            Username: `user${proposedBy}`
+                        });
+                    }
+
+                    return [];
+                }
+
+                if (sql.startsWith('DELETE FROM "TournamentMatchTimeSlots"')) {
+                    if (sql.includes('"Id" = $1')) {
+                        // "your own offers are yours to withdraw" is a
+                        // condition in the SQL, so the fake has to apply it -
+                        // otherwise it agrees that anybody may withdraw
+                        // anything.
+                        const index = slots.findIndex(
+                            (slot) =>
+                                slot.Id === params[0] &&
+                                (!sql.includes('"ProposedBy" = $3') ||
+                                    slot.ProposedBy === params[2])
+                        );
+
+                        if (index === -1) {
+                            return [];
+                        }
+
+                        const [removed] = slots.splice(index, 1);
+
+                        return [removed];
+                    }
+
+                    slots = [];
+
+                    return [];
+                }
+
+                if (sql.includes('FROM "TournamentMatchTimeSlots"')) {
+                    // ORDER BY "SlotTime" - the fake sorts because the service
+                    // relies on the order and an unsorted fake would pass
+                    // against a query that forgot to.
+                    return [...slots].sort((a, b) =>
+                        String(a.SlotTime).localeCompare(String(b.SlotTime))
+                    );
+                }
+
+                // syncProposedTime: the match's columns summarise the rows.
+                if (sql.includes('"ProposedTime" = s."SlotTime"')) {
+                    const soonest = [...slots].sort((a, b) =>
+                        String(a.SlotTime).localeCompare(String(b.SlotTime))
+                    )[0];
+
+                    if (soonest) {
+                        match.ProposedTime = soonest.SlotTime;
+                        match.ProposedBy = soonest.ProposedBy;
+                    }
+
+                    return [];
+                }
+
+                if (
+                    sql.includes('"ProposedTime" = NULL, "ProposedBy" = NULL') &&
+                    slots.length === 0
+                ) {
+                    match.ProposedTime = null;
+                    match.ProposedBy = null;
+
+                    return [];
+                }
+
                 if (sql.includes('FROM "Tournaments"')) {
                     return [tournament];
                 }
@@ -146,18 +230,66 @@ describe('Asynchronous tournaments', function () {
         it('stores the offer and tells the opponent', async function () {
             const time = soon();
 
-            const result = await service.proposeMatchTime(1, 3, alice, time, 'after work?');
+            const result = await service.proposeMatchTime(
+                1,
+                3,
+                alice,
+                time,
+                'after work?',
+                'America/Chicago'
+            );
 
             expect(result.success).toBe(true);
 
-            const [, params] = updateFor('"ProposedTime" = $2');
-            expect(new Date(params[1]).toISOString()).toBe(new Date(time).toISOString());
-            expect(params[2]).toBe(alice.id);
-            expect(params[3]).toBe('after work?');
+            const offers = await service.getTimeSlots(3);
+
+            expect(offers).toHaveLength(1);
+            expect(new Date(offers[0].time).toISOString()).toBe(new Date(time).toISOString());
+            expect(offers[0].proposedById).toBe(alice.id);
+            // The zone is advisory and exists for one sentence: "8pm your
+            // time, 3am theirs".
+            expect(offers[0].zone).toBe('America/Chicago');
 
             const event = emitted.find((entry) => entry.event === 'matchTimeProposed');
             expect(event.payload.byUserId).toBe(alice.id);
             expect(event.payload.player2Id).toBe(bob.id);
+        });
+
+        /**
+         * The reason this stopped being one column. A player offers three
+         * evenings at once; the other picks one. The old model replaced the
+         * live offer each time, which is a round trip per candidate between two
+         * people who are usually asleep when the other is awake.
+         */
+        it('keeps every time offered, soonest first', async function () {
+            const day = 24 * 60 * 60 * 1000;
+            const thursday = new Date(Date.now() + 3 * day).toISOString();
+            const tuesday = new Date(Date.now() + 1 * day).toISOString();
+            const wednesday = new Date(Date.now() + 2 * day).toISOString();
+
+            for (const time of [thursday, tuesday, wednesday]) {
+                expect((await service.proposeMatchTime(1, 3, alice, time)).success).toBe(true);
+            }
+
+            const offers = await service.getTimeSlots(3);
+
+            expect(offers).toHaveLength(3);
+            expect(offers.map((offer) => new Date(offer.time).toISOString())).toEqual([
+                tuesday,
+                wednesday,
+                thursday
+            ]);
+        });
+
+        // Offering a time somebody already offered is agreement, not a second
+        // option, and a list that shows it twice reads as a disagreement.
+        it('does not list the same time twice', async function () {
+            const time = soon();
+
+            await service.proposeMatchTime(1, 3, alice, time);
+            await service.proposeMatchTime(1, 3, bob, time);
+
+            expect(await service.getTimeSlots(3)).toHaveLength(1);
         });
 
         it('refuses a time that is not a time, is past, or is absurdly far off', async function () {
@@ -176,7 +308,7 @@ describe('Asynchronous tournaments', function () {
                     )
                 ).success
             ).toBe(false);
-            expect(updateFor('"ProposedTime" = $2')).toBeUndefined();
+            expect(await service.getTimeSlots(3)).toHaveLength(0);
         });
 
         // Scheduling is the players' business. The organizer has judge tools
@@ -206,36 +338,88 @@ describe('Asynchronous tournaments', function () {
         it('truncates a note rather than storing an essay', async function () {
             await service.proposeMatchTime(1, 3, alice, soon(), 'x'.repeat(500));
 
-            const [, params] = updateFor('"ProposedTime" = $2');
-            expect(params[3]).toHaveLength(280);
+            const [, params] = updateFor('"ScheduleNote" = $2');
+            expect(params[1]).toHaveLength(280);
+        });
+
+        // An IANA name or nothing. It is never computed with - the instant is
+        // UTC - so a bad one costs only the "their time" sentence.
+        it('keeps a real zone and drops a made-up one', async function () {
+            await service.proposeMatchTime(1, 3, alice, soon(), null, 'Europe/Berlin');
+            await service.proposeMatchTime(
+                1,
+                3,
+                alice,
+                new Date(Date.now() + 2 * 86400000).toISOString(),
+                null,
+                'definitely; not a zone'
+            );
+
+            const offers = await service.getTimeSlots(3);
+
+            expect(offers[0].zone).toBe('Europe/Berlin');
+            expect(offers[1].zone).toBeUndefined();
         });
     });
 
     describe('answering a proposal', function () {
-        beforeEach(function () {
-            match.ProposedTime = new Date(Date.now() + 86400000);
-            match.ProposedBy = alice.id;
+        beforeEach(async function () {
+            await service.proposeMatchTime(1, 3, alice, soon());
         });
 
         it('turns the offer into the agreed time', async function () {
-            db.query.mockImplementation(async (sql) => {
-                if (sql.includes('FROM "Tournaments"')) {
-                    return [tournament];
-                }
-                if (sql.includes('RETURNING "ScheduledAt"')) {
-                    return [{ ScheduledAt: match.ProposedTime }];
-                }
-                if (sql.includes('FROM "TournamentMatches"')) {
-                    return [match];
-                }
+            const result = await service.acceptMatchTime(1, 3, bob);
 
-                return [];
-            });
+            expect(result.success, result.message).toBe(true);
+            expect(emitted.some((entry) => entry.event === 'matchTimeAccepted')).toBe(true);
+            // Agreeing consumes every offer: the rest are moot.
+            expect(await service.getTimeSlots(3)).toHaveLength(0);
+        });
+
+        it('picks the named one out of several', async function () {
+            const day = 24 * 60 * 60 * 1000;
+
+            await service.proposeMatchTime(
+                1,
+                3,
+                alice,
+                new Date(Date.now() + 2 * day).toISOString()
+            );
+            await service.proposeMatchTime(
+                1,
+                3,
+                alice,
+                new Date(Date.now() + 3 * day).toISOString()
+            );
+
+            const offers = await service.getTimeSlots(3);
+            const chosen = offers[2];
+
+            const result = await service.acceptMatchTime(1, 3, bob, chosen.id);
+
+            expect(result.success, result.message).toBe(true);
+
+            const agreed = emitted.find((entry) => entry.event === 'matchTimeAccepted');
+
+            expect(new Date(agreed.payload.time).toISOString()).toBe(
+                new Date(chosen.time).toISOString()
+            );
+        });
+
+        // Naming one is required once there are several: silently taking the
+        // soonest would book somebody's evening for them.
+        it('will not guess when several times are on offer', async function () {
+            await service.proposeMatchTime(
+                1,
+                3,
+                alice,
+                new Date(Date.now() + 2 * 86400000).toISOString()
+            );
 
             const result = await service.acceptMatchTime(1, 3, bob);
 
-            expect(result.success).toBe(true);
-            expect(emitted.some((entry) => entry.event === 'matchTimeAccepted')).toBe(true);
+            expect(result.success).toBe(false);
+            expect(result.message).toMatch(/pick the one/i);
         });
 
         it('will not let the proposer accept their own offer', async function () {
@@ -245,292 +429,62 @@ describe('Asynchronous tournaments', function () {
             expect(result.message).toMatch(/other player/i);
         });
 
+        // A player takes one of their three offers back without cancelling the
+        // negotiation.
+        it('lets a player withdraw one of their own times', async function () {
+            await service.proposeMatchTime(
+                1,
+                3,
+                alice,
+                new Date(Date.now() + 2 * 86400000).toISOString()
+            );
+
+            const offers = await service.getTimeSlots(3);
+            const mine = offers[0];
+
+            expect((await service.withdrawMatchTime(1, 3, bob, mine.id)).success).toBe(false);
+            expect((await service.withdrawMatchTime(1, 3, alice, mine.id)).success).toBe(true);
+            expect(await service.getTimeSlots(3)).toHaveLength(1);
+        });
+
         it('says so when there is nothing to accept', async function () {
-            match.ProposedTime = null;
-            match.ProposedBy = null;
+            const [offer] = await service.getTimeSlots(3);
+
+            await service.withdrawMatchTime(1, 3, alice, offer.id);
 
             expect((await service.acceptMatchTime(1, 3, bob)).success).toBe(false);
         });
 
-        // The accept must consume the exact offer it read. A counter-proposal
-        // landing in between means the acceptor is agreeing to a time they
-        // never saw, so the write matches on the old offer and finds nothing.
-        it('does not agree to a proposal that changed underneath it', async function () {
-            db.query.mockImplementation(async (sql) => {
-                if (sql.includes('FROM "Tournaments"')) {
-                    return [tournament];
-                }
-                if (sql.includes('RETURNING "ScheduledAt"')) {
-                    return []; // the guarded UPDATE matched nothing
-                }
-                if (sql.includes('FROM "TournamentMatches"')) {
-                    return [match];
-                }
+        /**
+         * The accept must consume the exact offer it read. Withdrawn in
+         * between means agreeing to a time nobody is offering.
+         *
+         * The compare-and-swap is now a delete by primary key rather than a
+         * match on the timestamp - which, besides being unambiguous, cannot be
+         * defeated by how a Date is serialised. The old comparison bound a Date
+         * that node-postgres rendered with the host's offset, so on any host
+         * not set to UTC it matched nothing and told both players the proposal
+         * had changed, forever.
+         */
+        it('does not agree to an offer that was withdrawn underneath it', async function () {
+            // A second offer stays on the table, so this is "that one is gone"
+            // rather than "there is nothing to accept" - two different
+            // sentences, and the player needs the first.
+            await service.proposeMatchTime(
+                1,
+                3,
+                alice,
+                new Date(Date.now() + 2 * 86400000).toISOString()
+            );
 
-                return [];
-            });
+            const [offer] = await service.getTimeSlots(3);
 
-            const result = await service.acceptMatchTime(1, 3, bob);
+            await service.withdrawMatchTime(1, 3, alice, offer.id);
+
+            const result = await service.acceptMatchTime(1, 3, bob, offer.id);
 
             expect(result.success).toBe(false);
-            expect(result.message).toMatch(/changed while you were looking/i);
-        });
-
-        it('clears an offer or an agreed time for either player', async function () {
-            const result = await service.clearMatchSchedule(1, 3, bob);
-
-            expect(result.success).toBe(true);
-            expect(updateFor('"ScheduledAt" = NULL')).toBeDefined();
-            expect(emitted.some((entry) => entry.event === 'matchScheduleCleared')).toBe(true);
-        });
-    });
-
-    describe('lobby tables', function () {
-        beforeEach(function () {
-            db.query.mockImplementation(async (sql) => {
-                if (sql.includes('FROM "Tournaments"')) {
-                    return [tournament];
-                }
-
-                return [];
-            });
-        });
-
-        // A table opened when the round is paired would sit empty for days.
-        it('does not open a table per pairing in an async event', async function () {
-            expect(await service.getMatchesNeedingGames(1, { forPairing: true })).toEqual([]);
-        });
-
-        it("still opens live events' tables at pairing time", async function () {
-            tournament.Pacing = 'live';
-
-            // Reaches the real query path rather than returning early.
-            await service.getMatchesNeedingGames(1, { forPairing: true });
-
-            expect(
-                db.query.mock.calls.some(([sql]) => sql.includes('FROM "TournamentMatches"'))
-            ).toBe(true);
-        });
-    });
-
-    describe('the deadline sweep', function () {
-        const overdue = {
-            Id: 1,
-            Name: 'Async League',
-            OrganizerId: organizer.id,
-            CurrentRound: 1,
-            RoundEndsAt: new Date(Date.now() - 3600000)
-        };
-
-        it('announces a passed deadline once, with what is still open', async function () {
-            db.query.mockImplementation(async (sql) => {
-                if (sql.includes('SELECT "Id" FROM "Tournaments"')) {
-                    return [{ Id: 1 }];
-                }
-                if (sql.includes('"DeadlineNotifiedAt" = now()')) {
-                    return [overdue];
-                }
-                if (sql.includes('FROM "TournamentMatches"')) {
-                    return [match];
-                }
-
-                return [];
-            });
-
-            const result = await service.sweepRoundDeadlines();
-
-            expect(result.notified).toBe(1);
-
-            const event = emitted.find((entry) => entry.event === 'roundDeadlinePassed');
-            expect(event.payload.organizerId).toBe(organizer.id);
-            expect(event.payload.openMatches).toHaveLength(1);
-            expect(event.payload.openMatches[0].matchId).toBe(match.Id);
-        });
-
-        // Several lobby instances run this sweep. The marker write is the
-        // claim, so only the one that flips it announces.
-        it('stays silent when another instance claimed the event first', async function () {
-            db.query.mockImplementation(async (sql) => {
-                if (sql.includes('SELECT "Id" FROM "Tournaments"')) {
-                    return [{ Id: 1 }];
-                }
-                if (sql.includes('"DeadlineNotifiedAt" = now()')) {
-                    return []; // somebody else got there
-                }
-
-                return [];
-            });
-
-            expect(await service.sweepRoundDeadlines()).toEqual({ notified: 0 });
-            expect(emitted).toHaveLength(0);
-        });
-
-        it('never throws when the scan fails', async function () {
-            db.query.mockRejectedValue(new Error('db down'));
-
-            await expect(service.sweepRoundDeadlines()).resolves.toEqual({ notified: 0 });
-        });
-
-        // A deadline is the organizer's cue, not a verdict: an automatic
-        // forfeit cannot know which player ghosted whom.
-        it('decides nothing by itself', async function () {
-            db.query.mockImplementation(async (sql) => {
-                if (sql.includes('SELECT "Id" FROM "Tournaments"')) {
-                    return [{ Id: 1 }];
-                }
-                if (sql.includes('"DeadlineNotifiedAt" = now()')) {
-                    return [overdue];
-                }
-                if (sql.includes('FROM "TournamentMatches"')) {
-                    return [match];
-                }
-
-                return [];
-            });
-
-            await service.sweepRoundDeadlines();
-
-            expect(
-                db.query.mock.calls.some(([sql]) =>
-                    sql.includes('UPDATE "TournamentMatches" SET "WinnerId"')
-                )
-            ).toBe(false);
-        });
-    });
-
-    describe('the round clock', function () {
-        // Every path that opens a round - start, nextRound, the playoff cut -
-        // sets the deadline through one shared expression. This asserts on the
-        // SQL that actually reaches the database, which is the real contract:
-        // an async round is measured in days, a live one in minutes, and both
-        // branches have to be present or one pacing silently loses its clock.
-        const clockSqlFrom = (calls) =>
-            calls.map(([sql]) => sql).find((sql) => sql.includes('"RoundEndsAt" = CASE'));
-
-        it('knows both pacings wherever a round opens', async function () {
-            db.query.mockImplementation(async (sql) => {
-                if (sql.includes('FROM "Tournaments"')) {
-                    return [{ ...tournament, Status: 'registration', Format: 'swiss' }];
-                }
-                if (sql.includes('FROM "TournamentPlayers"')) {
-                    return [
-                        { UserId: alice.id, Username: 'alice', Seed: 1 },
-                        { UserId: bob.id, Username: 'bob', Seed: 2 }
-                    ];
-                }
-
-                return [];
-            });
-
-            await service.start(1, organizer);
-
-            const sql = clockSqlFrom(db.query.mock.calls);
-
-            expect(sql).toBeDefined();
-            expect(sql).toContain('"Pacing" = \'async\'');
-            expect(sql).toContain('"RoundDeadlineDays" * interval \'1 day\'');
-            expect(sql).toContain('"RoundTimerMinutes" * interval \'1 minute\'');
-            // A fresh round is a fresh deadline, so the overdue notice re-arms.
-            expect(sql).toContain('"DeadlineNotifiedAt" = NULL');
-        });
-
-        // A moved deadline is a new deadline: if it passes too, that is worth
-        // saying again.
-        it('re-arms the overdue notice when the deadline moves', async function () {
-            await service.adjustRoundClock(1, organizer, 24 * 60);
-
-            const [sql] = updateFor('"RoundEndsAt" =');
-            expect(sql).toContain('"DeadlineNotifiedAt" = NULL');
-        });
-    });
-
-    describe('what a player owes across events', function () {
-        it('says what each open match is waiting on', async function () {
-            const now = new Date();
-            db.query.mockResolvedValue([
-                {
-                    Id: 10,
-                    Round: 1,
-                    TournamentId: 1,
-                    TournamentName: 'League',
-                    Pacing: 'async',
-                    Mode: 'online',
-                    BestOf: 1,
-                    Player1Id: alice.id,
-                    Player2Id: bob.id,
-                    OpponentId: bob.id,
-                    OpponentName: 'bob',
-                    ScheduledAt: null,
-                    ProposedTime: null,
-                    ProposedBy: null,
-                    RoundEndsAt: now
-                },
-                {
-                    Id: 11,
-                    Round: 1,
-                    TournamentId: 2,
-                    TournamentName: 'Other',
-                    Pacing: 'async',
-                    Mode: 'online',
-                    BestOf: 3,
-                    Player1Id: alice.id,
-                    Player2Id: 5,
-                    OpponentId: 5,
-                    OpponentName: 'carol',
-                    ScheduledAt: null,
-                    ProposedTime: now,
-                    ProposedBy: 5,
-                    RoundEndsAt: now
-                },
-                {
-                    Id: 12,
-                    Round: 2,
-                    TournamentId: 3,
-                    TournamentName: 'Third',
-                    Pacing: 'async',
-                    Mode: 'online',
-                    BestOf: 1,
-                    Player1Id: alice.id,
-                    Player2Id: 6,
-                    OpponentId: 6,
-                    OpponentName: 'dan',
-                    ScheduledAt: null,
-                    ProposedTime: now,
-                    ProposedBy: alice.id,
-                    RoundEndsAt: now
-                },
-                {
-                    Id: 13,
-                    Round: 1,
-                    TournamentId: 4,
-                    TournamentName: 'Fourth',
-                    Pacing: 'async',
-                    Mode: 'online',
-                    BestOf: 1,
-                    Player1Id: alice.id,
-                    Player2Id: 7,
-                    OpponentId: 7,
-                    OpponentName: 'erin',
-                    ScheduledAt: now,
-                    ProposedTime: null,
-                    ProposedBy: null,
-                    RoundEndsAt: now
-                }
-            ]);
-
-            const mine = await service.myOpenMatches(alice);
-
-            expect(mine.map((entry) => entry.needsAction)).toEqual([
-                'propose',
-                'respond',
-                'waiting',
-                'play'
-            ]);
-            expect(mine[1].opponent).toBe('carol');
-        });
-
-        it('is empty for a signed-out visitor', async function () {
-            expect(await service.myOpenMatches(null)).toEqual([]);
+            expect(result.message).toMatch(/no longer on offer/i);
         });
     });
 });

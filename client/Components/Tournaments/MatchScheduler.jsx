@@ -10,16 +10,22 @@ import { Button as HeroButton, Input } from '@heroui/react';
  * whatever Discord the organizer runs, and the platform - which knows the
  * deadline, both players and the match - contributes nothing.
  *
- * The exchange is deliberately a two-state machine rather than a thread:
- * somebody proposes a time (optionally with a note), the other accepts it or
- * counter-proposes, and a counter-proposal simply replaces the live offer.
- * That is how scheduling actually converges, and it means the UI never has to
- * render a conversation.
+ * A player offers one or more times; the other picks one, or adds more of
+ * their own. It used to be a single live offer that a counter-proposal
+ * replaced, which is one round trip per candidate time between two people who
+ * are usually asleep when the other is awake - two players three zones apart
+ * could spend a day of a three-day round finding out that Thursday does not
+ * work either.
  *
  * All times are entered and shown in the reader's OWN timezone - the input is
  * a plain datetime-local, converted to UTC on the way out and back on the way
  * in. A cross-timezone event is the normal case for an async league, so a
  * screen that quietly meant "server time" would book the wrong hour.
+ *
+ * And an offer carries the zone it was made from, so it can be read back as
+ * "8pm your time, 3am theirs" - the sentence that stops somebody agreeing to a
+ * match at three in the morning. The browser knows both without anybody
+ * configuring anything.
  */
 
 /** Timestamps come back from Postgres without a zone; they are UTC. */
@@ -52,6 +58,47 @@ const defaultProposal = () => {
     date.setHours(19, 0, 0, 0);
 
     return toLocalInputValue(date);
+};
+
+/** The reader's own zone, as the browser knows it. */
+const myZone = () => {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+        return undefined;
+    }
+};
+
+/**
+ * The same instant in somebody else's zone, when that is a different answer.
+ *
+ * Returns nothing when the two zones agree on the wall clock - which is the
+ * common case even across different zone NAMES, and appending "(also 8pm their
+ * time)" to every offer would be noise that trains people to stop reading it.
+ */
+const inTheirZone = (date, zone) => {
+    if (!date || !zone || zone === myZone()) {
+        return null;
+    }
+
+    try {
+        const theirs = date.toLocaleString(undefined, {
+            timeZone: zone,
+            weekday: 'short',
+            hour: 'numeric',
+            minute: '2-digit'
+        });
+        const mine = date.toLocaleString(undefined, {
+            weekday: 'short',
+            hour: 'numeric',
+            minute: '2-digit'
+        });
+
+        return theirs === mine ? null : theirs;
+    } catch {
+        // An unrecognised zone costs the sentence and nothing else.
+        return null;
+    }
 };
 
 const formatWhen = (date, t) => {
@@ -87,8 +134,22 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
     }
 
     const scheduled = asUtc(match.scheduledAt);
-    const proposed = asUtc(match.proposedTime);
-    const iProposed = match.proposedBy === user.id;
+    // Every time currently on the table. Older payloads carry only the single
+    // proposedTime, so it is folded in as one offer - otherwise upgrading the
+    // server would blank the scheduler for any client still holding an old
+    // event in memory.
+    const offers =
+        match.timeSlots && match.timeSlots.length > 0
+            ? match.timeSlots
+            : match.proposedTime
+            ? [
+                  {
+                      id: null,
+                      time: match.proposedTime,
+                      proposedById: match.proposedBy
+                  }
+              ]
+            : [];
     const deadlineDate = asUtc(deadline);
     const pastDeadline = deadlineDate && deadlineDate.getTime() < Date.now();
 
@@ -118,8 +179,13 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
 
         send(
             'propose-time',
-            { time: when.toISOString(), note: note.trim() || undefined },
-            t('Time proposed - your opponent has been notified')
+            {
+                time: when.toISOString(),
+                note: note.trim() || undefined,
+                // So the other player can be shown "8pm your time, 3am theirs".
+                zone: myZone()
+            },
+            t('Time offered - your opponent has been notified')
         );
     };
 
@@ -195,62 +261,103 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
         );
     }
 
-    // A live offer: the recipient answers it, the proposer waits or withdraws.
-    if (proposed) {
+    // Live offers: the recipient picks one or adds their own; the proposer
+    // waits, or takes one back without cancelling the whole negotiation.
+    if (offers.length > 0) {
         return (
             <div className={compact ? '' : 'mt-2 border-t border-border/40 pt-2'}>
-                <div className='flex flex-wrap items-center gap-2 text-sm'>
+                <div className='mb-1 flex flex-wrap items-center gap-2 text-sm'>
                     <span className='rounded border border-amber-400/50 bg-amber-400/10 px-1.5 py-0.5 text-xs font-semibold text-amber-300'>
-                        {iProposed ? t('You proposed') : t('Proposed')}
+                        {offers.length === 1
+                            ? t('1 time offered')
+                            : t('{{count}} times offered', { count: offers.length })}
                     </span>
-                    <span className='text-foreground'>{formatWhen(proposed, t)}</span>
                     {match.scheduleNote && (
                         <span className='text-xs italic text-muted'>
                             &ldquo;{match.scheduleNote}&rdquo;
                         </span>
                     )}
-                    <span className='ml-auto flex flex-wrap gap-2'>
-                        {iProposed ? (
-                            <>
-                                <span className='self-center text-xs text-muted'>
-                                    {t('Waiting for {{name}}', {
-                                        name: opponentName || t('your opponent')
-                                    })}
-                                </span>
-                                <HeroButton
-                                    size='sm'
-                                    variant='tertiary'
-                                    className='!h-7 !px-2 text-xs'
-                                    onPress={() => send('clear-time', {}, t('Proposal withdrawn'))}
-                                >
-                                    {t('Withdraw')}
-                                </HeroButton>
-                            </>
-                        ) : (
-                            <>
-                                <HeroButton
-                                    size='sm'
-                                    variant='primary'
-                                    className='!h-7 !px-2 text-xs'
-                                    onPress={() => send('accept-time', {}, t('Match time agreed'))}
-                                >
-                                    {t('Accept')}
-                                </HeroButton>
-                                <HeroButton
-                                    size='sm'
-                                    variant='tertiary'
-                                    className='!h-7 !px-2 text-xs'
-                                    onPress={() => {
-                                        setTime(toLocalInputValue(proposed));
-                                        setProposing(true);
-                                    }}
-                                >
-                                    {t('Suggest another')}
-                                </HeroButton>
-                            </>
-                        )}
-                    </span>
+                    {!proposing && (
+                        <HeroButton
+                            size='sm'
+                            variant='tertiary'
+                            className='!h-7 !px-2 text-xs'
+                            onPress={() => setProposing(true)}
+                        >
+                            {t('Offer another time')}
+                        </HeroButton>
+                    )}
                 </div>
+
+                <div className='space-y-1'>
+                    {offers.map((offer) => {
+                        const when = asUtc(offer.time);
+                        const mine = offer.proposedById === user.id;
+                        const theirs = inTheirZone(when, offer.zone);
+
+                        return (
+                            <div
+                                key={offer.id}
+                                className='flex flex-wrap items-center gap-2 rounded border border-border/50 bg-surface-secondary/40 px-2 py-1 text-sm'
+                            >
+                                <span className='text-foreground'>{formatWhen(when, t)}</span>
+                                {/* The one sentence the stored zone exists for.
+                                    Only when the two zones actually disagree -
+                                    otherwise it is noise on every row. */}
+                                {theirs && (
+                                    <span className='text-xs text-muted'>
+                                        {t('({{time}} for {{name}})', {
+                                            time: theirs,
+                                            name: mine ? t('you') : opponentName || t('them')
+                                        })}
+                                    </span>
+                                )}
+                                <span className='ml-auto flex flex-wrap gap-2'>
+                                    {mine ? (
+                                        <HeroButton
+                                            size='sm'
+                                            variant='tertiary'
+                                            className='!h-6 !px-2 text-xs'
+                                            onPress={() =>
+                                                send(
+                                                    'withdraw-time',
+                                                    { slotId: offer.id },
+                                                    t('Time withdrawn')
+                                                )
+                                            }
+                                        >
+                                            {t('Withdraw')}
+                                        </HeroButton>
+                                    ) : (
+                                        <HeroButton
+                                            size='sm'
+                                            variant='primary'
+                                            className='!h-6 !px-2 text-xs'
+                                            onPress={() =>
+                                                send(
+                                                    'accept-time',
+                                                    { slotId: offer.id },
+                                                    t('Match time agreed')
+                                                )
+                                            }
+                                        >
+                                            {t('Play then')}
+                                        </HeroButton>
+                                    )}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {offers.every((offer) => offer.proposedById === user.id) && (
+                    <div className='mt-1 text-xs text-muted'>
+                        {t('Waiting for {{name}} to pick one or offer their own', {
+                            name: opponentName || t('your opponent')
+                        })}
+                    </div>
+                )}
+
                 {proposing && proposeForm}
             </div>
         );

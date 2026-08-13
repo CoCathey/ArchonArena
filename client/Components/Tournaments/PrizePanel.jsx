@@ -124,6 +124,24 @@ const PrizePanel = ({ tournament, players }) => {
                 </div>
             )}
 
+            {/* ARCHON: how to pay, next to what it costs. A fee with no way to
+                pay it is the most obvious question an event can leave open, and
+                it was the one the buy-in used to leave. Hidden once the event
+                is over, when it is no longer anything anyone can act on. */}
+            {tournament.paymentInstructions && !finished && (
+                <div className='mt-2 whitespace-pre-wrap rounded border border-emerald-500/25 bg-emerald-500/5 px-2 py-1.5 text-sm text-foreground/90'>
+                    <span className='mr-1 font-semibold text-emerald-300'>{t('How to pay:')}</span>
+                    {tournament.paymentInstructions}
+                    {tournament.requirePayment && (
+                        <span className='mt-1 block text-xs text-amber-600 dark:text-amber-300'>
+                            {t(
+                                'The event will not start until everyone entered has been marked paid.'
+                            )}
+                        </span>
+                    )}
+                </div>
+            )}
+
             {tournament.prizeNote && (
                 <div className='mt-2 whitespace-pre-wrap border-t border-emerald-500/20 pt-2 text-sm text-foreground/85'>
                     {tournament.prizeNote}

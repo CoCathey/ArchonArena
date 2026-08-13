@@ -79,6 +79,63 @@ const PlayersPanel = ({ tournament, players, act }) => {
                         {t('not checked in')}
                     </span>
                 ))}
+            {/* ARCHON: the entry-payment register, in the roster where the
+                organizer is already ticking people off.
+
+                Staff only, and never the player themselves - a register anybody
+                can tick their own name on is not a register. The tick names who
+                made it, because "which judge marked me paid" is the question
+                that settles a disagreement, and a bare checkbox cannot answer
+                it. The platform still takes none of the money. */}
+            {tournament.entryFeeCents > 0 &&
+                !waitlisted &&
+                (player.paid ? (
+                    <span
+                        className='rounded bg-emerald-500/15 px-1.5 text-xs text-emerald-400'
+                        title={
+                            player.paidBy
+                                ? t('Marked paid by {{staff}}', { staff: player.paidBy })
+                                : undefined
+                        }
+                    >
+                        {tournament.canManage ? (
+                            <button
+                                type='button'
+                                className='underline-offset-2 hover:underline'
+                                onClick={() =>
+                                    act(
+                                        'set-paid',
+                                        { userId: player.userId, paid: false },
+                                        t('{{player}} marked unpaid', { player: player.username })
+                                    )
+                                }
+                            >
+                                {t('paid')}
+                            </button>
+                        ) : (
+                            t('paid')
+                        )}
+                    </span>
+                ) : tournament.canManage ? (
+                    <HeroButton
+                        size='sm'
+                        variant='tertiary'
+                        className='!h-5 !min-w-0 !px-1.5 text-xs'
+                        onPress={() =>
+                            act(
+                                'set-paid',
+                                { userId: player.userId, paid: true },
+                                t('{{player}} marked paid', { player: player.username })
+                            )
+                        }
+                    >
+                        {t('Mark paid')}
+                    </HeroButton>
+                ) : (
+                    <span className='rounded bg-amber-400/15 px-1.5 text-xs text-amber-300'>
+                        {t('unpaid')}
+                    </span>
+                ))}
             {tournament.triad ? (
                 player.hasDeck ? (
                     (player.triadDecks || []).map((deck) => (

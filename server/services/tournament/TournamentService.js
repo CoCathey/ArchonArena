@@ -96,6 +96,22 @@ const PRIZE_CURRENCIES = [
 const MAX_ENTRY_FEE_CENTS = 1000000;
 /** 100% in basis points. Mirrors FULL_SHARE in client prizePool.js. */
 const FULL_SHARE_BPS = 10000;
+/**
+ * An IANA time-zone name as the browser reports it ('America/Chicago'), or
+ * null.
+ *
+ * Advisory throughout: it exists so an offer can be shown as "8pm your time,
+ * 3am theirs", which is the sentence that stops somebody agreeing to a match at
+ * three in the morning. Never computed with - the instant is UTC, as
+ * everywhere else - so an unrecognised one costs only that sentence.
+ */
+const cleanZone = (zone) => {
+    const text = String(zone || '').trim();
+
+    return /^[A-Za-z_+-]+\/[A-Za-z0-9_+-]+(\/[A-Za-z0-9_+-]+)?$|^UTC$/.test(text)
+        ? text.slice(0, 64)
+        : null;
+};
 // House codes as stored in the Houses table.
 const HOUSE_CODES = [
     'brobnar',
@@ -607,6 +623,15 @@ class TournamentService {
 
         out.prizeCurrency = PRIZE_CURRENCIES.includes(currency) ? currency : 'USD';
         out.prizeNote = (options.prizeNote || '').trim().slice(0, 500) || null;
+        // How to pay. Longer than the payout note because it may carry a
+        // handle, a link and a deadline.
+        out.paymentInstructions = (options.paymentInstructions || '').trim().slice(0, 1000) || null;
+
+        // Whether start() refuses to begin with unpaid players in the room.
+        // Meaningless without a fee, and quietly dropped rather than refused:
+        // an organizer clearing the fee has said the event is free, and
+        // arguing with them about a leftover checkbox helps nobody.
+        out.requirePayment = out.entryFeeCents ? !!options.requirePayment : false;
 
         const rawSplits = options.prizeSplits;
 
@@ -700,10 +725,12 @@ class TournamentService {
                 '"AdaptiveBo3", "Pacing", "RoundDeadlineDays", ' +
                 // ARCHON: the announced buy-in and prize split. Recorded only -
                 // the platform never holds or moves the money.
-                '"EntryFeeCents", "PrizeCurrency", "PrizeSplits", "PrizeNote", "CreatedAt") ' +
+                '"EntryFeeCents", "PrizeCurrency", "PrizeSplits", "PrizeNote", ' +
+                // ARCHON: how to pay, and whether the start button enforces it.
+                '"PaymentInstructions", "RequirePayment", "CreatedAt") ' +
                 'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ' +
                 '$16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, ' +
-                '$30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, ' +
+                '$30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, ' +
                 'now() AT TIME ZONE \'utc\') RETURNING "Id"',
             [
                 values.name,
@@ -745,7 +772,9 @@ class TournamentService {
                 values.entryFeeCents,
                 values.prizeCurrency,
                 values.prizeSplits ? JSON.stringify(values.prizeSplits) : null,
-                values.prizeNote
+                values.prizeNote,
+                values.paymentInstructions,
+                values.requirePayment
             ]
         );
 
@@ -827,6 +856,8 @@ class TournamentService {
                 prizeCurrency: tournament.PrizeCurrency,
                 prizeSplits: this.parseJsonColumn(tournament.PrizeSplits),
                 prizeNote: tournament.PrizeNote,
+                paymentInstructions: tournament.PaymentInstructions,
+                requirePayment: tournament.RequirePayment,
                 ...options
             };
 
@@ -854,7 +885,8 @@ class TournamentService {
                     '"AllowedSets" = $24, "RequiredHouses" = $25, "BannedHouses" = $26, ' +
                     '"SasChainHandicap" = $27, "ChainsPerMatchWin" = $28, "Triad" = $29, ' +
                     '"Pacing" = $30, "RoundDeadlineDays" = $31, "EntryFeeCents" = $32, ' +
-                    '"PrizeCurrency" = $33, "PrizeSplits" = $34, "PrizeNote" = $35 ' +
+                    '"PrizeCurrency" = $33, "PrizeSplits" = $34, "PrizeNote" = $35, ' +
+                    '"PaymentInstructions" = $36, "RequirePayment" = $37 ' +
                     'WHERE "Id" = $1',
                 [
                     tournamentId,
@@ -891,7 +923,9 @@ class TournamentService {
                     values.entryFeeCents,
                     values.prizeCurrency,
                     values.prizeSplits ? JSON.stringify(values.prizeSplits) : null,
-                    values.prizeNote
+                    values.prizeNote,
+                    values.paymentInstructions,
+                    values.requirePayment
                 ]
             );
 
@@ -1092,8 +1126,13 @@ class TournamentService {
         return await this.db.query(
             'SELECT tp."UserId", tp."Dropped", tp."Seed", tp."DeckId", tp."CheckedIn", ' +
                 'tp."Waitlisted", tp."FinalRank", tp."EventChains", u."Username", ' +
+                // ARCHON: the entry-payment register. PaidBy is joined for its
+                // username because "who marked this paid" is the question that
+                // actually gets asked when a player and an organizer disagree.
+                'tp."PaidAt", tp."PaidBy", pb."Username" AS "PaidByUsername", ' +
                 'd."Name" AS "DeckName", d."Uuid" AS "DeckUuid", ds."SasRating" ' +
                 'FROM "TournamentPlayers" tp JOIN "Users" u ON u."Id" = tp."UserId" ' +
+                'LEFT JOIN "Users" pb ON pb."Id" = tp."PaidBy" ' +
                 'LEFT JOIN "Decks" d ON d."Id" = tp."DeckId" ' +
                 'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
                 'WHERE tp."TournamentId" = $1 ORDER BY tp."Id"',
@@ -1152,7 +1191,7 @@ class TournamentService {
             return { success: false, message: 'No such tournament' };
         }
 
-        const [players, matches, organizerRows, staffRows, gameRows, triadPools] =
+        const [players, matches, organizerRows, staffRows, gameRows, triadPools, slotRows] =
             await Promise.all([
                 this.getPlayers(tournamentId),
                 this.getMatches(tournamentId),
@@ -1169,8 +1208,30 @@ class TournamentService {
                         'WHERE "TournamentId" = $1 ORDER BY "MatchId", "GameNumber"',
                     [tournamentId]
                 ),
-                tournament.Triad ? this.getTriadPools(tournamentId) : Promise.resolve({})
+                tournament.Triad ? this.getTriadPools(tournamentId) : Promise.resolve({}),
+                // ARCHON: the live time offers for every match in one read.
+                // Per-match would be a query per row of the pairings table.
+                this.db.query(
+                    'SELECT s."Id", s."MatchId", s."SlotTime", s."ProposedBy", s."ProposerZone", ' +
+                        'u."Username" FROM "TournamentMatchTimeSlots" s ' +
+                        'JOIN "Users" u ON u."Id" = s."ProposedBy" ' +
+                        'JOIN "TournamentMatches" m ON m."Id" = s."MatchId" ' +
+                        'WHERE m."TournamentId" = $1 ORDER BY s."SlotTime"',
+                    [tournamentId]
+                )
             ]);
+
+        const slotsByMatch = {};
+
+        for (const row of slotRows || []) {
+            (slotsByMatch[row.MatchId] = slotsByMatch[row.MatchId] || []).push({
+                id: row.Id,
+                time: row.SlotTime,
+                proposedById: row.ProposedBy,
+                proposedBy: row.Username,
+                zone: row.ProposerZone || undefined
+            });
+        }
 
         const canManage = actor ? await this.canManage(actor, tournament) : false;
 
@@ -1292,6 +1353,8 @@ class TournamentService {
                 prizeCurrency: tournament.PrizeCurrency || 'USD',
                 prizeSplits: this.parseJsonColumn(tournament.PrizeSplits),
                 prizeNote: tournament.PrizeNote,
+                paymentInstructions: tournament.PaymentInstructions,
+                requirePayment: !!tournament.RequirePayment,
                 organizer: organizerRows[0]?.Username,
                 canManage,
                 isOrganizer: actor ? actor.id === tournament.OrganizerId : false,
@@ -1327,6 +1390,11 @@ class TournamentService {
                 checkedIn: player.CheckedIn,
                 waitlisted: player.Waitlisted,
                 finalRank: player.FinalRank,
+                // Only where there is a fee: a "paid" column on a free event
+                // is a column of meaningless ticks.
+                paid: tournament.EntryFeeCents ? !!player.PaidAt : undefined,
+                paidAt: tournament.EntryFeeCents ? player.PaidAt : undefined,
+                paidBy: tournament.EntryFeeCents ? player.PaidByUsername || undefined : undefined,
                 amber: ratingById[player.UserId] ?? null,
                 eventChains: player.EventChains || 0,
                 deckId: showDeck(player) ? player.DeckId : undefined,
@@ -1374,6 +1442,9 @@ class TournamentService {
                 // spectators know when to show up too.
                 scheduledAt: match.ScheduledAt,
                 proposedTime: match.ProposedTime,
+                // ARCHON: every time currently on the table, so a player can
+                // pick one rather than wait a round trip per candidate.
+                timeSlots: slotsByMatch[match.Id] || [],
                 proposedBy: match.ProposedBy,
                 scheduleNote: match.ScheduleNote,
                 games: gamesByMatch[match.Id] || []
@@ -2133,6 +2204,55 @@ class TournamentService {
         return { success: true, checkInCode };
     }
 
+    /**
+     * ARCHON: mark an entrant paid, or un-mark them.
+     *
+     * Staff only, and deliberately never the player themselves: a register
+     * anybody can tick their own name on is not a register. The platform takes
+     * no money and moves none - this records that a human took ten dollars from
+     * another human, which is the only thing it can honestly claim to know.
+     *
+     * `PaidBy` outlives the tick. When a player says they paid and the sheet
+     * says otherwise, "marked by which judge, and when" is the question that
+     * settles it, and a boolean cannot answer it.
+     */
+    async setPaid(tournamentId, actor, targetUserId, paid) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament) {
+            return { success: false, message: 'No such tournament' };
+        }
+
+        if (!(await this.canManage(actor, tournament))) {
+            return { success: false, message: 'Only the organizer or a judge can record payment' };
+        }
+
+        if (!tournament.EntryFeeCents) {
+            return { success: false, message: 'This event has no entry fee' };
+        }
+
+        const userId = parseInt(targetUserId, 10);
+
+        if (Number.isNaN(userId)) {
+            return { success: false, message: 'No such player' };
+        }
+
+        const rows = await this.db.query(
+            'UPDATE "TournamentPlayers" SET ' +
+                (paid
+                    ? '"PaidAt" = now() AT TIME ZONE \'utc\', "PaidBy" = $3 '
+                    : '"PaidAt" = NULL, "PaidBy" = NULL ') +
+                'WHERE "TournamentId" = $1 AND "UserId" = $2 RETURNING "UserId"',
+            paid ? [tournamentId, userId, actor.id] : [tournamentId, userId]
+        );
+
+        if (!rows || rows.length === 0) {
+            return { success: false, message: 'That player is not registered for this event' };
+        }
+
+        return { success: true, paid: !!paid };
+    }
+
     async checkIn(tournamentId, actor, options = {}) {
         const tournament = await this.getTournamentRow(tournamentId);
 
@@ -2711,6 +2831,26 @@ class TournamentService {
             }
         }
 
+        // ARCHON: unpaid entrants, refused in the same shape as a missing deck.
+        //
+        // Named rather than counted, because the organizer's next action is to
+        // go and find those specific people. And refused rather than dropped:
+        // removing somebody from an event they turned up to is a decision a
+        // person should make, especially when the usual reason for an unpaid
+        // tick is that they paid a judge who has not marked it yet.
+        if (tournament.RequirePayment && tournament.EntryFeeCents) {
+            const unpaid = active.filter((player) => !player.PaidAt);
+
+            if (unpaid.length > 0) {
+                return {
+                    success: false,
+                    message: `Players who have not paid: ${unpaid
+                        .map((player) => player.Username)
+                        .join(', ')}. Mark them paid on the roster or remove them.`
+                };
+            }
+        }
+
         if (active.length < 2) {
             return { success: false, message: 'At least 2 players are required' };
         }
@@ -3036,7 +3176,7 @@ class TournamentService {
      * explicitly rather than as a Date so the column's meaning does not
      * depend on the server's timezone.
      */
-    async proposeMatchTime(tournamentId, matchId, actor, time, note) {
+    async proposeMatchTime(tournamentId, matchId, actor, time, note, zone) {
         const context = await this.scheduleContext(tournamentId, matchId, actor);
 
         if (context.error) {
@@ -3089,11 +3229,35 @@ class TournamentService {
 
         const cleanNote = (note || '').toString().slice(0, 280) || null;
 
+        /**
+         * ARCHON: an offer is a ROW, and there may be several live at once.
+         *
+         * Scheduling used to be one live offer that a counter-proposal
+         * replaced, which is one round trip per candidate time between two
+         * people who are usually asleep when the other is awake. Two players
+         * three zones apart could spend a day of a three-day round finding out
+         * that Thursday does not work either.
+         *
+         * Offering a time somebody already offered is agreement, not a second
+         * option, so the unique constraint absorbs it rather than listing it
+         * twice.
+         */
         await this.db.query(
-            'UPDATE "TournamentMatches" SET "ProposedTime" = $2, "ProposedBy" = $3, ' +
-                '"ScheduleNote" = $4 WHERE "Id" = $1',
-            [matchId, when.toISOString(), actor.id, cleanNote]
+            'INSERT INTO "TournamentMatchTimeSlots" ' +
+                '("MatchId", "ProposedBy", "SlotTime", "ProposerZone", "CreatedAt") ' +
+                "VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc') " +
+                'ON CONFLICT ("MatchId", "SlotTime") DO NOTHING',
+            [matchId, actor.id, when.toISOString(), cleanZone(zone)]
         );
+
+        if (cleanNote) {
+            await this.db.query(
+                'UPDATE "TournamentMatches" SET "ScheduleNote" = $2 WHERE "Id" = $1',
+                [matchId, cleanNote]
+            );
+        }
+
+        await this.syncProposedTime(matchId);
 
         this.emitScheduleEvent('matchTimeProposed', context, actor, {
             time: when.toISOString(),
@@ -3104,62 +3268,172 @@ class TournamentService {
     }
 
     /**
+     * Every time currently on the table for a match, soonest first.
+     */
+    async getTimeSlots(matchId) {
+        const rows = await this.db.query(
+            'SELECT s."Id", s."SlotTime", s."ProposedBy", s."ProposerZone", u."Username" ' +
+                'FROM "TournamentMatchTimeSlots" s JOIN "Users" u ON u."Id" = s."ProposedBy" ' +
+                'WHERE s."MatchId" = $1 ORDER BY s."SlotTime"',
+            [matchId]
+        );
+
+        return (rows || []).map((row) => ({
+            id: row.Id,
+            time: row.SlotTime,
+            proposedById: row.ProposedBy,
+            proposedBy: row.Username,
+            zone: row.ProposerZone || undefined
+        }));
+    }
+
+    /**
+     * Keep the match's ProposedTime/ProposedBy pointing at the soonest live
+     * offer.
+     *
+     * A cache, and deliberately written in exactly one place. Several things
+     * downstream ask "is there an offer outstanding" - the deadline reminders,
+     * the per-player schedule panel, the match list - and rewriting all of them
+     * to count rows in another table would be a lot of churn for a question
+     * these two columns already answer. What matters is that nothing else ever
+     * writes them, so they cannot drift from the rows they summarise.
+     */
+    async syncProposedTime(matchId) {
+        await this.db.query(
+            'UPDATE "TournamentMatches" m SET ' +
+                '"ProposedTime" = s."SlotTime", "ProposedBy" = s."ProposedBy" ' +
+                'FROM (SELECT "SlotTime", "ProposedBy" FROM "TournamentMatchTimeSlots" ' +
+                'WHERE "MatchId" = $1 ORDER BY "SlotTime" LIMIT 1) s WHERE m."Id" = $1',
+            [matchId]
+        );
+
+        // No slots left means no offer. The join above cannot express that -
+        // an UPDATE ... FROM with an empty subquery updates nothing at all.
+        await this.db.query(
+            'UPDATE "TournamentMatches" SET "ProposedTime" = NULL, "ProposedBy" = NULL ' +
+                'WHERE "Id" = $1 AND NOT EXISTS ' +
+                '(SELECT 1 FROM "TournamentMatchTimeSlots" WHERE "MatchId" = $1)',
+            [matchId]
+        );
+    }
+
+    /**
      * The opponent agrees to the proposed time: it becomes the match's
      * scheduled time and the proposal is consumed.
      */
-    async acceptMatchTime(tournamentId, matchId, actor) {
+    async acceptMatchTime(tournamentId, matchId, actor, slotId = null) {
         const context = await this.scheduleContext(tournamentId, matchId, actor);
 
         if (context.error) {
             return { success: false, message: context.error };
         }
 
-        const { match } = context;
+        const slots = await this.getTimeSlots(matchId);
 
-        if (!match.ProposedTime) {
+        if (slots.length === 0) {
             return { success: false, message: 'There is no proposed time to accept' };
         }
 
-        if (match.ProposedBy === actor.id) {
-            return { success: false, message: 'The other player has to accept your proposal' };
-        }
+        // With one offer on the table, accepting without naming it is
+        // unambiguous - and it is what every older client sends.
+        const chosen = slotId
+            ? slots.find((slot) => slot.id === parseInt(slotId, 10))
+            : slots.length === 1
+            ? slots[0]
+            : null;
 
-        // The accept must consume the exact proposal it read: if a
-        // counter-offer lands between the read and this write, accepting
-        // nothing is right and agreeing to a time nobody saw is not.
-        //
-        // ARCHON: the proposal is bound back as a normalised UTC string, not
-        // as the Date it was read as. Every timestamp column here is
-        // `timestamp without time zone` holding UTC wall-clock, and db/index.js
-        // parses it back as UTC - but node-postgres serialises a Date
-        // parameter using the HOST's offset, and Postgres casting that to an
-        // unzoned column keeps the wall clock and discards the offset. On any
-        // host that is not UTC the comparison therefore looked for a time two
-        // (or six, or nine) hours from the one stored, matched nothing, and
-        // told both players "the proposal changed while you were looking" -
-        // forever. proposeMatchTime already writes a normalised string, which
-        // is why the write it makes is fine and the one that reads it back was
-        // not. Deployment runs UTC, so this was invisible there and total
-        // anywhere else.
-        const updated = await this.db.query(
-            'UPDATE "TournamentMatches" SET "ScheduledAt" = "ProposedTime", ' +
-                // A newly agreed time is a new thing to be reminded about.
-                '"ProposedTime" = NULL, "ProposedBy" = NULL, "ScheduleRemindedAt" = NULL ' +
-                'WHERE "Id" = $1 AND "ProposedTime" = $2 AND "ProposedBy" = $3 ' +
-                'RETURNING "ScheduledAt"',
-            [matchId, new Date(match.ProposedTime).toISOString(), match.ProposedBy]
-        );
-
-        if (!updated || updated.length === 0) {
+        if (!chosen) {
             return {
                 success: false,
-                message: 'The proposal changed while you were looking - check the new time'
+                message: slotId
+                    ? 'That time is no longer on offer - check the times listed'
+                    : 'Several times are on offer - pick the one that works'
             };
         }
 
+        if (chosen.proposedById === actor.id) {
+            return { success: false, message: 'The other player has to accept your proposal' };
+        }
+
+        /**
+         * ARCHON: the delete IS the compare-and-swap.
+         *
+         * Accepting must consume the exact offer it read: if the other player
+         * withdraws it between the read and this write, agreeing to a time
+         * nobody is offering is wrong. Deleting by primary key answers that
+         * unambiguously - one row or none - and, unlike the timestamp
+         * comparison it replaces, it cannot be defeated by how a Date is
+         * serialised.
+         *
+         * That comparison was a real bug on any host not set to UTC:
+         * node-postgres serialises a Date parameter with the host's offset and
+         * Postgres casting it to an unzoned column keeps the wall clock and
+         * discards the offset, so the WHERE looked for a time hours from the
+         * one stored, matched nothing, and told both players "the proposal
+         * changed while you were looking" - every time, forever. An integer key
+         * has no such failure mode.
+         */
+        const claimed = await this.db.query(
+            'DELETE FROM "TournamentMatchTimeSlots" WHERE "Id" = $1 AND "MatchId" = $2 ' +
+                'RETURNING "SlotTime"',
+            [chosen.id, matchId]
+        );
+
+        if (!claimed || claimed.length === 0) {
+            return {
+                success: false,
+                message: 'That time was withdrawn while you were looking - check the times listed'
+            };
+        }
+
+        await this.db.query(
+            'UPDATE "TournamentMatches" SET "ScheduledAt" = $2, ' +
+                // A newly agreed time is a new thing to be reminded about.
+                '"ProposedTime" = NULL, "ProposedBy" = NULL, "ScheduleRemindedAt" = NULL ' +
+                'WHERE "Id" = $1',
+            [matchId, new Date(claimed[0].SlotTime).toISOString()]
+        );
+
+        // The rest of the offers are moot now that a time is agreed.
+        await this.db.query('DELETE FROM "TournamentMatchTimeSlots" WHERE "MatchId" = $1', [
+            matchId
+        ]);
+
         this.emitScheduleEvent('matchTimeAccepted', context, actor, {
-            time: updated[0].ScheduledAt
+            time: claimed[0].SlotTime
         });
+
+        return { success: true };
+    }
+
+    /**
+     * Take one of your own offers back off the table without clearing the rest.
+     */
+    async withdrawMatchTime(tournamentId, matchId, actor, slotId) {
+        const context = await this.scheduleContext(tournamentId, matchId, actor, {
+            allowManagers: true
+        });
+
+        if (context.error) {
+            return { success: false, message: context.error };
+        }
+
+        const isManager = context.isManager;
+        const rows = await this.db.query(
+            'DELETE FROM "TournamentMatchTimeSlots" WHERE "Id" = $1 AND "MatchId" = $2' +
+                // Your own offers are yours to withdraw. A judge may remove any
+                // of them, which is the same authority they already have over
+                // an agreed time.
+                (isManager ? '' : ' AND "ProposedBy" = $3') +
+                ' RETURNING "Id"',
+            isManager ? [parseInt(slotId, 10), matchId] : [parseInt(slotId, 10), matchId, actor.id]
+        );
+
+        if (!rows || rows.length === 0) {
+            return { success: false, message: 'That time is not yours to withdraw' };
+        }
+
+        await this.syncProposedTime(matchId);
 
         return { success: true };
     }
@@ -3190,6 +3464,12 @@ class TournamentService {
                 'WHERE "Id" = $1',
             [matchId]
         );
+
+        // Clearing the schedule clears the offers with it: an offer outliving
+        // the plan it belonged to is an offer nobody remembers making.
+        await this.db.query('DELETE FROM "TournamentMatchTimeSlots" WHERE "MatchId" = $1', [
+            matchId
+        ]);
 
         this.emitScheduleEvent('matchScheduleCleared', context, actor, {
             hadAgreedTime: !!match.ScheduledAt
@@ -3236,7 +3516,7 @@ class TournamentService {
             }
         }
 
-        return { tournament, match };
+        return { tournament, match, isParticipant, isManager: !isParticipant };
     }
 
     /**

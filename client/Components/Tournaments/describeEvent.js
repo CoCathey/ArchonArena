@@ -65,7 +65,10 @@ export const defaultEventForm = {
     entryFee: '',
     prizeCurrency: 'USD',
     prizeSplits: [],
-    prizeNote: ''
+    prizeNote: '',
+    // How players pay, and whether the start button enforces it.
+    paymentInstructions: '',
+    requirePayment: false
 };
 
 const FORMAT_NAMES = {

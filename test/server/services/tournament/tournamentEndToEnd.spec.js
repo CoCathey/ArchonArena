@@ -1023,4 +1023,317 @@ describe('a tournament end to end, on real PostgreSQL', function () {
         },
         120000
     );
+    /**
+     * ARCHON: who has paid, and an event that will not start until they have.
+     *
+     * The platform takes no money and moves none - this is a register the
+     * organizer keeps, in the place everybody is already looking. It earns its
+     * keep at eight players on a Friday, where "who has handed me ten dollars"
+     * is genuinely hard to hold in your head: people pay at different times,
+     * some pay a judge rather than the organizer, and somebody always says they
+     * paid last week.
+     *
+     * Real PostgreSQL because the enforcement is a query over a real column
+     * and a real join, and because the fake would agree with any of it.
+     */
+    maybe(
+        'records who has paid and refuses to start until everyone has',
+        async function () {
+            const alice = users.player3;
+            const bob = users.player4;
+            const carol = users.player5;
+
+            const paid = await service.create(alice, {
+                name: 'Paid Entry Cup',
+                format: 'swiss',
+                roundCount: 1,
+                entryFeeCents: 1000,
+                paymentInstructions: 'Cash at the counter before the first round.',
+                requirePayment: true
+            });
+
+            expect(paid.success, paid.message).toBe(true);
+
+            for (const player of [alice, bob, carol]) {
+                await service.register(paid.id, player, {});
+            }
+
+            const opened = await service.getDetail(paid.id, alice);
+
+            expect(opened.tournament.paymentInstructions).toMatch(/Cash at the counter/);
+            expect(opened.tournament.requirePayment).toBe(true);
+            // Nobody has paid yet, and the roster says so rather than staying
+            // quiet about it.
+            expect(opened.players.every((player) => player.paid === false)).toBe(true);
+
+            // Starting names the people the organizer has to go and find.
+            const tooEarly = await service.start(paid.id, alice);
+
+            expect(tooEarly.success).toBe(false);
+            expect(tooEarly.message).toMatch(/have not paid/i);
+            expect(tooEarly.message).toContain(bob.username);
+            expect(tooEarly.message).toContain(carol.username);
+
+            // A player cannot tick their own name: a register anybody can sign
+            // is not a register.
+            const selfServe = await service.setPaid(paid.id, bob, bob.id, true);
+
+            expect(selfServe.success).toBe(false);
+            expect(selfServe.message).toMatch(/organizer or a judge/i);
+
+            for (const player of [alice, bob, carol]) {
+                const marked = await service.setPaid(paid.id, alice, player.id, true);
+
+                expect(marked.success, marked.message).toBe(true);
+            }
+
+            const afterPaying = await service.getDetail(paid.id, alice);
+
+            expect(afterPaying.players.every((player) => player.paid)).toBe(true);
+            // Named, because "which judge marked me paid" is what settles a
+            // disagreement and a boolean cannot answer it.
+            expect(afterPaying.players[0].paidBy).toBe(alice.username);
+            expect(afterPaying.players[0].paidAt).toBeTruthy();
+
+            const started = await service.start(paid.id, alice);
+
+            expect(started.success, started.message).toBe(true);
+        },
+        120000
+    );
+
+    maybe(
+        'leaves a free event and an unenforced fee alone',
+        async function () {
+            const alice = users.player6;
+            const bob = users.player7;
+
+            // A fee, but the organizer collects as people arrive and does not
+            // want the start button arguing about it.
+            const relaxed = await service.create(alice, {
+                name: 'Relaxed Paid Cup',
+                format: 'swiss',
+                roundCount: 1,
+                entryFeeCents: 500,
+                requirePayment: false
+            });
+
+            await service.register(relaxed.id, alice, {});
+            await service.register(relaxed.id, bob, {});
+
+            const started = await service.start(relaxed.id, alice);
+
+            expect(started.success, started.message).toBe(true);
+
+            // And a free event has no register at all - a "paid" column of
+            // meaningless ticks is worse than no column.
+            const free = await service.create(alice, { name: 'Free Cup', format: 'swiss' });
+
+            await service.register(free.id, alice, {});
+
+            const detail = await service.getDetail(free.id, alice);
+
+            expect(detail.tournament.requirePayment).toBe(false);
+            expect(detail.players[0].paid).toBeUndefined();
+
+            const noFee = await service.setPaid(free.id, alice, alice.id, true);
+
+            expect(noFee.success).toBe(false);
+            expect(noFee.message).toMatch(/no entry fee/i);
+        },
+        120000
+    );
+    /**
+     * ARCHON: several times on the table at once, each carrying the zone it
+     * was offered from.
+     *
+     * Real PostgreSQL because all of it is SQL the fake cannot check: a unique
+     * constraint that turns "I can do Thursday too" into agreement rather than
+     * a duplicate row, an ORDER BY the service relies on, a delete-by-key
+     * compare-and-swap, and a summary column kept in step with the rows it
+     * summarises.
+     */
+    maybe(
+        'keeps several offered times, in order, and agrees to the one picked',
+        async function () {
+            const alice = users.player1;
+            const bob = users.player2;
+            const day = 24 * 60 * 60 * 1000;
+
+            const league = await service.create(alice, {
+                name: 'Time Slots League',
+                format: 'swiss',
+                roundCount: 1,
+                pacing: 'async',
+                roundDeadlineDays: 14
+            });
+
+            await service.register(league.id, alice, {});
+            await service.register(league.id, bob, {});
+            await service.start(league.id, alice);
+
+            const match = (await service.getDetail(league.id, alice)).matches.find(
+                (entry) => entry.player1Id && entry.player2Id
+            );
+
+            const thursday = new Date(Date.now() + 3 * day).toISOString();
+            const tuesday = new Date(Date.now() + 1 * day).toISOString();
+            const wednesday = new Date(Date.now() + 2 * day).toISOString();
+
+            // Alice offers three evenings in one go, from Chicago.
+            for (const time of [thursday, tuesday, wednesday]) {
+                const offered = await service.proposeMatchTime(
+                    league.id,
+                    match.id,
+                    alice,
+                    time,
+                    null,
+                    'America/Chicago'
+                );
+
+                expect(offered.success, offered.message).toBe(true);
+            }
+
+            let slots = await service.getTimeSlots(match.id);
+
+            expect(slots).toHaveLength(3);
+            expect(slots.map((slot) => new Date(slot.time).toISOString())).toEqual([
+                tuesday,
+                wednesday,
+                thursday
+            ]);
+            expect(slots[0].zone).toBe('America/Chicago');
+            expect(slots[0].proposedBy).toBe(alice.username);
+
+            // Bob says Thursday works for him too. That is agreement, not a
+            // fourth option, and the unique constraint absorbs it.
+            await service.proposeMatchTime(
+                league.id,
+                match.id,
+                bob,
+                thursday,
+                null,
+                'Europe/Berlin'
+            );
+            expect(await service.getTimeSlots(match.id)).toHaveLength(3);
+
+            // Bob adds one of his own and the list stays sorted.
+            const friday = new Date(Date.now() + 4 * day).toISOString();
+
+            await service.proposeMatchTime(league.id, match.id, bob, friday, null, 'Europe/Berlin');
+            slots = await service.getTimeSlots(match.id);
+            expect(slots).toHaveLength(4);
+            expect(new Date(slots[3].time).toISOString()).toBe(friday);
+
+            // The summary columns track the soonest live offer, because the
+            // reminders and the schedule panel read them.
+            const withOffers = (await service.getDetail(league.id, alice)).matches.find(
+                (entry) => entry.id === match.id
+            );
+
+            expect(new Date(withOffers.proposedTime).toISOString()).toBe(tuesday);
+            expect(withOffers.timeSlots).toHaveLength(4);
+
+            // Naming one is required with several on the table: silently taking
+            // the soonest would book somebody's evening for them.
+            const guessed = await service.acceptMatchTime(league.id, match.id, bob);
+
+            expect(guessed.success).toBe(false);
+            expect(guessed.message).toMatch(/pick the one/i);
+
+            // Bob picks Wednesday.
+            const wednesdaySlot = slots.find(
+                (slot) => new Date(slot.time).toISOString() === wednesday
+            );
+            const agreed = await service.acceptMatchTime(
+                league.id,
+                match.id,
+                bob,
+                wednesdaySlot.id
+            );
+
+            expect(agreed.success, agreed.message).toBe(true);
+
+            const settled = (await service.getDetail(league.id, alice)).matches.find(
+                (entry) => entry.id === match.id
+            );
+
+            expect(new Date(settled.scheduledAt).toISOString()).toBe(wednesday);
+            // Agreeing consumes every offer, and the summary goes with them.
+            expect(settled.timeSlots).toHaveLength(0);
+            expect(settled.proposedTime).toBeFalsy();
+        },
+        120000
+    );
+
+    maybe(
+        'lets a player take back one of their own times, and nobody elses',
+        async function () {
+            const alice = users.player3;
+            const bob = users.player4;
+            const day = 24 * 60 * 60 * 1000;
+
+            const league = await service.create(alice, {
+                name: 'Withdraw League',
+                format: 'swiss',
+                roundCount: 1,
+                pacing: 'async',
+                roundDeadlineDays: 14
+            });
+
+            await service.register(league.id, alice, {});
+            await service.register(league.id, bob, {});
+            await service.start(league.id, alice);
+
+            const match = (await service.getDetail(league.id, alice)).matches.find(
+                (entry) => entry.player1Id && entry.player2Id
+            );
+
+            await service.proposeMatchTime(
+                league.id,
+                match.id,
+                alice,
+                new Date(Date.now() + day).toISOString()
+            );
+            await service.proposeMatchTime(
+                league.id,
+                match.id,
+                alice,
+                new Date(Date.now() + 2 * day).toISOString()
+            );
+
+            const [first] = await service.getTimeSlots(match.id);
+
+            expect(
+                (await service.withdrawMatchTime(league.id, match.id, bob, first.id)).success
+            ).toBe(false);
+            expect(
+                (await service.withdrawMatchTime(league.id, match.id, alice, first.id)).success
+            ).toBe(true);
+
+            const left = await service.getTimeSlots(match.id);
+
+            expect(left).toHaveLength(1);
+
+            // The summary follows: the soonest live offer is now the second one.
+            const after = (await service.getDetail(league.id, alice)).matches.find(
+                (entry) => entry.id === match.id
+            );
+
+            expect(new Date(after.proposedTime).toISOString()).toBe(
+                new Date(left[0].time).toISOString()
+            );
+
+            // And with the last one gone there is no offer at all.
+            await service.withdrawMatchTime(league.id, match.id, alice, left[0].id);
+
+            const empty = (await service.getDetail(league.id, alice)).matches.find(
+                (entry) => entry.id === match.id
+            );
+
+            expect(empty.proposedTime).toBeFalsy();
+            expect(empty.timeSlots).toHaveLength(0);
+        },
+        120000
+    );
 });
