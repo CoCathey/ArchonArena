@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
-import { Button as HeroButton } from '@heroui/react';
+import { Button as HeroButton, toast } from '@heroui/react';
 import { Link } from 'react-router-dom';
 
 import Panel from '../Components/Site/Panel';
@@ -10,9 +10,12 @@ import { LockGlyph } from '../Components/Membership/PremiumLock';
 import {
     useGetMembershipCatalogQuery,
     useGetMyMembershipQuery,
-    useGetPatreonStatusQuery
+    useGetPatreonStatusQuery,
+    useStartPatreonLinkMutation
 } from '../redux/api';
 import { TIER_BADGE_CLASS } from '../membership';
+import { isPatreonUnlinked } from '../types';
+import { clearUpgradeIntent, readUpgradeIntent, recordUpgradeIntent } from '../patreonIntent';
 
 /**
  * ARCHON (N12): the membership page.
@@ -40,7 +43,7 @@ const CheckGlyph = () => (
     </svg>
 );
 
-const TierCard = ({ tier, capabilityCopy, currentTier, isAdmin, campaignUrl, t }) => {
+const TierCard = ({ tier, capabilityCopy, currentTier, isAdmin, campaignUrl, onChoose, t }) => {
     const isCurrent = currentTier === tier.id;
     const recommended = tier.recommended;
 
@@ -112,13 +115,19 @@ const TierCard = ({ tier, capabilityCopy, currentTier, isAdmin, campaignUrl, t }
 
             <div className='mt-4 pt-3'>
                 {tier.priceUsd > 0 ? (
-                    campaignUrl ? (
+                    tier.checkoutUrl || campaignUrl ? (
                         <HeroButton
                             as='a'
                             className='w-full'
-                            href={campaignUrl}
+                            // Per-tier checkout when the reward id is
+                            // configured, campaign page otherwise.
+                            href={tier.checkoutUrl || campaignUrl}
                             rel='noopener noreferrer'
                             target='_blank'
+                            // The site cannot see a subscription until the
+                            // account is linked, so remember that they went to
+                            // pay and ask them to finish when they come back.
+                            onClick={() => onChoose(tier.id)}
                             variant={recommended ? 'primary' : 'tertiary'}
                         >
                             {isCurrent
@@ -142,12 +151,104 @@ const TierCard = ({ tier, capabilityCopy, currentTier, isAdmin, campaignUrl, t }
     );
 };
 
+/**
+ * ARCHON (N12): the prompt that catches someone coming back from Patreon.
+ *
+ * Without it the flow dead-ends silently: the site cannot see a subscription
+ * until the account is linked (pledge status is read with the player's OWN
+ * token - there is no webhook and no campaign poll), so a player pays, returns,
+ * and is still shown as Free. The reasonable conclusion is that the payment
+ * failed.
+ *
+ * Re-checked on window focus because the checkout opens in a new tab: the
+ * membership page is still mounted behind it and would otherwise never
+ * re-render when they switch back.
+ */
+const useUpgradeIntent = () => {
+    const [intent, setIntent] = useState(() => readUpgradeIntent());
+
+    useEffect(() => {
+        const recheck = () => setIntent(readUpgradeIntent());
+
+        window.addEventListener('focus', recheck);
+        document.addEventListener('visibilitychange', recheck);
+
+        return () => {
+            window.removeEventListener('focus', recheck);
+            document.removeEventListener('visibilitychange', recheck);
+        };
+    }, []);
+
+    return [intent, setIntent];
+};
+
+const FinishLinking = ({ tierName, onLink, onDismiss, isLinking, t }) => (
+    <div className='rounded-lg border border-amber-500/60 bg-amber-500/10 p-4'>
+        <h3 className='m-0 text-sm font-semibold text-foreground'>
+            {tierName
+                ? t('Finish connecting your {{tier}} membership', { tier: tierName })
+                : t('Finish connecting your membership')}
+        </h3>
+        <p className='mt-1 mb-3 max-w-2xl text-xs text-muted'>
+            {t(
+                'Subscribing on Patreon is only half of it — Archon Arena cannot see your ' +
+                    'membership until you connect your Patreon account. It takes one click, and ' +
+                    'your benefits unlock straight away.'
+            )}
+        </p>
+        <div className='flex flex-wrap gap-2'>
+            <HeroButton isDisabled={isLinking} size='sm' variant='primary' onPress={onLink}>
+                {isLinking ? t('Connecting…') : t('Connect Patreon')}
+            </HeroButton>
+            <HeroButton size='sm' variant='tertiary' onPress={onDismiss}>
+                {t('Not now')}
+            </HeroButton>
+        </div>
+    </div>
+);
+
 const Membership = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
     const { data: catalog, isLoading } = useGetMembershipCatalogQuery();
     const { data: mine } = useGetMyMembershipQuery(undefined, { skip: !user });
     const { data: patreon } = useGetPatreonStatusQuery();
+
+    const [intent, setIntent] = useUpgradeIntent();
+    const [startPatreonLink, linkState] = useStartPatreonLinkMutation();
+
+    const linked = !isPatreonUnlinked(user?.patreon);
+    // Only worth asking when there is something to finish: they went to pay,
+    // they are signed in, and the account is not linked yet. A linked account
+    // needs no prompt - the next auth refresh reads their pledge.
+    const showFinishLinking = !!intent && !!user && !linked && !!patreon?.enabled;
+
+    useEffect(() => {
+        // Linked (or already a paying member): the breadcrumb has done its job.
+        if (linked || (mine?.membership?.rank ?? 0) > 0) {
+            clearUpgradeIntent();
+            setIntent(null);
+        }
+    }, [linked, mine, setIntent]);
+
+    const onFinishLinking = async () => {
+        try {
+            const result = await startPatreonLink().unwrap();
+
+            if (result.success && result.url) {
+                window.location.assign(result.url);
+            } else {
+                toast.danger(result.message || t('Could not start account linking'));
+            }
+        } catch {
+            toast.danger(t('Could not start account linking'));
+        }
+    };
+
+    const onDismissLinking = () => {
+        clearUpgradeIntent();
+        setIntent(null);
+    };
 
     const tiers = catalog?.tiers || [];
     const capabilityCopy = catalog?.capabilities || {};
@@ -183,6 +284,16 @@ const Membership = () => {
                 </div>
             </Panel>
 
+            {showFinishLinking && (
+                <FinishLinking
+                    isLinking={linkState.isLoading}
+                    onDismiss={onDismissLinking}
+                    onLink={onFinishLinking}
+                    t={t}
+                    tierName={(tiers.find((tier) => tier.id === intent.tier) || {}).name || null}
+                />
+            )}
+
             {isAdmin && (
                 <AlertPanel
                     type='info'
@@ -202,6 +313,7 @@ const Membership = () => {
                         currentTier={currentTier}
                         isAdmin={isAdmin}
                         key={tier.id}
+                        onChoose={recordUpgradeIntent}
                         t={t}
                         tier={tier}
                     />

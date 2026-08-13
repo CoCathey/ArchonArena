@@ -226,7 +226,7 @@ function tierFromPatreonMembership(membership) {
  * capabilities resolved. Safe to send to an unauthenticated client - it is
  * a price list, not anybody's entitlements.
  */
-function tierCatalog() {
+function tierCatalog(patreonConfig = {}) {
     return TIERS.map((tier) => ({
         id: tier.id,
         rank: tier.rank,
@@ -238,8 +238,103 @@ function tierCatalog() {
         includes: tier.includes,
         // Only what this tier adds, for the "everything in X, plus" rendering.
         adds: tier.capabilities,
-        capabilities: capabilitiesForTier(tier.id)
+        capabilities: capabilitiesForTier(tier.id),
+        checkoutUrl: checkoutUrlFor(tier, patreonConfig)
     }));
+}
+
+/**
+ * The Patreon URL that starts a pledge at THIS tier.
+ *
+ * Patreon takes a per-tier checkout link of the form
+ * `https://www.patreon.com/checkout/<page>?rid=<reward id>`. Without the `rid`
+ * every button on the pricing page lands on the campaign homepage, and a player
+ * who just clicked "Choose Archon" has to go and find Archon again - which is
+ * exactly where people give up.
+ *
+ * The reward ids come from the creator dashboard (Membership -> Edit a tier;
+ * the number at the end of that URL) and live in config rather than in this
+ * file, so they can be filled in - or changed when a tier is recreated on
+ * Patreon - without a redeploy.
+ *
+ * Falls back to the plain campaign page when an id is missing, which is the
+ * old behaviour, and to null when there is no campaign at all so the UI can say
+ * "coming soon" instead of rendering a dead button.
+ *
+ * @param {object} tier
+ * @param {{campaignUrl?: string, pageName?: string, tierIds?: object}} config
+ * @returns {string|null}
+ */
+function checkoutUrlFor(tier, config = {}) {
+    if (!tier.priceUsd) {
+        return null;
+    }
+
+    const campaignUrl = config.campaignUrl || null;
+    const rewardId = config.tierIds && config.tierIds[tier.id];
+    const pageName = config.pageName || pageNameFromCampaignUrl(campaignUrl);
+
+    if (!rewardId || !pageName) {
+        return campaignUrl;
+    }
+
+    return `https://www.patreon.com/checkout/${encodeURIComponent(
+        pageName
+    )}?rid=${encodeURIComponent(rewardId)}`;
+}
+
+/**
+ * The campaign's page name, taken from its public URL so an operator only has
+ * to configure one of the two. `https://www.patreon.com/archonarena` ->
+ * `archonarena`. Returns null for anything that is not a plain campaign URL,
+ * rather than guessing at a path segment.
+ */
+function pageNameFromCampaignUrl(campaignUrl) {
+    if (!campaignUrl) {
+        return null;
+    }
+
+    let segments;
+
+    try {
+        segments = new URL(campaignUrl).pathname.split('/').filter(Boolean);
+    } catch {
+        return null;
+    }
+
+    // Patreon hands out several shapes for the same campaign:
+    //   /archonarena              the classic vanity page
+    //   /c/archonarena            the newer creator path
+    //   /16554466/join            a share/join link, keyed by campaign id
+    //   /archonarena/membership   a tab on the page
+    // The identifier is the first segment once the /c/ prefix and any trailing
+    // page section are removed.
+    if (segments[0] === 'c') {
+        segments = segments.slice(1);
+    }
+
+    const identifier = segments[0];
+
+    // `/user?u=123` and `/checkout/...` are Patreon's own routes, not campaign
+    // identifiers - deriving "user" from the first would build a checkout link
+    // to somebody else entirely.
+    const RESERVED = ['user', 'checkout', 'join', 'login', 'signup', 'home'];
+
+    if (!identifier || RESERVED.includes(identifier)) {
+        return null;
+    }
+
+    // Anything left after the identifier must be a known page section, not a
+    // second identifier - better to derive nothing than to derive the wrong
+    // thing and build a checkout link that 404s.
+    const rest = segments.slice(1);
+    const KNOWN_SECTIONS = ['join', 'membership', 'posts', 'about', 'shop'];
+
+    if (rest.length && !rest.every((segment) => KNOWN_SECTIONS.includes(segment))) {
+        return null;
+    }
+
+    return identifier;
 }
 
 module.exports = {
@@ -252,5 +347,7 @@ module.exports = {
     tierById,
     higherTier,
     tierFromPatreonMembership,
-    tierCatalog
+    tierCatalog,
+    checkoutUrlFor,
+    pageNameFromCampaignUrl
 };

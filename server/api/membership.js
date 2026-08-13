@@ -39,7 +39,10 @@ module.exports.init = function (server) {
         wrapAsync(async (req, res) => {
             res.send({
                 success: true,
-                tiers: tierCatalog(),
+                // Per-tier Patreon checkout links are built server-side, so the
+                // reward ids stay in config and the client never assembles a
+                // provider URL.
+                tiers: tierCatalog(configService.getValue('patreon') || {}),
                 // The copy for every capability, so locked panels and the
                 // pricing page describe a feature the same way.
                 capabilities: CAPABILITY_CATALOG

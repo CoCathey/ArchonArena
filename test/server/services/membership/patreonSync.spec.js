@@ -205,3 +205,107 @@ describe('Patreon membership sync', function () {
         });
     });
 });
+
+/**
+ * ARCHON (N12): per-tier checkout links.
+ *
+ * A pricing page whose buttons all land on the campaign homepage makes someone
+ * who just clicked "Choose Archon" go and find Archon again, which is where
+ * people give up. These pin the URL shapes Patreon actually hands out, because
+ * the campaign link an operator pastes in is not always the vanity one.
+ */
+describe('Patreon checkout links', function () {
+    const {
+        checkoutUrlFor,
+        pageNameFromCampaignUrl
+    } = require('../../../../server/services/membership/tiers');
+
+    const archon = { id: TIER_IDS.ARCHON, priceUsd: 10 };
+
+    describe('page name derivation', function () {
+        it('reads the vanity page from a campaign URL', function () {
+            expect(pageNameFromCampaignUrl('https://www.patreon.com/archonarena')).toBe(
+                'archonarena'
+            );
+        });
+
+        it("handles Patreon's newer /c/ path", function () {
+            expect(pageNameFromCampaignUrl('https://www.patreon.com/c/archonarena')).toBe(
+                'archonarena'
+            );
+        });
+
+        it('handles a numeric join link', function () {
+            expect(pageNameFromCampaignUrl('https://www.patreon.com/16554466/join')).toBe(
+                '16554466'
+            );
+        });
+
+        it('ignores a trailing page section', function () {
+            expect(pageNameFromCampaignUrl('https://www.patreon.com/archonarena/membership')).toBe(
+                'archonarena'
+            );
+        });
+
+        it("refuses Patreon's own routes rather than deriving nonsense", function () {
+            // Deriving "user" here would build a checkout link pointing at a
+            // Patreon route, not at this campaign.
+            expect(pageNameFromCampaignUrl('https://www.patreon.com/user?u=123')).toBeNull();
+            expect(pageNameFromCampaignUrl('https://www.patreon.com/checkout/x')).toBeNull();
+        });
+
+        it('returns null for junk instead of throwing', function () {
+            expect(pageNameFromCampaignUrl('not a url')).toBeNull();
+            expect(pageNameFromCampaignUrl('')).toBeNull();
+            expect(pageNameFromCampaignUrl(undefined)).toBeNull();
+        });
+    });
+
+    describe('the link a tier button opens', function () {
+        it('goes straight to that tier when a reward id is configured', function () {
+            const url = checkoutUrlFor(archon, {
+                campaignUrl: 'https://www.patreon.com/16554466/join',
+                tierIds: { archon: '9988776' }
+            });
+
+            expect(url).toBe('https://www.patreon.com/checkout/16554466?rid=9988776');
+        });
+
+        it('falls back to the campaign page when that tier has no id yet', function () {
+            // Partial configuration has to keep working - an operator filling
+            // in one id at a time must not break the other buttons.
+            const url = checkoutUrlFor(
+                { id: TIER_IDS.SUPPORTER, priceUsd: 5 },
+                {
+                    campaignUrl: 'https://www.patreon.com/archonarena',
+                    tierIds: { archon: '9988776' }
+                }
+            );
+
+            expect(url).toBe('https://www.patreon.com/archonarena');
+        });
+
+        it('is null when no campaign is configured at all', function () {
+            // The UI shows "coming soon" rather than a dead button.
+            expect(checkoutUrlFor(archon, {})).toBeNull();
+        });
+
+        it('is null for the free tier, which is not bought', function () {
+            expect(
+                checkoutUrlFor(
+                    { id: TIER_IDS.FREE, priceUsd: 0 },
+                    { campaignUrl: 'https://www.patreon.com/archonarena' }
+                )
+            ).toBeNull();
+        });
+
+        it('escapes the reward id rather than interpolating it raw', function () {
+            const url = checkoutUrlFor(archon, {
+                campaignUrl: 'https://www.patreon.com/archonarena',
+                tierIds: { archon: 'a b&c' }
+            });
+
+            expect(url).toBe('https://www.patreon.com/checkout/archonarena?rid=a%20b%26c');
+        });
+    });
+});
