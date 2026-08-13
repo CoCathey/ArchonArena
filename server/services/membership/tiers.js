@@ -271,16 +271,40 @@ function checkoutUrlFor(tier, config = {}) {
     }
 
     const campaignUrl = config.campaignUrl || null;
-    const rewardId = config.tierIds && config.tierIds[tier.id];
+    const configured = config.tierIds && config.tierIds[tier.id];
+
+    if (!configured) {
+        return campaignUrl;
+    }
+
+    // A full URL is used exactly as given. Patreon has several link shapes for
+    // a tier and they change over time; when an operator has a link that they
+    // have actually clicked and seen work, composing a different one from its
+    // id would be replacing something verified with something guessed.
+    if (isHttpUrl(configured)) {
+        return String(configured);
+    }
+
     const pageName = config.pageName || pageNameFromCampaignUrl(campaignUrl);
 
-    if (!rewardId || !pageName) {
+    if (!pageName) {
         return campaignUrl;
     }
 
     return `https://www.patreon.com/checkout/${encodeURIComponent(
         pageName
-    )}?rid=${encodeURIComponent(rewardId)}`;
+    )}?rid=${encodeURIComponent(configured)}`;
+}
+
+/** Only http(s), so a config value cannot smuggle in a javascript: URL. */
+function isHttpUrl(value) {
+    try {
+        const protocol = new URL(String(value)).protocol;
+
+        return protocol === 'https:' || protocol === 'http:';
+    } catch {
+        return false;
+    }
 }
 
 /**

@@ -21,7 +21,27 @@
     patreon: {
         // Must also be registered as a redirect URI on the Patreon client.
         // Override with PATREON_CALLBACK_URL on a site at another domain.
-        callbackUrl: 'https://archonarena.com/patreon'
+        callbackUrl: 'https://archonarena.com/patreon',
+        // The public campaign page. Not a secret - it is a link we hand to
+        // players - so it lives here rather than in the environment.
+        campaignUrl: 'https://www.patreon.com/16554466/join',
+        // The campaign's page name. Not derivable from campaignUrl above,
+        // which is the numeric share link - so it is stated rather than
+        // guessed at, and anything composed from a bare reward id gets the
+        // right path.
+        pageName: 'cocathey',
+        // Per-tier checkout links, so each button opens THAT tier rather than
+        // the campaign homepage. These are the real links from the creator
+        // dashboard and are used verbatim - including the `vanity` parameter,
+        // which is not something to reconstruct. A bare reward id also works
+        // here and is composed into
+        // https://www.patreon.com/checkout/<pageName>?rid=<id>.
+        // Override any of it with PATREON_TIER_IDS.
+        tierIds: {
+            supporter: 'https://www.patreon.com/checkout/cocathey?rid=29339856&vanity=16554466',
+            archon: 'https://www.patreon.com/checkout/cocathey?rid=29339861&vanity=16554466',
+            vault_master: 'https://www.patreon.com/checkout/cocathey?rid=29339864&vanity=16554466'
+        }
     },
 
     lobby: {
