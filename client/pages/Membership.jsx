@@ -13,7 +13,7 @@ import {
     useGetPatreonStatusQuery,
     useStartPatreonLinkMutation
 } from '../redux/api';
-import { TIER_BADGE_CLASS } from '../membership';
+import { isAdminUser, TIER_BADGE_CLASS } from '../membership';
 import { isPatreonUnlinked } from '../types';
 import { clearUpgradeIntent, readUpgradeIntent, recordUpgradeIntent } from '../patreonIntent';
 
@@ -405,7 +405,10 @@ const Membership = () => {
     const tiers = catalog?.tiers || [];
     const capabilityCopy = catalog?.capabilities || {};
     const currentTier = mine?.membership?.tier || 'free';
-    const isAdmin = !!mine?.membership?.isAdmin;
+    // Read locally as well as from the API: the notice explains why every
+    // panel is unlocked, and it would be strange for it to disappear because a
+    // status request failed.
+    const isAdmin = !!mine?.membership?.isAdmin || isAdminUser(user);
     const campaignUrl = patreon?.campaignUrl;
 
     return (

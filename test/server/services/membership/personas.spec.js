@@ -489,3 +489,67 @@ describe('checkauth re-resolves entitlements after the supporter sweep', functio
         expect(userDetails.capabilities).toEqual([]);
     });
 });
+
+/**
+ * ARCHON (N12): admin access must survive a user object that is missing the
+ * membership fields entirely.
+ *
+ * The resolved `capabilities` array is the normal mechanism, but it is not the
+ * only shape a user object can arrive in: a session predating this feature, a
+ * token minted before it shipped, or any path that hands over a user without
+ * the membership block. In all of those an admin would otherwise be refused
+ * everything - and a locked panel reads as a product decision, not a bug, so
+ * nobody would report it as one.
+ *
+ * Both sides now carry an explicit floor. There is still exactly one admin
+ * check per side, in the one function every gate on that side goes through.
+ */
+describe('admin access without a capability list', function () {
+    const guard = (user, capability) => {
+        const middleware = requireCapability(capability);
+        let nexted = false;
+        const res = {
+            status() {
+                return this;
+            },
+            send() {
+                return this;
+            }
+        };
+
+        middleware({ user }, res, () => {
+            nexted = true;
+        });
+
+        return nexted;
+    };
+
+    it('lets an admin through with NO capabilities array at all', function () {
+        // The shape a pre-N12 token produces.
+        const legacyAdmin = { id: 1, username: 'admin', permissions: { isAdmin: true } };
+
+        for (const capability of ALL_CAPABILITIES) {
+            expect(guard(legacyAdmin, capability), `admin refused ${capability}`).toBe(true);
+        }
+    });
+
+    it('lets an admin through with an EMPTY capabilities array', function () {
+        const admin = {
+            id: 1,
+            username: 'admin',
+            permissions: { isAdmin: true },
+            capabilities: [],
+            membership: { tier: 'free', rank: 0, isAdmin: false }
+        };
+
+        expect(guard(admin, CAPABILITIES.ARCHON_INTELLIGENCE)).toBe(true);
+        expect(guard(admin, CAPABILITIES.EXPERIMENTAL_FEATURES)).toBe(true);
+    });
+
+    it('still refuses a non-admin with no capabilities array', function () {
+        // The floor must not become a hole: only isAdmin passes.
+        const legacyPlayer = { id: 2, username: 'player', permissions: {} };
+
+        expect(guard(legacyPlayer, CAPABILITIES.ARCHON_INTELLIGENCE)).toBe(false);
+    });
+});
