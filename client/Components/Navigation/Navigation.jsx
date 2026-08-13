@@ -206,6 +206,24 @@ const Navigation = (props) => {
                 return null;
             }
 
+            // ARCHON (N12): `highlight` renders an item as a pill rather than a
+            // plain nav link. Used for Archon+, which is the one entry that has
+            // to be findable without already knowing it exists - a membership
+            // page nobody can see sells nothing.
+            if (menuItem.highlight) {
+                return (
+                    <Link
+                        key={menuItem.title}
+                        className={`inline-flex h-7 items-center rounded-full border border-amber-500/60 bg-amber-500/15 px-3 text-xs font-semibold text-amber-700 transition hover:bg-amber-500/25 dark:text-amber-200${
+                            mobile ? ' w-full justify-center' : ''
+                        }`}
+                        href={menuItem.path}
+                    >
+                        {t(menuItem.title)}
+                    </Link>
+                );
+            }
+
             return (
                 <Link
                     key={menuItem.title}

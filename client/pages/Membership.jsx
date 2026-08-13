@@ -207,6 +207,155 @@ const FinishLinking = ({ tierName, onLink, onDismiss, isLinking, t }) => (
     </div>
 );
 
+/**
+ * ARCHON (N12): the full "what do I actually get" grid.
+ *
+ * The tier cards sell; this settles. Rows are grouped by the tier that
+ * introduces each capability, and every column to the right of that tier gets a
+ * tick automatically - which is the visual form of "every tier includes the
+ * ones below it", rather than a sentence asking the reader to take it on trust.
+ *
+ * Driven entirely by the server's catalogue, so moving a capability between
+ * tiers moves it here too, with no edit to this file.
+ */
+const ComparisonTable = ({ tiers, capabilityCopy, currentTier, t }) => {
+    if (!tiers.length) {
+        return null;
+    }
+
+    const free = tiers.find((tier) => tier.rank === 0);
+    const rows = tiers.flatMap((tier) =>
+        (tier.adds || []).map((capability) => ({ capability, introducedBy: tier }))
+    );
+
+    const Tick = () => (
+        <svg
+            aria-hidden='true'
+            className='mx-auto h-4 w-4 text-emerald-400'
+            fill='none'
+            stroke='currentColor'
+            strokeWidth='2.5'
+            viewBox='0 0 24 24'
+        >
+            <path d='M20 6 9 17l-5-5' />
+        </svg>
+    );
+
+    return (
+        <div className='overflow-x-auto'>
+            <table className='w-full min-w-[640px] border-collapse text-sm'>
+                <thead>
+                    <tr className='border-b border-border/70'>
+                        <th className='py-2 pr-3 text-left text-xs font-medium uppercase tracking-wide text-muted'>
+                            {t('Feature')}
+                        </th>
+                        {tiers.map((tier) => (
+                            <th
+                                className={[
+                                    'w-24 px-2 py-2 text-center text-xs font-semibold',
+                                    tier.recommended ? 'text-amber-300' : 'text-foreground',
+                                    currentTier === tier.id ? 'bg-surface-secondary/50' : ''
+                                ].join(' ')}
+                                key={tier.id}
+                            >
+                                <div>{tier.name}</div>
+                                <div className='font-normal text-muted'>
+                                    {tier.priceUsd ? `$${tier.priceUsd}` : t('Free')}
+                                </div>
+                            </th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody>
+                    {/* Everything free, ticked all the way across - the point
+                        being that nothing about playing is taken away. */}
+                    {(free?.includes || []).map((line) => (
+                        <tr className='border-b border-border/40' key={line}>
+                            <td className='py-1.5 pr-3 text-foreground'>{line}</td>
+                            {tiers.map((tier) => (
+                                <td className='px-2 py-1.5' key={tier.id}>
+                                    <Tick />
+                                </td>
+                            ))}
+                        </tr>
+                    ))}
+
+                    {rows.map(({ capability, introducedBy }) => {
+                        const copy = capabilityCopy?.[capability];
+
+                        return (
+                            <tr className='border-b border-border/40' key={capability}>
+                                <td className='py-1.5 pr-3'>
+                                    <div className='text-foreground'>
+                                        {copy?.label || capability}
+                                    </div>
+                                    {copy?.learn && (
+                                        <div className='text-xs text-muted'>{copy.learn}</div>
+                                    )}
+                                </td>
+                                {tiers.map((tier) => (
+                                    <td
+                                        className={[
+                                            'px-2 py-1.5 text-center',
+                                            currentTier === tier.id ? 'bg-surface-secondary/50' : ''
+                                        ].join(' ')}
+                                        key={tier.id}
+                                    >
+                                        {tier.rank >= introducedBy.rank ? (
+                                            <Tick />
+                                        ) : (
+                                            <span className='text-muted'>—</span>
+                                        )}
+                                    </td>
+                                ))}
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
+    );
+};
+
+/**
+ * Where each thing you paid for actually lives.
+ *
+ * Borrowed from what Decks of KeyForge does well: subscribing is only useful if
+ * you can then find the thing. The locations come from the server's capability
+ * catalogue alongside the labels, so a feature that moves is described in one
+ * place.
+ */
+const WhereToFindIt = ({ tiers, capabilityCopy, t }) => (
+    <div className='space-y-3'>
+        {tiers
+            .filter((tier) => (tier.adds || []).length)
+            .map((tier) => (
+                <div key={tier.id}>
+                    <h4 className='m-0 mb-1 text-sm font-semibold text-foreground'>{tier.name}</h4>
+                    <dl className='m-0 grid gap-x-4 gap-y-1 sm:grid-cols-2'>
+                        {(tier.adds || []).map((capability) => {
+                            const copy = capabilityCopy?.[capability];
+
+                            return (
+                                <div className='flex gap-2 text-xs' key={capability}>
+                                    <dt className='shrink-0 text-foreground'>
+                                        {copy?.label || capability}
+                                    </dt>
+                                    <dd className='m-0 text-muted'>{copy?.where || '—'}</dd>
+                                </div>
+                            );
+                        })}
+                    </dl>
+                </div>
+            ))}
+        <p className='m-0 text-xs text-muted'>
+            {t(
+                'Benefits unlock as soon as your Patreon account is connected — there is nothing else to claim.'
+            )}
+        </p>
+    </div>
+);
+
 const Membership = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -222,6 +371,9 @@ const Membership = () => {
     // they are signed in, and the account is not linked yet. A linked account
     // needs no prompt - the next auth refresh reads their pledge.
     const showFinishLinking = !!intent && !!user && !linked && !!patreon?.enabled;
+    // The same condition without the breadcrumb: anyone signed in who has not
+    // connected yet can do it from here.
+    const canLink = !!user && !linked && !!patreon?.enabled;
 
     useEffect(() => {
         // Linked (or already a paying member): the breadcrumb has done its job.
@@ -281,6 +433,29 @@ const Membership = () => {
                                 'your own game — never what happens in it.'
                         )}
                     </p>
+
+                    {/* Always offered to a signed-in account that has not linked
+                        yet, not only after an upgrade click - somebody who
+                        subscribed on their phone arrives here with no
+                        breadcrumb, and the site cannot see their pledge until
+                        they connect. */}
+                    {canLink && (
+                        <div className='flex flex-wrap items-center gap-2 pt-1'>
+                            <HeroButton
+                                isDisabled={linkState.isLoading}
+                                size='sm'
+                                variant='tertiary'
+                                onPress={onFinishLinking}
+                            >
+                                {linkState.isLoading
+                                    ? t('Connecting…')
+                                    : t('Already subscribed? Connect Patreon')}
+                            </HeroButton>
+                            <span className='text-xs text-muted'>
+                                {t('Your benefits unlock the moment your account is connected.')}
+                            </span>
+                        </div>
+                    )}
                 </div>
             </Panel>
 
@@ -319,6 +494,22 @@ const Membership = () => {
                     />
                 ))}
             </div>
+
+            <Panel type='default' compactHeader title={t('Compare every tier')}>
+                <p className='mt-0 mb-2 text-xs text-muted'>
+                    {t('Every tier includes everything in the tiers below it.')}
+                </p>
+                <ComparisonTable
+                    capabilityCopy={capabilityCopy}
+                    currentTier={currentTier}
+                    t={t}
+                    tiers={tiers}
+                />
+            </Panel>
+
+            <Panel type='default' compactHeader title={t('Where to find your benefits')}>
+                <WhereToFindIt capabilityCopy={capabilityCopy} t={t} tiers={tiers} />
+            </Panel>
 
             <Panel type='default' compactHeader title={t('Where the money goes')}>
                 <ul className='m-0 list-disc space-y-1 pl-5 text-sm text-muted'>
