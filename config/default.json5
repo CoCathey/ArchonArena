@@ -147,6 +147,23 @@
         // Public campaign page, linked from the profile so a player who is not
         // yet a patron can find it. Blank hides the link.
         campaignUrl: '', // set via PATREON_CAMPAIGN_URL
+        // Your campaign's page name, e.g. 'archonarena'. Only needed when it
+        // cannot be derived from campaignUrl (a custom domain, say).
+        pageName: '', // set via PATREON_PAGE_NAME
+        // ARCHON (N12): Patreon reward ids, so each tier's button goes straight
+        // to THAT tier's checkout instead of the campaign homepage. Find each
+        // one in the creator dashboard: Membership -> Edit the tier -> the
+        // number at the end of that URL.
+        //
+        // Left blank, the buttons fall back to the campaign page - which works,
+        // but makes someone who just clicked "Choose Archon" go and find Archon
+        // again. Set via PATREON_TIER_IDS as JSON, e.g.
+        //   PATREON_TIER_IDS='{"supporter":"1234567","archon":"1234568"}'
+        tierIds: {
+            supporter: '',
+            archon: '',
+            vault_master: ''
+        },
         requestTimeoutMs: 10000
     },
 

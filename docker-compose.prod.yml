@@ -117,6 +117,10 @@ services:
             - PATREON_CAMPAIGN_ID=${PATREON_CAMPAIGN_ID:-}
             - PATREON_CALLBACK_URL=${PATREON_CALLBACK_URL:-}
             - PATREON_CAMPAIGN_URL=${PATREON_CAMPAIGN_URL:-}
+            # Per-tier checkout deep links. Without the reward ids every tier
+            # button lands on the campaign homepage.
+            - PATREON_PAGE_NAME=${PATREON_PAGE_NAME:-}
+            - PATREON_TIER_IDS=${PATREON_TIER_IDS:-}
         command: ['node', '.']
 
     node-0:

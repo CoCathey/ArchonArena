@@ -41,6 +41,13 @@
           "cameraPermission": false,
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#e8a33d",
+          "defaultChannel": "default"
+        }
       ]
     ]
   }

@@ -36,6 +36,9 @@ class NotificationService {
         // Optional: without it, in-app notifications still work and email is
         // simply skipped. The lobby injects the shared instance.
         this.emailService = options.emailService || null;
+        // Optional in the same way: without it the mobile app simply gets
+        // nothing while it is closed, and in-app plus email are unaffected.
+        this.pushService = options.pushService || null;
         this.configService = options.configService || null;
         this.now = options.now || (() => new Date());
         // Where links in emails point. Falls back to a relative path, which is
@@ -53,13 +56,17 @@ class NotificationService {
 
         try {
             const rows = await this.db.query(
-                'SELECT "InApp", "Email" FROM "NotificationPreferences" ' +
+                'SELECT "InApp", "Email", "Push" FROM "NotificationPreferences" ' +
                     'WHERE "UserId" = $1 AND "Category" = $2',
                 [userId, category]
             );
 
             if (rows && rows[0]) {
-                return { inApp: !!rows[0].InApp, email: !!rows[0].Email };
+                return {
+                    inApp: !!rows[0].InApp,
+                    email: !!rows[0].Email,
+                    push: this.inferredPush(rows[0], defaults)
+                };
             }
         } catch (err) {
             // Falling back to defaults is the safe failure: the player still
@@ -71,6 +78,28 @@ class NotificationService {
     }
 
     /**
+     * What a stored preference row means for push.
+     *
+     * A row written before push existed says nothing about it, so the
+     * category's default would seem to apply - except for one case that
+     * matters more than the default does. Somebody who turned a category off
+     * entirely has already said, as loudly as the UI let them, that they do
+     * not want to hear about this. Handing them a phone buzz because a new
+     * channel appeared after they opted out would be the single most
+     * infuriating way to introduce push notifications.
+     *
+     * So a silenced category stays silent, and a category they left on picks
+     * up the default.
+     */
+    inferredPush(row, defaults) {
+        if (row.Push !== null && row.Push !== undefined) {
+            return !!row.Push;
+        }
+
+        return defaults.push && (!!row.InApp || !!row.Email);
+    }
+
+    /**
      * Every category with this user's effective settings, for the account page.
      */
     async getPreferences(userId) {
@@ -78,13 +107,17 @@ class NotificationService {
 
         try {
             const rows = await this.db.query(
-                'SELECT "Category", "InApp", "Email" FROM "NotificationPreferences" ' +
+                'SELECT "Category", "InApp", "Email", "Push" FROM "NotificationPreferences" ' +
                     'WHERE "UserId" = $1',
                 [userId]
             );
 
             for (const row of rows || []) {
-                stored[row.Category] = { inApp: !!row.InApp, email: !!row.Email };
+                stored[row.Category] = {
+                    inApp: !!row.InApp,
+                    email: !!row.Email,
+                    push: this.inferredPush(row, categoryDefaults(row.Category))
+                };
             }
         } catch (err) {
             logger.warn(`Could not read notification preferences: ${err.message}`);
@@ -101,7 +134,7 @@ class NotificationService {
      * default is deliberate here: the player made a choice, and a later change
      * to the default should not quietly undo it.
      */
-    async setPreference(userId, category, { inApp, email }) {
+    async setPreference(userId, category, { inApp, email, push }) {
         if (!isKnownCategory(category)) {
             return { success: false, message: `Unknown notification category '${category}'` };
         }
@@ -109,15 +142,16 @@ class NotificationService {
         const defaults = categoryDefaults(category);
 
         await this.db.query(
-            'INSERT INTO "NotificationPreferences" ("UserId", "Category", "InApp", "Email", "UpdatedAt") ' +
-                "VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc') " +
+            'INSERT INTO "NotificationPreferences" ("UserId", "Category", "InApp", "Email", "Push", "UpdatedAt") ' +
+                "VALUES ($1, $2, $3, $4, $5, now() AT TIME ZONE 'utc') " +
                 'ON CONFLICT ("UserId", "Category") DO UPDATE SET ' +
-                '"InApp" = $3, "Email" = $4, "UpdatedAt" = now() AT TIME ZONE \'utc\'',
+                '"InApp" = $3, "Email" = $4, "Push" = $5, "UpdatedAt" = now() AT TIME ZONE \'utc\'',
             [
                 userId,
                 category,
                 typeof inApp === 'boolean' ? inApp : defaults.inApp,
-                typeof email === 'boolean' ? email : defaults.email
+                typeof email === 'boolean' ? email : defaults.email,
+                typeof push === 'boolean' ? push : defaults.push
             ]
         );
 
@@ -171,7 +205,7 @@ class NotificationService {
 
         const preference = await this.getPreference(userId, category);
 
-        if (!preference.inApp && !preference.email) {
+        if (!preference.inApp && !preference.email && !preference.push) {
             return { delivered: false, reason: 'opted-out' };
         }
 
@@ -222,7 +256,24 @@ class NotificationService {
             }
         }
 
-        return { delivered: true, notificationId: inserted, emailed };
+        let pushed = 0;
+
+        if (preference.push && this.pushService) {
+            // Same contract as everything else here: a phone that could not be
+            // reached must not affect the operation that raised this.
+            const result = await this.pushService.send({
+                userId,
+                title,
+                body,
+                url,
+                data,
+                category
+            });
+
+            pushed = result ? result.sent : 0;
+        }
+
+        return { delivered: true, notificationId: inserted, emailed, pushed };
     }
 
     /**

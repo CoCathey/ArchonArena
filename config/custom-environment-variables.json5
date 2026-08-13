@@ -71,7 +71,11 @@
         clientSecret: 'PATREON_CLIENT_SECRET',
         callbackUrl: 'PATREON_CALLBACK_URL',
         campaignId: 'PATREON_CAMPAIGN_ID',
-        campaignUrl: 'PATREON_CAMPAIGN_URL'
+        campaignUrl: 'PATREON_CAMPAIGN_URL',
+        pageName: 'PATREON_PAGE_NAME',
+        // __format json: this is a map of tier id -> Patreon reward id, so it
+        // arrives as an object rather than a string.
+        tierIds: { __name: 'PATREON_TIER_IDS', __format: 'json' }
     },
 
     auth: {

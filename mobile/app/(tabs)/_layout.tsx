@@ -93,6 +93,13 @@ export default function TabsLayout() {
                 }}
             />
             <Tabs.Screen
+                name='tournaments'
+                options={{
+                    title: 'Events',
+                    tabBarIcon: ({ color }) => <TabIcon glyph='🏆' color={color} />
+                }}
+            />
+            <Tabs.Screen
                 name='friends'
                 options={{
                     title: 'Friends',

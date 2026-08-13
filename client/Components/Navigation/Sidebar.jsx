@@ -11,6 +11,7 @@ import LanguageSelector from './LanguageSelector';
 import Link from './Link';
 
 import BrandMark from '../../assets/img/aa_mark.svg';
+import { hasCapability } from '../../membership';
 
 /**
  * ARCHON: chess.com-style fixed left sidebar. Sections open flyout
@@ -66,6 +67,15 @@ const Sidebar = ({ appName, user }) => {
         }
 
         if (item.permission && !user?.permissions?.[item.permission]) {
+            return false;
+        }
+
+        // ARCHON (N12): premium capability, checked against the resolved list
+        // the server put on the user - so an admin passes without this file
+        // knowing anything about admins. Most premium entries deliberately do
+        // NOT set this: the page shows its own locked state, which sells the
+        // feature where hiding it would not.
+        if (item.capability && !hasCapability(user, item.capability)) {
             return false;
         }
 

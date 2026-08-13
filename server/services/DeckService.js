@@ -163,13 +163,30 @@ class DeckService {
 
         try {
             deck = await db.query(
-                'SELECT d.*, u."Username", e."ExpansionId" as "Expansion", (SELECT COUNT(*) FROM "Decks" WHERE "Name" = d."Name") AS DeckCount, ' +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
+                // ARCHON: $1 is the DECK id, and the win/loss subqueries used to
+                // compare it against "WinnerId" and "PlayerId", which are USER
+                // ids. The counts were therefore meaningless - zero unless a
+                // deck id happened to equal a user id - and the mobile deck
+                // screen has been showing them as a record ever since. The
+                // owner is d."UserId", and correlating on that needs no extra
+                // parameter.
+                //
+                // "DeckCount" is quoted for the same reason it is quoted in
+                // getFlaggedUnverifiedDecksForUser: unquoted, Postgres folds it
+                // to `deckcount`, mapDeck reads `deck.DeckCount` and gets
+                // undefined, and every deck's usage level came out 0.
+                // WinRate is derived in an outer select, the same way
+                // findForUser does it, so the two endpoints agree. Without it
+                // mapDeck's `winRate` was undefined here and only here.
+                'SELECT *, CASE WHEN "WinCount" + "LoseCount" = 0 THEN 0 ELSE (CAST("WinCount" AS FLOAT) / ("WinCount" + "LoseCount")) * 100 END AS "WinRate" FROM ( ' +
+                    'SELECT d.*, u."Username", e."ExpansionId" as "Expansion", (SELECT COUNT(*) FROM "Decks" WHERE "Name" = d."Name") AS "DeckCount", ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = d."UserId" AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "WinCount", ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != d."UserId" AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     'FROM "Decks" d ' +
                     'JOIN "Users" u ON u."Id" = "UserId" ' +
                     'JOIN "Expansions" e on e."Id" = d."ExpansionId" ' +
-                    'WHERE d."Id" = $1 ',
+                    'WHERE d."Id" = $1 ' +
+                    ') sq ',
                 [id]
             );
         } catch (err) {
@@ -546,7 +563,10 @@ class DeckService {
         try {
             decks = await db.query(
                 'SELECT *, CASE WHEN "WinCount" + "LoseCount" = 0 THEN 0 ELSE (CAST("WinCount" AS FLOAT) / ("WinCount" + "LoseCount")) * 100 END AS "WinRate" FROM ( ' +
-                    'SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", (SELECT COUNT(*) FROM "Decks" WHERE "Name" = d."Name") AS DeckCount, ' +
+                    // ARCHON: "DeckCount" quoted. Unquoted, Postgres folds the
+                    // alias to `deckcount`, so mapDeck's `deck.DeckCount` was
+                    // undefined and every deck's usage level computed as 0.
+                    'SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", (SELECT COUNT(*) FROM "Decks" WHERE "Name" = d."Name") AS "DeckCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     // ARCHON: SAS joined HERE rather than attached to the page

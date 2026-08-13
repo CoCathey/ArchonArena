@@ -16,7 +16,7 @@ const ConfigService = require('../services/ConfigService');
 const BanlistService = require('../services/BanlistService');
 // ARCHON (N12): Patreon linking lives in api/patreon.js; checkauth below still
 // needs the service to reconcile the supporter role on each auth refresh.
-const { patreonService } = require('./patreon');
+const { patreonService, syncMembershipTier } = require('./patreon');
 const util = require('../util.js');
 const { rateLimit, createFailureThrottle, clientIp } = require('./rateLimit');
 const { renderHtmlEmail, renderTextEmail } = require('../services/emailTemplate');
@@ -749,19 +749,44 @@ module.exports.init = function (server, options) {
             // including on a deployment that has never turned Patreon on.
             if (patreonService.isEnabled()) {
                 let isSupporter = false;
+                let patreonMembership = null;
 
                 if (user.patreon && user.patreon.refresh_token) {
-                    userDetails.patreon = await patreonService.getPatreonStatusForUser(user);
+                    // The full membership rather than just the status string:
+                    // the tier a pledge buys is decided from its Patreon tier
+                    // titles and amount, and the sync below needs both.
+                    patreonMembership = await patreonService.getMembershipForUser(user);
+                    userDetails.patreon = patreonMembership.status;
 
                     if (userDetails.patreon === 'none') {
                         delete userDetails.patreon;
 
                         let ret = await patreonService.refreshTokenForUser(user);
                         if (ret) {
-                            userDetails.patreon = await patreonService.getPatreonStatusForUser(
-                                user
-                            );
+                            patreonMembership = await patreonService.getMembershipForUser(user);
+                            userDetails.patreon = patreonMembership.status;
                         }
+                    }
+
+                    // ARCHON (N12): reconcile the stored TIER, not just the
+                    // legacy Supporter role.
+                    //
+                    // Without this the Memberships row was only ever written at
+                    // link time, which broke the two things the tier is for:
+                    // a pledge upgraded on Patreon never took effect here, and
+                    // - worse - a LAPSED pledge kept its tier forever, because
+                    // revoking the Supporter role does not touch the row that
+                    // actually grants the capabilities. The roadmap's
+                    // acceptance criterion is that a lapsed pledge removes
+                    // access; this is what makes that true.
+                    //
+                    // syncFromPatreon skips the write when nothing changed, so
+                    // this is a read on the common path, not a write per auth
+                    // refresh.
+                    const synced = await syncMembershipTier(user.id, patreonMembership);
+
+                    if (synced) {
+                        user.membership = synced;
                     }
                 }
 
@@ -769,11 +794,31 @@ module.exports.init = function (server, options) {
                     isSupporter = true;
                 }
 
+                // Re-resolve unconditionally: the membership row above may have
+                // changed the tier even when the Supporter role did not (an
+                // upgrade from Supporter to Archon leaves the role alone).
+                Object.assign(userDetails, user.getMembershipSummary());
+
                 if (isSupporter !== req.user.permissions.isSupporter) {
                     if (!req.user.permissions.keepsSupporterWithNoPatreon) {
                         userDetails.permissions.isSupporter = req.user.permissions.isSupporter =
                             isSupporter;
                         await userService.setSupporterStatus(user.id, isSupporter);
+
+                        // ARCHON (N12): capabilities were resolved at the top of
+                        // this handler, from the permissions as they stood
+                        // BEFORE this sweep. A pledge that starts or lapses on
+                        // this very request would otherwise ship the new role
+                        // with the old capabilities - premium panels staying
+                        // locked for someone who just started paying, which
+                        // reads as the payment not having worked.
+                        //
+                        // The model's own copy has to be updated first:
+                        // getWireSafeDetails hands out a COPY of the permissions
+                        // object (server/settings.js), so mutating userDetails
+                        // above does not change what getEntitlements() reads.
+                        user.setPermission('isSupporter', isSupporter);
+                        Object.assign(userDetails, user.getMembershipSummary());
                     }
                 }
             } else if (user.patreon && user.patreon.access_token) {

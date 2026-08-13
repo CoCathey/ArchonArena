@@ -49,8 +49,19 @@ class GameService {
         for (let player of game.players) {
             try {
                 await this.db.query(
+                    // ARCHON: the deck lookup is scoped to the player who owns
+                    // it. "Decks" is unique on ("Identity","UserId"), not on
+                    // "Identity" alone - a deck identity is shared by every
+                    // player who imports that deck - so the unscoped subquery
+                    // returned more than one row as soon as two people owned
+                    // the same deck, and the INSERT errored out. That aborted
+                    // the transaction and lost the whole game record.
+                    //
+                    // This is the form update() has always used; create() was
+                    // simply missing the second condition.
                     'INSERT INTO "GamePlayers" ("GameId", "PlayerId", "DeckId") VALUES ' +
-                        '($1, (SELECT "Id" FROM "Users" WHERE "Username" = $2), (SELECT "Id" FROM "Decks" WHERE "Identity" = $3))',
+                        '($1, (SELECT "Id" FROM "Users" WHERE "Username" = $2), ' +
+                        '(SELECT "Id" FROM "Decks" WHERE "Identity" = $3 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $2)))',
                     [gameId, player.name, player.deck]
                 );
             } catch (err) {
@@ -100,8 +111,22 @@ class GameService {
                 await this.db.query(
                     'UPDATE "GamePlayers" SET "Keys" = $1, ' +
                         '"DeckId" = (SELECT "Id" FROM "Decks" WHERE "Identity" = $5 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $4)), ' +
+                        // ARCHON (N12): turn order, for the going-first split in
+                        // Archon Intelligence. COALESCE keeps a replayed or
+                        // partial save from overwriting a value already
+                        // recorded, and an undefined here writes NULL, which
+                        // the analytics treat as "not recorded" rather than
+                        // "went second".
+                        '"WentFirst" = COALESCE($6, "GamePlayers"."WentFirst"), ' +
                         '"Turn" = $2 WHERE "GameId" = (SELECT "Id" FROM "Games" WHERE "GameId" = $3) AND "PlayerId" = (SELECT "Id" FROM "Users" WHERE "Username" = $4)',
-                    [keys, player.turn, game.gameId, player.name, player.deck]
+                    [
+                        keys,
+                        player.turn,
+                        game.gameId,
+                        player.name,
+                        player.deck,
+                        player.wentFirst === undefined ? null : !!player.wentFirst
+                    ]
                 );
             } catch (err) {
                 logger.error(

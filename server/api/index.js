@@ -3,6 +3,10 @@ const account = require('./account');
 const oidc = require('./oidc');
 // ARCHON (N12): Patreon supporter linking
 const patreon = require('./patreon');
+// ARCHON (N12): premium membership, entitlements and admin grants
+const membership = require('./membership');
+// ARCHON (N12): Archon Intelligence + Tournament Lab
+const intelligence = require('./intelligence');
 // ARCHON: public rating lookups
 const ratings = require('./ratings');
 // ARCHON: runtime admin settings
@@ -47,6 +51,11 @@ module.exports.init = function (server, options) {
     // /api/account/patreon/* paths are matched ahead of the parameterised
     // /api/account/:username routes.
     patreon.init(server);
+    // ARCHON (N12): membership catalogue, status and admin grants. Before
+    // account.init for the same reason patreon is - fixed /api/account paths
+    // must beat the parameterised ones.
+    membership.init(server);
+    intelligence.init(server);
     account.init(server, options);
     // ARCHON: OIDC SSO login (Keybringer)
     oidc.init(server);

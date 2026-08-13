@@ -347,6 +347,73 @@ export async function fetchDeck(id: Deck['id']) {
     return apiFetch<DeckDetailResult>(`/api/decks/${id}`);
 }
 
+// ---- Notifications ----
+
+export interface NotificationRow {
+    id: number;
+    category: string;
+    title: string;
+    body?: string;
+    url?: string;
+    data?: Record<string, unknown>;
+    read: boolean;
+    createdAt: string;
+}
+
+export async function fetchNotifications(limit = 30) {
+    return apiFetch<ApiResponse & { notifications?: NotificationRow[]; unread?: number }>(
+        `/api/notifications?limit=${limit}`
+    );
+}
+
+export async function markNotificationsRead(ids?: number[]) {
+    return apiFetch<ApiResponse>('/api/notifications/read', { method: 'POST', body: { ids } });
+}
+
+export interface NotificationPreference {
+    category: string;
+    group: string;
+    label: string;
+    description: string;
+    inApp: boolean;
+    email: boolean;
+    push: boolean;
+}
+
+export async function fetchNotificationPreferences() {
+    return apiFetch<ApiResponse & { preferences?: NotificationPreference[] }>(
+        '/api/notifications/preferences'
+    );
+}
+
+export async function setNotificationPreference(
+    category: string,
+    channels: { inApp?: boolean; email?: boolean; push?: boolean }
+) {
+    return apiFetch<ApiResponse>('/api/notifications/preferences', {
+        method: 'POST',
+        body: { category, ...channels }
+    });
+}
+
+/** Tell the server this device can receive push. Sent on every launch. */
+export async function registerPushToken(
+    token: string,
+    details: { platform?: string; deviceName?: string } = {}
+) {
+    return apiFetch<ApiResponse>('/api/notifications/push-token', {
+        method: 'POST',
+        body: { token, ...details }
+    });
+}
+
+export async function removePushToken(token: string) {
+    return apiFetch<ApiResponse>('/api/notifications/push-token/remove', {
+        method: 'POST',
+        body: { token }
+    });
+}
+
 // ---- Friends ----
 
 export async function fetchFriends() {

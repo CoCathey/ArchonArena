@@ -5,6 +5,10 @@
  * @property {boolean} [showOnlyWhenLoggedIn] Whether or not this menu item only shows for logged in users
  * @property {boolean} [showOnlyWhenLoggedOut] Whether or not this menu item only shows for logged out users
  * @property {Permission} [permission] The permission required to see this menu item
+ * @property {string} [capability] ARCHON (N12): a premium capability required to
+ *   see this item. Checked against the resolved `user.capabilities` list, so an
+ *   admin passes automatically. Prefer leaving premium entries VISIBLE and
+ *   letting the page show its locked state - hiding a feature sells nothing.
  * @property {string} [pageKey] Key of an admin-toggleable content page (see the
  *   'navigation' site setting); the item is hidden when that page is turned off
  * @property {MenuItem[]} [childItems] Child menu items
@@ -57,6 +61,9 @@ export const RightMenu = [
  */
 export const ProfileMenu = [
     { title: 'Profile', path: '/profile' },
+    // ARCHON (N12): membership sits in the profile menu because that is where a
+    // player goes to look at their own account.
+    { title: 'Membership', path: '/membership' },
     { title: 'Security', path: '/security' },
     { title: 'Block List', path: '/blocklist' },
     { title: 'Logout', path: '/logout' }
@@ -100,6 +107,21 @@ export const SidebarMenu = [
             { path: '/stats', title: 'Overview' },
             { path: '/stats/me', title: 'My Stats', showOnlyWhenLoggedIn: true },
             { path: '/stats/leaderboards', title: 'Leaderboards' }
+        ]
+    },
+    // ARCHON (N12): the premium tools get their own section rather than being
+    // buried inside Stats. They are a distinct proposition - "understand your
+    // decks" rather than "here are numbers" - and a player who never upgrades
+    // still benefits from seeing what the tools are, which is why these entries
+    // are visible to everyone and the pages themselves show a locked preview
+    // instead of 404ing.
+    {
+        title: 'Archon+',
+        landingPath: '/membership',
+        childItems: [
+            { path: '/intelligence', title: 'Archon Intelligence', showOnlyWhenLoggedIn: true },
+            { path: '/tournament-lab', title: 'Tournament Lab', showOnlyWhenLoggedIn: true },
+            { path: '/membership', title: 'Membership' }
         ]
     },
     {

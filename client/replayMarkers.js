@@ -17,6 +17,35 @@
  * @param {Array<{messageIndex: number, board?: object}>} snapshots
  * @returns {Array<{messageIndex: number, player: string, keys: number}>}
  */
+/**
+ * How many keys a player has forged, from a snapshot's `stats.keys`.
+ *
+ * ARCHON: this used to be `Number(stats.keys)`. `stats.keys` is the engine's
+ * per-colour map - `{ red: false, blue: true, yellow: false }` (player.js
+ * `getStats`) - and `Number({})` is NaN, so the finite check below rejected
+ * every player and `findKeyForges` always returned an empty array. The jump
+ * controls it feeds have therefore never appeared on any replay.
+ *
+ * The unit test did not catch it because its fixture passes a plain number,
+ * which is a shape the engine never produces. Numbers are still accepted here
+ * - defensively, for any recording or caller that has one - but the map is the
+ * real format and is what the count is derived from.
+ *
+ * @param {object|number|null|undefined} keys
+ * @returns {number|null} null when there is nothing countable
+ */
+export function keyCount(keys) {
+    if (typeof keys === 'number') {
+        return Number.isFinite(keys) ? keys : null;
+    }
+
+    if (!keys || typeof keys !== 'object') {
+        return null;
+    }
+
+    return Object.values(keys).filter(Boolean).length;
+}
+
 export function findKeyForges(snapshots) {
     const forges = [];
     const previousKeys = new Map();
@@ -29,9 +58,9 @@ export function findKeyForges(snapshots) {
         }
 
         for (const player of players) {
-            const keys = Number(player?.stats?.keys);
+            const keys = keyCount(player?.stats?.keys);
 
-            if (!player?.name || !Number.isFinite(keys)) {
+            if (!player?.name || keys === null) {
                 continue;
             }
 

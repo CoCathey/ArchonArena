@@ -30,5 +30,9 @@ export const TAG_TYPES = {
     // ARCHON (N5): reports, the moderation queue and the audit log.
     MODERATION: 'Moderation',
     // ARCHON (N12): Patreon link + pledge status.
-    PATREON: 'Patreon'
+    PATREON: 'Patreon',
+    // ARCHON (N12): premium membership and entitlements.
+    MEMBERSHIP: 'Membership',
+    // ARCHON (N12): Archon Intelligence analytics.
+    INTELLIGENCE: 'Intelligence'
 };

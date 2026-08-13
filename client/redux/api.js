@@ -245,6 +245,44 @@ export const api = createApi({
                 method: 'POST'
             })
         }),
+        // ARCHON (N12): the tier price list and capability copy. Public, so the
+        // membership page renders for a logged-out visitor deciding to sign up.
+        getMembershipCatalog: builder.query({
+            query: () => '/membership/catalog'
+        }),
+        // The caller's own resolved entitlements. The user object already
+        // carries `capabilities`; this is for the membership page, which also
+        // wants provider/status/expiry detail.
+        getMyMembership: builder.query({
+            query: () => '/membership/me',
+            providesTags: [TAG_TYPES.MEMBERSHIP]
+        }),
+        getAdminMemberships: builder.query({
+            query: () => '/admin/memberships',
+            providesTags: [TAG_TYPES.MEMBERSHIP]
+        }),
+        grantMembership: builder.mutation({
+            query: (body) => ({ url: '/admin/memberships/grant', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.MEMBERSHIP, TAG_TYPES.INTELLIGENCE]
+        }),
+        // ARCHON (N12): Archon Intelligence.
+        getDeckIntelligence: builder.query({
+            query: (deckId) => `/intelligence/deck/${deckId}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
+        getPlayerIntelligence: builder.query({
+            query: () => '/intelligence/player',
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
+        getMetaIntelligence: builder.query({
+            query: (days = 30) => `/intelligence/meta?days=${days}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
+        getTournamentLab: builder.query({
+            query: (deckIds = []) =>
+                `/intelligence/tournament-lab?decks=${encodeURIComponent(deckIds.join(','))}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
         // ARCHON (N12): is Patreon configured on this deployment, and where is
         // the campaign page. Public - the client renders no Patreon UI at all
         // when it comes back disabled.
@@ -271,14 +309,14 @@ export const api = createApi({
                 method: 'POST',
                 body: { code, state }
             }),
-            invalidatesTags: [TAG_TYPES.PATREON]
+            invalidatesTags: [TAG_TYPES.PATREON, TAG_TYPES.MEMBERSHIP, TAG_TYPES.INTELLIGENCE]
         }),
         unlinkPatreon: builder.mutation({
             query: () => ({
                 url: '/account/unlinkPatreon',
                 method: 'POST'
             }),
-            invalidatesTags: [TAG_TYPES.PATREON]
+            invalidatesTags: [TAG_TYPES.PATREON, TAG_TYPES.MEMBERSHIP, TAG_TYPES.INTELLIGENCE]
         }),
         // ARCHON: OIDC (Keybringer) linked identities for account settings
         getOidcIdentities: builder.query({
@@ -352,15 +390,24 @@ export const api = createApi({
             providesTags: [TAG_TYPES.RATINGS]
         }),
         // ARCHON: platform statistics & analytics (public aggregate lookups)
+        // ARCHON (N12): these three payloads are filtered by membership tier
+        // (server/api/statsGating.js), so a cached copy fetched while free is
+        // WRONG the moment the account upgrades - the premium fields would stay
+        // missing until the cache expired, which reads as the upgrade not
+        // having worked. Tagging them MEMBERSHIP makes a membership change
+        // refetch them.
         getMetaStats: builder.query({
-            query: () => '/stats/meta'
+            query: () => '/stats/meta',
+            providesTags: [TAG_TYPES.MEMBERSHIP]
         }),
         getPlayerStats: builder.query({
-            query: (username) => `/stats/player/${encodeURIComponent(username)}`
+            query: (username) => `/stats/player/${encodeURIComponent(username)}`,
+            providesTags: [TAG_TYPES.MEMBERSHIP]
         }),
         // ARCHON: per-deck record with SAS-vs-performance delta.
         getDeckStats: builder.query({
-            query: (username) => `/stats/decks/${encodeURIComponent(username)}`
+            query: (username) => `/stats/decks/${encodeURIComponent(username)}`,
+            providesTags: [TAG_TYPES.MEMBERSHIP]
         }),
         // ARCHON: public player profile header, clubs and recent games. Amber,
         // stats and trophies come from their own public endpoints above.
@@ -1058,6 +1105,15 @@ export const {
     useActivateAccountMutation,
     useResendActivationMutation,
     useVerifyAuthenticationMutation,
+    // ARCHON (N12): premium membership + Archon Intelligence
+    useGetMembershipCatalogQuery,
+    useGetMyMembershipQuery,
+    useGetAdminMembershipsQuery,
+    useGrantMembershipMutation,
+    useGetDeckIntelligenceQuery,
+    useGetPlayerIntelligenceQuery,
+    useGetMetaIntelligenceQuery,
+    useGetTournamentLabQuery,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,
     useGetPatreonMembershipQuery,

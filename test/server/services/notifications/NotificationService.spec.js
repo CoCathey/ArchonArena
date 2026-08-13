@@ -119,7 +119,11 @@ describe('NotificationService', function () {
 
         it('applies the category default when nothing is stored', async function () {
             // friend.accepted is pleasant but never urgent, so it does not mail.
-            expect(categoryDefaults('friend.accepted')).toEqual({ inApp: true, email: false });
+            expect(categoryDefaults('friend.accepted')).toEqual({
+                inApp: true,
+                email: false,
+                push: false
+            });
 
             db.query.mockResolvedValueOnce([]).mockResolvedValueOnce([{ Id: 5 }]);
 
@@ -257,5 +261,127 @@ describe('NotificationService', function () {
             expect(preferences.length).toBeGreaterThan(1);
             expect(preferences.every((entry) => isKnownCategory(entry.category))).toBe(true);
         });
+    });
+});
+
+describe('NotificationService push channel', function () {
+    let db;
+    let pushService;
+    let service;
+
+    beforeEach(function () {
+        db = { query: vi.fn().mockResolvedValue([]) };
+        pushService = { send: vi.fn().mockResolvedValue({ sent: 1, failed: 0, removed: 0 }) };
+        service = new NotificationService(db, { pushService });
+    });
+
+    const pairing = {
+        userId: 7,
+        category: 'tournament.pairing',
+        title: 'Round 2 pairing',
+        body: 'You are playing bob.',
+        url: '/tournaments/3',
+        data: { tournamentId: 3 }
+    };
+
+    it('pushes a pairing by default', async function () {
+        db.query.mockResolvedValueOnce([]).mockResolvedValueOnce([{ Id: 1 }]);
+
+        const result = await service.notify(pairing);
+
+        expect(result.pushed).toBe(1);
+        expect(pushService.send).toHaveBeenCalledWith(
+            expect.objectContaining({
+                userId: 7,
+                title: 'Round 2 pairing',
+                url: '/tournaments/3',
+                category: 'tournament.pairing',
+                data: { tournamentId: 3 }
+            })
+        );
+    });
+
+    it('does not push a category that is not worth interrupting for', async function () {
+        db.query.mockResolvedValueOnce([]).mockResolvedValueOnce([{ Id: 1 }]);
+
+        await service.notify({ ...pairing, category: 'friend.accepted' });
+
+        expect(pushService.send).not.toHaveBeenCalled();
+    });
+
+    it('honours an explicit push opt-out', async function () {
+        db.query
+            .mockResolvedValueOnce([{ InApp: true, Email: true, Push: false }])
+            .mockResolvedValueOnce([{ Id: 1 }]);
+
+        await service.notify(pairing);
+
+        expect(pushService.send).not.toHaveBeenCalled();
+    });
+
+    // The upgrade case: rows written before push existed carry Push = NULL.
+    it('pushes for a pre-push row that left the category on', async function () {
+        db.query
+            .mockResolvedValueOnce([{ InApp: true, Email: false, Push: null }])
+            .mockResolvedValueOnce([{ Id: 1 }]);
+
+        await service.notify(pairing);
+
+        expect(pushService.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays silent for a pre-push row that had silenced the category', async function () {
+        // They turned this category off before push existed. Buzzing their
+        // phone because a new channel appeared is exactly what they said no to.
+        db.query.mockResolvedValueOnce([{ InApp: false, Email: false, Push: null }]);
+
+        const result = await service.notify(pairing);
+
+        expect(result).toEqual({ delivered: false, reason: 'opted-out' });
+        expect(pushService.send).not.toHaveBeenCalled();
+    });
+
+    it('delivers by push alone when both other channels are off', async function () {
+        db.query.mockResolvedValueOnce([{ InApp: false, Email: false, Push: true }]);
+
+        const result = await service.notify(pairing);
+
+        expect(result.delivered).toBe(true);
+        expect(result.notificationId).toBeNull();
+        expect(pushService.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports the push preference to the preferences page', async function () {
+        db.query.mockResolvedValueOnce([
+            { Category: 'tournament.pairing', InApp: true, Email: false, Push: null }
+        ]);
+
+        const preferences = await service.getPreferences(7);
+        const pairingRow = preferences.find((row) => row.category === 'tournament.pairing');
+
+        expect(pairingRow.push).toBe(true);
+    });
+
+    it('still delivers when there is no push service at all', async function () {
+        const withoutPush = new NotificationService(db);
+        db.query.mockResolvedValueOnce([]).mockResolvedValueOnce([{ Id: 1 }]);
+
+        const result = await withoutPush.notify(pairing);
+
+        expect(result.delivered).toBe(true);
+        expect(result.pushed).toBe(0);
+    });
+
+    it('writes push alongside the other channels', async function () {
+        await service.setPreference(7, 'tournament.pairing', {
+            inApp: true,
+            email: false,
+            push: false
+        });
+
+        const [sql, params] = db.query.mock.calls[0];
+
+        expect(sql).toContain('"Push" = $5');
+        expect(params).toEqual([7, 'tournament.pairing', true, false, false]);
     });
 });
