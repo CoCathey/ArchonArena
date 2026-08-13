@@ -309,3 +309,65 @@ describe('Patreon checkout links', function () {
         });
     });
 });
+
+/**
+ * ARCHON (N12): a configured tier link may be a full URL or a bare reward id.
+ *
+ * Patreon has several link shapes for a tier and they change over time. When an
+ * operator has a link they have actually clicked and seen work, composing a
+ * different one from its id replaces something verified with something guessed,
+ * so a full URL is used exactly as given.
+ */
+describe('tier links configured as full URLs', function () {
+    const { checkoutUrlFor } = require('../../../../server/services/membership/tiers');
+
+    const archon = { id: TIER_IDS.ARCHON, priceUsd: 10 };
+
+    it('uses a configured URL verbatim', function () {
+        const url = checkoutUrlFor(archon, {
+            campaignUrl: 'https://www.patreon.com/16554466/join',
+            tierIds: { archon: 'https://www.patreon.com/membership/29339861' }
+        });
+
+        expect(url).toBe('https://www.patreon.com/membership/29339861');
+    });
+
+    it('still composes a checkout link from a bare id', function () {
+        const url = checkoutUrlFor(archon, {
+            campaignUrl: 'https://www.patreon.com/archonarena',
+            tierIds: { archon: '29339861' }
+        });
+
+        expect(url).toBe('https://www.patreon.com/checkout/archonarena?rid=29339861');
+    });
+
+    it('mixes the two, so tiers can be migrated one at a time', function () {
+        const config = {
+            campaignUrl: 'https://www.patreon.com/archonarena',
+            tierIds: {
+                supporter: 'https://www.patreon.com/membership/29339856',
+                archon: '29339861'
+            }
+        };
+
+        expect(checkoutUrlFor({ id: TIER_IDS.SUPPORTER, priceUsd: 5 }, config)).toBe(
+            'https://www.patreon.com/membership/29339856'
+        );
+        expect(checkoutUrlFor(archon, config)).toBe(
+            'https://www.patreon.com/checkout/archonarena?rid=29339861'
+        );
+    });
+
+    it('refuses a non-http scheme rather than rendering it as a link', function () {
+        // Config is trusted, but this value goes straight into an href - a
+        // javascript: URL there would be a self-inflicted XSS.
+        const url = checkoutUrlFor(archon, {
+            campaignUrl: 'https://www.patreon.com/archonarena',
+            // eslint-disable-next-line no-script-url
+            tierIds: { archon: 'javascript:alert(1)' }
+        });
+
+        expect(url).not.toContain('javascript:');
+        expect(url).toBe('https://www.patreon.com/checkout/archonarena?rid=javascript%3Aalert(1)');
+    });
+});
