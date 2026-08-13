@@ -1424,6 +1424,31 @@ class Game extends EventEmitter {
         this.router.rematch(this);
     }
 
+    /**
+     * ARCHON: continue this match at this table.
+     *
+     * Deliberately NOT a rematch. A rematch builds a fresh pending game
+     * carrying none of the event with it - no match id, so the result could
+     * never be reported, and no deck pin, so both players would get a free
+     * choice in an event that had locked them. This hands the table back to the
+     * lobby, which knows the match and seats both players at whichever table
+     * the event has opened for the next game.
+     *
+     * The result of the game just played is already recorded: GAMEWIN fired
+     * when it ended, long before anybody pressed this.
+     */
+    nextTournamentGame() {
+        if (!this.tournament) {
+            return;
+        }
+
+        if (!this.finishedAt) {
+            this.finishedAt = new Date();
+        }
+
+        this.router.tournamentNextGame(this);
+    }
+
     timeExpired() {
         this.emit('onTimeExpired');
     }

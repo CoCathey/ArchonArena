@@ -75,6 +75,8 @@ describe('Lobby tournament tables', function () {
             refuseUnpinnedStart: vi.fn(() => false),
             startTournamentGameIfReady: vi.fn(),
             findTournamentGame: Lobby.prototype.findTournamentGame,
+            seatTournamentPlayers: Lobby.prototype.seatTournamentPlayers,
+            onTournamentNextGame: Lobby.prototype.onTournamentNextGame,
             staleTournamentTables: Lobby.prototype.staleTournamentTables,
             ensureTournamentGame: Lobby.prototype.ensureTournamentGame,
             createTournamentGame: Lobby.prototype.createTournamentGame,
@@ -193,6 +195,66 @@ describe('Lobby tournament tables', function () {
             // Without a game number it is the old, ambiguous question - still
             // answerable, and still the first one.
             expect(lobby.findTournamentGame(7)).toBe(gameOne);
+        });
+    });
+
+    /**
+     * ARCHON: "can we make it where the current table just lets you click a
+     * button to make that table the table for game 2".
+     *
+     * The next game's table already exists - opening it is the first thing
+     * that happens when a result is recorded - so continuing a series is not a
+     * question of creating anything. It is a question of retiring the table
+     * that just finished and putting the two players in the seats of the one
+     * that is waiting, without either of them going to look for it.
+     */
+    describe('continuing the series at the table', function () {
+        it('retires the finished table and seats both players at the next one', async function () {
+            const gameOne = await lobby.ensureTournamentGame(matchInfo(1));
+
+            gameOne.started = true;
+            lobby.socketsByName = {
+                alice: { id: 'sock-a', user: alice, joinChannel: vi.fn() },
+                bob: { id: 'sock-b', user: bob, joinChannel: vi.fn() }
+            };
+            lobby.tournamentService.getMatchesNeedingGames = vi.fn(async () => [matchInfo(2)]);
+
+            await lobby.onTournamentNextGame({ gameId: gameOne.id });
+
+            // The finished table is gone...
+            expect(lobby.games[gameOne.id]).toBeUndefined();
+
+            // ...and exactly one table remains, for game two, with both seats
+            // filled.
+            const remaining = tablesForMatch(7);
+
+            expect(remaining).toHaveLength(1);
+            expect(remaining[0].tournament.gameNumber).toBe(2);
+            expect(Object.keys(remaining[0].getPlayers()).sort()).toEqual(['alice', 'bob']);
+            expect(lobby.startTournamentGameIfReady).toHaveBeenCalled();
+        });
+
+        // A best-of-three decided 2-0 has no game three. Nothing to open, and
+        // nobody left waiting at a table for a game that will never come.
+        it('opens nothing when the match is already decided', async function () {
+            const gameTwo = await lobby.ensureTournamentGame(matchInfo(2));
+
+            gameTwo.started = true;
+            lobby.tournamentService.getMatchesNeedingGames = vi.fn(async () => []);
+
+            await lobby.onTournamentNextGame({ gameId: gameTwo.id });
+
+            expect(tablesForMatch(7)).toHaveLength(0);
+        });
+
+        it('ignores a table that is not a tournament table', async function () {
+            const casual = new PendingGame(alice, { name: 'casual' });
+
+            lobby.games[casual.id] = casual;
+
+            await lobby.onTournamentNextGame({ gameId: casual.id });
+
+            expect(lobby.games[casual.id]).toBe(casual);
         });
     });
 

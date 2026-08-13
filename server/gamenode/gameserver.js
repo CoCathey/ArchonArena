@@ -508,6 +508,34 @@ class GameServer {
     }
 
     /**
+     * ARCHON: hand a finished tournament table back so the match can continue.
+     *
+     * Structurally a rematch - the players are cleared out and the node lets
+     * the game go - but the lobby's handler is entirely different: rather than
+     * building a fresh game, it seats both players at the table the event has
+     * already opened for the next game of this match.
+     *
+     * @param {import("../game/game")} game
+     */
+    tournamentNextGame(game) {
+        this.gameSocket.send('TOURNAMENTNEXTGAME', { game: game.getSaveState() });
+
+        for (let player of Object.values(game.getPlayersAndSpectators())) {
+            if (player.left || player.disconnectedAt || !player.socket) {
+                continue;
+            }
+
+            player.socket.send('cleargamestate');
+            player.socket.leaveChannel(game.id);
+            // So no further game state is sent to somebody the lobby is about
+            // to seat somewhere else.
+            player.left = true;
+        }
+
+        delete this.games[game.id];
+    }
+
+    /**
      * @param {import("../game/game")} game
      */
     rematchWithNewDecks(game) {

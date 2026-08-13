@@ -64,6 +64,8 @@ class Lobby {
         this.router.on('onGameClosed', this.onGameClosed.bind(this));
         this.router.on('onGameRematch', this.onGameRematch.bind(this));
         this.router.on('onGameRematchWithNewDecks', this.onGameRematchWithNewDecks.bind(this));
+        // ARCHON: a tournament series continuing at the table it is already at.
+        this.router.on('onTournamentNextGame', this.onTournamentNextGame.bind(this));
         this.router.on('onPlayerLeft', this.onPlayerLeft.bind(this));
         this.router.on('onWorkerTimedOut', this.onWorkerTimedOut.bind(this));
         this.router.on('onNodeReconnected', this.onNodeReconnected.bind(this));
@@ -2449,33 +2451,7 @@ class Lobby {
             game.id
         );
 
-        // Seat everyone who is online and not busy in another game.
-        for (const player of matchInfo.players) {
-            const socket = this.socketsByName[player.username];
-
-            if (!socket || this.findGameForUser(player.username)) {
-                continue;
-            }
-
-            const joinError = game.join(socket.id, socket.user);
-
-            if (joinError) {
-                continue;
-            }
-
-            socket.joinChannel(game.id);
-
-            if (player.deckId) {
-                try {
-                    await this.applyDeckSelection(game, player.username, player.deckId, false);
-                } catch (err) {
-                    logger.error(
-                        `Failed to auto-select deck ${player.deckId} for ${player.username}`,
-                        err
-                    );
-                }
-            }
-        }
+        await this.seatTournamentPlayers(game, matchInfo);
 
         /**
          * Clear away any unstarted table left over for this match.
@@ -2501,6 +2477,107 @@ class Lobby {
         this.startTournamentGameIfReady(game);
 
         return game;
+    }
+
+    /**
+     * Put the pairing in their seats with the decks the event pinned.
+     *
+     * Shared by table creation and by a series continuing at the table it is
+     * already at: in the second case the table already exists and only the
+     * seating is wanted, so this cannot live inside the creation path.
+     *
+     * Anyone already in another game is left alone - they will be seated when
+     * they leave it, and dragging somebody out of a game they are playing to
+     * sit them at another is never right.
+     */
+    async seatTournamentPlayers(game, matchInfo) {
+        for (const player of matchInfo.players) {
+            const socket = this.socketsByName[player.username];
+
+            if (!socket || game.getPlayerByName(player.username)) {
+                continue;
+            }
+
+            const busyIn = this.findGameForUser(player.username);
+
+            if (busyIn && busyIn.id !== game.id) {
+                continue;
+            }
+
+            const joinError = game.join(socket.id, socket.user);
+
+            if (joinError) {
+                continue;
+            }
+
+            socket.joinChannel(game.id);
+
+            if (player.deckId) {
+                try {
+                    await this.applyDeckSelection(game, player.username, player.deckId, false);
+                } catch (err) {
+                    logger.error(
+                        `Failed to auto-select deck ${player.deckId} for ${player.username}`,
+                        err
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * ARCHON: both players agreed to play the next game of their match at the
+     * table they just finished on.
+     *
+     * The node has already cleared them out and let its game go. What is left
+     * is to retire the finished table and seat them at the one the event
+     * opened for the next game - which exists already, because opening it is
+     * the first thing that happens when a result is recorded.
+     *
+     * Everything about the event travels with them: the match, the pinned
+     * decks, the series number. That is the whole reason this is not a
+     * rematch, which would have built a table the event knows nothing about.
+     */
+    async onTournamentNextGame(oldGame) {
+        const finished = this.games[oldGame.gameId];
+
+        if (!finished || !finished.tournament) {
+            return;
+        }
+
+        const { tournamentId, matchId } = finished.tournament;
+
+        // The finished table has done its job. Removing it first also frees
+        // both players from it, so the seating below can find them idle.
+        this.broadcastGameMessage('removegame', finished);
+        delete this.games[finished.id];
+
+        try {
+            const matches = await this.tournamentService.getMatchesNeedingGames(tournamentId);
+            const matchInfo = matches.find((entry) => entry.matchId === matchId);
+
+            if (!matchInfo) {
+                // The match is over - the game just played decided it. Nothing
+                // to open, and the event page has the result.
+                logger.info(`Match ${matchId} needs no further game; not continuing the series`);
+
+                return;
+            }
+
+            const game = await this.ensureTournamentGame(matchInfo);
+
+            if (!game) {
+                return;
+            }
+
+            await this.seatTournamentPlayers(game, matchInfo);
+
+            this.sendGameState(game);
+            this.broadcastGameMessage('updategame', game);
+            this.startTournamentGameIfReady(game);
+        } catch (err) {
+            logger.error(`Failed to continue tournament match ${matchId} at its table`, err);
+        }
     }
 
     /**

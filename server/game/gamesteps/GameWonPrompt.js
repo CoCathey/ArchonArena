@@ -1,6 +1,7 @@
 const AllPlayerPrompt = require('./allplayerprompt');
 const ContinuePrompt = require('./ContinuePrompt');
 const RematchPrompt = require('./RematchPrompt');
+const NextTournamentGamePrompt = require('./NextTournamentGamePrompt');
 
 const ButtonArgToMode = {
     'rematch-same-decks': 'same',
@@ -10,6 +11,7 @@ const ButtonArgToMode = {
 
 const ButtonArgToRequest = {
     continue: 'to continue',
+    'next-game': 'to play the next game of this match',
     'rematch-same-decks': 'a rematch with the same decks',
     'rematch-swap-decks': 'a rematch with swapped decks',
     'rematch-change-decks': 'a rematch with different decks'
@@ -42,20 +44,34 @@ class GameWonPrompt extends AllPlayerPrompt {
      * that ends early (2-0 in a best of three) sends them back to the event
      * page, which is where they were going anyway.
      */
-    whatHappensNext() {
+    /**
+     * Whether another game in this match is possible.
+     *
+     * Read from what the TABLE knows - its game number and the series length -
+     * rather than from the match score, which lives in the database and not on
+     * this node. So this is right about the only thing it claims: that the
+     * series is not already at its last game. A match that is decided early
+     * (2-0 in a best of three) has its next table refused by the event, and the
+     * player is told so rather than left waiting.
+     */
+    seriesContinues() {
         const { gameNumber, bestOf } = this.game.tournament || {};
 
-        if (!bestOf || bestOf < 2) {
-            return 'Leave the game to report back to the event - the result is already recorded.';
-        }
+        return !!bestOf && bestOf > 1 && (gameNumber || 1) < bestOf;
+    }
 
-        if (gameNumber && gameNumber >= bestOf) {
-            return 'That is the last game of the series. Leave the game to see the result on the event page.';
+    whatHappensNext() {
+        if (!this.seriesContinues()) {
+            const { bestOf } = this.game.tournament || {};
+
+            return bestOf && bestOf > 1
+                ? 'That is the last game of the series. Leave the game to see the result on the event page.'
+                : 'Leave the game to report back to the event - the result is already recorded.';
         }
 
         return (
-            'The result is recorded. Leave this game and your next table in this match is ' +
-            'waiting on the event page - you do not need to report anything.'
+            'The result is recorded and you do not need to report anything. Start the next ' +
+            'game here, or leave and pick it up on the event page.'
         );
     }
 
@@ -80,17 +96,27 @@ class GameWonPrompt extends AllPlayerPrompt {
          * had already opened for them and nothing on this screen mentioned.
          */
         if (this.game.tournament) {
+            const buttons = [{ arg: 'continue', text: 'Continue Playing' }];
+
+            // The next game of the series, started right here. Both players
+            // are already sitting at this table with the decks the event
+            // pinned; walking to the event page to find the next one was
+            // never work anybody needed to do.
+            if (this.seriesContinues()) {
+                buttons.unshift({
+                    arg: 'next-game',
+                    text: `Play Game ${(this.game.tournament.gameNumber || 1) + 1}`,
+                    disabled: opponentLeft
+                });
+            }
+
             return {
                 promptTitle: 'Game Won',
-                // Says what happens next, because at a tournament table
-                // something does and it is not on this screen. The event opens
-                // the next game of a series itself the moment this result is
-                // recorded; all either player has to do is leave.
                 menuTitle: {
                     text: '{{player}} has won the game! {{next}}',
                     values: { player: this.winner.name, next: this.whatHappensNext() }
                 },
-                buttons: [{ arg: 'continue', text: 'Continue Playing' }]
+                buttons
             };
         }
 
@@ -155,6 +181,8 @@ class GameWonPrompt extends AllPlayerPrompt {
 
         if (arg === 'continue') {
             this.game.queueStep(new ContinuePrompt(this.game, player, callbacks));
+        } else if (arg === 'next-game') {
+            this.game.queueStep(new NextTournamentGamePrompt(this.game, player, callbacks));
         } else {
             this.game.queueStep(
                 new RematchPrompt(this.game, player, ButtonArgToMode[arg], callbacks)

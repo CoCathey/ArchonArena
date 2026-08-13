@@ -323,6 +323,22 @@ class GameRouter extends EventEmitter {
                 this.emit('onGameRematch', message.arg.game);
 
                 break;
+            // ARCHON: a tournament series continuing at the table it is
+            // already at. Same shape as a rematch - the node is done with this
+            // game and its worker is freed - but the lobby seats the players at
+            // the event's next table rather than building a new game.
+            case 'TOURNAMENTNEXTGAME':
+                this.gameService.update(message.arg.game);
+
+                if (worker) {
+                    worker.numGames--;
+                } else {
+                    logger.error(`Got a next-game handoff for non existant worker ${identity}`);
+                }
+
+                this.emit('onTournamentNextGame', message.arg.game);
+
+                break;
             case 'REMATCHWITHNEWDECKS':
                 this.gameService.update(message.arg.game);
 
