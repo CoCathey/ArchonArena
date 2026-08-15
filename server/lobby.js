@@ -883,12 +883,18 @@ class Lobby {
     }
 
     broadcastUserMessage(user, message) {
+        // The same summary for every recipient - only the block check varies.
+        // Built once because `role` now resolves entitlements to decide the
+        // supporter badge, and rebuilding it per socket made one player joining
+        // cost one resolution per connection.
+        const summary = user.getShortSummary();
+
         for (let socket of Object.values(this.sockets)) {
             if (socket.user === user || (socket.user && socket.user.hasUserBlocked(user))) {
                 continue;
             }
 
-            socket.send(message, user.getShortSummary());
+            socket.send(message, summary);
         }
     }
 

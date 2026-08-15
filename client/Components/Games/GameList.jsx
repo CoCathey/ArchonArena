@@ -12,6 +12,7 @@ import AlertPanel from '../Site/AlertPanel';
 import PlayerAmber from '../Site/PlayerAmber';
 import Link from '../Navigation/Link';
 import { lobbyActions } from '../../redux/slices/lobbySlice';
+import { getRoleClass } from '../../util';
 import TimeLimitIcon from '../../assets/img/Timelimit.png';
 import ShowHandIcon from '../../assets/img/ShowHandIcon.png';
 import SealedIcon from '../../assets/img/sealed.png';
@@ -286,11 +287,16 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
                                     <div className='grid gap-2 sm:grid-cols-2'>
                                         {seats.map((player, seatIndex) => {
                                             if (player) {
-                                                const userClass = `username ${
+                                                // ARCHON (N12): `${role}-role` is
+                                                // keyteki's old class name and
+                                                // nothing defines it, so every
+                                                // supporter in the lobby list
+                                                // rendered exactly like everyone
+                                                // else. getRoleClass is what the
+                                                // stylesheet actually keys on.
+                                                const userClass = `username ${getRoleClass(
                                                     player.role
-                                                        ? `${player.role.toLowerCase()}-role`
-                                                        : ''
-                                                }`;
+                                                )}`;
 
                                                 return (
                                                     <div

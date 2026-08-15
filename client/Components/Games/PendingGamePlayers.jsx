@@ -8,6 +8,7 @@ import Icon from '../Icon';
 import Panel from '../Site/Panel';
 import Avatar from '../Site/Avatar';
 import PlayerAmber from '../Site/PlayerAmber';
+import { getRoleClass } from '../../util';
 
 /**
  * @typedef PendingGamePlayersProps
@@ -139,9 +140,9 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                         );
                     }
 
-                    const userClass =
-                        'username truncate font-semibold' +
-                        (player.role ? ` ${player.role.toLowerCase()}-role` : '');
+                    // ARCHON (N12): was `${role}-role`, which no stylesheet
+                    // defines - see the same fix in GameList.
+                    const userClass = `username truncate ${getRoleClass(player.role)}`;
 
                     const deckSelected = !!player.deck?.selected;
                     const deckName = playerIsMe

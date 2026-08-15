@@ -67,9 +67,13 @@ const CAPABILITIES = {
  */
 const CAPABILITY_CATALOG = {
     [CAPABILITIES.ELO_HISTORY]: {
-        label: 'Full Elo history',
-        learn: 'See every rating change you have ever had, not just your current number.',
-        where: 'Archon Intelligence, and your profile'
+        label: 'Elo history',
+        // Was "Full Elo history ... every rating change you have ever had".
+        // playerRatingHistory is called with limit 500 and hard-caps at 2000, so
+        // "every ... ever" is not what is served; and the profile does not show
+        // rating history at all, only Archon Intelligence does.
+        learn: 'See how your rating moved game by game, not just your current number.',
+        where: 'Archon Intelligence'
     },
     [CAPABILITIES.EXPANDED_MATCH_HISTORY]: {
         label: 'Expanded match history',
@@ -97,7 +101,11 @@ const CAPABILITY_CATALOG = {
     },
     [CAPABILITIES.PERFORMANCE_DASHBOARD]: {
         label: 'Performance dashboard',
-        learn: 'One page that shows whether you are actually improving.',
+        // Was "whether you are actually improving", which promises a trend.
+        // playerVsExpectation is called with no `sinceDays`, so there is no date
+        // filter and no time axis - it is one lifetime figure. The trend version
+        // is ADVANCED_PERFORMANCE_DASHBOARD below, and it is still planned.
+        learn: 'See whether you are beating what your rating predicted, across your whole record.',
         where: 'Archon Intelligence'
     },
     [CAPABILITIES.PROFILE_COSMETICS]: {
@@ -145,26 +153,41 @@ const CAPABILITY_CATALOG = {
         where: 'Archon+ → Tournament Lab'
     },
     [CAPABILITIES.ADVANCED_REPLAYS]: {
-        label: 'Advanced replay',
-        learn: 'Walk a finished game turn by turn and find the point it was decided.',
+        label: 'Replay analysis',
+        // Was "walk a finished game turn by turn and find the point it was
+        // decided" - which is exactly what ReplayViewer already does for every
+        // signed-in account, for free. Selling it at Archon was charging for the
+        // free tier. What is actually unbuilt is analysis layered over the
+        // replay, so that is what this now describes.
+        learn: 'Analysis layered over a replay. Stepping through replays is free for everyone.',
         where: 'Any finished game → Replay',
         planned: true
     },
     [CAPABILITIES.PRIVATE_LEAGUES]: {
-        label: 'Private groups and leagues',
-        learn: 'Run an invite-only league for your playgroup.',
+        label: 'League play for your club',
+        // Was "run an invite-only group for your playgroup" - clubs already do
+        // that for free, join codes and all (ClubService). What no club has is
+        // league play: seasons, fixtures, standings. That is the unbuilt part,
+        // so that is what this describes.
+        learn: 'Seasons and standings inside a club. Clubs themselves are free for everyone.',
         where: 'Community → Clubs',
         planned: true
     },
     [CAPABILITIES.CUSTOM_TOURNAMENTS]: {
-        label: 'Custom tournaments',
-        learn: 'Run events with your own structure and rules.',
+        label: 'Extended tournament options',
+        // Was "run events with your own structure and rules", which TournamentService.create
+        // already lets any free account do across ~42 configurable fields -
+        // format, rounds, cut, seeding, SAS bands, teams, pacing, prizes. Anyone
+        // can run a custom event; this is only ever additions on top of that.
+        learn: 'Extra options on top of tournament creation, which is free for everyone.',
         where: 'Tournaments → Create',
         planned: true
     },
     [CAPABILITIES.ADVANCED_PERFORMANCE_DASHBOARD]: {
         label: 'Advanced performance dashboard',
-        learn: 'Track your results against what your rating predicted, over time.',
+        // The difference from Supporter's PERFORMANCE_DASHBOARD is the time
+        // axis, so say so - otherwise the two read as the same thing sold twice.
+        learn: 'Break that same comparison down over time, so you can see the trend.',
         where: 'Archon Intelligence → Player Intelligence',
         planned: true
     },

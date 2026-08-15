@@ -1,7 +1,8 @@
 const Settings = require('../settings');
 // ARCHON (N12): the single authority on premium access. See its header for why
 // the admin override lives there and nowhere else.
-const { resolveEntitlements } = require('../services/membership/entitlements');
+const { resolveEntitlements, can } = require('../services/membership/entitlements');
+const { CAPABILITIES } = require('../services/membership/capabilities');
 
 class User {
     constructor(userData) {
@@ -93,6 +94,22 @@ class User {
         return this.userData.permissions && this.userData.permissions.isSupporter;
     }
 
+    /**
+     * ARCHON (N12): the supporter badge, as the membership tiers sell it.
+     *
+     * `isSupporter` above is the legacy Roles-table flag, granted by hand. The
+     * Supporter tier sells "show your support next to your name", and paying on
+     * Patreon does not touch that table - so every Patreon member was buying a
+     * badge that nobody, including them, could see.
+     *
+     * Read as a capability rather than as a tier, so it follows the tiers if the
+     * badge ever moves, and so an admin has it for the same reason they have
+     * everything else.
+     */
+    get hasSupporterBadge() {
+        return can(this.getEntitlements(), CAPABILITIES.SUPPORTER_BADGE);
+    }
+
     get role() {
         if (this.isAdmin) {
             return 'admin';
@@ -110,7 +127,7 @@ class User {
             return 'contributor';
         }
 
-        if (this.isSupporter) {
+        if (this.isSupporter || this.hasSupporterBadge) {
             return 'supporter';
         }
 

@@ -16,7 +16,28 @@
  * IP, password state or linked-identity data. Disabled accounts do not resolve,
  * matching the member directory and the leaderboards.
  */
+const logger = require('../../log');
+const { resolveEntitlements, can } = require('../membership/entitlements');
+const { CAPABILITIES } = require('../membership/capabilities');
+const { membershipFromDbRow } = require('../membership/mapRow');
+
 const BIO_MAX_LENGTH = 280;
+
+/**
+ * ARCHON (N12): the badge, in the same order User.role uses.
+ *
+ * Deliberately not routed through UserService.mapPermissions: this is a display
+ * concern on an unauthenticated endpoint, not authorization, and importing the
+ * user service here would drag the whole account stack into a public profile
+ * read. Nothing is granted from this - it decides a text colour.
+ */
+const ROLE_BY_PRIORITY = [
+    ['Admin', 'admin'],
+    ['TournamentWinner', 'winner'],
+    ['PreviousTournamentWinner', 'previouswinner'],
+    ['Contributor', 'contributor'],
+    ['Supporter', 'supporter']
+];
 
 class PlayerProfileService {
     constructor(db = require('../../db')) {
@@ -46,9 +67,10 @@ class PlayerProfileService {
             return null;
         }
 
-        const [clubs, recentGames] = await Promise.all([
+        const [clubs, recentGames, role] = await Promise.all([
             this.getClubs(user.Id),
-            this.getRecentGames(user.Id)
+            this.getRecentGames(user.Id),
+            this.getRole(user.Id)
         ]);
 
         return {
@@ -58,9 +80,68 @@ class PlayerProfileService {
             state: user.State,
             bio: user.Bio || null,
             joined: user.Registered,
+            role,
             clubs,
             recentGames
         };
+    }
+
+    /**
+     * ARCHON (N12): the badge shown next to this player's name.
+     *
+     * The Supporter tier sells "show your support next to your name in the
+     * lobby and on your profile". The lobby half worked through User.role; the
+     * profile half did not exist, because this payload carried no role at all -
+     * so half of a live paid promise was unkept.
+     *
+     * Two sources, because there are two ways to be a supporter: the granted
+     * Roles-table row, and a Patreon membership that carries the badge
+     * capability. Both land on the same string, and the same colours the lobby
+     * uses.
+     *
+     * @returns {Promise<string>} one of admin/winner/previouswinner/contributor/supporter/user
+     */
+    async getRole(userId) {
+        let roleNames = new Set();
+
+        try {
+            const rows = await this.db.query(
+                'SELECT r."Name" FROM "UserRoles" ur JOIN "Roles" r ON r."Id" = ur."RoleId" ' +
+                    'WHERE ur."UserId" = $1',
+                [userId]
+            );
+
+            roleNames = new Set((rows || []).map((row) => row.Name));
+        } catch (err) {
+            // A profile that renders without a badge is fine; one that 500s is
+            // not. Same reasoning as the membership lookup below.
+            logger.warn('Failed to look up roles for player profile', err);
+        }
+
+        for (const [roleName, role] of ROLE_BY_PRIORITY) {
+            if (roleNames.has(roleName)) {
+                return role;
+            }
+        }
+
+        try {
+            const rows = await this.db.query('SELECT * FROM "Memberships" WHERE "UserId" = $1', [
+                userId
+            ]);
+            const entitlements = resolveEntitlements({
+                user: { permissions: {} },
+                membership: membershipFromDbRow(rows && rows[0])
+            });
+
+            if (can(entitlements, CAPABILITIES.SUPPORTER_BADGE)) {
+                return 'supporter';
+            }
+        } catch (err) {
+            // The Memberships migration may not have run yet.
+            logger.warn('Failed to look up membership for player profile', err);
+        }
+
+        return 'user';
     }
 
     /** The bio as the account owner would edit it (no public/disabled gating). */

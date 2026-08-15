@@ -10,6 +10,7 @@ import Avatar from '../Components/Site/Avatar';
 import AmberValue from '../Components/Site/AmberValue';
 // ARCHON (N5): reporting
 import ReportButton from '../Components/Site/ReportButton';
+import { getRoleClass } from '../util';
 import {
     useGetPlayerProfileQuery,
     useGetPlayerStatsQuery,
@@ -95,7 +96,11 @@ const PlayerProfile = () => {
                 <div className='flex items-center gap-3'>
                     <Avatar imgPath={profile.avatar} />
                     <div className='min-w-0'>
-                        <div className='text-lg font-semibold text-foreground'>
+                        {/* ARCHON (N12): the supporter badge is sold as "next
+                            to your name in the lobby and on your profile", and
+                            the profile never carried a role. Same colours the
+                            lobby and in-game chat use. */}
+                        <div className={`text-lg ${getRoleClass(profile.role)}`}>
                             {profile.username}
                         </div>
                         <div className='flex flex-wrap gap-x-3 text-xs text-muted'>
