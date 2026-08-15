@@ -1964,7 +1964,7 @@ class Lobby {
             await this.checkSasBound(game, deck, isStandalone);
         }
 
-        this.checkUnchained(game, deck);
+        this.checkUnchained(game, deck, isStandalone);
 
         for (let card of deck.cards) {
             let house = card.house;
@@ -2051,15 +2051,24 @@ class Lobby {
      * ARCHON: the Unchained set is playable only in an Unchained game, and is
      * the only thing playable there.
      *
-     * This was enforced on the random-deck path and nowhere else, so the rule
-     * held for "roll me one" and not for "I pick this one" - the dice would
-     * refuse a deck the list had just offered. Checked here rather than only in
-     * the picker because a hidden option is not a control: the list decides
-     * what is easy to do, this decides what is possible.
+     * Both pickers narrow their lists to it (the web by expansion, the app by
+     * the `unchained` deck filter) and the Lucky Dice roll has always applied
+     * it - but nothing checked the deck that actually arrived, so the rule was
+     * whatever the client chose to send. A hidden option is not a control: the
+     * list decides what is easy to do, this decides what is possible.
      *
-     * Standalone decks carry no expansion of their own and are left alone.
+     * ## Standalone decks are enforced one way only
+     *
+     * An Unchained game refuses a standalone deck that is not Unchained, because
+     * otherwise the mode does not mean anything - the whole point is that both
+     * sides are drawn from that pool.
+     *
+     * Every other format leaves standalone decks alone. They are a small curated
+     * list that both clients have always offered unfiltered in every format, so
+     * refusing one now would break something that works today to enforce a rule
+     * about a set the player did not choose to be in.
      */
-    checkUnchained(game, deck) {
+    checkUnchained(game, deck, isStandalone = false) {
         if (!deck || deck.expansion === undefined || deck.expansion === null) {
             return;
         }
@@ -2068,6 +2077,10 @@ class Lobby {
         const isUnchainedGame = game.gameFormat === 'unchained';
 
         if (isUnchainedDeck === isUnchainedGame) {
+            return;
+        }
+
+        if (isStandalone && !isUnchainedGame) {
             return;
         }
 

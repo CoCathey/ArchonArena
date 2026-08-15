@@ -434,6 +434,27 @@ describe('Lobby.checkUnchained', function () {
         }
     });
 
+    it('refuses a standalone deck that is not Unchained in an Unchained game', function () {
+        // Otherwise the mode means nothing: the point is that both sides come
+        // from that pool.
+        let err;
+
+        try {
+            lobby.checkUnchained({ gameFormat: 'unchained' }, deck(855), true);
+        } catch (caught) {
+            err = caught;
+        }
+
+        expect(err).toBeTruthy();
+    });
+
+    it('leaves standalone decks alone in every other format', function () {
+        // Both clients have always offered the curated standalone list
+        // unfiltered in every format. Refusing one now would break something
+        // that works today over a set the player did not choose to be in.
+        expect(() => lobby.checkUnchained({ gameFormat: 'normal' }, deck(601), true)).not.toThrow();
+    });
+
     it('says nothing about a deck with no expansion recorded', function () {
         // Standalone decks carry no expansion; refusing them here would break
         // a path that has nothing to do with this rule.
