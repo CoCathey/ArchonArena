@@ -64,6 +64,24 @@ const CAPABILITIES = {
  * Remove the flag when the feature ships AND something gates on the capability.
  * A capability with no gate and no `planned` flag is a promise nobody is
  * keeping.
+ *
+ * ## Vault Master, and what took the flags off
+ *
+ * All five of this tier's capabilities were flagged, which is why
+ * `isTierPurchasable` refused to sell it - $20 bought nothing over Archon's
+ * $10. They are now unflagged because each has something behind it:
+ *
+ *   experimental_features  \
+ *   beta_features           |  the preview programme, previews.js: a registry of
+ *   early_access (Archon)   |  features that exist but are not finished, staged
+ *   priority_access        /   by tier, with a per-preview head start in days
+ *   enhanced_cosmetics         cosmetics.js: public nameplate and key finish
+ *   organizer_tools            organizerExport.js: CSV of any event you run
+ *
+ * The three preview capabilities are the fragile ones - each is only true while
+ * the registry holds a preview at its stage, so `previewCapabilitiesWithContent`
+ * derives that and the spec asserts these flags agree with it. A preview
+ * graduating out of a stage must not leave a tier selling an empty queue.
  */
 const CAPABILITY_CATALOG = {
     [CAPABILITIES.ELO_HISTORY]: {
@@ -198,39 +216,40 @@ const CAPABILITY_CATALOG = {
     },
     [CAPABILITIES.EARLY_ACCESS]: {
         label: 'Early access',
-        learn: 'Use major new features before they are released to everyone.',
-        where: 'Announced in News as features land',
-        planned: true
+        // Live as of the preview programme (previews.js): a preview at the
+        // early_access stage is open to this capability, one tier ahead of the
+        // capability it eventually graduates into.
+        learn: 'Use finished features on their way to a wider tier, before they get there.',
+        where: 'Profile → Previews'
     },
     [CAPABILITIES.EXPERIMENTAL_FEATURES]: {
         label: 'Experimental features',
-        learn: 'Try tools that are still being designed, and shape where they go.',
-        where: 'Profile → Appearance, as they are released',
-        planned: true
+        learn: 'Switch on tools that are still being designed, and shape where they go.',
+        where: 'Profile → Previews'
     },
     [CAPABILITIES.BETA_FEATURES]: {
         label: 'Beta features',
-        learn: 'Get new competitive tools while they are still in testing.',
-        where: 'Announced in News',
-        planned: true
+        learn: 'Use new competitive tools while they are still being tested.',
+        where: 'Profile → Previews'
     },
     [CAPABILITIES.ENHANCED_COSMETICS]: {
         label: 'Enhanced cosmetics',
-        learn: 'Additional profile and in-game customisation.',
-        where: 'Profile → Appearance',
-        planned: true
+        // Was "additional profile and in-game customisation", which described
+        // nothing that existed. What exists is public: the colour your name is
+        // drawn in and the finish on your key, everywhere either appears.
+        learn: 'Choose the colour of your name and the finish on your key, everywhere they appear.',
+        where: 'Profile → Appearance'
     },
     [CAPABILITIES.ORGANIZER_TOOLS]: {
         label: 'Organiser tools',
-        learn: 'Extra capability for running events for other people.',
-        where: 'Tournaments, when running an event',
-        planned: true
+        learn: 'Export standings, pairings and the entry list of any event you run as a spreadsheet.',
+        where: 'Tournaments → your event → Organiser'
     },
     [CAPABILITIES.PRIORITY_ACCESS]: {
         label: 'Priority access',
-        learn: 'First access to new competitive tools as they land.',
-        where: 'Announced in News',
-        planned: true
+        // A head start measured in days, not a feeling. See previews.js.
+        learn: 'Every preview reaches you the day it opens, ahead of the tier it is being tested for.',
+        where: 'Profile → Previews'
     }
 };
 

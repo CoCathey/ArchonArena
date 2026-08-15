@@ -6,6 +6,9 @@ const UserService = require('../services/UserService');
 const ConfigService = require('../services/ConfigService');
 const MembershipService = require('../services/membership/MembershipService');
 const BadgeService = require('../services/membership/BadgeService');
+const MemberPreferencesService = require('../services/membership/MemberPreferencesService');
+const { previewCatalog, previewById } = require('../services/membership/previews');
+const { cosmeticCatalog, sanitiseCosmetics } = require('../services/membership/cosmetics');
 const { patreonService } = require('./patreon');
 const {
     tierCatalog,
@@ -20,6 +23,7 @@ const configService = new ConfigService();
 const userService = new UserService(configService);
 const membershipService = new MembershipService();
 const badgeService = new BadgeService();
+const preferencesService = new MemberPreferencesService();
 
 /** Mirrors admin-settings.js - isAdmin only. */
 const requireAdmin = (req, res, next) => {
@@ -36,6 +40,11 @@ const requireAdmin = (req, res, next) => {
  * GET  /api/membership/catalog        -> the price list (public)
  * GET  /api/membership/badges         -> badges for a list of players (public)
  * GET  /api/membership/me             -> the caller's own entitlements
+ * GET  /api/membership/previews       -> the preview programme, for this account
+ * POST /api/membership/previews       -> switch a preview on or off
+ * GET  /api/membership/cosmetics      -> the cosmetics catalogue and this
+ *                                        account's choices
+ * POST /api/membership/cosmetics      -> choose cosmetics
  * GET  /api/admin/memberships         -> who has what (admin)
  * POST /api/admin/memberships/grant   -> comp a tier to an account (admin)
  *
@@ -106,6 +115,149 @@ module.exports.init = function (server) {
                     lastSyncedAt: membership ? membership.lastSyncedAt : null
                 },
                 capabilities: entitlements.capabilities
+            });
+        })
+    );
+
+    /**
+     * ARCHON (N12): the preview programme for the calling account.
+     *
+     * Deliberately not capability-gated as a route. `previewCatalog` returns
+     * only previews this account's tier can reach at all, so an account with
+     * none gets an empty list rather than a 403 - and the Profile panel that
+     * calls this can then decide not to render itself, instead of every account
+     * without Vault Master seeing an error in their own settings.
+     *
+     * Previews whose window has not opened yet ARE included, with the date it
+     * does. That is the visible form of the head start priority access buys.
+     */
+    server.get(
+        '/api/membership/previews',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            const entitlements = entitlementsForRequest(req);
+            const choices = await preferencesService.getPreviewChoices(req.user.id);
+
+            res.send({
+                success: true,
+                previews: previewCatalog(entitlements, choices)
+            });
+        })
+    );
+
+    /**
+     * Switch a preview on or off.
+     *
+     * The entitlement check is not a formality: without it an account could
+     * store a row for a preview it cannot reach, which would silently take
+     * effect the day it upgraded - a switch it never knowingly set. So a
+     * preview it cannot currently use is refused rather than stored.
+     */
+    server.post(
+        '/api/membership/previews',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            const { preview, enabled } = req.body || {};
+
+            if (!previewById(preview)) {
+                return res.send({ success: false, message: 'No such preview' });
+            }
+
+            const entitlements = entitlementsForRequest(req);
+            const available = previewCatalog(entitlements, {}).find(
+                (entry) => entry.id === preview && entry.available
+            );
+
+            if (!available) {
+                return res.status(403).send({
+                    success: false,
+                    message: 'This preview is not available on your membership yet.',
+                    upgradeRequired: true
+                });
+            }
+
+            const stored = await preferencesService.setPreviewChoice(
+                req.user.id,
+                preview,
+                enabled !== false
+            );
+
+            if (!stored) {
+                return res.send({ success: false, message: 'Could not save that preference' });
+            }
+
+            const choices = await preferencesService.getPreviewChoices(req.user.id);
+
+            res.send({ success: true, previews: previewCatalog(entitlements, choices) });
+        })
+    );
+
+    /**
+     * ARCHON (N12): the cosmetics catalogue, and what this account has picked.
+     *
+     * The whole catalogue every time, with the locked options marked - the
+     * panel is where a player finds out that a membership changes something
+     * other people can see, and hiding the options they do not have would
+     * make it a panel with one row in it.
+     */
+    server.get(
+        '/api/membership/cosmetics',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            const entitlements = entitlementsForRequest(req);
+            const chosen = await preferencesService.getCosmetics(req.user.id);
+
+            res.send({
+                success: true,
+                slots: cosmeticCatalog(entitlements),
+                // What is stored, filtered to what may still be used, so the
+                // panel shows the same thing everybody else sees.
+                chosen: sanitiseCosmetics(chosen, entitlements)
+            });
+        })
+    );
+
+    server.post(
+        '/api/membership/cosmetics',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            const entitlements = entitlementsForRequest(req);
+            const requested = (req.body && req.body.choices) || {};
+
+            if (typeof requested !== 'object' || Array.isArray(requested)) {
+                return res.send({ success: false, message: 'Nothing to change' });
+            }
+
+            // The one place that decides what may be stored. Unknown slots and
+            // options this account is not entitled to are dropped rather than
+            // 400'd, so a stale tab saving one valid change and one stale one
+            // still applies the valid change.
+            const allowed = sanitiseCosmetics(requested, entitlements);
+            const refused = Object.keys(requested).filter(
+                (slot) => !Object.prototype.hasOwnProperty.call(allowed, slot)
+            );
+
+            if (!Object.keys(allowed).length) {
+                return res.status(refused.length ? 403 : 400).send({
+                    success: false,
+                    message: refused.length
+                        ? 'Those cosmetics are not part of your membership.'
+                        : 'Nothing to change',
+                    upgradeRequired: refused.length > 0
+                });
+            }
+
+            await preferencesService.setCosmetics(req.user.id, allowed);
+
+            const chosen = await preferencesService.getCosmetics(req.user.id);
+
+            res.send({
+                success: true,
+                slots: cosmeticCatalog(entitlements),
+                chosen: sanitiseCosmetics(chosen, entitlements),
+                // Named rather than silently dropped: a switch that appears to
+                // save and does not is worse than one that says why.
+                refused
             });
         })
     );

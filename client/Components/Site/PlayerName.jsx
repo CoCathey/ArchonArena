@@ -13,6 +13,7 @@ import PlayerBadge from './PlayerBadge';
 import Link from '../Navigation/Link';
 import { getRoleClass } from '../../util';
 import { TIERS } from '../../membership';
+import { nameplateClass } from '../../cosmetics';
 
 /**
  * ARCHON (N12): one component for "somebody else's name".
@@ -189,6 +190,7 @@ const TIER_TEXT_CLASS = Object.freeze({
  * @param {string} [props.tier] pass when the payload already carries it
  * @param {string} [props.tierName]
  * @param {string} [props.role] site role, for the name colour
+ * @param {object} [props.cosmetics] chosen cosmetics, when the payload carries them
  * @param {boolean} [props.link] link through to their profile
  * @param {boolean} [props.plain] skip the role colour, keep the badge
  * @param {string} [props.className] applied to the name text
@@ -198,6 +200,7 @@ const PlayerName = ({
     tier,
     tierName,
     role,
+    cosmetics,
     link = false,
     plain = false,
     className = '',
@@ -210,13 +213,28 @@ const PlayerName = ({
     const effectiveTier = tier !== undefined ? tier : looked && looked.tier;
     const effectiveName = tierName !== undefined ? tierName : looked && looked.tierName;
     const effectiveRole = role !== undefined ? role : looked && looked.role;
+    // ARCHON (N12): the account's own choice, where they have one and are still
+    // entitled to it - the server drops it from the badge otherwise, so there
+    // is nothing to check here.
+    const effectiveCosmetics = cosmetics !== undefined ? cosmetics : looked && looked.cosmetics;
+    const chosenNameplate = nameplateClass(effectiveCosmetics);
 
     const nameClass = plain
         ? className
         : // A paying player is coloured by their tier rather than by the flat
           // supporter green, so the three tiers are distinguishable in a list.
           // Site roles outrank tiers: an admin is red whether or not they pay.
-          [TIER_TEXT_CLASS[effectiveTier] || getRoleClass(effectiveRole), className]
+          //
+          // A chosen nameplate replaces the tier colour, and only that: it sits
+          // in front of the tier for the same reason the tier sits in front of
+          // the role, and the ordering below it is untouched. Site roles are
+          // not at risk from this - publicBadge resolves cosmetics with the
+          // admin override stripped, so an admin who does not pay for a tier
+          // has no cosmetic to apply and stays red.
+          [
+              chosenNameplate || TIER_TEXT_CLASS[effectiveTier] || getRoleClass(effectiveRole),
+              className
+          ]
               .filter(Boolean)
               .join(' ');
 
@@ -234,7 +252,11 @@ const PlayerName = ({
             ) : (
                 <span className={`${nameClass} truncate`}>{label}</span>
             )}
-            <PlayerBadge tier={effectiveTier} tierName={effectiveName} />
+            <PlayerBadge
+                cosmetics={effectiveCosmetics}
+                tier={effectiveTier}
+                tierName={effectiveName}
+            />
         </span>
     );
 };
@@ -244,6 +266,7 @@ PlayerName.displayName = 'PlayerName';
 PlayerName.propTypes = {
     children: PropTypes.node,
     className: PropTypes.string,
+    cosmetics: PropTypes.object,
     link: PropTypes.bool,
     plain: PropTypes.bool,
     role: PropTypes.string,

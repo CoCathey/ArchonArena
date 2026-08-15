@@ -62,7 +62,7 @@ class BadgeService {
 
         try {
             rows = await this.db.query(
-                'SELECT u."Username", ' +
+                'SELECT u."Id", u."Username", ' +
                     // Roles and membership in one round trip. The role
                     // aggregate is filtered to the handful that produce a
                     // badge, so this never drags a user's whole permission set
@@ -76,7 +76,7 @@ class BadgeService {
                     'LEFT JOIN "Memberships" m ON m."UserId" = u."Id" ' +
                     'WHERE lower(u."Username") = ANY($1) ' +
                     '  AND u."Disabled" IS NOT TRUE AND u."Verified" IS TRUE ' +
-                    'GROUP BY u."Username", m."Tier", m."Status", m."ExpiresAt", ' +
+                    'GROUP BY u."Id", u."Username", m."Tier", m."Status", m."ExpiresAt", ' +
                     '  m."GrantedTier", m."GrantedUntil"',
                 [wanted, BADGE_ROLE_NAMES]
             );
@@ -90,6 +90,7 @@ class BadgeService {
             return {};
         }
 
+        const cosmeticsByUser = await this.getCosmetics((rows || []).map((row) => row.Id));
         const badges = {};
 
         for (const row of rows || []) {
@@ -101,7 +102,8 @@ class BadgeService {
                     ExpiresAt: row.ExpiresAt,
                     GrantedTier: row.GrantedTier,
                     GrantedUntil: row.GrantedUntil
-                })
+                }),
+                cosmetics: cosmeticsByUser[row.Id]
             });
 
             if (badge.role === 'user' && badge.tier === TIER_IDS.FREE) {
@@ -112,6 +114,51 @@ class BadgeService {
         }
 
         return badges;
+    }
+
+    /**
+     * ARCHON (N12): the cosmetic choices for a set of user ids.
+     *
+     * A second query rather than a third join: the badge query already
+     * aggregates roles, and joining a second one-to-many table to it would
+     * multiply the rows under that aggregate. Two small indexed reads are
+     * cheaper than getting that wrong.
+     *
+     * Its own try/catch, and its own failure mode: a deployment that has run
+     * the Memberships migration but not this one still gets badges, just
+     * without cosmetics.
+     *
+     * @param {number[]} userIds
+     * @returns {Promise<Object<number, Object<string,string>>>}
+     */
+    async getCosmetics(userIds) {
+        const ids = [...new Set((userIds || []).filter((id) => Number.isFinite(id)))];
+
+        if (!ids.length) {
+            return {};
+        }
+
+        let rows;
+
+        try {
+            rows = await this.db.query(
+                'SELECT "UserId", "Slot", "Choice" FROM "MembershipCosmetics" ' +
+                    'WHERE "UserId" = ANY($1)',
+                [ids]
+            );
+        } catch (err) {
+            logger.warn('Failed to look up player cosmetics', err);
+
+            return {};
+        }
+
+        const byUser = {};
+
+        for (const row of rows || []) {
+            (byUser[row.UserId] = byUser[row.UserId] || {})[row.Slot] = row.Choice;
+        }
+
+        return byUser;
     }
 }
 

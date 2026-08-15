@@ -66,11 +66,29 @@ describe('tier promises', function () {
         );
     };
 
+    /**
+     * ARCHON (N12): a preview's `graduatesTo` is not a gate.
+     *
+     * previews.js names the capability each in-progress feature will belong to
+     * once it is finished. That is a plan, not a delivery - the feature is
+     * currently reachable through the preview programme and NOT through the
+     * capability it points at, which is the entire distinction the programme
+     * exists to express.
+     *
+     * Left in, it would read as "advanced_performance_dashboard is referenced,
+     * so remove its planned flag" - and Archon would go back to advertising a
+     * dashboard it does not have, which is exactly the failure this file was
+     * written to catch. The stage capabilities in the same file are real gates
+     * and stay in the corpus.
+     */
+    const withoutGraduationTargets = (source) =>
+        source.replace(/graduatesTo:\s*CAPABILITIES\.[A-Z_]+/g, 'graduatesTo: <planned>');
+
     const corpus = [
         ...sourceFiles(path.join(ROOT, 'server')),
         ...sourceFiles(path.join(ROOT, 'client'))
     ]
-        .map((file) => fs.readFileSync(file, 'utf8'))
+        .map((file) => withoutGraduationTargets(fs.readFileSync(file, 'utf8')))
         .join('\n');
 
     /** Constant name for a capability id, e.g. elo_history -> ELO_HISTORY. */
