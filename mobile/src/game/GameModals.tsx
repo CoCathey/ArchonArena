@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image } from 'expo-image';
 import {
     Dimensions,
@@ -7,8 +7,10 @@ import {
     Pressable,
     StyleSheet,
     Text,
-    View
+    View,
+    useWindowDimensions
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing } from '../theme';
 import CardTile from './CardTile';
 import { CARD_ASPECT, CARDBACK, cardImageUrl } from './cardImages';
@@ -84,7 +86,13 @@ export function CardZoomOverlay(props: { card?: CardSummary; onClose: () => void
     );
 }
 
-/** Fullscreen zoomed card preview (long-press). */
+/**
+ * Fullscreen zoomed card preview (long-press), as a Modal.
+ *
+ * Only for screens that present nothing else at the same moment — the deck
+ * browser. The game board deliberately uses CardZoomOverlay instead; see the
+ * note on PileViewer.
+ */
 export function CardZoomModal(props: { card?: CardSummary; onClose: () => void }) {
     return (
         <Modal
@@ -98,142 +106,178 @@ export function CardZoomModal(props: { card?: CardSummary; onClose: () => void }
     );
 }
 
-/** Bottom sheet listing a card's server-provided menu options. */
-export function CardMenuModal(props: {
+/**
+ * Bottom sheet listing a card's server-provided menu options.
+ *
+ * A plain in-tree overlay rather than a native Modal — see PileViewer for why
+ * the board no longer presents any of these natively.
+ */
+export function CardMenuSheet(props: {
     card?: CardSummary;
     onClose: () => void;
     onItem: (card: CardSummary, item: CardMenuItem) => void;
+    /** Hand the card to the screen's zoom rather than opening one in here. */
+    onZoom?: (card: CardSummary) => void;
 }) {
     const { card } = props;
-    const menu = (card?.menu ?? []).filter((item) => item.command !== 'click');
-    // Zoom lives inside this modal rather than opening another one on top of
-    // it — see the note on PileModal.
-    const [zoom, setZoom] = useState(false);
-    useEffect(() => setZoom(false), [card?.uuid]);
+    const insets = useSafeAreaInsets();
+
+    if (!card) {
+        return null;
+    }
+
+    const menu = (card.menu ?? []).filter((item) => item.command !== 'click');
 
     return (
-        <Modal visible={!!card} transparent animationType='slide' onRequestClose={props.onClose}>
-            <Pressable style={styles.sheetBackdrop} onPress={props.onClose}>
-                <Pressable style={styles.sheet} onPress={() => {}}>
-                    <Text style={styles.sheetTitle} numberOfLines={1}>
-                        {card?.name ?? 'Card'}
-                    </Text>
-                    {menu.map((item, index) => (
-                        <Pressable
-                            key={index}
-                            style={({ pressed }) => [styles.sheetItem, pressed && { opacity: 0.6 }]}
-                            onPress={() => card && props.onItem(card, item)}
-                        >
-                            <Text style={styles.sheetItemText}>{item.text ?? 'Option'}</Text>
-                        </Pressable>
-                    ))}
+        <View style={styles.overlay}>
+            <Pressable style={styles.sheetBackdrop} onPress={props.onClose} />
+            <View
+                style={[
+                    styles.sheet,
+                    { paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing.md }
+                ]}
+            >
+                <Text style={styles.sheetTitle} numberOfLines={1}>
+                    {card.name ?? 'Card'}
+                </Text>
+                {menu.map((item, index) => (
                     <Pressable
+                        key={index}
                         style={({ pressed }) => [styles.sheetItem, pressed && { opacity: 0.6 }]}
-                        onPress={() => setZoom(true)}
+                        onPress={() => props.onItem(card, item)}
                     >
-                        <Text style={styles.sheetItemText}>View card</Text>
+                        <Text style={styles.sheetItemText}>{String(item.text ?? 'Option')}</Text>
                     </Pressable>
-                    <Pressable
-                        style={({ pressed }) => [
-                            styles.sheetItem,
-                            styles.sheetCancel,
-                            pressed && { opacity: 0.6 }
-                        ]}
-                        onPress={props.onClose}
-                    >
-                        <Text style={[styles.sheetItemText, { color: colors.textDim }]}>Cancel</Text>
-                    </Pressable>
+                ))}
+                <Pressable
+                    style={({ pressed }) => [styles.sheetItem, pressed && { opacity: 0.6 }]}
+                    onPress={() => props.onZoom?.(card)}
+                >
+                    <Text style={styles.sheetItemText}>View card</Text>
                 </Pressable>
-            </Pressable>
-            {zoom && card ? (
-                <View style={StyleSheet.absoluteFill}>
-                    <CardZoomOverlay card={card} onClose={() => setZoom(false)} />
-                </View>
-            ) : null}
-        </Modal>
+                <Pressable
+                    style={({ pressed }) => [
+                        styles.sheetItem,
+                        styles.sheetCancel,
+                        pressed && { opacity: 0.6 }
+                    ]}
+                    onPress={props.onClose}
+                >
+                    <Text style={[styles.sheetItemText, { color: colors.textDim }]}>Cancel</Text>
+                </Pressable>
+            </View>
+        </View>
     );
 }
+
+/** Rows of four, so a 36-card discard reads as a grid rather than a list. */
+const PILE_COLUMNS = 4;
+const PILE_GAP = 8;
 
 /**
  * Grid viewer for a card pile (discard, archives, purged...).
  *
- * Zooming a card here renders *inside* this modal instead of opening a second
- * one over it. Stacking two native modals and then dismissing the lower one
- * leaves iOS with an orphaned presentation that swallows every touch — the app
- * looks frozen. Opening a discard pile, long-pressing a card and closing the
- * pile did exactly that.
+ * ARCHON: this is a plain full-screen overlay, NOT a native Modal.
+ *
+ * Opening an opponent's discard pile could lock the app up. The cause is the
+ * one already documented on DeckPreview: presenting native modals over each
+ * other on iOS and then unwinding them leaves an orphaned presentation that
+ * swallows every touch, and the board is exactly where that is easiest to
+ * provoke — the pile sheet stacked a card zoom inside its own presentation
+ * while a second modal (the card menu) and a third (the log sheet) sat mounted
+ * alongside it. Tapping a card, then closing the pile, then reaching for the
+ * log is an ordinary thing to do and it left nothing on screen responding.
+ *
+ * The fix is to stop presenting natively at all: the board draws its pile
+ * viewer, card menu and card zoom as ordinary sibling views inside its own
+ * tree, which cannot orphan a presentation because there is none. It also
+ * means the zoom can live on the screen rather than being duplicated in here.
+ *
+ * The list is windowed on purpose too. A late-game discard runs to 30-odd
+ * cards, and FlatList's default is to render ten *rows* up front — forty
+ * remote card images decoded in one frame, which on a phone is a visible hang
+ * of its own even when nothing is stuck.
  */
-export function PileModal(props: {
+export function PileViewer(props: {
     title?: string;
     cards?: CardSummary[];
-    visible: boolean;
     onClose: () => void;
-    /** Called for a card the player can act on; zooming is handled here. */
+    /** Called for a card the player can act on. */
     onCardSelect?: (card: CardSummary) => void;
+    /** Called to look at a card; the screen owns the zoom. */
+    onCardZoom: (card: CardSummary) => void;
 }) {
-    const screen = Dimensions.get('window');
-    const cardWidth = Math.floor((screen.width - spacing.md * 2 - 8 * 3) / 4);
-    const [zoomCard, setZoomCard] = useState<CardSummary | undefined>();
+    const { width, height } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
 
-    // Never leave a zoom hanging over a pile that has since closed.
-    useEffect(() => {
-        if (!props.visible) {
-            setZoomCard(undefined);
-        }
-    }, [props.visible]);
+    const columnWidth = Math.floor(
+        (width - spacing.lg * 2 - PILE_GAP * (PILE_COLUMNS - 1)) / PILE_COLUMNS
+    );
+    const rowHeight = Math.round(columnWidth * CARD_ASPECT) + PILE_GAP;
+
+    // Piles arrive straight off the wire; a hole in the array would otherwise
+    // take the whole board down with it on the first render.
+    const cards = useMemo(
+        () => (props.cards ?? []).filter((card): card is CardSummary => !!card),
+        [props.cards]
+    );
 
     const press = (card: CardSummary) => {
         if (card.selectable && props.onCardSelect) {
             props.onCardSelect(card);
             return;
         }
-        setZoomCard(card);
+        props.onCardZoom(card);
     };
 
     return (
-        <Modal
-            visible={props.visible}
-            transparent
-            animationType='slide'
-            onRequestClose={props.onClose}
-        >
-            <Pressable style={styles.sheetBackdrop} onPress={props.onClose}>
-                <Pressable style={[styles.sheet, { maxHeight: '75%' }]} onPress={() => {}}>
-                    <View style={styles.pileHeader}>
-                        <Text style={styles.sheetTitle}>{props.title ?? 'Cards'}</Text>
-                        <Pressable onPress={props.onClose} hitSlop={12}>
-                            <Text style={styles.closeText}>Close</Text>
-                        </Pressable>
-                    </View>
-                    <FlatList
-                        data={props.cards ?? []}
-                        keyExtractor={(card, index) => card.uuid ?? String(index)}
-                        numColumns={4}
-                        columnWrapperStyle={{ gap: 8 }}
-                        contentContainerStyle={{ gap: 8, paddingBottom: 24 }}
-                        renderItem={({ item }) => (
-                            <CardTile
-                                card={item}
-                                width={cardWidth}
-                                onPress={press}
-                                onLongPress={setZoomCard}
-                            />
-                        )}
-                        ListEmptyComponent={
-                            <Text style={styles.emptyPile}>Nothing here yet</Text>
-                        }
-                    />
-                </Pressable>
-            </Pressable>
-            {zoomCard ? (
-                <View style={StyleSheet.absoluteFill}>
-                    <CardZoomOverlay
-                        card={zoomCard}
-                        onClose={() => setZoomCard(undefined)}
-                    />
+        <View style={styles.overlay}>
+            <Pressable style={styles.sheetBackdrop} onPress={props.onClose} />
+            <View
+                style={[
+                    styles.sheet,
+                    {
+                        maxHeight: Math.round(height * 0.75),
+                        paddingBottom: Math.max(insets.bottom, spacing.md)
+                    }
+                ]}
+            >
+                <View style={styles.pileHeader}>
+                    <Text style={styles.sheetTitle} numberOfLines={1}>
+                        {props.title ?? 'Cards'}
+                        <Text style={styles.pileCount}>{`  ${cards.length}`}</Text>
+                    </Text>
+                    <Pressable onPress={props.onClose} hitSlop={16}>
+                        <Text style={styles.closeText}>Close</Text>
+                    </Pressable>
                 </View>
-            ) : null}
-        </Modal>
+                <FlatList
+                    data={cards}
+                    keyExtractor={(card, index) => card.uuid ?? `card-${index}`}
+                    numColumns={PILE_COLUMNS}
+                    columnWrapperStyle={styles.pileRow}
+                    contentContainerStyle={styles.pileContent}
+                    initialNumToRender={3}
+                    maxToRenderPerBatch={4}
+                    windowSize={5}
+                    removeClippedSubviews
+                    getItemLayout={(_, index) => ({
+                        length: rowHeight,
+                        offset: rowHeight * index,
+                        index
+                    })}
+                    renderItem={({ item }) => (
+                        <CardTile
+                            card={item}
+                            width={columnWidth}
+                            onPress={press}
+                            onLongPress={props.onCardZoom}
+                        />
+                    )}
+                    ListEmptyComponent={<Text style={styles.emptyPile}>Nothing here yet</Text>}
+                />
+            </View>
+        </View>
     );
 }
 
@@ -275,25 +319,49 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '700'
     },
+    // Sibling overlays are drawn in source order on iOS, but on Android any
+    // elevated view further up the tree (a card's glow, the drag ghost) can
+    // punch through one. Both are set so the ordering holds either way.
+    overlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 20,
+        elevation: 20
+    },
+    // The backdrop is its own view behind the sheet rather than a Pressable
+    // wrapped around it: a Pressable that contains a scrollable competes with
+    // it for the touch, which makes dragging the grid feel dead and can close
+    // the sheet out from under a scroll.
     sheetBackdrop: {
-        flex: 1,
-        backgroundColor: colors.overlay,
-        justifyContent: 'flex-end'
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: colors.overlay
     },
     sheet: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
         backgroundColor: colors.surface,
         borderTopLeftRadius: radius.lg,
         borderTopRightRadius: radius.lg,
         borderColor: colors.border,
         borderWidth: 1,
-        padding: spacing.lg,
-        paddingBottom: 34
+        padding: spacing.lg
     },
     sheetTitle: {
         color: colors.text,
         fontSize: 16,
         fontWeight: '800',
-        marginBottom: spacing.sm
+        marginBottom: spacing.sm,
+        flexShrink: 1,
+        textTransform: 'capitalize'
     },
     sheetItem: {
         paddingVertical: 13,
@@ -313,12 +381,25 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        gap: spacing.md,
         marginBottom: spacing.sm
+    },
+    pileCount: {
+        color: colors.textFaint,
+        fontSize: 13,
+        fontWeight: '700'
+    },
+    pileRow: {
+        gap: PILE_GAP
+    },
+    pileContent: {
+        gap: PILE_GAP,
+        paddingBottom: spacing.lg
     },
     closeText: {
         color: colors.accent,
         fontWeight: '700',
-        fontSize: 14
+        fontSize: 15
     },
     emptyPile: {
         color: colors.textFaint,

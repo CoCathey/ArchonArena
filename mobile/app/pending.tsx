@@ -20,6 +20,14 @@ import DeckPreview from '../src/decks/DeckPreview';
 import DeckRow from '../src/decks/DeckRow';
 import { useDeckLibrary } from '../src/decks/useDeckLibrary';
 import { formatLabel, isUnchainedFormat } from '../src/game/gameFormats';
+import {
+    allPlayersReady,
+    choosesOwnDeck as gameChoosesOwnDeck,
+    deckStatusLabel,
+    isLuckyDiceGame,
+    isSealedGame,
+    startHint
+} from '../src/game/pendingGame';
 import { lobby } from '../src/net/lobbySocket';
 import { useAuthStore } from '../src/stores/authStore';
 import { useGameStore } from '../src/stores/gameStore';
@@ -49,10 +57,10 @@ export default function PendingGameScreen() {
     const gameFormat = currentGame?.gameFormat ?? 'normal';
     // Sealed hands both players a generated deck; Lucky Dice rolls one for each
     // of them when the owner starts. Neither has anything to pick.
-    const isSealed = gameFormat === 'sealed';
-    const isLuckyDice = !!currentGame?.luckyDice;
+    const isSealed = isSealedGame(currentGame);
+    const isLuckyDice = isLuckyDiceGame(currentGame);
     const sasBound = currentGame?.sasBound;
-    const choosesOwnDeck = !isSealed && !isLuckyDice;
+    const choosesOwnDeck = gameChoosesOwnDeck(currentGame);
 
     // The collection pages in from the server (search/sort/house filter all run
     // there), so every deck is reachable rather than just the first page. The
@@ -142,7 +150,9 @@ export default function PendingGameScreen() {
         typeof currentGame.owner === 'string'
             ? currentGame.owner === username
             : currentGame.owner?.username === username;
-    const everyoneReady = players.length === 2 && players.every((player) => player.deck?.selected);
+    // Lucky Dice games start deckless — the lobby rolls both decks when the
+    // owner presses Start — so readiness cannot be "everyone holds a deck".
+    const everyoneReady = allPlayersReady(currentGame);
     const iAmSpectator = !me;
 
     const pickDeck = (deck: Deck, standalone: boolean) => {
@@ -211,11 +221,7 @@ export default function PendingGameScreen() {
                                         ? player.name === username && player.deck.name
                                             ? player.deck.name
                                             : 'Deck selected'
-                                        : isSealed
-                                        ? 'Dealing a sealed deck…'
-                                        : isLuckyDice
-                                        ? 'Rolls a deck when the game starts'
-                                        : 'Choosing a deck…'}
+                                        : deckStatusLabel(currentGame)}
                                 </Text>
                                 {/* The server sends the opponent's SAS too, unless
                                     the game hides decklists. */}
@@ -255,19 +261,27 @@ export default function PendingGameScreen() {
 
                 <View style={styles.actionRow}>
                     {isOwner ? (
-                        <Button
-                            title={everyoneReady ? 'Start game' : 'Waiting for decks…'}
-                            disabled={!everyoneReady}
-                            onPress={() => lobby.startGame(currentGame.id)}
-                            style={{ flex: 1 }}
-                        />
+                        <View style={{ flex: 1 }}>
+                            <Button
+                                title={
+                                    everyoneReady
+                                        ? isLuckyDice
+                                            ? '🎲 Roll decks & start'
+                                            : 'Start game'
+                                        : 'Waiting…'
+                                }
+                                disabled={!everyoneReady}
+                                onPress={() => lobby.startGame(currentGame.id)}
+                            />
+                            <Text style={styles.startHint}>{startHint(currentGame)}</Text>
+                        </View>
                     ) : (
                         <Text style={styles.waiting}>
                             {iAmSpectator
                                 ? 'Spectating — the game will open when it starts.'
                                 : everyoneReady
                                 ? 'Waiting for the host to start the game…'
-                                : 'Waiting for everyone to pick decks…'}
+                                : startHint(currentGame)}
                         </Text>
                     )}
                 </View>
@@ -580,6 +594,12 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         marginTop: spacing.md,
         marginBottom: spacing.sm
+    },
+    startHint: {
+        color: colors.textFaint,
+        fontSize: 11,
+        textAlign: 'center',
+        marginTop: 5
     },
     chatBox: {
         backgroundColor: colors.bgElevated,

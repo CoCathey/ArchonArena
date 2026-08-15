@@ -32,7 +32,10 @@ import LogSheet from '../src/game/LogSheet';
 import { DragDropProvider, DropZone, type DropZoneName } from '../src/game/DragDrop';
 import { useVerticalSwipe } from '../src/game/gestures';
 import { groupHandByHouse } from '../src/game/handOrder';
-import { CardMenuModal, CardZoomOverlay, PileModal } from '../src/game/GameModals';
+import { isHandHidden } from '../src/game/handVisibility';
+import { hasProphecies } from '../src/game/prophecies';
+import { ProphecySheet, ProphecyStrip } from '../src/game/ProphecyView';
+import { CardMenuSheet, CardZoomOverlay, PileViewer } from '../src/game/GameModals';
 import { Button } from '../src/ui/primitives';
 import HouseIcon from '../src/ui/HouseIcon';
 import type { CardMenuItem, CardSummary, PlayerState, PromptButton } from '../src/game/types';
@@ -90,6 +93,8 @@ export default function GameScreen() {
     const status = useGameStore((state) => state.status);
     const username = useAuthStore((state) => state.user?.username);
     const handByHouse = useSettingsStore((state) => state.groupHandByHouse);
+    const hideHandSetting = useSettingsStore((state) => state.hideHandOnOpponentTurn);
+    const setHideHandSetting = useSettingsStore((state) => state.setHideHandOnOpponentTurn);
     const { width: screenWidth } = useWindowDimensions();
 
     const [zoomCard, setZoomCard] = useState<CardSummary | undefined>();
@@ -98,6 +103,13 @@ export default function GameScreen() {
     const [pileView, setPileView] = useState<
         { player: 'me' | 'opponent'; pile: PileName } | undefined
     >();
+    // Held by uuid rather than by value: prophecies change state under us
+    // (activated, flipped) and the sheet has to show what is true now.
+    const [prophecyView, setProphecyView] = useState<
+        { uuid: string; mine: boolean } | undefined
+    >();
+    // "Show me my hand anyway" for the rest of the opponent's turn.
+    const [peekingHand, setPeekingHand] = useState(false);
     // While a card is being dragged, the scroll views release the gesture.
     const [dragActive, setDragActive] = useState(false);
     const leftGame = useRef(false);
@@ -133,6 +145,16 @@ export default function GameScreen() {
             router.replace('/(tabs)');
         }
     }, [cleared]);
+
+    // A peek lasts until the turn comes back round, so the setting behaves the
+    // same way every opponent turn rather than quietly staying off after the
+    // one time somebody looked.
+    const myTurn = !!me?.activePlayer;
+    useEffect(() => {
+        if (myTurn) {
+            setPeekingHand(false);
+        }
+    }, [myTurn]);
 
     // Fire a single haptic when the game ends.
     const winnerRef = useRef<string | undefined>(undefined);
@@ -186,8 +208,30 @@ export default function GameScreen() {
         ]);
     };
 
+    // The account carries this setting too (set from the website), and either
+    // one turns it on. The in-game toggle writes both, so switching it off here
+    // is not overridden by an account value that is still on.
+    const hideHandEnabled = hideHandSetting || !!me?.optionSettings?.hideHandOnOpponentTurn;
+
+    const toggleHideHand = () => {
+        const next = !hideHandEnabled;
+        setHideHandSetting(next);
+        // Keep the game node's copy in step, so a game watched from the web at
+        // the same time agrees about it.
+        sendGameMessage('toggleOptionSetting', 'hideHandOnOpponentTurn', next);
+        if (next) {
+            setPeekingHand(false);
+        }
+    };
+
     const showGameMenu = () => {
         Alert.alert(rootState?.name ?? 'Game', undefined, [
+            {
+                text: hideHandEnabled
+                    ? 'Show my hand on their turn'
+                    : 'Hide my hand on their turn',
+                onPress: toggleHideHand
+            },
             { text: 'Resync game', onPress: resyncGame },
             {
                 text: rootState?.manualMode ? 'Disable manual mode' : 'Enable manual mode',
@@ -242,6 +286,34 @@ export default function GameScreen() {
         sendGameMessage('drop', card.uuid, source, target);
     };
 
+    // ---- prophecies ----
+    // `clickProphecy` is the same message the web client sends; the engine
+    // routes it through the current pipeline step, which is what makes it work
+    // both as an activation and as an answer to a prompt.
+    const onProphecySelect = (card: CardSummary) => {
+        if (isSpectator) {
+            setZoomCard(card);
+            return;
+        }
+        tapFeedback();
+        sendGameMessage('cardClicked', card.uuid);
+    };
+
+    const onProphecyActivate = (card: CardSummary) => {
+        if (isSpectator) {
+            return;
+        }
+        tapFeedback();
+        sendGameMessage('clickProphecy', card.uuid);
+        setProphecyView(undefined);
+    };
+
+    const onProphecyMenuItem = (card: CardSummary, item: CardMenuItem) => {
+        tapFeedback();
+        sendGameMessage('menuItemClick', card.uuid, item);
+        setProphecyView(undefined);
+    };
+
     if (!rootState || !perspective) {
         const failed = status === 'failed';
         return (
@@ -290,6 +362,15 @@ export default function GameScreen() {
         : // One unnamed group keeps the render path identical for both settings.
           [{ house: 'hand', cards: hand }];
 
+    // Stand the hand down while the opponent plays, if asked. Never when the
+    // game wants something from this player — see handVisibility.ts.
+    const handHidden = isHandHidden({
+        me,
+        localSetting: hideHandSetting,
+        isPeeking: peekingHand,
+        isSpectator
+    });
+
     const pileCards = (() => {
         if (!pileView) {
             return undefined;
@@ -297,6 +378,18 @@ export default function GameScreen() {
         const target = pileView.player === 'me' ? perspective : opponent;
         return target?.cardPiles?.[pileView.pile === 'deck' ? 'discard' : pileView.pile];
     })();
+
+    // Prophecies live beside the board rather than in a pile, and both sides
+    // are public, so each player's are drawn under their own stats.
+    const prophecyOwner = prophecyView
+        ? prophecyView.mine
+            ? perspective
+            : opponent
+        : undefined;
+    const prophecyCard = prophecyView
+        ? prophecyOwner?.prophecyCards?.find((card) => card.uuid === prophecyView.uuid)
+        : undefined;
+    const showProphecies = hasProphecies(perspective, opponent);
 
     const winnerBanner = rootState.winner ? (
         <View style={styles.winnerBanner}>
@@ -360,6 +453,18 @@ export default function GameScreen() {
                             player={opponent}
                             active={!!opponent.activePlayer}
                             onPilePress={(pile) => setPileView({ player: 'opponent', pile })}
+                        />
+                    ) : null}
+                    {showProphecies && opponent ? (
+                        <ProphecyStrip
+                            cards={opponent.prophecyCards}
+                            isMine={false}
+                            manualMode={!!rootState.manualMode}
+                            onSelect={onProphecySelect}
+                            onOpen={(card) =>
+                                setProphecyView({ uuid: String(card.uuid), mine: false })
+                            }
+                            onZoom={setZoomCard}
                         />
                     ) : null}
 
@@ -450,6 +555,18 @@ export default function GameScreen() {
                     </View>
 
                     {/* Me */}
+                    {showProphecies ? (
+                        <ProphecyStrip
+                            cards={perspective.prophecyCards}
+                            isMine={!isSpectator}
+                            manualMode={!!rootState.manualMode}
+                            onSelect={onProphecySelect}
+                            onOpen={(card) =>
+                                setProphecyView({ uuid: String(card.uuid), mine: true })
+                            }
+                            onZoom={setZoomCard}
+                        />
+                    ) : null}
                     <PlayerHud
                         player={perspective}
                         isMe={!isSpectator}
@@ -459,7 +576,33 @@ export default function GameScreen() {
 
                     {/* Hand */}
                     <DropZone name='hand'>
-                        {hand.length > 0 ? (
+                        {handHidden ? (
+                            /* Not unmounted, just stood down: the count is
+                               still there, and one tap brings the cards back
+                               for the rest of the opponent's turn. A hidden
+                               hand you cannot look at would be a worse
+                               distraction than the one this setting is for. */
+                            <Pressable
+                                onPress={() => {
+                                    tapFeedback();
+                                    setPeekingHand(true);
+                                }}
+                                style={({ pressed }) => [
+                                    styles.handStrip,
+                                    styles.handStripEmpty,
+                                    styles.handHidden,
+                                    pressed && { opacity: 0.7 }
+                                ]}
+                                accessibilityRole='button'
+                                accessibilityLabel='Show my hand'
+                            >
+                                <Text style={styles.handHiddenText}>
+                                    Hand hidden · {hand.length} card
+                                    {hand.length === 1 ? '' : 's'}
+                                </Text>
+                                <Text style={styles.handHiddenHint}>Tap to look</Text>
+                            </Pressable>
+                        ) : hand.length > 0 ? (
                             <ScrollView
                                 horizontal
                                 showsHorizontalScrollIndicator={false}
@@ -515,34 +658,8 @@ export default function GameScreen() {
                         ) : null}
                     </DropZone>
 
-                    {/* Modals. Only ever one of these is on screen at a time: each
-                handles its own card zoom internally, because stacking native
-                modals and unwinding them out of order locks up iOS. */}
-                    <CardMenuModal
-                        card={menuCard}
-                        onClose={() => setMenuCard(undefined)}
-                        onItem={onMenuItem}
-                    />
-                    <PileModal
-                        visible={!!pileView}
-                        title={
-                            pileView
-                                ? `${
-                                      pileView.player === 'me' ? perspective.name : opponent?.name
-                                  } · ${pileView.pile}`
-                                : undefined
-                        }
-                        cards={pileCards}
-                        onClose={() => setPileView(undefined)}
-                        onCardSelect={
-                            isSpectator
-                                ? undefined
-                                : (card) => {
-                                      sendGameMessage('cardClicked', card.uuid);
-                                      setPileView(undefined);
-                                  }
-                        }
-                    />
+                    {/* The log is the board's only native presentation, and it
+                        never has anything else open over or under it. */}
                     <LogSheet
                         visible={logOpen}
                         messages={rootState.messages ?? []}
@@ -553,12 +670,61 @@ export default function GameScreen() {
                 </DragDropProvider>
             </SafeAreaView>
 
-            {/* Zoom for cards tapped on the board or in hand. A plain overlay,
-            not a Modal — nothing else is presented at that moment, and it
-            keeps the screen down to one native presentation. Outside the
-            SafeAreaView so it covers the notch and home indicator too. */}
+            {/* ARCHON: everything else the board puts over itself — a pile, a
+                card menu, a prophecy, a zoom — is a plain sibling overlay
+                rather than a native Modal, and they are ordered here so a zoom
+                opened from any of them lands on top.
+
+                Native modals stacked over each other and then unwound out of
+                order leave iOS with an orphaned presentation that swallows
+                every touch, which is what made opening an opponent's discard
+                pile able to freeze the app. There is nothing to orphan here.
+
+                Outside the SafeAreaView so they cover the notch and the home
+                indicator too. */}
+            {pileView ? (
+                <PileViewer
+                    title={`${
+                        pileView.player === 'me' ? perspective.name : opponent?.name ?? 'Opponent'
+                    } · ${pileView.pile}`}
+                    cards={pileCards}
+                    onClose={() => setPileView(undefined)}
+                    onCardZoom={setZoomCard}
+                    onCardSelect={
+                        isSpectator
+                            ? undefined
+                            : (card) => {
+                                  sendGameMessage('cardClicked', card.uuid);
+                                  setPileView(undefined);
+                              }
+                    }
+                />
+            ) : null}
+
+            {menuCard ? (
+                <CardMenuSheet
+                    card={menuCard}
+                    onClose={() => setMenuCard(undefined)}
+                    onItem={onMenuItem}
+                    onZoom={setZoomCard}
+                />
+            ) : null}
+
+            {prophecyCard ? (
+                <ProphecySheet
+                    card={prophecyCard}
+                    cards={prophecyOwner?.prophecyCards}
+                    isMine={!!prophecyView?.mine && !isSpectator}
+                    manualMode={!!rootState.manualMode}
+                    onClose={() => setProphecyView(undefined)}
+                    onActivate={onProphecyActivate}
+                    onMenuItem={onProphecyMenuItem}
+                    onZoom={setZoomCard}
+                />
+            ) : null}
+
             {zoomCard ? (
-                <View style={StyleSheet.absoluteFill}>
+                <View style={styles.zoomLayer}>
                     <CardZoomOverlay card={zoomCard} onClose={() => setZoomCard(undefined)} />
                 </View>
             ) : null}
@@ -570,6 +736,16 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: colors.bg
+    },
+    // Above every other overlay (pile, card menu, prophecy), which sit at 20.
+    zoomLayer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 30,
+        elevation: 30
     },
     loading: {
         flex: 1,
@@ -690,6 +866,21 @@ const styles = StyleSheet.create({
     handStripEmpty: {
         alignItems: 'center',
         justifyContent: 'center'
+    },
+    handHidden: {
+        gap: 2,
+        paddingVertical: 10,
+        borderTopColor: colors.borderLight,
+        borderStyle: 'dashed'
+    },
+    handHiddenText: {
+        color: colors.textDim,
+        fontSize: 13,
+        fontWeight: '700'
+    },
+    handHiddenHint: {
+        color: colors.textFaint,
+        fontSize: 10
     },
     handDivider: {
         width: 1,
