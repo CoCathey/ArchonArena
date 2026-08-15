@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public."Tournaments"
     -- everybody sees instead of a number each page works out for itself.
     "RoundEndsAt" timestamp without time zone,
     "CheckInOpenedAt" timestamp without time zone,
-    "RatedGames" boolean NOT NULL DEFAULT false,
+    "RatedGames" boolean NOT NULL DEFAULT true,
     "RequireDeckRegistration" boolean NOT NULL DEFAULT false,
     "SasMin" integer,
     "SasMax" integer,
