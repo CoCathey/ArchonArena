@@ -1,22 +1,27 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { router } from 'expo-router';
-import {
-    ActivityIndicator,
-    Keyboard,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View
-} from 'react-native';
-import type { Friend, GameSummary } from '../../src/api/types';
-import { removeFriend, respondToFriendRequest, sendFriendRequest } from '../../src/api/client';
-import { lobby } from '../../src/net/lobbySocket';
-import { useAuthStore } from '../../src/stores/authStore';
-import { useFriendsStore } from '../../src/stores/friendsStore';
-import { useLobbyStore } from '../../src/stores/lobbyStore';
-import { colors, radius, spacing } from '../../src/theme';
-import { Button, Card, EmptyState, ErrorBanner, TextField } from '../../src/ui/primitives';
+import { ActivityIndicator, Keyboard, StyleSheet, Text, View } from 'react-native';
+import type { Friend, GameSummary } from '../api/types';
+import { removeFriend, respondToFriendRequest, sendFriendRequest } from '../api/client';
+import { lobby } from '../net/lobbySocket';
+import { useAuthStore } from '../stores/authStore';
+import { useFriendsStore } from '../stores/friendsStore';
+import { useLobbyStore } from '../stores/lobbyStore';
+import { colors, radius, spacing } from '../theme';
+import { Button, Card, EmptyState, ErrorBanner, TextField } from '../ui/primitives';
+
+/**
+ * ARCHON: friends, as a section of the Profile tab rather than a tab of its own.
+ *
+ * It was a sixth tab, and a phone tab bar only reads at about five - the labels
+ * were already truncating. Friends is also the least frequent of the six: you
+ * add somebody once and then glance at who is online, which is a thing you do
+ * while you are already looking at your own account.
+ *
+ * Written as a section, not a screen: it renders bare Cards and lets whatever
+ * hosts it own the ScrollView. Profile already has one, and nesting a second
+ * scroller inside it would fight the outer one for every drag.
+ */
 
 /** What a friend is up to right now, derived from the live lobby lists. */
 interface Presence {
@@ -86,7 +91,7 @@ function FriendRow(props: {
     );
 }
 
-export default function FriendsScreen() {
+export function FriendsSection() {
     const username = useAuthStore((state) => state.user?.username);
     const friends = useFriendsStore((state) => state.friends);
     const incoming = useFriendsStore((state) => state.incoming);
@@ -215,18 +220,7 @@ export default function FriendsScreen() {
         );
 
     return (
-        <ScrollView
-            style={styles.container}
-            contentContainerStyle={{ padding: spacing.md, paddingBottom: 48 }}
-            keyboardShouldPersistTaps='handled'
-            refreshControl={
-                <RefreshControl
-                    refreshing={loading && loaded}
-                    onRefresh={load}
-                    tintColor={colors.textDim}
-                />
-            }
-        >
+        <>
             <Card style={{ marginBottom: spacing.md }}>
                 <Text style={styles.cardTitle}>Add a friend</Text>
                 <View style={styles.addRow}>
@@ -335,15 +329,11 @@ export default function FriendsScreen() {
                     )
                 ) : null}
             </Card>
-        </ScrollView>
+        </>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: colors.bg
-    },
     cardTitle: {
         color: colors.text,
         fontSize: 15,
@@ -392,3 +382,5 @@ const styles = StyleSheet.create({
         fontSize: 13
     }
 });
+
+export default FriendsSection;

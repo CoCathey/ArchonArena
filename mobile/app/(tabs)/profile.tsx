@@ -19,6 +19,7 @@ import { useSettingsStore } from '../../src/stores/settingsStore';
 import { TIER_COLORS } from '../../src/membership/capabilities';
 import { currentTier, currentTierName, isAdmin, isMember } from '../../src/membership/entitlements';
 import { colors, radius, spacing } from '../../src/theme';
+import FriendsSection from '../../src/friends/FriendsSection';
 import { Button, Card, ErrorBanner } from '../../src/ui/primitives';
 
 function SettingRow(props: {
@@ -308,7 +309,20 @@ export default function ProfileScreen() {
                 </Card>
             ) : null}
 
-            <Button title='Sign out' variant='danger' onPress={signOut} loading={busy} />
+            {/* ARCHON: friends live here now rather than in a tab of their own.
+                Below the account settings and above sign-out, because it is the
+                part of this screen you come back to - the settings above it are
+                set once. */}
+            <Text style={styles.friendsHeading}>Friends</Text>
+            <FriendsSection />
+
+            <Button
+                title='Sign out'
+                variant='danger'
+                onPress={signOut}
+                loading={busy}
+                style={{ marginTop: spacing.md }}
+            />
 
             <Text style={styles.footer}>
                 Archon Arena mobile · KeyForge is a trademark of Fantasy Flight Games / Ghost
@@ -322,6 +336,13 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: colors.bg
+    },
+    friendsHeading: {
+        color: colors.text,
+        fontSize: 17,
+        fontWeight: '800',
+        marginBottom: spacing.sm,
+        marginTop: spacing.xs
     },
     membershipRow: {
         flexDirection: 'row',

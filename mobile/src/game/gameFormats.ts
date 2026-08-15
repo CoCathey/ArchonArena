@@ -1,10 +1,14 @@
 /**
- * The game modes the lobby offers, mirroring client/Components/Games/
- * GameFormats.jsx. Unchained and Reversal are hidden from the UI on both
- * clients — the engine still supports them, they are just not offerable.
+ * ARCHON: every game mode the lobby will actually run.
+ *
+ * The list is the server's MATCHMAKING_FORMATS, not the web create form's -
+ * those had drifted apart. Reversal and Unchained are fully implemented (the
+ * deck swap in gameserver.js, the set restriction in DeckService) and Quick
+ * Match has always queued for both; only the web's create form left them out,
+ * so they were reachable by matchmaking and not by making a game.
  */
 export interface GameFormat {
-    name: 'normal' | 'sealed' | 'adaptive-bo1' | 'alliance';
+    name: 'normal' | 'sealed' | 'adaptive-bo1' | 'alliance' | 'reversal' | 'unchained';
     label: string;
     hint: string;
 }
@@ -29,7 +33,41 @@ export const GAME_FORMATS: GameFormat[] = [
         name: 'alliance',
         label: 'Alliance',
         hint: 'Play a deck built from three houses of different decks.'
+    },
+    {
+        name: 'reversal',
+        label: 'Reversal',
+        hint: 'You each pick a deck, then swap — play your opponent\'s.'
+    },
+    {
+        name: 'unchained',
+        label: 'Unchained',
+        hint: 'Unchained-set decks only, on both sides.'
     }
+];
+
+/** Modes where the Unchained set is the only legal deck — and the only ones. */
+export const isUnchainedFormat = (format?: string): boolean => format === 'unchained';
+
+/**
+ * ARCHON: game modes for a TOURNAMENT, which speak a different vocabulary.
+ *
+ * Events call standard play `archon`; the lobby calls it `normal`, and
+ * TournamentService translates between them on the way to a table
+ * (LOBBY_FORMAT_BY_EVENT). This screen used to reuse the lobby list, so the
+ * default it sent was `normal` — which is not in the event whitelist, so
+ * creating a standard event from the app was refused every time.
+ *
+ * Unchained is deliberately absent: the engine runs it, but events have never
+ * accepted it, and offering a mode the server rejects is the bug above again.
+ * This list mirrors TournamentService.GAME_FORMATS exactly.
+ */
+export const EVENT_GAME_FORMATS: { name: string; label: string }[] = [
+    { name: 'archon', label: 'Archon' },
+    { name: 'sealed', label: 'Sealed' },
+    { name: 'alliance', label: 'Alliance' },
+    { name: 'reversal', label: 'Reversal' },
+    { name: 'adaptive-bo1', label: 'Adaptive' }
 ];
 
 export function formatLabel(name?: string): string {

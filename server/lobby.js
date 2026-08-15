@@ -23,6 +23,7 @@ const TournamentService = require('./services/tournament/TournamentService');
 const tournamentEvents = require('./services/tournament/tournamentEvents');
 // ARCHON: Quick Match matchmaking queue (Amber-based pairing)
 const MatchmakingService = require('./services/matchmaking/MatchmakingService');
+const { UNCHAINED_EXPANSION_ID } = require('./services/DeckService');
 const RatingService = require('./services/rating/RatingService');
 const User = require('./models/User');
 const { sortBy } = require('./Array');
@@ -1963,6 +1964,8 @@ class Lobby {
             await this.checkSasBound(game, deck, isStandalone);
         }
 
+        this.checkUnchained(game, deck);
+
         for (let card of deck.cards) {
             let house = card.house;
 
@@ -2044,6 +2047,39 @@ class Lobby {
      * bounded game they are refused outright rather than treated as any
      * particular number.
      */
+    /**
+     * ARCHON: the Unchained set is playable only in an Unchained game, and is
+     * the only thing playable there.
+     *
+     * This was enforced on the random-deck path and nowhere else, so the rule
+     * held for "roll me one" and not for "I pick this one" - the dice would
+     * refuse a deck the list had just offered. Checked here rather than only in
+     * the picker because a hidden option is not a control: the list decides
+     * what is easy to do, this decides what is possible.
+     *
+     * Standalone decks carry no expansion of their own and are left alone.
+     */
+    checkUnchained(game, deck) {
+        if (!deck || deck.expansion === undefined || deck.expansion === null) {
+            return;
+        }
+
+        const isUnchainedDeck = Number(deck.expansion) === UNCHAINED_EXPANSION_ID;
+        const isUnchainedGame = game.gameFormat === 'unchained';
+
+        if (isUnchainedDeck === isUnchainedGame) {
+            return;
+        }
+
+        const err = new Error('Unchained deck rule');
+
+        err.playerMessage = isUnchainedGame
+            ? `${deck.name} is not an Unchained deck - this game only accepts decks from the Unchained set`
+            : `${deck.name} is an Unchained deck and can only be played in an Unchained game`;
+
+        throw err;
+    }
+
     async checkSasBound(game, deck, isStandalone) {
         const rejection = (message) => {
             const err = new Error(message);
