@@ -32,7 +32,7 @@ game seats, the game list, the nav.
 ```
 server/services/membership/cosmetics.js      the catalogue + all the rules
 server/services/community/ProfileCosmeticsService.js   read/write the row
-server/db/schema/migrations/66 - ProfileCosmetics.sql  one row per user
+server/db/schema/migrations/67 - ProfileCosmetics.sql  one row per user
 client/cosmetics.js                          id -> pixels, and nothing else
 client/Components/Profile/ProfileCosmetics.jsx  the editor, with live preview
 ```
