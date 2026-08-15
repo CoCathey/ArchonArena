@@ -4,6 +4,9 @@ const EventEmitter = require('events');
 
 const logger = require('../log');
 const { membershipFromDbRow } = require('./membership/mapRow');
+// ARCHON (N12): profile cosmetics, loaded with the user so a lobby seat can
+// render them without a lookup per player.
+const { cosmeticsFromDbRow } = require('./community/ProfileCosmeticsService');
 const User = require('../models/User');
 const db = require('../db');
 const { expand } = require('../Array');
@@ -856,6 +859,23 @@ class UserService extends EventEmitter {
         } catch (err) {
             logger.warn('Failed to lookup membership for user', err);
             user.membership = undefined;
+        }
+
+        // ARCHON (N12): profile cosmetics, loaded here for the same reason as
+        // the membership above - User.getShortSummary carries them into every
+        // lobby broadcast, and doing it per broadcast would be a query per
+        // player per update. Best-effort on the same terms: no table, no
+        // cosmetics, and the account still loads.
+        try {
+            const cosmetics = await db.query(
+                'SELECT * FROM "ProfileCosmetics" WHERE "UserId" = $1',
+                [user.id]
+            );
+
+            user.cosmetics = cosmeticsFromDbRow(cosmetics && cosmetics[0]);
+        } catch (err) {
+            logger.warn('Failed to lookup profile cosmetics for user', err);
+            user.cosmetics = undefined;
         }
     }
 

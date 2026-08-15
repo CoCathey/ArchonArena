@@ -14,6 +14,8 @@ export const TAG_TYPES = {
     LOCATION: 'Location',
     // ARCHON (I3): optional player bio.
     BIO: 'Bio',
+    // ARCHON (N12): profile cosmetics (accent, banner, frame, title, effect).
+    COSMETICS: 'Cosmetics',
     TOURNAMENTS: 'Tournaments',
     FRIENDS: 'Friends',
     CLUBS: 'Clubs',

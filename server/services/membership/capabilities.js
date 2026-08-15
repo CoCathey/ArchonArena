@@ -110,11 +110,13 @@ const CAPABILITY_CATALOG = {
     },
     [CAPABILITIES.PROFILE_COSMETICS]: {
         label: 'Profile customisation',
-        // Planned. Worded as intent, not as a claim about today - the only
-        // customisation that exists is the board background, which is free.
-        learn: 'Customise how your profile looks.',
-        where: 'Profile → Appearance',
-        planned: true
+        // Shipped: an accent colour, a banner, an avatar frame, a title and a
+        // longer bio, gated per option in
+        // server/services/membership/cosmetics.js. Until then the only
+        // customisation on the site was the board background, which is free -
+        // so this was being sold and did not exist.
+        learn: 'Give your profile an accent colour, a banner, an avatar frame and a title.',
+        where: 'Profile → Appearance'
     },
     [CAPABILITIES.SUPPORTER_BADGE]: {
         label: 'Supporter badge',
@@ -216,9 +218,12 @@ const CAPABILITY_CATALOG = {
     },
     [CAPABILITIES.ENHANCED_COSMETICS]: {
         label: 'Enhanced cosmetics',
-        learn: 'Additional profile and in-game customisation.',
-        where: 'Profile → Appearance',
-        planned: true
+        // The first Vault Master capability to actually ship. Until it did,
+        // `isTierPurchasable` correctly refused to sell the tier at all - all
+        // five of its capabilities were unbuilt, so $20 bought nothing over
+        // Archon's $10.
+        learn: 'Any accent colour you like, animated name effects, and the prismatic frame.',
+        where: 'Profile → Appearance'
     },
     [CAPABILITIES.ORGANIZER_TOOLS]: {
         label: 'Organiser tools',

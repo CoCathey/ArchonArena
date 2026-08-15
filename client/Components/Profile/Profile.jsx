@@ -11,6 +11,8 @@ import KeyforgeGameSettings from './KeyforgeGameSettings';
 // ARCHON (N2): per-category notification delivery preferences
 import NotificationPreferences from './NotificationPreferences';
 import ProfileCardSize from './ProfileCardSize';
+// ARCHON (N12): what profile_cosmetics / enhanced_cosmetics buy.
+import ProfileCosmetics from './ProfileCosmetics';
 import { Constants } from '../../constants';
 // ARCHON (N12): drives whether the Integrations tab is offered at all
 import { useGetOidcStatusQuery, useGetPatreonStatusQuery } from '../../redux/api';
@@ -346,6 +348,17 @@ const Profile = ({ onSubmit, isLoading }) => {
                                                     }
                                                     onCardSizeSelected={(name) => setCardSize(name)}
                                                 />
+                                                {/* ARCHON (N12): profile
+                                                    cosmetics. Saves through
+                                                    its own endpoint rather
+                                                    than the form's Save
+                                                    button - the two are
+                                                    validated against
+                                                    different things, and a
+                                                    swatch should not be able
+                                                    to fail because an email
+                                                    address is invalid. */}
+                                                <ProfileCosmetics />
                                             </div>
                                         )}
                                         {activeSection === ProfileSection.Gameplay && (

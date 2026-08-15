@@ -1005,9 +1005,18 @@ tiers, and perks that cannot touch competitive fairness.
 -   Owner: create the Patreon campaign and tiers; set `PATREON_CLIENT_ID`,
     `PATREON_CLIENT_SECRET` and `PATREON_CAMPAIGN_ID`, then link your own account to verify the
     round trip against the live campaign.
--   Define supporter perks — cosmetic and convenience only: custom backgrounds and card backs,
-    avatar frames, a supporter badge, longer replay retention, larger deck-import batches.
-    **(admin-config)** which tier unlocks which perk.
+-   [x] **Profile customisation** — the first cosmetic perks to actually exist, and what
+        `profile_cosmetics` (Supporter) and `enhanced_cosmetics` (Vault Master) were already being
+        sold as. Five slots: accent colour, profile banner, avatar frame, title and name effect,
+        plus a longer bio. The catalogue and its per-option tier gating live in one file
+        (`server/services/membership/cosmetics.js`); the client maps ids to pixels and never
+        decides who may use what. A lapsed pledge stops rendering the same day the badge does,
+        without deleting the selection — resubscribing restores it. Shipping enhanced cosmetics
+        also makes Vault Master purchasable for the first time: `isTierPurchasable` had correctly
+        refused to sell a tier whose every capability was unbuilt. See
+        [docs/design/profile-cosmetics.md](docs/design/profile-cosmetics.md).
+-   Remaining supporter perks — cosmetic and convenience only: custom card backs, longer replay
+    retention, larger deck-import batches. **(admin-config)** which tier unlocks which perk.
 -   A "Support Archon Arena" page saying plainly where the money goes, with an opt-in supporter
     list.
 

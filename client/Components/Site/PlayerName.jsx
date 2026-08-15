@@ -13,6 +13,8 @@ import PlayerBadge from './PlayerBadge';
 import Link from '../Navigation/Link';
 import { getRoleClass } from '../../util';
 import { TIERS } from '../../membership';
+// ARCHON (N12): name effects, one of the profile cosmetics.
+import { accentStyle, nameEffectClass } from '../../cosmetics';
 
 /**
  * ARCHON (N12): one component for "somebody else's name".
@@ -189,6 +191,9 @@ const TIER_TEXT_CLASS = Object.freeze({
  * @param {string} [props.tier] pass when the payload already carries it
  * @param {string} [props.tierName]
  * @param {string} [props.role] site role, for the name colour
+ * @param {object} [props.cosmetics] ARCHON (N12): the player's resolved
+ *        cosmetics, for the name effect. Pass when the payload carries them;
+ *        otherwise the badge lookup brings them along.
  * @param {boolean} [props.link] link through to their profile
  * @param {boolean} [props.plain] skip the role colour, keep the badge
  * @param {string} [props.className] applied to the name text
@@ -198,6 +203,7 @@ const PlayerName = ({
     tier,
     tierName,
     role,
+    cosmetics,
     link = false,
     plain = false,
     className = '',
@@ -210,6 +216,11 @@ const PlayerName = ({
     const effectiveTier = tier !== undefined ? tier : looked && looked.tier;
     const effectiveName = tierName !== undefined ? tierName : looked && looked.tierName;
     const effectiveRole = role !== undefined ? role : looked && looked.role;
+    // ARCHON (N12): the badge lookup carries the name effect for pages whose
+    // payload does not, so a leaderboard gets them without its own query. Only
+    // members ever have one - the server resolves it away when a pledge lapses.
+    const effectiveCosmetics = cosmetics !== undefined ? cosmetics : looked && looked.cosmetics;
+    const effectClass = nameEffectClass(effectiveCosmetics);
 
     const nameClass = plain
         ? className
@@ -221,18 +232,25 @@ const PlayerName = ({
               .join(' ');
 
     const label = children || username;
+    // A gradient name paints the text with its own colour, so the tier colour
+    // underneath it would never be seen; the effect class wins where there is
+    // one, and the tier colour is what shows for everybody else.
+    const textClass = [nameClass, effectClass].filter(Boolean).join(' ');
 
     return (
-        <span className='inline-flex min-w-0 items-baseline gap-1'>
+        <span
+            className='inline-flex min-w-0 items-baseline gap-1'
+            style={effectClass ? accentStyle(effectiveCosmetics) : undefined}
+        >
             {link ? (
                 <Link
-                    className={`${nameClass} truncate hover:underline`}
+                    className={`${textClass} truncate hover:underline`}
                     href={`/players/${encodeURIComponent(username)}`}
                 >
                     {label}
                 </Link>
             ) : (
-                <span className={`${nameClass} truncate`}>{label}</span>
+                <span className={`${textClass} truncate`}>{label}</span>
             )}
             <PlayerBadge tier={effectiveTier} tierName={effectiveName} />
         </span>
@@ -244,6 +262,7 @@ PlayerName.displayName = 'PlayerName';
 PlayerName.propTypes = {
     children: PropTypes.node,
     className: PropTypes.string,
+    cosmetics: PropTypes.object,
     link: PropTypes.bool,
     plain: PropTypes.bool,
     role: PropTypes.string,

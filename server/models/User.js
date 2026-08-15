@@ -3,6 +3,9 @@ const Settings = require('../settings');
 // the admin override lives there and nowhere else.
 const { resolveEntitlements } = require('../services/membership/entitlements');
 const { publicBadge } = require('../services/membership/publicBadge');
+// ARCHON (N12): profile cosmetics ride along with the user so a lobby seat
+// shows them without a second lookup per player.
+const { resolveCosmetics, isDefaultCosmetics } = require('../services/membership/cosmetics');
 
 class User {
     constructor(userData) {
@@ -117,6 +120,19 @@ class User {
         return this.publicBadge.role;
     }
 
+    /**
+     * ARCHON (N12): the cosmetics this account may currently display.
+     *
+     * Resolved rather than read: the stored selection deliberately outlives a
+     * membership, so this is where a lapsed pledge stops rendering. Unlike
+     * `publicBadge`, the admin override applies - an accent colour makes no
+     * claim about anybody's billing, and an admin who cannot see the frame
+     * they just chose is a bug report, not a policy.
+     */
+    get cosmetics() {
+        return resolveCosmetics(this.userData.cosmetics, this.getEntitlements().capabilities);
+    }
+
     /** The tier id other people may see, or 'free'. */
     get publicTier() {
         return this.publicBadge.tier;
@@ -223,6 +239,9 @@ class User {
             onboarded: !!this.userData.onboarded,
             // ARCHON: linked Decks of KeyForge account (prefills bulk import)
             dokUsername: this.userData.dokUsername || null,
+            // ARCHON (N12): the account's own cosmetics, so the client can
+            // draw its own avatar frame without asking for it separately.
+            cosmetics: this.cosmetics,
             // ARCHON (N12): premium membership. The client gates UI on
             // `capabilities` and never re-derives it from the tier - the server
             // is the only thing that decides, so a hand-edited client cannot
@@ -239,6 +258,7 @@ class User {
         // Resolved once: `role` and `tier` both come from the same badge, and
         // this runs for every user in every lobby broadcast.
         const badge = this.publicBadge;
+        const cosmetics = this.cosmetics;
 
         return {
             username: this.username,
@@ -248,7 +268,11 @@ class User {
             // ARCHON (N12): the tier, so a lobby seat can show which one
             // without a second lookup. Name only - never expiry or provider.
             tier: badge.tier,
-            tierName: badge.tierName
+            tierName: badge.tierName,
+            // Omitted entirely when nothing is set, which is most accounts -
+            // this goes out to every client on every lobby update, and a
+            // default block per user would be most of the message.
+            ...(isDefaultCosmetics(cosmetics) ? {} : { cosmetics })
         };
     }
 

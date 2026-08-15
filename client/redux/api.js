@@ -403,6 +403,24 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.BIO]
         }),
+        // ARCHON (N12): profile cosmetics. One GET for the editor - the whole
+        // catalogue with each option marked locked or not, plus this account's
+        // current selection - so the page needs no second request to know what
+        // it may offer.
+        getCosmetics: builder.query({
+            query: () => '/account/cosmetics',
+            providesTags: [TAG_TYPES.COSMETICS]
+        }),
+        setCosmetics: builder.mutation({
+            query: (cosmetics) => ({
+                url: '/account/cosmetics',
+                method: 'PUT',
+                body: { cosmetics }
+            }),
+            // The bio limit rises with the same capability, and the public
+            // profile is what the editor is previewing.
+            invalidatesTags: [TAG_TYPES.COSMETICS, TAG_TYPES.USER]
+        }),
         getLeaderboard: builder.query({
             query: (params) => ({
                 url: '/ratings/leaderboard',
@@ -1164,6 +1182,9 @@ export const {
     useSetLocationMutation,
     useGetBioQuery,
     useSetBioMutation,
+    // ARCHON (N12): profile cosmetics.
+    useGetCosmeticsQuery,
+    useSetCosmeticsMutation,
     useGetSiteContentQuery,
     useAdminSetRatingMutation,
     useAdminResetRatingsMutation,

@@ -7,6 +7,8 @@ const logger = require('./log');
 // ARCHON: site-wide Watch settings (spectator broadcast delay). Read from the
 // in-memory snapshot, so handing a game to a node never waits on the database.
 const settings = require('./services/settings');
+// ARCHON (N12): profile cosmetics, so a lobby seat can show an avatar frame.
+const { isDefaultCosmetics } = require('./services/membership/cosmetics');
 
 class PendingGame {
     constructor(owner, details) {
@@ -386,8 +388,14 @@ class PendingGame {
                 deck = {};
             }
 
+            // ARCHON (N12): the seat shows the member's avatar frame. Omitted
+            // when nothing is set, which is most players - this summary is
+            // broadcast to the whole lobby whenever a game changes.
+            const cosmetics = player.user.cosmetics;
+
             playerSummaries[player.name] = {
                 avatar: player.user.avatar,
+                ...(isDefaultCosmetics(cosmetics) ? {} : { cosmetics }),
                 deck: activePlayer ? deck : {},
                 houses: this.started && player.deck ? player.deck.houses : [],
                 id: player.id,
