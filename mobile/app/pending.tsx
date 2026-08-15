@@ -19,7 +19,7 @@ import DeckFilterBar from '../src/decks/DeckFilterBar';
 import DeckPreview from '../src/decks/DeckPreview';
 import DeckRow from '../src/decks/DeckRow';
 import { useDeckLibrary } from '../src/decks/useDeckLibrary';
-import { formatLabel } from '../src/game/gameFormats';
+import { formatLabel, isUnchainedFormat } from '../src/game/gameFormats';
 import { lobby } from '../src/net/lobbySocket';
 import { useAuthStore } from '../src/stores/authStore';
 import { useGameStore } from '../src/stores/gameStore';
@@ -64,7 +64,11 @@ export default function PendingGameScreen() {
         enabled: deckModal,
         isAlliance: gameFormat === 'alliance',
         sasMin: sasBound?.min,
-        sasMax: sasBound?.max
+        sasMax: sasBound?.max,
+        // Always one or the other, never absent: Unchained decks are legal in
+        // an Unchained game and nowhere else, so "no opinion" would offer decks
+        // the server is about to refuse.
+        unchained: isUnchainedFormat(gameFormat)
     });
 
     // Handoff arrives when the owner starts the game: open the board.

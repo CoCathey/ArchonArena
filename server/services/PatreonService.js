@@ -64,6 +64,17 @@ const IDENTITY_QUERY = new URLSearchParams({
 // an account page open indefinitely.
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 
+/**
+ * ARCHON (N12): marks an OAuth `state` as belonging to a phone-app link.
+ *
+ * Patreon has one registered redirect URI and it is the website. The web
+ * callback page reads this prefix and forwards the code to the app's deep link
+ * instead of trying to complete a link for a browser session that is not signed
+ * in. It is a routing hint, not a credential - `state` is public, and the
+ * request is still verified against the signed state token.
+ */
+const MOBILE_STATE_PREFIX = 'm.';
+
 class PatreonService {
     /**
      * @param {import('./ConfigService')} configService reads the `patreon` section
@@ -99,11 +110,25 @@ class PatreonService {
      * callback has to echo back. The caller is responsible for remembering the
      * state (a signed cookie, in the API layer) and rejecting a mismatch.
      *
+     * ## `mobile`
+     *
+     * Patreon redirects to one registered `redirect_uri` - the website - and
+     * the phone app cannot receive that. Rather than register a second URI (or
+     * a custom scheme, which Patreon does not accept), the state is marked so
+     * the web callback page knows to bounce straight to the app's deep link
+     * without doing anything else. `state` is opaque to Patreon and comes back
+     * verbatim, so the marker survives the round trip, and it carries no
+     * meaning beyond "hand this back to the app" - the actual verification is
+     * still the signed token in the API layer.
+     *
+     * @param {object} [options]
+     * @param {boolean} [options.mobile] mark the state for the app deep link
      * @returns {{url: string, state: string}}
      */
-    createAuthRequest() {
+    createAuthRequest({ mobile = false } = {}) {
         const config = this.getConfig();
-        const state = crypto.randomBytes(24).toString('base64url');
+        const state =
+            (mobile ? MOBILE_STATE_PREFIX : '') + crypto.randomBytes(24).toString('base64url');
 
         const params = new URLSearchParams({
             response_type: 'code',
@@ -391,3 +416,4 @@ class PatreonService {
 
 module.exports = PatreonService;
 module.exports.SCOPES = SCOPES;
+module.exports.MOBILE_STATE_PREFIX = MOBILE_STATE_PREFIX;

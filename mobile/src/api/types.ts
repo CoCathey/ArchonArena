@@ -403,3 +403,193 @@ export interface NewGameRequest {
     expansions: Record<string, boolean>;
     [key: string]: unknown;
 }
+
+// ---- Archon+ membership (N12) ----
+
+/** One capability's copy, from the server's catalogue. */
+export interface CapabilityCopy {
+    label: string;
+    learn: string;
+    where?: string;
+    /** Advertised but not built yet — shown, never sold. */
+    planned?: boolean;
+}
+
+export interface MembershipTier {
+    id: string;
+    name: string;
+    rank: number;
+    priceUsd: number;
+    tagline?: string;
+    recommended?: boolean;
+    /** Free-tier lines, listed in words rather than as capabilities. */
+    includes?: string[];
+    /** Capability ids this tier adds over the one below. */
+    adds?: string[];
+    /** Of `adds`, the ones that actually work today. */
+    liveCapabilities?: string[];
+    /** False when the tier delivers nothing the tier below does not. */
+    purchasable?: boolean;
+    /** Per-tier Patreon checkout, or null when the tier is not sellable. */
+    checkoutUrl?: string | null;
+}
+
+export interface MembershipCatalogResult extends ApiResponse {
+    tiers?: MembershipTier[];
+    capabilities?: Record<string, CapabilityCopy>;
+}
+
+export interface MyMembership {
+    tier: string;
+    tierName: string;
+    rank: number;
+    isAdmin: boolean;
+    complimentary: boolean;
+    source: string;
+    expiresAt?: string | null;
+    provider?: string | null;
+    status?: string | null;
+}
+
+export interface MyMembershipResult extends ApiResponse {
+    membership?: MyMembership;
+    capabilities?: string[];
+}
+
+export interface PatreonStatusResult extends ApiResponse {
+    enabled?: boolean;
+    campaignUrl?: string | null;
+}
+
+export interface PatreonLinkStartResult extends ApiResponse {
+    url?: string;
+    /** Mobile only: the signed state, since the app has no cookie jar. */
+    stateToken?: string;
+    deepLink?: string;
+}
+
+// ---- Archon Intelligence ----
+
+/**
+ * Every metric the server could not compute arrives as `available: false` with
+ * a reason, rather than as a zero. The screens render the reason.
+ */
+export interface Availability {
+    available?: boolean;
+    reason?: string;
+}
+
+export interface HouseRow {
+    house: string;
+    houseName?: string;
+    games: number;
+    wins?: number;
+    winRate: number | null;
+    prevalence?: number;
+}
+
+export interface DeckRanking {
+    deckId: number;
+    deckName: string;
+    games: number;
+    wins: number;
+    losses: number;
+    winRate: number | null;
+    sas?: number | null;
+}
+
+export interface RatingHistoryEntry {
+    at: string;
+    opponent?: string;
+    won: boolean;
+    change: number;
+    ratingBefore: number;
+    ratingAfter: number;
+}
+
+/** One set's row in a by-set breakdown. */
+export interface SetRow {
+    set?: { code?: number; name?: string };
+    games: number;
+    wins?: number;
+    losses?: number;
+    winRate: number | null;
+    /** Share of the sample this set is; sums to 100% since a deck has one set. */
+    share?: number | null;
+}
+
+export interface PlayerIntelligenceResult extends ApiResponse {
+    ratingHistory?: RatingHistoryEntry[];
+    /** Echo of the filter, so "no filter" is distinguishable from "matched nothing". */
+    sets?: number[];
+    bySet?: SetRow[];
+    vsExpectation?: Availability & {
+        games?: number;
+        winRate?: number | null;
+        expectedWinRate?: number | null;
+        vsExpectation?: number | null;
+    };
+    rankings?: DeckRanking[];
+    byHouse?: HouseRow[];
+    /** Sections this account is not entitled to — render as locked, not empty. */
+    locked?: string[];
+}
+
+export interface DeckIntelligenceResult extends ApiResponse {
+    deckId?: number;
+    mine?: {
+        overview?: Availability & {
+            games?: number;
+            wins?: number;
+            losses?: number;
+            winRate?: number | null;
+            avgKeysAtEnd?: number | null;
+            avgSeconds?: number | null;
+        };
+        rating?: Availability & { netSwing?: number; vsExpectation?: number | null };
+        byOpposingHouse?: Availability & { rows?: HouseRow[] };
+        byTurnOrder?: Availability & {
+            first?: { winRate: number | null; games: number };
+            second?: { winRate: number | null; games: number };
+        };
+    };
+    everyone?: Availability & {
+        games?: number;
+        wins?: number;
+        losses?: number;
+        winRate?: number | null;
+    };
+}
+
+export interface MetaIntelligenceResult extends ApiResponse {
+    days?: number;
+    sets?: number[];
+    bySet?: Availability & { rows?: SetRow[] };
+    houses?: Availability & { rows?: HouseRow[] };
+    summary?: Availability & {
+        games?: number;
+        players?: number;
+        decks?: number;
+        avgSeconds?: number | null;
+    };
+}
+
+export interface TournamentLabDeck {
+    deckId: number;
+    deckName: string;
+    sas?: number | null;
+    overview: { games?: number; wins?: number; losses?: number; winRate?: number | null };
+    rating?: Availability & { netSwing?: number; vsExpectation?: number | null };
+    form?: { results?: { won: boolean; at: string }[] };
+    bestMatchups?: HouseRow[];
+    worstMatchups?: HouseRow[];
+    /** False when the sample is too small to lean on. */
+    confident?: boolean;
+    minConfidentGames?: number;
+}
+
+export interface TournamentLabResult extends ApiResponse {
+    candidates?: { deckId: number; deckName: string; games: number; winRate: number | null }[];
+    decks?: TournamentLabDeck[];
+    meta?: Availability & { rows?: HouseRow[] };
+}

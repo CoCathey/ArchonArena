@@ -30,3 +30,14 @@ export function expansionLabel(expansion?: number | string): string | undefined 
     }
     return EXPANSION_LABELS[String(expansion)];
 }
+
+/**
+ * ARCHON: every set, newest first — the order the intelligence set filter uses.
+ *
+ * Newest first because the sets somebody is deciding about are the recent ones,
+ * which is the same reasoning the web SetFilter follows.
+ */
+export const ORDERED_EXPANSIONS: { id: number; label: string }[] = Object.entries(EXPANSION_LABELS)
+    .map(([id, label]) => ({ id: parseInt(id, 10), label }))
+    .filter((entry) => Number.isFinite(entry.id))
+    .sort((a, b) => b.id - a.id);

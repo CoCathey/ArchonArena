@@ -143,6 +143,45 @@ describe('DeckService deck rules', function () {
         });
     });
 
+    /**
+     * ARCHON: the Unchained set (601) is playable only in an Unchained game and
+     * is the only thing playable there.
+     *
+     * getRandomDeckIdForUser has always applied this. The deck LIST never did,
+     * so "roll me a deck" and "let me choose one" disagreed about what was
+     * legal - the dice would refuse a deck the list had just offered.
+     */
+    describe('the Unchained set filter', function () {
+        it('restricts the list to the Unchained set in an Unchained game', function () {
+            const params = [1];
+            const filter = service.processFilter(2, params, [{ name: 'unchained', value: true }]);
+
+            expect(filter).toContain('AND e."ExpansionId" = 601');
+            // A constant, not input - it must not consume a placeholder.
+            expect(params).toEqual([1]);
+        });
+
+        it('excludes the Unchained set everywhere else', function () {
+            const filter = service.processFilter(2, [1], [{ name: 'unchained', value: false }]);
+
+            expect(filter).toContain('AND e."ExpansionId" <> 601');
+        });
+
+        it('leaves the set alone when no opinion is given', function () {
+            // The deck library outside a game lists everything.
+            const filter = service.processFilter(2, [1], [{ name: 'name', value: 'fun' }]);
+
+            expect(filter).not.toContain('ExpansionId');
+        });
+
+        it('filters the list the same way the dice do', function () {
+            // The two paths must agree; the whole bug was that they did not.
+            const listed = service.processFilter(2, [1], [{ name: 'unchained', value: true }]);
+
+            expect(listed).toContain('e."ExpansionId" = 601');
+        });
+    });
+
     describe('the SAS range filter', function () {
         it('turns sasMin/sasMax into range comparisons on the DeckSas join', function () {
             const params = [1];

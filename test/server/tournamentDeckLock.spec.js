@@ -100,6 +100,9 @@ describe('tournament deck lock', function () {
             sendHandoff: vi.fn(),
             applyDeckSelection: Lobby.prototype.applyDeckSelection,
             checkSasBound: Lobby.prototype.checkSasBound,
+            // Called by onSelectDeck on every selection; these decks carry no
+            // expansion, so it has nothing to say here.
+            checkUnchained: Lobby.prototype.checkUnchained,
             tournamentDeckFor: Lobby.prototype.tournamentDeckFor,
             pinnedDeckMessage: Lobby.prototype.pinnedDeckMessage,
             onSelectDeck: Lobby.prototype.onSelectDeck,

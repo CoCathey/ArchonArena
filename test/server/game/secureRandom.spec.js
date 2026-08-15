@@ -132,8 +132,15 @@ describe('secureRandom', function () {
 
             // 256 % 36 = 4, so four values get an extra chance - about 15%.
             expect(spread(modulo)).toBeGreaterThan(0.1);
-            // Sampling noise only.
-            expect(spread(fair)).toBeLessThan(0.05);
+            /**
+             * Sampling noise only - but bounded honestly. The range of 36 bins
+             * at 10k expected each typically lands near 0.04, and a 0.05
+             * ceiling sat close enough to fire on a fair source about once in
+             * a few hundred runs (observed: 0.0562). 0.08 is far above what
+             * noise reaches in practice and far below the ~0.15 the modulo
+             * produces, so it separates the two without flaking.
+             */
+            expect(spread(fair)).toBeLessThan(0.08);
         });
     });
 
