@@ -8,13 +8,18 @@ engine the website uses, with a UI built for one-handed portrait play.
 
 - **Sign in / register** against the Archon Arena lobby (JWT + refresh-token flow,
   tokens kept in the iOS keychain via `expo-secure-store`)
-- **Play tab** — live game list over the lobby socket, create game (type/format,
-  password, spectators, open hands, time limit), quick join, join/watch with password
+- **Play tab** — live game list over the lobby socket, create game in any of the
+  six modes the lobby runs (Archon, Sealed, Adaptive, Alliance, Reversal,
+  Unchained) with every option the web form has — password, spectators, open
+  hands, mute spectators, hidden deck lists, unlisted games, time limit, Lucky
+  Dice and SAS bounds — quick join, join/watch with password
 - **Decks tab** — your deck library with house icons + SAS, Master Vault import by
   link or id, standalone decks for instant play, deck detail view (full card list
   by house with card zoom)
 - **Stats tab** — world leaderboard per rating pool, your ratings/rank, win-rate
   breakdowns by house and format, and match history
+- **Profile tab** — account, appearance and notification settings, Archon+
+  status, and friends (presence, requests, and dropping into a friend's game)
 - **Archon+** — membership status, what each tier includes, and connecting an
   existing Patreon account (OAuth sign-in through the system browser). What the
   screen may say about *buying* a membership is decided per platform — see
@@ -66,11 +71,12 @@ cached on disk by `expo-image`, so the app ships no card data.
 
 ```
 app/                    expo-router screens
-  (tabs)/               Play / Decks / Profile
+  (tabs)/               Play / Decks / Events / Stats / Profile
   login.tsx register.tsx new-game.tsx pending.tsx game.tsx
   membership.tsx intelligence.tsx tournament-lab.tsx
 src/
   api/                  REST client + wire types
+  friends/              the friends section of the Profile tab
   membership/           capabilities, entitlements, Patreon linking, store policy
   net/                  lobby socket, game socket, jsonpatch
   stores/               zustand stores (auth, settings, lobby, game)

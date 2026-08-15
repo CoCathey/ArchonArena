@@ -7,6 +7,15 @@ const Constants = require('../constants');
 const secureRandom = require('../game/secureRandom');
 const BonusOrder = Constants.Houses.concat(['amber', 'capture', 'damage', 'draw', 'discard']);
 
+/**
+ * ARCHON: the Unchained set.
+ *
+ * Playable only in an Unchained game, and the only thing playable there. It was
+ * a bare 601 in getRandomDeckIdForUser and nowhere else, which is how the deck
+ * LIST came to ignore the rule the dice enforced.
+ */
+const UNCHAINED_EXPANSION_ID = 601;
+
 const allianceRestrictedRules = {
     befuddle: { expansions: [600] },
     ghostform: { expansions: [452, 600] },
@@ -260,9 +269,11 @@ class DeckService {
             where += `AND d."IsAlliance" = $${params.length} `;
         }
 
-        // 601 is the Unchained set: playable only in the unchained format and
-        // the only thing playable there (the modal filters the same way).
-        where += unchainedOnly ? 'AND e."ExpansionId" = 601 ' : 'AND e."ExpansionId" <> 601 ';
+        // Playable only in the unchained format, and the only thing playable
+        // there. The deck list applies the same rule via the `unchained` filter.
+        where += unchainedOnly
+            ? `AND e."ExpansionId" = ${UNCHAINED_EXPANSION_ID} `
+            : `AND e."ExpansionId" <> ${UNCHAINED_EXPANSION_ID} `;
 
         if (sasMin !== undefined && sasMin !== null) {
             params.push(sasMin);
@@ -549,6 +560,18 @@ class DeckService {
             } else if (filterObject.name === 'isAlliance') {
                 filter += `AND ${this.mapColumn(filterObject.name)} = $${index++} `;
                 params.push(filterObject.value);
+            } else if (filterObject.name === 'unchained') {
+                // ARCHON: the deck picker in an Unchained game must offer only
+                // Unchained decks, and every other game must offer none of
+                // them. getRandomDeckIdForUser has always applied this rule, so
+                // "roll a random deck" and "choose one from the list" disagreed
+                // about what was legal - the dice refused what the list offered.
+                //
+                // Not parameterised because it is a constant, not input: the
+                // value only decides which side of the comparison to take.
+                filter += filterObject.value
+                    ? `AND e."ExpansionId" = ${UNCHAINED_EXPANSION_ID} `
+                    : `AND e."ExpansionId" <> ${UNCHAINED_EXPANSION_ID} `;
             } else if (filterObject.name === 'house') {
                 // ARCHON: houses live in DeckHouses, not on the deck row, so
                 // they cannot go through mapColumn. Repeat the filter once per
@@ -1844,3 +1867,4 @@ class DeckService {
 }
 
 module.exports = DeckService;
+module.exports.UNCHAINED_EXPANSION_ID = UNCHAINED_EXPANSION_ID;

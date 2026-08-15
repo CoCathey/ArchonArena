@@ -282,6 +282,13 @@ export interface DeckQuery {
      */
     sasMin?: number;
     sasMax?: number;
+    /**
+     * Restrict to (true) or exclude (false) the Unchained set. Unchained decks
+     * are legal only in an Unchained game and are the only thing legal there,
+     * so every game sends one or the other; omitting it lists everything, which
+     * is what the deck library outside a game wants.
+     */
+    unchained?: boolean;
 }
 
 export async function fetchDecks(options: DeckQuery = {}) {
@@ -309,6 +316,9 @@ export async function fetchDecks(options: DeckQuery = {}) {
     }
     if (options.sasMax !== undefined) {
         filter.push({ name: 'sasMax', value: options.sasMax });
+    }
+    if (options.unchained !== undefined) {
+        filter.push({ name: 'unchained', value: options.unchained });
     }
     if (filter.length > 0) {
         params.set('filter', JSON.stringify(filter));
