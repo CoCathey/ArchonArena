@@ -13,11 +13,13 @@ import type {
     PlayerIntelligenceResult
 } from '../src/api/types';
 import { CAPABILITIES } from '../src/membership/capabilities';
+import SetFilter from '../src/membership/SetFilter';
 import { hasAnyCapability, hasCapability } from '../src/membership/entitlements';
 import PremiumLock from '../src/membership/PremiumLock';
 import {
     duration,
     HouseBar,
+    SetBar,
     Muted,
     num,
     pct,
@@ -202,6 +204,7 @@ export default function IntelligenceScreen() {
 
     const [player, setPlayer] = useState<PlayerIntelligenceResult | undefined>();
     const [meta, setMeta] = useState<MetaIntelligenceResult | undefined>();
+    const [sets, setSets] = useState<number[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | undefined>();
 
@@ -217,8 +220,8 @@ export default function IntelligenceScreen() {
 
         try {
             const [playerResult, metaResult] = await Promise.all([
-                unlocked ? fetchPlayerIntelligence() : Promise.resolve(undefined),
-                canMeta ? fetchMetaIntelligence(30) : Promise.resolve(undefined)
+                unlocked ? fetchPlayerIntelligence(sets) : Promise.resolve(undefined),
+                canMeta ? fetchMetaIntelligence(30, sets) : Promise.resolve(undefined)
             ]);
 
             setPlayer(playerResult);
@@ -228,7 +231,7 @@ export default function IntelligenceScreen() {
         } finally {
             setLoading(false);
         }
-    }, [canMeta, unlocked]);
+    }, [canMeta, sets, unlocked]);
 
     useEffect(() => {
         load();
@@ -253,6 +256,17 @@ export default function IntelligenceScreen() {
                     Three questions: is the deck good, are you good with it, and how does it hold up
                     against what people are actually playing?
                 </Text>
+                {/* ARCHON: one control, and everything below it re-reads for
+                    those sets — a house win rate or a "vs expectation" means
+                    something different inside one set than averaged over
+                    twenty. The two by-set tables deliberately ignore it: they
+                    are what the filter is chosen FROM, and narrowing them would
+                    collapse each to one row. */}
+                {unlocked || canMeta ? (
+                    <View style={{ marginTop: spacing.md }}>
+                        <SetFilter disabled={loading} onChange={setSets} selected={sets} />
+                    </View>
+                ) : null}
             </Card>
 
             {/* ---- Player Intelligence ---------------------------------- */}
@@ -441,6 +455,29 @@ export default function IntelligenceScreen() {
                 </PremiumLock>
             </Card>
 
+            {/* ---- Your record by set ---------------------------------- */}
+            <Card>
+                <Text style={styles.panelTitle}>Your record by set</Text>
+                <PremiumLock
+                    capabilities={[CAPABILITIES.MATCHUP_ANALYTICS]}
+                    pitch='See which sets you actually win in, and how much of your play each one is.'
+                >
+                    {(player?.bySet ?? []).length ? (
+                        <View>
+                            {(player?.bySet ?? []).map((row) => (
+                                <SetBar key={row.set?.code ?? row.set?.name} row={row} />
+                            ))}
+                            <Muted>
+                                Not narrowed by the filter above — this is the table the filter is
+                                chosen from.
+                            </Muted>
+                        </View>
+                    ) : (
+                        <Muted>No games recorded yet.</Muted>
+                    )}
+                </PremiumLock>
+            </Card>
+
             {/* ---- Meta Intelligence ----------------------------------- */}
             <Card>
                 <Text style={styles.panelTitle}>Meta Intelligence</Text>
@@ -463,6 +500,14 @@ export default function IntelligenceScreen() {
                         {(meta?.houses?.rows ?? []).map((row) => (
                             <HouseBar key={row.house} row={row} />
                         ))}
+                        {(meta?.bySet?.rows ?? []).length ? (
+                            <View>
+                                <SectionLabel>What the field is playing, by set</SectionLabel>
+                                {(meta?.bySet?.rows ?? []).slice(0, 10).map((row) => (
+                                    <SetBar key={row.set?.code ?? row.set?.name} row={row} />
+                                ))}
+                            </View>
+                        ) : null}
                         <Muted>
                             Across all decided games in the last {meta?.days ?? 30} days.
                         </Muted>

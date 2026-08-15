@@ -562,17 +562,28 @@ export async function unlinkPatreon() {
  * highest one is held is what used to leave a Supporter without the Elo history
  * they had paid for. `locked` names the sections that were withheld.
  */
-export async function fetchPlayerIntelligence() {
-    return apiFetch<PlayerIntelligenceResult>('/api/intelligence/player');
+export async function fetchPlayerIntelligence(sets: number[] = []) {
+    return apiFetch<PlayerIntelligenceResult>(`/api/intelligence/player${setsQuery(sets)}`);
 }
 
 /** One deck, from the caller's own games. Only ever their own decks. */
+/**
+ * A set filter as a query string. Empty means every set — and that is NOT the
+ * same as sending an empty filter, which the server would read as "no sets at
+ * all", so the parameter is omitted rather than sent blank.
+ */
+function setsQuery(sets: number[]): string {
+    return sets.length ? `?sets=${sets.join(',')}` : '';
+}
+
 export async function fetchDeckIntelligence(deckId: number) {
     return apiFetch<DeckIntelligenceResult>(`/api/intelligence/deck/${deckId}`);
 }
 
-export async function fetchMetaIntelligence(days = 30) {
-    return apiFetch<MetaIntelligenceResult>(`/api/intelligence/meta?days=${days}`);
+export async function fetchMetaIntelligence(days = 30, sets: number[] = []) {
+    const query = sets.length ? `&sets=${sets.join(',')}` : '';
+
+    return apiFetch<MetaIntelligenceResult>(`/api/intelligence/meta?days=${days}${query}`);
 }
 
 /** Compare up to four of your own decks. No decks selected still returns candidates. */

@@ -507,8 +507,22 @@ export interface RatingHistoryEntry {
     ratingAfter: number;
 }
 
+/** One set's row in a by-set breakdown. */
+export interface SetRow {
+    set?: { code?: number; name?: string };
+    games: number;
+    wins?: number;
+    losses?: number;
+    winRate: number | null;
+    /** Share of the sample this set is; sums to 100% since a deck has one set. */
+    share?: number | null;
+}
+
 export interface PlayerIntelligenceResult extends ApiResponse {
     ratingHistory?: RatingHistoryEntry[];
+    /** Echo of the filter, so "no filter" is distinguishable from "matched nothing". */
+    sets?: number[];
+    bySet?: SetRow[];
     vsExpectation?: Availability & {
         games?: number;
         winRate?: number | null;
@@ -549,6 +563,8 @@ export interface DeckIntelligenceResult extends ApiResponse {
 
 export interface MetaIntelligenceResult extends ApiResponse {
     days?: number;
+    sets?: number[];
+    bySet?: Availability & { rows?: SetRow[] };
     houses?: Availability & { rows?: HouseRow[] };
     summary?: Availability & {
         games?: number;

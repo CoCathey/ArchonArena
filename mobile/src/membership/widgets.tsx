@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { HouseRow, RatingHistoryEntry } from '../api/types';
+import type { HouseRow, RatingHistoryEntry, SetRow } from '../api/types';
 import { colors, radius, spacing } from '../theme';
 
 /**
@@ -82,6 +82,40 @@ export function HouseBar(props: { row: HouseRow; showPrevalence?: boolean }) {
             </View>
             <Text style={styles.barValue}>{pct(value)}</Text>
             {showPrevalence ? null : <Text style={styles.barGames}>{row.games}g</Text>}
+        </View>
+    );
+}
+
+/**
+ * A set row: name, win rate, and how much of the sample it is.
+ *
+ * The share is drawn at true scale, unlike the house bar — a deck has three
+ * houses but exactly one set, so these really do sum to 100% and can be read as
+ * proportions of the whole.
+ */
+export function SetBar(props: { row: SetRow }) {
+    const { row } = props;
+    const width = Math.max(0, Math.min(100, Math.round((row.winRate ?? 0) * 100)));
+
+    return (
+        <View style={styles.barRow}>
+            <Text numberOfLines={1} style={styles.barLabel}>
+                {row.set?.name || row.set?.code || '—'}
+            </Text>
+            <View style={styles.barTrack}>
+                <View
+                    style={[
+                        styles.barFill,
+                        {
+                            width: `${width}%`,
+                            backgroundColor:
+                                (row.winRate ?? 0) >= 0.5 ? colors.success : colors.danger
+                        }
+                    ]}
+                />
+            </View>
+            <Text style={styles.barValue}>{pct(row.winRate)}</Text>
+            <Text style={styles.barGames}>{row.games}g</Text>
         </View>
     );
 }
