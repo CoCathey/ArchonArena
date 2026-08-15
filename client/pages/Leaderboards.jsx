@@ -6,6 +6,7 @@ import { Button as HeroButton } from '@heroui/react';
 
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
+import PlayerName from '../Components/Site/PlayerName';
 import AmberValue from '../Components/Site/AmberValue';
 import Avatar from '../Components/Site/Avatar';
 import { countryName } from '../geo';
@@ -58,12 +59,11 @@ const Podium = ({ entries }) => {
                             <Avatar imgPath={entry.avatar} />
                         </div>
                         <div className='mt-2 truncate text-sm font-bold text-foreground'>
-                            <Link
-                                href={`/players/${encodeURIComponent(entry.username)}`}
-                                className='hover:text-amber-300 hover:underline'
-                            >
-                                {entry.username}
-                            </Link>
+                            <PlayerName
+                                className='hover:text-amber-300'
+                                link
+                                username={entry.username}
+                            />
                         </div>
                         {locationOf(entry) && (
                             <div className='truncate text-xs text-muted'>{locationOf(entry)}</div>
@@ -298,14 +298,11 @@ const Leaderboards = () => {
                                                 {entry.rank}
                                             </td>
                                             <td className='px-2 py-2 font-semibold text-foreground'>
-                                                <Link
-                                                    href={`/players/${encodeURIComponent(
-                                                        entry.username
-                                                    )}`}
-                                                    className='hover:text-amber-300 hover:underline'
-                                                >
-                                                    {entry.username}
-                                                </Link>
+                                                <PlayerName
+                                                    className='hover:text-amber-300'
+                                                    link
+                                                    username={entry.username}
+                                                />
                                                 {entry.provisional && (
                                                     <span
                                                         className='ml-1 text-xs text-muted'

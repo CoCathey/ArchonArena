@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import Link from '../Components/Navigation/Link';
+import PlayerName from '../Components/Site/PlayerName';
 import { useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton, toast } from '@heroui/react';
@@ -351,12 +351,11 @@ const ClubDetail = () => {
                                 key={member.userId}
                                 className='flex items-center gap-2 rounded bg-surface-secondary/50 px-2 py-1.5 text-sm'
                             >
-                                <Link
-                                    href={`/players/${encodeURIComponent(member.username)}`}
-                                    className='font-semibold text-foreground hover:text-amber-300 hover:underline'
-                                >
-                                    {member.username}
-                                </Link>
+                                <PlayerName
+                                    className='hover:text-amber-300'
+                                    link
+                                    username={member.username}
+                                />
                                 {member.country && (
                                     <span className='text-xs text-muted'>
                                         {countryName(member.country)}
@@ -418,12 +417,11 @@ const ClubDetail = () => {
                                 <tr key={entry.username} className='border-t border-border/40'>
                                     <td className='py-1 text-muted'>{entry.rank}</td>
                                     <td>
-                                        <Link
-                                            href={`/players/${encodeURIComponent(entry.username)}`}
-                                            className='font-semibold text-foreground hover:text-amber-300 hover:underline'
-                                        >
-                                            {entry.username}
-                                        </Link>
+                                        <PlayerName
+                                            className='hover:text-amber-300'
+                                            link
+                                            username={entry.username}
+                                        />
                                         {entry.provisional && (
                                             <span className='ml-1 text-xs text-muted'>
                                                 {t('(provisional)')}
@@ -491,12 +489,11 @@ const ClubDetail = () => {
                             key={member.userId}
                             className='flex items-center gap-2 rounded bg-surface-secondary/50 px-2 py-1.5 text-sm'
                         >
-                            <Link
-                                href={`/players/${encodeURIComponent(member.username)}`}
-                                className='font-semibold text-foreground hover:text-amber-300 hover:underline'
-                            >
-                                {member.username}
-                            </Link>
+                            <PlayerName
+                                className='hover:text-amber-300'
+                                link
+                                username={member.username}
+                            />
                             {member.role === 'owner' && (
                                 <span className='rounded bg-accent/20 px-1.5 text-xs text-amber-300'>
                                     {t('Owner')}

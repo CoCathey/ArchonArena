@@ -7,9 +7,9 @@ import AmberImage from '../../assets/img/amber.png';
 import CardBackImage from '../../assets/img/idbacks/cardback.jpg';
 import TideImage from '../../assets/img/tide/tide.png';
 import { Constants } from '../../constants';
-import { getRoleClass } from '../../util';
 import AlertPanel from '../Site/AlertPanel';
 import Avatar from '../Site/Avatar';
+import PlayerName from '../Site/PlayerName';
 import CardImage from './CardImage';
 
 const keyImages = {};
@@ -245,23 +245,25 @@ const Messages = ({ messages, onCardMouseOver, onCardMouseOut }) => {
                     </span>
                 );
             } else if (fragment.name && fragment.argType === 'player') {
-                const userClass = `username ${getRoleClass(fragment.role)}`;
-
                 messages.push(
                     <div key={index++} className='message-chat flex items-center gap-1.5'>
                         <Avatar imgPath={fragment.avatar} />
-                        <span key={index++} className={userClass}>
-                            {fragment.name}
-                        </span>
+                        <PlayerName
+                            className='username'
+                            key={index++}
+                            role={fragment.role}
+                            username={fragment.name}
+                        />
                     </div>
                 );
             } else if (fragment.argType === 'nonAvatarPlayer') {
-                const userClass = `username ${getRoleClass(fragment.role)}`;
-
                 messages.push(
-                    <span key={index++} className={userClass}>
-                        {fragment.name}
-                    </span>
+                    <PlayerName
+                        className='username'
+                        key={index++}
+                        role={fragment.role}
+                        username={fragment.name}
+                    />
                 );
             } else {
                 let messageFragment = processKeywords(fragment.toString());

@@ -359,8 +359,8 @@ const About = () => {
                                     {
                                         term: t('Supporter'),
                                         description: t(
-                                            'Your full rating history, expanded match history, deeper ' +
-                                                'personal and deck statistics, and a badge.'
+                                            'Your rating history game by game, deeper personal and ' +
+                                                'deck statistics, and a badge.'
                                         )
                                     },
                                     {
@@ -374,12 +374,21 @@ const About = () => {
                                     {
                                         term: t('Vault Master'),
                                         description: t(
-                                            'Everything above, plus organiser tools, early access and ' +
-                                                'experimental features.'
+                                            'Everything above. Its own features — organiser tools, ' +
+                                                'early access, experimental builds — are on the roadmap ' +
+                                                'rather than built, so it is a way to support the site ' +
+                                                'rather than a way to get more of it today.'
                                         )
                                     }
                                 ]}
                             />
+                            <Callout>
+                                {t(
+                                    'Some tier features are still on the roadmap rather than built. The ' +
+                                        'membership page marks those as planned rather than included, so ' +
+                                        'you can see exactly what you would be paying for today.'
+                                )}
+                            </Callout>
                             <P>
                                 <Link className='text-accent hover:underline' href='/membership'>
                                     {t('See what each tier includes')}

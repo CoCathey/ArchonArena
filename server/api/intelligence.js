@@ -3,7 +3,7 @@ const passport = require('passport');
 const { wrapAsync } = require('../util.js');
 const ArchonIntelligenceService = require('../services/membership/ArchonIntelligenceService');
 const TournamentLabService = require('../services/membership/TournamentLabService');
-const { requireCapability } = require('./requireCapability');
+const { requireCapability, requireAnyCapability, sectionsFor } = require('./requireCapability');
 const { CAPABILITIES } = require('../services/membership/capabilities');
 const { parseSets } = require('../services/membership/setFilter');
 
@@ -61,33 +61,63 @@ module.exports.init = function (server) {
         })
     );
 
+    /**
+     * ARCHON (N12): this payload spans three tiers, so it is gated per section
+     * rather than as a whole.
+     *
+     * It used to require ARCHON_INTELLIGENCE for everything - which meant a
+     * Supporter, who is sold "Full Elo history" and a "Performance dashboard"
+     * for $5, got a 403 on the only endpoint that serves them. They were paying
+     * for two things they could not reach. Gating on the lowest capability and
+     * filtering the sections is what actually matches what was sold.
+     *
+     * Sections are computed only when the caller is entitled to them, so this
+     * also stops doing four queries for someone who may see one.
+     */
+    const PLAYER_SECTIONS = {
+        // Supporter
+        ratingHistory: CAPABILITIES.ELO_HISTORY,
+        vsExpectation: CAPABILITIES.PERFORMANCE_DASHBOARD,
+        // Archon
+        rankings: CAPABILITIES.PERSONAL_DECK_RANKINGS,
+        byHouse: CAPABILITIES.MATCHUP_ANALYTICS,
+        // The set counterpart of byHouse - same shape, same question asked of a
+        // different dimension - so it is sold with it rather than separately.
+        bySet: CAPABILITIES.MATCHUP_ANALYTICS
+    };
+
     server.get(
         '/api/intelligence/player',
         passport.authenticate('jwt', { session: false }),
-        requireCapability(CAPABILITIES.ARCHON_INTELLIGENCE),
+        requireAnyCapability(Object.values(PLAYER_SECTIONS)),
         wrapAsync(async (req, res) => {
             const sets = parseSets(req.query.sets);
+            const { allowed, locked } = sectionsFor(req, PLAYER_SECTIONS);
 
-            const [rankings, vsExpectation, byHouse, bySet, ratingHistory] = await Promise.all([
-                intelligence.playerDeckRankings(req.user.id, { sets }),
-                intelligence.playerVsExpectation(req.user.id, { sets }),
-                intelligence.playerByOwnHouse(req.user.id, { sets }),
-                // Unfiltered on purpose: this is the table the filter is chosen
-                // FROM, so narrowing it to the current filter would collapse it
-                // to a single row and hide the comparison.
-                intelligence.playerBySet(req.user.id),
-                intelligence.playerRatingHistory(req.user.id, { limit: 500 })
-            ]);
+            const producers = {
+                // Not set-filtered, deliberately: a rating is one number across
+                // every set, so narrowing the series would draw a line with the
+                // games that moved it missing from underneath it.
+                ratingHistory: () => intelligence.playerRatingHistory(req.user.id, { limit: 500 }),
+                vsExpectation: () => intelligence.playerVsExpectation(req.user.id, { sets }),
+                rankings: () => intelligence.playerDeckRankings(req.user.id, { sets }),
+                byHouse: () => intelligence.playerByOwnHouse(req.user.id, { sets }),
+                // Also unfiltered, for the opposite reason: this is the table
+                // the filter is chosen FROM, so narrowing it to the current
+                // selection would collapse it to one row and hide the
+                // comparison that makes the filter worth setting.
+                bySet: () => intelligence.playerBySet(req.user.id)
+            };
 
-            res.send({
-                success: true,
-                sets,
-                rankings,
-                vsExpectation,
-                byHouse,
-                bySet,
-                ratingHistory
-            });
+            const results = await Promise.all(allowed.map((section) => producers[section]()));
+            const payload = Object.fromEntries(
+                allowed.map((section, index) => [section, results[index]])
+            );
+
+            // `locked` tells the client which panels to render as upgrade
+            // prompts rather than as missing. `sets` echoes the filter back so
+            // the client can tell "no filter" from "filter returned nothing".
+            res.send({ success: true, sets, ...payload, locked });
         })
     );
 

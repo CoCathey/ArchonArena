@@ -11,6 +11,7 @@ import Avatar from '../Site/Avatar';
 import AlertPanel from '../Site/AlertPanel';
 import PlayerAmber from '../Site/PlayerAmber';
 import Link from '../Navigation/Link';
+import PlayerName from '../Site/PlayerName';
 import { lobbyActions } from '../../redux/slices/lobbySlice';
 import TimeLimitIcon from '../../assets/img/Timelimit.png';
 import ShowHandIcon from '../../assets/img/ShowHandIcon.png';
@@ -286,27 +287,28 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
                                     <div className='grid gap-2 sm:grid-cols-2'>
                                         {seats.map((player, seatIndex) => {
                                             if (player) {
-                                                const userClass = `username ${
-                                                    player.role
-                                                        ? `${player.role.toLowerCase()}-role`
-                                                        : ''
-                                                }`;
-
+                                                // ARCHON (N12): `${role}-role` is
+                                                // keyteki's old class name and
+                                                // nothing defines it, so every
+                                                // supporter in the lobby list
+                                                // rendered exactly like everyone
+                                                // else. getRoleClass is what the
+                                                // stylesheet actually keys on -
+                                                // now inside PlayerName, which
+                                                // also carries the tier badge.
                                                 return (
                                                     <div
                                                         key={`${game.id}-${player.name}`}
                                                         className='flex min-h-11 items-center gap-2 rounded-md border border-border/45 bg-surface-secondary/55 px-2 py-1.5 text-foreground'
                                                     >
                                                         <Avatar imgPath={player.avatar} />
-                                                        <span className={userClass}>
-                                                            <Link
-                                                                href={`/players/${encodeURIComponent(
-                                                                    player.name
-                                                                )}`}
-                                                                className='hover:text-amber-300 hover:underline'
-                                                            >
-                                                                {player.name}
-                                                            </Link>
+                                                        <span className='username'>
+                                                            <PlayerName
+                                                                className='hover:text-amber-300'
+                                                                link
+                                                                role={player.role}
+                                                                username={player.name}
+                                                            />
                                                         </span>
                                                         <PlayerAmber
                                                             username={player.name}

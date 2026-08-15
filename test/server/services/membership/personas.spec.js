@@ -553,3 +553,105 @@ describe('admin access without a capability list', function () {
         expect(guard(legacyPlayer, CAPABILITIES.ARCHON_INTELLIGENCE)).toBe(false);
     });
 });
+
+/**
+ * ARCHON (N12): the supporter badge, which is the only Supporter promise whose
+ * whole point is that OTHER people can see it.
+ *
+ * It was sold on the $5 tier with no `planned` flag, so the pricing page ticked
+ * it alongside working features - but the only thing that produced the badge was
+ * `permissions.isSupporter`, the hand-granted Roles-table flag. Paying on
+ * Patreon writes a Memberships row and touches no role, so every Patreon
+ * Supporter bought a badge that nobody, including them, could see.
+ *
+ * `role` is what the lobby, the pending-game seats, in-game chat and persisted
+ * chat history all key their colour off, so making it capability-aware fixes
+ * every surface at once.
+ */
+describe('the supporter badge', function () {
+    const user = (permissions = {}, membership = undefined) =>
+        new User({ id: 1, username: 'p', settings: {}, permissions, membership });
+
+    it('is shown for a Patreon supporter who was never granted the role', function () {
+        const patron = user({}, { tier: TIER_IDS.SUPPORTER, status: 'active' });
+
+        expect(patron.role).toBe('supporter');
+    });
+
+    it('is shown at every paid tier, not only Supporter', function () {
+        for (const tier of [TIER_IDS.SUPPORTER, TIER_IDS.ARCHON, TIER_IDS.VAULT_MASTER]) {
+            expect(user({}, { tier, status: 'active' }).role).toBe('supporter');
+        }
+    });
+
+    it('is still shown for the legacy hand-granted role with no membership', function () {
+        expect(user({ isSupporter: true }).role).toBe('supporter');
+    });
+
+    it('is not shown to a free account', function () {
+        expect(user({}).role).toBe('user');
+        expect(user({}, { tier: TIER_IDS.FREE, status: 'active' }).role).toBe('user');
+    });
+
+    it('is not shown for a lapsed pledge', function () {
+        const lapsed = user({}, { tier: TIER_IDS.ARCHON, status: 'former_patron' });
+
+        expect(lapsed.role).toBe('user');
+    });
+
+    it('does not displace a higher badge', function () {
+        // role is a single string by priority; a paying admin is still 'admin',
+        // a paying tournament winner still 'winner'.
+        const membership = { tier: TIER_IDS.VAULT_MASTER, status: 'active' };
+
+        expect(user({ isAdmin: true }, membership).role).toBe('admin');
+        expect(user({ isWinner: true }, membership).role).toBe('winner');
+        expect(user({ isContributor: true }, membership).role).toBe('contributor');
+    });
+
+    it('reaches other players, which is the whole point of a badge', function () {
+        // getShortSummary is what the lobby broadcasts about someone else.
+        const patron = user({}, { tier: TIER_IDS.SUPPORTER, status: 'active' });
+
+        expect(patron.getShortSummary().role).toBe('supporter');
+    });
+
+    it('names the tier, because the badge is meant to distinguish them', function () {
+        const patron = user({}, { tier: TIER_IDS.VAULT_MASTER, status: 'active' });
+
+        expect(patron.getShortSummary().tier).toBe(TIER_IDS.VAULT_MASTER);
+        expect(patron.getShortSummary().tierName).toBe('Vault Master');
+    });
+
+    it('exposes the tier and nothing else about the membership', function () {
+        // The line: a badge says which tier somebody supports at. It is not a
+        // public readout of when they renew, who they pay through, or what
+        // else that tier unlocks.
+        const patron = user(
+            {},
+            {
+                tier: TIER_IDS.VAULT_MASTER,
+                status: 'active',
+                provider: 'patreon',
+                externalId: 'patreon-99',
+                expiresAt: new Date('2030-01-01T00:00:00Z')
+            }
+        );
+        const summary = patron.getShortSummary();
+
+        expect(summary.membership).toBeUndefined();
+        expect(summary.capabilities).toBeUndefined();
+        expect(JSON.stringify(summary)).not.toContain('patreon');
+        expect(JSON.stringify(summary)).not.toContain('2030');
+    });
+
+    it('does not advertise an admin as a patron of a tier they do not pay for', function () {
+        // The admin override resolves to the highest tier so every feature
+        // opens. Broadcasting that would tell the lobby every administrator is
+        // a Vault Master patron.
+        const summary = user({ isAdmin: true }).getShortSummary();
+
+        expect(summary.role).toBe('admin');
+        expect(summary.tier).toBe(TIER_IDS.FREE);
+    });
+});

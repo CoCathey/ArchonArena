@@ -16,6 +16,10 @@
  * IP, password state or linked-identity data. Disabled accounts do not resolve,
  * matching the member directory and the leaderboards.
  */
+const logger = require('../../log');
+const { publicBadge, permissionsFromRoleNames } = require('../membership/publicBadge');
+const { membershipFromDbRow } = require('../membership/mapRow');
+
 const BIO_MAX_LENGTH = 280;
 
 class PlayerProfileService {
@@ -46,9 +50,10 @@ class PlayerProfileService {
             return null;
         }
 
-        const [clubs, recentGames] = await Promise.all([
+        const [clubs, recentGames, badge] = await Promise.all([
             this.getClubs(user.Id),
-            this.getRecentGames(user.Id)
+            this.getRecentGames(user.Id),
+            this.getBadge(user.Id)
         ]);
 
         return {
@@ -58,9 +63,67 @@ class PlayerProfileService {
             state: user.State,
             bio: user.Bio || null,
             joined: user.Registered,
+            role: badge.role,
+            tier: badge.tier,
+            tierName: badge.tierName,
             clubs,
             recentGames
         };
+    }
+
+    /**
+     * ARCHON (N12): the badge shown next to this player's name.
+     *
+     * The Supporter tier sells "show your support next to your name in the
+     * lobby and on your profile". The lobby half worked through User.role; the
+     * profile half did not exist, because this payload carried no role at all -
+     * so half of a live paid promise was unkept.
+     *
+     * Two sources, because there are two ways to be a supporter: the granted
+     * Roles-table row, and a Patreon membership that carries the badge
+     * capability. Both land on the same string, and the same colours the lobby
+     * uses.
+     *
+     * @returns {Promise<{role: string, tier: string, tierName: string|null}>}
+     */
+    async getBadge(userId) {
+        let roleNames = [];
+        let membership;
+
+        try {
+            const rows = await this.db.query(
+                'SELECT r."Name" FROM "UserRoles" ur JOIN "Roles" r ON r."Id" = ur."RoleId" ' +
+                    'WHERE ur."UserId" = $1',
+                [userId]
+            );
+
+            roleNames = (rows || []).map((row) => row.Name);
+        } catch (err) {
+            // A profile that renders without a badge is fine; one that 500s is
+            // not. Same reasoning as the membership lookup below.
+            logger.warn('Failed to look up roles for player profile', err);
+        }
+
+        try {
+            const rows = await this.db.query('SELECT * FROM "Memberships" WHERE "UserId" = $1', [
+                userId
+            ]);
+
+            membership = membershipFromDbRow(rows && rows[0]);
+        } catch (err) {
+            // The Memberships migration may not have run yet.
+            logger.warn('Failed to look up membership for player profile', err);
+        }
+
+        return publicBadge({
+            permissions: permissionsFromRoleNames(roleNames),
+            membership: membership || null
+        });
+    }
+
+    /** @deprecated use getBadge - kept so the role alone is still one call. */
+    async getRole(userId) {
+        return (await this.getBadge(userId)).role;
     }
 
     /** The bio as the account owner would edit it (no public/disabled gating). */

@@ -10,6 +10,8 @@ import Avatar from '../Components/Site/Avatar';
 import AmberValue from '../Components/Site/AmberValue';
 // ARCHON (N5): reporting
 import ReportButton from '../Components/Site/ReportButton';
+import PlayerName from '../Components/Site/PlayerName';
+import { TIER_BADGE_CLASS } from '../membership';
 import {
     useGetPlayerProfileQuery,
     useGetPlayerStatsQuery,
@@ -95,8 +97,29 @@ const PlayerProfile = () => {
                 <div className='flex items-center gap-3'>
                     <Avatar imgPath={profile.avatar} />
                     <div className='min-w-0'>
-                        <div className='text-lg font-semibold text-foreground'>
-                            {profile.username}
+                        {/* ARCHON (N12): the supporter badge is sold as "next
+                            to your name in the lobby and on your profile", and
+                            the profile never carried a role. The tier arrives
+                            with the payload, so no lookup here - and the name
+                            is written out in full, since this is the one page
+                            with room for it. */}
+                        <div className='flex items-center gap-2 text-lg'>
+                            <PlayerName
+                                className='font-semibold'
+                                role={profile.role}
+                                tier={profile.tier}
+                                tierName={profile.tierName}
+                                username={profile.username}
+                            />
+                            {profile.tierName && (
+                                <span
+                                    className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                                        TIER_BADGE_CLASS[profile.tier] || TIER_BADGE_CLASS.free
+                                    }`}
+                                >
+                                    {profile.tierName}
+                                </span>
+                            )}
                         </div>
                         <div className='flex flex-wrap gap-x-3 text-xs text-muted'>
                             {location && <span>{location}</span>}
@@ -270,12 +293,11 @@ const PlayerProfile = () => {
                                     {game.keys}-{game.opponentKeys}
                                 </span>
                                 {game.opponent && (
-                                    <Link
-                                        href={`/players/${encodeURIComponent(game.opponent)}`}
-                                        className='text-amber-300 hover:underline'
-                                    >
-                                        {game.opponent}
-                                    </Link>
+                                    <PlayerName
+                                        className='text-amber-300'
+                                        link
+                                        username={game.opponent}
+                                    />
                                 )}
                                 {game.deckName && (
                                     <span className='min-w-0 truncate text-xs text-muted'>

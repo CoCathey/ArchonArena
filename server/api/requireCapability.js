@@ -101,4 +101,81 @@ function entitlementsForRequest(req) {
     return resolveEntitlements({ user });
 }
 
-module.exports = { requireCapability, entitlementsForRequest };
+/**
+ * ARCHON (N12): a guard for an endpoint that serves several tiers.
+ *
+ * Some endpoints carry sections belonging to different capabilities - the
+ * player intelligence payload holds Elo history (Supporter) next to deck
+ * rankings (Archon). Gating the whole route on the highest of them locks a
+ * Supporter out of something they are paying for; gating on the lowest and
+ * then filtering the payload is the shape that matches what was sold.
+ *
+ * This admits anyone holding AT LEAST ONE of the listed capabilities. The
+ * handler is then responsible for including only the sections the caller has
+ * - see `sectionsFor`.
+ *
+ * @param {string[]} capabilities
+ */
+function requireAnyCapability(capabilities) {
+    for (const capability of capabilities) {
+        if (!isKnownCapability(capability)) {
+            throw new Error(`requireAnyCapability called with unknown capability '${capability}'.`);
+        }
+    }
+
+    return function (req, res, next) {
+        if (!req.user) {
+            return res.status(401).send({ success: false, message: 'Unauthorized' });
+        }
+
+        if (req.user.permissions && req.user.permissions.isAdmin) {
+            return next();
+        }
+
+        const entitlements = entitlementsForRequest(req);
+
+        if (capabilities.some((capability) => can(entitlements, capability))) {
+            return next();
+        }
+
+        return res.status(403).send({
+            success: false,
+            message: 'This feature is part of Archon Arena membership.',
+            // The cheapest one that would unlock something here, so the client
+            // can name the right tier.
+            capability: capabilities[0],
+            upgradeRequired: true
+        });
+    };
+}
+
+/**
+ * Which of a payload's sections this caller may see.
+ *
+ * @param {object} req
+ * @param {Object<string,string>} sectionCapabilities section name -> capability
+ * @returns {{allowed: string[], locked: string[]}}
+ */
+function sectionsFor(req, sectionCapabilities) {
+    const entitlements = entitlementsForRequest(req);
+    const isAdmin = !!(req.user && req.user.permissions && req.user.permissions.isAdmin);
+    const allowed = [];
+    const locked = [];
+
+    for (const [section, capability] of Object.entries(sectionCapabilities)) {
+        if (isAdmin || can(entitlements, capability)) {
+            allowed.push(section);
+        } else {
+            locked.push(section);
+        }
+    }
+
+    return { allowed, locked };
+}
+
+module.exports = {
+    requireCapability,
+    requireAnyCapability,
+    sectionsFor,
+    entitlementsForRequest
+};

@@ -52,37 +52,69 @@ const CAPABILITIES = {
  * the product does - it is the line shown on a locked panel, and "See which
  * houses beat you most often" earns an upgrade in a way "Matchup analytics"
  * does not.
+ *
+ * `planned: true` marks a capability that is NOT built yet. An audit of every
+ * tier promise against the code found thirteen of them, including all five of
+ * Vault Master's - so the pricing page was advertising, and the tiers were
+ * selling, features that did not exist. Rather than quietly deleting them (the
+ * roadmap is real and worth showing) they are marked, and the UI must render
+ * them as planned rather than as included: no tick in the comparison grid, and
+ * counted separately on the tier card.
+ *
+ * Remove the flag when the feature ships AND something gates on the capability.
+ * A capability with no gate and no `planned` flag is a promise nobody is
+ * keeping.
  */
 const CAPABILITY_CATALOG = {
     [CAPABILITIES.ELO_HISTORY]: {
-        label: 'Full Elo history',
-        learn: 'See every rating change you have ever had, not just your current number.',
-        where: 'Archon Intelligence, and your profile'
+        label: 'Elo history',
+        // Was "Full Elo history ... every rating change you have ever had".
+        // playerRatingHistory is called with limit 500 and hard-caps at 2000, so
+        // "every ... ever" is not what is served; and the profile does not show
+        // rating history at all, only Archon Intelligence does.
+        learn: 'See how your rating moved game by game, not just your current number.',
+        where: 'Archon Intelligence'
     },
     [CAPABILITIES.EXPANDED_MATCH_HISTORY]: {
         label: 'Expanded match history',
         learn: 'Go back through your whole match record instead of only recent games.',
-        where: 'Game History'
+        where: 'Game History',
+        planned: true
     },
     [CAPABILITIES.ADVANCED_PLAYER_STATS]: {
         label: 'Advanced player statistics',
-        learn: 'See how you perform by house, by opponent and over time.',
+        // Was "by house, by opponent and over time". Only the house and format
+        // breakdowns exist (StatisticsService.getPlayerStats); per-opponent and
+        // over-time were never built, and this is a live paid promise, so the
+        // copy is corrected rather than the gap excused.
+        learn: 'See your win rate broken down by house and by game format.',
         where: 'Stats, and any player profile'
     },
     [CAPABILITIES.ADVANCED_DECK_STATS]: {
         label: 'Advanced deck statistics',
-        learn: 'See the real record, average keys and game length for each of your decks.',
+        // Was "the real record, average keys and game length". None of those
+        // three are what this gate protects - it protects the expected-win-rate
+        // and SAS-delta columns (statsGating DECK_ROW_PREMIUM). Record, keys and
+        // game length come with Archon Intelligence, one tier up.
+        learn: 'See how each of your decks performs against what its SAS predicts.',
         where: 'Stats → Your Decks'
     },
     [CAPABILITIES.PERFORMANCE_DASHBOARD]: {
         label: 'Performance dashboard',
-        learn: 'One page that shows whether you are actually improving.',
+        // Was "whether you are actually improving", which promises a trend.
+        // playerVsExpectation is called with no `sinceDays`, so there is no date
+        // filter and no time axis - it is one lifetime figure. The trend version
+        // is ADVANCED_PERFORMANCE_DASHBOARD below, and it is still planned.
+        learn: 'See whether you are beating what your rating predicted, across your whole record.',
         where: 'Archon Intelligence'
     },
     [CAPABILITIES.PROFILE_COSMETICS]: {
         label: 'Profile customisation',
-        learn: 'Customise how your profile looks to other players.',
-        where: 'Profile → Appearance'
+        // Planned. Worded as intent, not as a claim about today - the only
+        // customisation that exists is the board background, which is free.
+        learn: 'Customise how your profile looks.',
+        where: 'Profile → Appearance',
+        planned: true
     },
     [CAPABILITIES.SUPPORTER_BADGE]: {
         label: 'Supporter badge',
@@ -92,7 +124,8 @@ const CAPABILITY_CATALOG = {
     [CAPABILITIES.HISTORICAL_STATS]: {
         label: 'Additional historical statistics',
         learn: 'Look further back than the default window on every statistic.',
-        where: 'Stats'
+        where: 'Stats',
+        planned: true
     },
     [CAPABILITIES.ARCHON_INTELLIGENCE]: {
         label: 'Archon Intelligence',
@@ -120,24 +153,43 @@ const CAPABILITY_CATALOG = {
         where: 'Archon+ → Tournament Lab'
     },
     [CAPABILITIES.ADVANCED_REPLAYS]: {
-        label: 'Advanced replay',
-        learn: 'Walk a finished game turn by turn and find the point it was decided.',
-        where: 'Any finished game → Replay'
+        label: 'Replay analysis',
+        // Was "walk a finished game turn by turn and find the point it was
+        // decided" - which is exactly what ReplayViewer already does for every
+        // signed-in account, for free. Selling it at Archon was charging for the
+        // free tier. What is actually unbuilt is analysis layered over the
+        // replay, so that is what this now describes.
+        learn: 'Analysis layered over a replay. Stepping through replays is free for everyone.',
+        where: 'Any finished game → Replay',
+        planned: true
     },
     [CAPABILITIES.PRIVATE_LEAGUES]: {
-        label: 'Private groups and leagues',
-        learn: 'Run an invite-only league for your playgroup.',
-        where: 'Community → Clubs'
+        label: 'League play for your club',
+        // Was "run an invite-only group for your playgroup" - clubs already do
+        // that for free, join codes and all (ClubService). What no club has is
+        // league play: seasons, fixtures, standings. That is the unbuilt part,
+        // so that is what this describes.
+        learn: 'Seasons and standings inside a club. Clubs themselves are free for everyone.',
+        where: 'Community → Clubs',
+        planned: true
     },
     [CAPABILITIES.CUSTOM_TOURNAMENTS]: {
-        label: 'Custom tournaments',
-        learn: 'Run events with your own structure and rules.',
-        where: 'Tournaments → Create'
+        label: 'Extended tournament options',
+        // Was "run events with your own structure and rules", which TournamentService.create
+        // already lets any free account do across ~42 configurable fields -
+        // format, rounds, cut, seeding, SAS bands, teams, pacing, prizes. Anyone
+        // can run a custom event; this is only ever additions on top of that.
+        learn: 'Extra options on top of tournament creation, which is free for everyone.',
+        where: 'Tournaments → Create',
+        planned: true
     },
     [CAPABILITIES.ADVANCED_PERFORMANCE_DASHBOARD]: {
         label: 'Advanced performance dashboard',
-        learn: 'Track your results against what your rating predicted, over time.',
-        where: 'Archon Intelligence → Player Intelligence'
+        // The difference from Supporter's PERFORMANCE_DASHBOARD is the time
+        // axis, so say so - otherwise the two read as the same thing sold twice.
+        learn: 'Break that same comparison down over time, so you can see the trend.',
+        where: 'Archon Intelligence → Player Intelligence',
+        planned: true
     },
     [CAPABILITIES.META_ANALYTICS]: {
         label: 'Meta analytics',
@@ -147,32 +199,38 @@ const CAPABILITY_CATALOG = {
     [CAPABILITIES.EARLY_ACCESS]: {
         label: 'Early access',
         learn: 'Use major new features before they are released to everyone.',
-        where: 'Announced in News as features land'
+        where: 'Announced in News as features land',
+        planned: true
     },
     [CAPABILITIES.EXPERIMENTAL_FEATURES]: {
         label: 'Experimental features',
         learn: 'Try tools that are still being designed, and shape where they go.',
-        where: 'Profile → Appearance, as they are released'
+        where: 'Profile → Appearance, as they are released',
+        planned: true
     },
     [CAPABILITIES.BETA_FEATURES]: {
         label: 'Beta features',
         learn: 'Get new competitive tools while they are still in testing.',
-        where: 'Announced in News'
+        where: 'Announced in News',
+        planned: true
     },
     [CAPABILITIES.ENHANCED_COSMETICS]: {
         label: 'Enhanced cosmetics',
         learn: 'Additional profile and in-game customisation.',
-        where: 'Profile → Appearance'
+        where: 'Profile → Appearance',
+        planned: true
     },
     [CAPABILITIES.ORGANIZER_TOOLS]: {
         label: 'Organiser tools',
         learn: 'Extra capability for running events for other people.',
-        where: 'Tournaments, when running an event'
+        where: 'Tournaments, when running an event',
+        planned: true
     },
     [CAPABILITIES.PRIORITY_ACCESS]: {
         label: 'Priority access',
         learn: 'First access to new competitive tools as they land.',
-        where: 'Announced in News'
+        where: 'Announced in News',
+        planned: true
     }
 };
 

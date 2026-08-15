@@ -1,5 +1,5 @@
 import React from 'react';
-import Link from '../Navigation/Link';
+import PlayerName from '../Site/PlayerName';
 import { useTranslation } from 'react-i18next';
 
 import Panel from '../Site/Panel';
@@ -141,16 +141,11 @@ const StandingsPanel = ({ tournament, standings, players, currentUsername }) => 
                                         )}
                                     </td>
                                     <td className='px-2 py-1.5'>
-                                        <span className='font-semibold text-foreground'>
-                                            <Link
-                                                href={`/players/${encodeURIComponent(
-                                                    entry.username
-                                                )}`}
-                                                className='hover:text-amber-300 hover:underline'
-                                            >
-                                                {entry.username}
-                                            </Link>
-                                        </span>
+                                        <PlayerName
+                                            className='hover:text-amber-300'
+                                            link
+                                            username={entry.username}
+                                        />
                                         {player.amber != null && (
                                             <AmberValue
                                                 value={player.amber}

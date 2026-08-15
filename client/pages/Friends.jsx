@@ -5,6 +5,7 @@ import { Button as HeroButton, Input, toast } from '@heroui/react';
 
 import Panel from '../Components/Site/Panel';
 import AlertPanel from '../Components/Site/AlertPanel';
+import PlayerName from '../Components/Site/PlayerName';
 import { useFriendActionMutation, useGetFriendsQuery } from '../redux/api';
 
 /**
@@ -183,9 +184,7 @@ const Friends = () => {
                                 className='flex items-center gap-2 rounded bg-surface-secondary/50 px-2 py-1.5 text-sm'
                             >
                                 {onlineBadge(friend.username)}
-                                <span className='font-semibold text-foreground'>
-                                    {friend.username}
-                                </span>
+                                <PlayerName link username={friend.username} />
                                 <HeroButton
                                     size='sm'
                                     variant='tertiary'

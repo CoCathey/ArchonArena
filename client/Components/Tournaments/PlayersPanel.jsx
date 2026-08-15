@@ -1,5 +1,5 @@
 import React from 'react';
-import Link from '../Navigation/Link';
+import PlayerName from '../Site/PlayerName';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton, Input } from '@heroui/react';
 
@@ -38,12 +38,7 @@ const PlayersPanel = ({ tournament, players, act }) => {
                     title={t('Seed')}
                 />
             )}
-            <Link
-                href={`/players/${encodeURIComponent(player.username)}`}
-                className='text-foreground hover:text-amber-300 hover:underline'
-            >
-                {player.username}
-            </Link>
+            <PlayerName className='hover:text-amber-300' link username={player.username} />
             {player.amber != null && (
                 <AmberValue value={player.amber} className='!text-xs' iconClass='h-3 w-3' />
             )}

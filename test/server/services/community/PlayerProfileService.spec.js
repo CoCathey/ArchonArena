@@ -182,4 +182,85 @@ describe('PlayerProfileService', function () {
             expect(result).toEqual({ success: true, bio: null });
         });
     });
+
+    /**
+     * ARCHON (N12): the profile half of the supporter badge.
+     *
+     * Supporter is sold as "show your support next to your name in the lobby and
+     * on your profile". The lobby half worked; this payload carried no role at
+     * all, so half of a live paid promise was unkept.
+     */
+    describe('getRole', function () {
+        const primeRoles = ({ roles = [], membership = null } = {}) => {
+            db.query.mockImplementation(async (sql) => {
+                if (sql.includes('FROM "UserRoles"')) {
+                    return roles.map((name) => ({ Name: name }));
+                }
+                if (sql.includes('FROM "Memberships"')) {
+                    return membership ? [membership] : [];
+                }
+                return [];
+            });
+        };
+
+        it('is user for an account with no roles and no membership', async function () {
+            primeRoles();
+
+            await expect(service.getRole(7)).resolves.toBe('user');
+        });
+
+        it('is supporter for the granted Roles-table row', async function () {
+            primeRoles({ roles: ['Supporter'] });
+
+            await expect(service.getRole(7)).resolves.toBe('supporter');
+        });
+
+        it('is supporter for a Patreon member who was never granted the role', async function () {
+            // The case the badge was sold for and never delivered: paying on
+            // Patreon writes a Memberships row and touches no role.
+            primeRoles({
+                membership: { UserId: 7, Tier: 'supporter', Status: 'active', Provider: 'patreon' }
+            });
+
+            await expect(service.getRole(7)).resolves.toBe('supporter');
+        });
+
+        it('prefers the higher badge when an account has several', async function () {
+            primeRoles({
+                roles: ['Supporter', 'Admin', 'Contributor'],
+                membership: { UserId: 7, Tier: 'archon', Status: 'active' }
+            });
+
+            await expect(service.getRole(7)).resolves.toBe('admin');
+        });
+
+        it('is user, not an error, when the membership table is unavailable', async function () {
+            // The Memberships migration may not have run. A profile that
+            // renders without a badge is fine; one that 500s is not.
+            db.query.mockImplementation(async (sql) => {
+                if (sql.includes('FROM "Memberships"')) {
+                    throw new Error('relation "Memberships" does not exist');
+                }
+                return [];
+            });
+
+            await expect(service.getRole(7)).resolves.toBe('user');
+        });
+
+        it('is included in the public profile payload', async function () {
+            db.query.mockImplementation(async (sql) => {
+                if (sql.includes('FROM "Users"')) {
+                    return [userRow()];
+                }
+                if (sql.includes('FROM "UserRoles"')) {
+                    return [{ Name: 'Supporter' }];
+                }
+                return [];
+            });
+
+            const profile = await service.getProfile('Player1');
+
+            expect(profile.role).toBe('supporter');
+        });
+    });
 });

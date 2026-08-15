@@ -1,4 +1,4 @@
-const { CAPABILITIES, ALL_CAPABILITIES } = require('./capabilities');
+const { CAPABILITIES, ALL_CAPABILITIES, CAPABILITY_CATALOG } = require('./capabilities');
 
 /**
  * ARCHON (N12): membership tiers, and the one place that says which tier
@@ -226,6 +226,38 @@ function tierFromPatreonMembership(membership) {
  * capabilities resolved. Safe to send to an unauthenticated client - it is
  * a price list, not anybody's entitlements.
  */
+/** Capabilities of a tier that actually work today (not flagged planned). */
+function liveCapabilitiesForTier(tierId) {
+    return capabilitiesForTier(tierId).filter(
+        (capability) => !(CAPABILITY_CATALOG[capability] || {}).planned
+    );
+}
+
+/**
+ * ARCHON (N12): may this tier be sold right now?
+ *
+ * A paid tier is purchasable only if it delivers something, TODAY, that the
+ * tier below it does not already include. Vault Master failed this the moment
+ * it was audited: all five of its capabilities were unbuilt, so $20 a month
+ * bought nothing whatsoever over Archon's $10.
+ *
+ * Deriving this rather than hand-maintaining a flag means a tier cannot be left
+ * on sale by accident, and becomes purchasable automatically the day its first
+ * feature ships.
+ */
+function isTierPurchasable(tier) {
+    if (!tier.priceUsd) {
+        return false;
+    }
+
+    const below = TIERS.filter((candidate) => candidate.rank < tier.rank).sort(
+        (a, b) => b.rank - a.rank
+    )[0];
+    const inherited = new Set(below ? liveCapabilitiesForTier(below.id) : []);
+
+    return liveCapabilitiesForTier(tier.id).some((capability) => !inherited.has(capability));
+}
+
 function tierCatalog(patreonConfig = {}) {
     return TIERS.map((tier) => ({
         id: tier.id,
@@ -239,7 +271,10 @@ function tierCatalog(patreonConfig = {}) {
         // Only what this tier adds, for the "everything in X, plus" rendering.
         adds: tier.capabilities,
         capabilities: capabilitiesForTier(tier.id),
-        checkoutUrl: checkoutUrlFor(tier, patreonConfig)
+        // What works today, and whether there is enough of it to charge for.
+        liveCapabilities: liveCapabilitiesForTier(tier.id),
+        purchasable: isTierPurchasable(tier),
+        checkoutUrl: isTierPurchasable(tier) ? checkoutUrlFor(tier, patreonConfig) : null
     }));
 }
 
@@ -372,6 +407,8 @@ module.exports = {
     higherTier,
     tierFromPatreonMembership,
     tierCatalog,
+    liveCapabilitiesForTier,
+    isTierPurchasable,
     checkoutUrlFor,
     pageNameFromCampaignUrl
 };
