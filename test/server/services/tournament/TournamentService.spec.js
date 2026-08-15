@@ -921,7 +921,14 @@ const createFakeDb = () => {
                         UserId: deck.UserId,
                         Name: deck.Name,
                         Uuid: deck.Uuid,
+                        // Two different numbers, exactly as in the real schema:
+                        // ExpansionId is the surrogate key into "Expansions",
+                        // SetCode is the 341/800 code that AllowedSets holds.
+                        // The fake used to conflate them, which is precisely how
+                        // a comparison against the wrong one kept passing here
+                        // while rejecting every deck in production.
                         ExpansionId: deck.ExpansionId || null,
+                        SetCode: deck.SetCode === undefined ? null : deck.SetCode,
                         SasRating: deck.SasRating === undefined ? null : deck.SasRating,
                         Houses: deck.Houses ? JSON.stringify(deck.Houses) : null
                     }));
@@ -2714,6 +2721,12 @@ describe('TournamentService', function () {
             expect(JSON.parse(row.BannedHouses)).toEqual(['dis']);
         });
 
+        /**
+         * ExpansionId and SetCode are deliberately different numbers on every
+         * fixture here - 4 vs 341, 2 vs 452 - and they are the real pairings
+         * from the seeded schema. A legality check that reads the wrong column
+         * therefore rejects the legal deck rather than quietly agreeing.
+         */
         it('enforces set legality and house conditions on decks', async function () {
             db.state.decks.push(
                 {
@@ -2721,7 +2734,8 @@ describe('TournamentService', function () {
                     UserId: 2,
                     Name: 'CotA Dis',
                     Uuid: 'u-61',
-                    ExpansionId: 341,
+                    ExpansionId: 4,
+                    SetCode: 341,
                     SasRating: 65,
                     Houses: ['dis', 'logos', 'shadows']
                 },
@@ -2730,7 +2744,8 @@ describe('TournamentService', function () {
                     UserId: 2,
                     Name: 'WC Brobnar',
                     Uuid: 'u-62',
-                    ExpansionId: 452,
+                    ExpansionId: 2,
+                    SetCode: 452,
                     SasRating: 66,
                     Houses: ['brobnar', 'logos', 'untamed']
                 },
@@ -2739,7 +2754,8 @@ describe('TournamentService', function () {
                     UserId: 2,
                     Name: 'CotA Brobnar',
                     Uuid: 'u-63',
-                    ExpansionId: 341,
+                    ExpansionId: 4,
+                    SetCode: 341,
                     SasRating: 67,
                     Houses: ['brobnar', 'sanctum', 'untamed']
                 }

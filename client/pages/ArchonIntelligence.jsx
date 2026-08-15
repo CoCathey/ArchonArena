@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import Panel from '../Components/Site/Panel';
 import AlertPanel from '../Components/Site/AlertPanel';
 import PremiumLock from '../Components/Membership/PremiumLock';
+import SetFilter from '../Components/Site/SetFilter';
 import { CAPABILITIES, hasCapability } from '../membership';
 import { useGetPlayerIntelligenceQuery, useGetMetaIntelligenceQuery } from '../redux/api';
 
@@ -23,6 +24,17 @@ import { useGetPlayerIntelligenceQuery, useGetMetaIntelligenceQuery } from '../r
  * behind it, so the page sells itself. Nothing here invents a number: every
  * metric the server could not compute arrives as `available: false` with a
  * reason, and is rendered as "not recorded yet" rather than as a zero.
+ *
+ * ## The set filter reaches the whole page
+ *
+ * One control at the top, and everything below it re-reads for those sets -
+ * because a house win rate, a deck ranking and a "vs expectation" all mean
+ * something different inside one set than averaged over twenty of them.
+ *
+ * Two tables deliberately ignore it: "your record by set" and "what the field
+ * is playing, by set". Those are the tables the filter is chosen FROM. Filtering
+ * them to the current selection would collapse each to a single row and destroy
+ * the comparison that makes the filter worth setting.
  */
 
 const pct = (value) =>
@@ -85,6 +97,38 @@ const HouseBar = ({ row, t }) => (
 
 HouseBar.propTypes = { row: PropTypes.object, t: PropTypes.func };
 
+/**
+ * A set row: name, win rate, and how much of the sample it is.
+ *
+ * The share bar is drawn at true scale, unlike the house one - a deck has three
+ * houses but exactly one set, so these really do sum to 100% and can be read as
+ * proportions of the whole.
+ */
+const SetRow = ({ row, t, showShare = true }) => (
+    <div className='flex items-center gap-2 text-xs'>
+        <div className='w-32 shrink-0 truncate text-foreground' title={row.set?.name}>
+            {row.set?.name || row.set?.code || '—'}
+        </div>
+        <div className='h-2 flex-1 overflow-hidden rounded bg-surface-secondary'>
+            <div
+                className={row.winRate >= 0.5 ? 'h-full bg-emerald-500/70' : 'h-full bg-red-500/70'}
+                style={{ width: `${Math.round((row.winRate ?? 0) * 100)}%` }}
+            />
+        </div>
+        <div className='w-10 shrink-0 text-right text-foreground'>{pct(row.winRate)}</div>
+        <div className='w-14 shrink-0 text-right text-muted'>
+            {t('{{count}}g', { count: row.games })}
+        </div>
+        {showShare && (
+            <div className='w-12 shrink-0 text-right text-muted' title={t('share of games')}>
+                {pct(row.share)}
+            </div>
+        )}
+    </div>
+);
+
+SetRow.propTypes = { row: PropTypes.object, showShare: PropTypes.bool, t: PropTypes.func };
+
 /** Blurred sample used behind the lock, so the page demonstrates its own value. */
 const SamplePanel = () => (
     <div className='space-y-2 p-3'>
@@ -115,13 +159,19 @@ const ArchonIntelligence = () => {
     const user = useSelector((state) => state.account.user);
     const unlocked = hasCapability(user, CAPABILITIES.ARCHON_INTELLIGENCE);
     const canMeta = hasCapability(user, CAPABILITIES.META_ANALYTICS);
+    // Empty means every set, which is what both the control and the server
+    // already take it to mean.
+    const [sets, setSets] = useState([]);
 
     // Skipped entirely when locked: a 403 round trip per panel teaches nobody
     // anything, and the locked state is rendered from the catalogue copy.
-    const { data: player, isLoading } = useGetPlayerIntelligenceQuery(undefined, {
+    const { data: player, isLoading } = useGetPlayerIntelligenceQuery(sets, {
         skip: !user || !unlocked
     });
-    const { data: meta } = useGetMetaIntelligenceQuery(30, { skip: !user || !canMeta });
+    const { data: meta } = useGetMetaIntelligenceQuery(
+        { days: 30, sets },
+        { skip: !user || !canMeta }
+    );
 
     if (!user) {
         return (
@@ -143,6 +193,11 @@ const ArchonIntelligence = () => {
 
     const vs = player?.vsExpectation;
     const rankings = player?.rankings || [];
+    const filtered = sets.length > 0;
+    // Said once, under the filter, rather than repeated on every panel.
+    const scopeNote = filtered
+        ? t('Everything below counts only games played with decks from the selected sets.')
+        : t('Everything below counts every set. Choose one or more to narrow it.');
 
     return (
         <div className='mx-auto max-w-6xl space-y-3 p-3'>
@@ -153,6 +208,10 @@ const ArchonIntelligence = () => {
                             'up against what people are actually playing?'
                     )}
                 </p>
+            </Panel>
+
+            <Panel type='default' compactHeader title={t('Set')}>
+                <SetFilter hint={scopeNote} selected={sets} t={t} onChange={setSets} />
             </Panel>
 
             {/* ---- Player Intelligence ---------------------------------- */}
@@ -212,6 +271,7 @@ const ArchonIntelligence = () => {
                                 <thead>
                                     <tr className='border-b border-border/70 text-left text-xs uppercase tracking-wide text-muted'>
                                         <th className='py-1.5 pr-2 font-medium'>{t('Deck')}</th>
+                                        <th className='py-1.5 pr-2 font-medium'>{t('Set')}</th>
                                         <th className='py-1.5 pr-2 text-right font-medium'>
                                             {t('Games')}
                                         </th>
@@ -232,6 +292,12 @@ const ArchonIntelligence = () => {
                                             <td className='py-1.5 pr-2 text-foreground'>
                                                 {deck.deckName}
                                             </td>
+                                            <td
+                                                className='py-1.5 pr-2 text-muted'
+                                                title={deck.set?.name}
+                                            >
+                                                {deck.set?.code || '—'}
+                                            </td>
                                             <td className='py-1.5 pr-2 text-right text-muted'>
                                                 {deck.games}
                                             </td>
@@ -251,14 +317,54 @@ const ArchonIntelligence = () => {
                         </div>
                     ) : (
                         <div className='p-3 text-sm text-muted'>
-                            {t('Play a few games with your decks and their records appear here.')}
+                            {/* "Play more games" is the wrong advice when the
+                                real answer is that the filter excluded them. */}
+                            {filtered
+                                ? t(
+                                      'No games with decks from the selected sets. Try another set, or ' +
+                                          'All sets.'
+                                  )
+                                : t(
+                                      'Play a few games with your decks and their records appear here.'
+                                  )}
                         </div>
                     )}
                 </PremiumLock>
             </Panel>
 
+            {/* ---- By set ----------------------------------------------- */}
+            <Panel type='default' compactHeader title={t('Your record by set')}>
+                <PremiumLock
+                    capability={CAPABILITIES.ARCHON_INTELLIGENCE}
+                    preview={<SamplePanel />}
+                    minHeight={180}
+                >
+                    <div className='space-y-1.5 p-1'>
+                        {(player?.bySet || []).map((row) => (
+                            <SetRow key={row.set?.id} row={row} t={t} />
+                        ))}
+                        {!player?.bySet?.length && (
+                            <div className='text-sm text-muted'>{t('No games recorded yet.')}</div>
+                        )}
+                        <p className='m-0 pt-1 text-[11px] text-muted'>
+                            {t(
+                                'Not filtered — this is the table you pick a filter from. A deck belongs ' +
+                                    'to exactly one set, so unlike the house tables these are shares of ' +
+                                    'your real games and add up to 100%.'
+                            )}
+                        </p>
+                    </div>
+                </PremiumLock>
+            </Panel>
+
             {/* ---- Matchups --------------------------------------------- */}
-            <Panel type='default' compactHeader title={t('Your record by house')}>
+            <Panel
+                type='default'
+                compactHeader
+                title={
+                    filtered ? t('Your record by house, in these sets') : t('Your record by house')
+                }
+            >
                 <PremiumLock
                     capability={CAPABILITIES.MATCHUP_ANALYTICS}
                     preview={<SamplePanel />}
@@ -307,9 +413,43 @@ const ArchonIntelligence = () => {
                             ))}
                         </div>
                         <p className='m-0 text-[11px] text-muted'>
-                            {t('Across all decided games in the last {{days}} days.', {
-                                days: meta?.days ?? 30
-                            })}
+                            {filtered
+                                ? t(
+                                      'House prevalence across the last {{days}} days, in the selected ' +
+                                          'sets only. Each set ships its own distribution of houses, so ' +
+                                          'this is the number that changes most when you narrow it.',
+                                      { days: meta?.days ?? 30 }
+                                  )
+                                : t('Across all decided games in the last {{days}} days.', {
+                                      days: meta?.days ?? 30
+                                  })}
+                        </p>
+                    </div>
+                </PremiumLock>
+            </Panel>
+
+            {/* ---- What the field is playing, by set -------------------- */}
+            <Panel type='default' compactHeader title={t('What the field is playing, by set')}>
+                <PremiumLock
+                    capability={CAPABILITIES.META_ANALYTICS}
+                    preview={<SamplePanel />}
+                    minHeight={180}
+                >
+                    <div className='space-y-1.5 p-1'>
+                        {(meta?.bySet?.rows || []).map((row) => (
+                            <SetRow key={row.set?.id} row={row} t={t} />
+                        ))}
+                        {!meta?.bySet?.rows?.length && (
+                            <div className='text-sm text-muted'>
+                                {t('No games in this window yet.')}
+                            </div>
+                        )}
+                        <p className='m-0 pt-1 text-[11px] text-muted'>
+                            {t(
+                                'Also unfiltered, for the same reason. Read the share column as what ' +
+                                    'you are likely to face; treat the win rate as a statement about ' +
+                                    'who plays each set rather than about the cards in it.'
+                            )}
                         </p>
                     </div>
                 </PremiumLock>

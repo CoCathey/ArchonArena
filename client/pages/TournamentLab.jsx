@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import Panel from '../Components/Site/Panel';
 import AlertPanel from '../Components/Site/AlertPanel';
 import PremiumLock from '../Components/Membership/PremiumLock';
+import SetFilter from '../Components/Site/SetFilter';
 import { CAPABILITIES, hasCapability } from '../membership';
 import { useGetTournamentLabQuery } from '../redux/api';
 
@@ -27,6 +28,12 @@ import { useGetTournamentLabQuery } from '../redux/api';
  *  - No confident-looking numbers over tiny samples. A deck under the game
  *    threshold is shown with its record AND a warning, rather than being
  *    silently ranked next to a deck with forty games.
+ *
+ * The set filter is the first thing on the page rather than a refinement,
+ * because most events restrict which sets may be brought and a comparison that
+ * includes decks the player cannot legally register is not a weaker answer - it
+ * is the wrong one. Scoped to a set, everything downstream narrows with it: the
+ * candidates, and the meta panel describing the field they would meet.
  */
 
 const MAX_SELECTED = 4;
@@ -78,6 +85,7 @@ const DeckColumn = ({ deck, t }) => (
         <div className='mb-2'>
             <div className='truncate text-sm font-semibold text-foreground'>{deck.deckName}</div>
             <div className='text-[11px] text-muted'>
+                {deck.set?.name ? `${deck.set.name} · ` : ''}
                 {deck.sas ? t('SAS {{sas}}', { sas: deck.sas }) : t('SAS unknown')}
             </div>
         </div>
@@ -162,6 +170,19 @@ const DeckColumn = ({ deck, t }) => (
             </div>
         )}
 
+        {!!deck.vsScopedSets?.length && (
+            <div className='mb-1.5'>
+                <div className='text-[10px] uppercase tracking-wide text-muted'>
+                    {t('Against the sets in play')}
+                </div>
+                <div className='text-xs text-foreground'>
+                    {deck.vsScopedSets
+                        .map((row) => `${row.set?.code || '—'} ${pct(row.winRate)} (${row.games}g)`)
+                        .join(', ')}
+                </div>
+            </div>
+        )}
+
         {!deck.confident && (
             <div className='mt-auto rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300'>
                 {t('Only {{games}} games — too few to lean on. {{min}}+ is a usable sample.', {
@@ -180,10 +201,12 @@ const TournamentLab = () => {
     const user = useSelector((state) => state.account.user);
     const unlocked = hasCapability(user, CAPABILITIES.TOURNAMENT_LAB);
     const [selected, setSelected] = useState([]);
+    const [sets, setSets] = useState([]);
 
-    const { data, isFetching } = useGetTournamentLabQuery(selected, {
-        skip: !user || !unlocked
-    });
+    const { data, isFetching } = useGetTournamentLabQuery(
+        { decks: selected, sets },
+        { skip: !user || !unlocked }
+    );
 
     const toggle = (deckId) =>
         setSelected((current) =>
@@ -193,6 +216,26 @@ const TournamentLab = () => {
                 ? current
                 : [...current, deckId]
         );
+
+    /**
+     * Narrowing the sets can strand a selected deck outside the filter, and
+     * leaving it selected would quietly compare a deck that is now illegal.
+     * Dropping it is the honest behaviour, so the selection always means "decks
+     * I could actually bring".
+     */
+    const changeSets = (next) => {
+        setSets(next);
+
+        if (next.length) {
+            const legal = new Set(
+                (data?.candidates || [])
+                    .filter((candidate) => candidate.set && next.includes(candidate.set.id))
+                    .map((candidate) => candidate.deckId)
+            );
+
+            setSelected((current) => current.filter((deckId) => legal.has(deckId)));
+        }
+    };
 
     if (!user) {
         return (
@@ -214,6 +257,7 @@ const TournamentLab = () => {
 
     const candidates = data?.candidates || [];
     const decks = data?.decks || [];
+    const scoping = data?.scoping;
 
     return (
         <div className='mx-auto max-w-6xl space-y-3 p-3'>
@@ -234,6 +278,36 @@ const TournamentLab = () => {
                 minHeight={260}
             >
                 <div className='space-y-3'>
+                    <Panel
+                        type='default'
+                        compactHeader
+                        title={t('Which sets does the event allow?')}
+                    >
+                        <SetFilter
+                            hint={
+                                scoping?.tournament
+                                    ? t('Scoped to {{event}}.', { event: scoping.tournament.name })
+                                    : sets.length
+                                    ? t(
+                                          'Only decks from these sets are offered below, and the field ' +
+                                              'is measured in the same sets.'
+                                      )
+                                    : t(
+                                          'Most events restrict this. Set it to match, and only decks ' +
+                                              'you could actually register are offered.'
+                                      )
+                            }
+                            selected={sets}
+                            t={t}
+                            onChange={changeSets}
+                        />
+                        {scoping?.tournamentAllowsAllSets && (
+                            <p className='m-0 pt-1.5 text-[11px] text-muted'>
+                                {t('That event does not restrict sets, so nothing was filtered.')}
+                            </p>
+                        )}
+                    </Panel>
+
                     <Panel type='default' compactHeader title={t('Choose decks')}>
                         {candidates.length ? (
                             <div className='flex flex-wrap gap-1.5'>
@@ -257,6 +331,9 @@ const TournamentLab = () => {
                                         >
                                             {candidate.deckName}
                                             <span className='ml-1.5 text-muted'>
+                                                {candidate.set?.code
+                                                    ? `${candidate.set.code} · `
+                                                    : ''}
                                                 {candidate.games}g · {pct(candidate.winRate)}
                                             </span>
                                         </button>
@@ -265,9 +342,14 @@ const TournamentLab = () => {
                             </div>
                         ) : (
                             <div className='text-sm text-muted'>
-                                {t(
-                                    'No decks with recorded games yet. Play some games and your decks appear here.'
-                                )}
+                                {sets.length
+                                    ? t(
+                                          'You have no played decks from those sets. Widen the set ' +
+                                              'filter, or play a game with one you would bring.'
+                                      )
+                                    : t(
+                                          'No decks with recorded games yet. Play some games and your decks appear here.'
+                                      )}
                             </div>
                         )}
                         {selected.length > 0 && (
@@ -330,10 +412,17 @@ const TournamentLab = () => {
                                 ))}
                             </div>
                             <p className='m-0 pt-2 text-[11px] text-muted'>
-                                {t(
-                                    'Share of house slots played across the last 30 days. Every deck ' +
-                                        'contributes three, so these sum to 300%.'
-                                )}
+                                {sets.length
+                                    ? t(
+                                          'Share of house slots across the last 30 days, counting only ' +
+                                              'games played in the sets above — the field of this ' +
+                                              'format rather than the field at large. Every deck ' +
+                                              'contributes three houses, so these sum to 300%.'
+                                      )
+                                    : t(
+                                          'Share of house slots played across the last 30 days. Every deck ' +
+                                              'contributes three, so these sum to 300%.'
+                                      )}
                             </p>
                         </Panel>
                     )}
