@@ -1,5 +1,5 @@
-const _ = require('underscore');
 const Card = require('../../Card.js');
+const secureRandom = require('../../secureRandom');
 
 class FleaMarket extends Card {
     // Action: Look at a random card in your opponent's hand. You may give your opponent 1 Aember. If you do, play that card as if it were yours.
@@ -11,7 +11,7 @@ class FleaMarket extends Card {
             gameAction: ability.actions.reveal((context) => ({
                 location: 'hand',
                 chatMessage: true,
-                target: _.shuffle(context.player.opponent.hand)[0]
+                target: secureRandom.shuffle(context.player.opponent.hand)[0]
             })),
             then: (
                 preThenContext,

@@ -1,5 +1,5 @@
-const _ = require('underscore');
 const Card = require('../../Card.js');
+const secureRandom = require('../../secureRandom');
 
 class BeamOfForgetting extends Card {
     // Play: Reveal a random card from your opponent’s hand. Put that
@@ -12,7 +12,7 @@ class BeamOfForgetting extends Card {
             gameAction: ability.actions.reveal((context) => ({
                 location: 'hand',
                 chatMessage: true,
-                target: _.shuffle(context.player.opponent.hand)[0]
+                target: secureRandom.shuffle(context.player.opponent.hand)[0]
             })),
             then: (
                 preThenContext,

@@ -1,5 +1,5 @@
-const _ = require('underscore');
 const Card = require('../../Card.js');
+const secureRandom = require('../../secureRandom');
 
 class Keyforgery extends Card {
     // When your opponent would forge a key, that player names a house. Reveal a random card from your hand. If that card is not of the named house, destroy Keyforgery and they do not forge that key (no A is spent).
@@ -17,7 +17,7 @@ class Keyforgery extends Card {
             gameAction: ability.actions.reveal((context) => ({
                 location: 'hand',
                 chatMessage: true,
-                target: _.shuffle(context.player.hand)[0]
+                target: secureRandom.shuffle(context.player.hand)[0]
             })),
             then: (preThenContext) => ({
                 condition: (context) =>

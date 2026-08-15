@@ -3,6 +3,8 @@ const util = require('../util');
 const db = require('../db');
 const { expand, flatten } = require('../Array');
 const Constants = require('../constants');
+// ARCHON: game-deciding randomness comes from one place - see the module.
+const secureRandom = require('../game/secureRandom');
 const BonusOrder = Constants.Houses.concat(['amber', 'capture', 'damage', 'draw', 'discard']);
 
 const allianceRestrictedRules = {
@@ -240,8 +242,8 @@ class DeckService {
      * cached SAS sits inside the range - which also excludes decks DoK has not
      * rated, exactly as the bound itself does.
      *
-     * Randomness is the database's: a user's collection is at most a few
-     * hundred rows, so ORDER BY random() is cheap and needs no state here.
+     * The roll itself is ours rather than the database's - see the note on the
+     * query below.
      *
      * @returns {Promise<number|null>} a deck id, or null when nothing is
      *          eligible (which callers should tell the player, not swallow)
@@ -272,16 +274,38 @@ class DeckService {
             where += `AND ds."SasRating" <= $${params.length} `;
         }
 
+        /**
+         * ARCHON: the row is chosen HERE, not by Postgres.
+         *
+         * `ORDER BY random()` is uniform but predictable - Postgres's random()
+         * is a seeded PRNG like any other, and this picks the deck somebody
+         * plays a rated, sometimes paid, game with. Counting and then taking a
+         * cryptographic offset costs one extra query on a path that runs once
+         * per game, and makes the choice unguessable. See game/secureRandom.
+         */
         let rows;
 
         try {
+            const counted = await db.query(
+                'SELECT count(*)::int AS "Total" FROM "Decks" d ' +
+                    'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
+                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                    where,
+                params
+            );
+            const total = (counted && counted[0] && counted[0].Total) || 0;
+
+            if (total === 0) {
+                return null;
+            }
+
             rows = await db.query(
                 'SELECT d."Id" FROM "Decks" d ' +
                     'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
                     'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
                     where +
-                    'ORDER BY random() LIMIT 1',
-                params
+                    `ORDER BY d."Id" OFFSET $${params.length + 1} LIMIT 1`,
+                [...params, secureRandom.randomInt(total)]
             );
         } catch (err) {
             logger.error('Failed to pick a random deck', err);
@@ -403,8 +427,24 @@ class DeckService {
                   )}))`
                 : '';
         try {
+            // ARCHON: chosen here rather than by Postgres, for the same reason
+            // as the Lucky Dice pick above - a sealed deal decides a game, and
+            // `ORDER BY random()` is uniform but predictable. See
+            // game/secureRandom.
+            const counted = await db.query(
+                `SELECT count(*)::int AS "Total" from "Decks" d JOIN "Expansions" e on e."Id" = d."ExpansionId" WHERE "IncludeInSealed" = True${setFilter}`
+            );
+            const total = (counted && counted[0] && counted[0].Total) || 0;
+
+            if (total === 0) {
+                logger.warn('Could not find any sealed decks!');
+
+                return undefined;
+            }
+
             deck = await db.query(
-                `SELECT d.*, e."ExpansionId" AS "Expansion" from "Decks" d JOIN "Expansions" e on e."Id" = d."ExpansionId" WHERE "IncludeInSealed" = True${setFilter} ORDER BY random() LIMIT 1`
+                `SELECT d.*, e."ExpansionId" AS "Expansion" from "Decks" d JOIN "Expansions" e on e."Id" = d."ExpansionId" WHERE "IncludeInSealed" = True${setFilter} ORDER BY d."Id" OFFSET $1 LIMIT 1`,
+                [secureRandom.randomInt(total)]
             );
         } catch (err) {
             logger.error('Failed to fetch random deck', err);

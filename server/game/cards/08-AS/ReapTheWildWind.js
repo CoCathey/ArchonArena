@@ -1,5 +1,5 @@
-const _ = require('underscore');
 const Card = require('../../Card.js');
+const secureRandom = require('../../secureRandom');
 
 class ReapTheWildWind extends Card {
     // Play: Each player reveals a random card from their hand and
@@ -9,11 +9,12 @@ class ReapTheWildWind extends Card {
             gameAction: ability.actions.reveal((context) => ({
                 location: 'hand',
                 chatMessage: true,
-                target: _.shuffle(context.player.hand)
+                target: secureRandom
+                    .shuffle(context.player.hand)
                     .slice(0, 1)
                     .concat(
                         context.player.opponent
-                            ? _.shuffle(context.player.opponent.hand).slice(0, 1)
+                            ? secureRandom.shuffle(context.player.opponent.hand).slice(0, 1)
                             : []
                     )
             })),

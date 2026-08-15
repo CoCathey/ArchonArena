@@ -4,7 +4,7 @@
  */
 const { EVENTS } = require('../Events/types');
 const PlayerAction = require('./PlayerAction');
-const _ = require('underscore');
+const secureRandom = require('../secureRandom');
 
 class RandomDiscardAction extends PlayerAction {
     setDefaultProperties() {
@@ -111,7 +111,7 @@ class RandomDiscardAction extends PlayerAction {
                     return;
                 }
 
-                const randomCard = _.sample(availableCards);
+                const randomCard = secureRandom.sample(availableCards);
                 cardsDiscarded.push(randomCard);
                 context.game.addMessage(
                     `{0} randomly discards {1} from ${this.location}`,

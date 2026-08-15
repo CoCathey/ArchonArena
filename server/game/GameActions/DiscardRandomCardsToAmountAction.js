@@ -1,6 +1,6 @@
 const { EVENTS } = require('../Events/types');
 const PlayerAction = require('./PlayerAction');
-const _ = require('underscore');
+const secureRandom = require('../secureRandom');
 
 /**
  * DiscardRandomCardsToAmountAction - Discards random cards from a player's hand
@@ -73,7 +73,7 @@ class DiscardRandomCardsToAmountAction extends PlayerAction {
                     return;
                 }
 
-                const randomCard = _.sample(player.hand);
+                const randomCard = secureRandom.sample(player.hand);
                 cardsDiscarded.push(randomCard);
                 context.game.addMessage('{0} randomly discards {1}', player, randomCard);
 

@@ -1,5 +1,5 @@
-const _ = require('underscore');
 const Card = require('../../Card.js');
+const secureRandom = require('../../secureRandom');
 
 class HarmonicPack extends Card {
     // Play: Deal 2D to a creature. Reveal a random card from a player's archives.
@@ -36,7 +36,7 @@ class HarmonicPack extends Card {
                                 ? context.player.archives
                                 : context.player.opponent.archives;
                         return {
-                            target: archives.length > 0 ? _.shuffle(archives)[0] : [],
+                            target: archives.length > 0 ? secureRandom.shuffle(archives)[0] : [],
                             chatMessage: true,
                             location: 'archives'
                         };
