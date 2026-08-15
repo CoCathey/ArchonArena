@@ -10,6 +10,7 @@ upstream for a later Kubernetes migration if scale demands it.
 ```
 Internet ──▶ Caddy (:80/:443, auto-TLS)
               ├── /node-0/socket.io ─▶ game node container (socket.io, :9500)
+              ├── /node-1/socket.io ─▶ game node container (socket.io, :9500)
               └── everything else   ─▶ lobby container (Express + socket.io, :4000)
                                         ├── PostgreSQL (users, decks, games)
                                         └── Redis (lobby↔node messaging, cache)
@@ -19,6 +20,8 @@ Internet ──▶ Caddy (:80/:443, auto-TLS)
 -   Game nodes run actual games. They register with the lobby over Redis and are reached
     by browsers **through the site origin** at `/node-N/socket.io` — no per-node DNS or
     open ports.
+-   A game lives in one node's memory and cannot be moved, which is what shapes the deploy
+    procedure in §5: nodes are replaced one at a time, each drained first.
 -   Caddy obtains and renews Let's Encrypt certificates automatically.
 
 ## 1. Server prerequisites
@@ -292,13 +295,53 @@ rather than an error. Verify by diffing against a fresh build if in doubt.
 ```bash
 cd /opt/archonarena
 git pull
-docker compose -f docker-compose.prod.yml --env-file .env.production build
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+bash deploy/rolling-deploy.sh
 ```
 
-Compose replaces containers with the new image; Caddy keeps serving during the swap.
-For zero-disruption game-node updates, drain first (roadmap: deploy script) — restarting
-`node-0` ends in-progress games on it.
+That is the whole deploy. **Do not use a bare `docker compose up -d`** for a code change:
+the lobby and the game nodes share one image, so Compose replaces all of them at once and
+every game in progress dies with them.
+
+What the script does, and why in this order:
+
+1. **Builds the image once.**
+2. **Replaces the lobby.** A few seconds of downtime for the lobby itself — Caddy holds
+   incoming requests and retries them (`lb_try_duration`), and socket.io reconnects. Games
+   in progress are untouched: players are connected straight to the game nodes, and when
+   the lobby comes back it re-syncs the live game list from them.
+3. **Replaces each game node in turn.** A game cannot be moved between nodes, so each node
+   is first stood down (it stops being given new games while its current ones play out),
+   and only replaced once it is empty. Its siblings carry new games meanwhile.
+
+Step 3 is why there is more than one node. With a single node, standing it down means
+nobody can start a game until it is back — the site stays up, but Start says "No game
+nodes available". The script warns and asks before doing that.
+
+Useful flags:
+
+```bash
+bash deploy/rolling-deploy.sh --lobby-only        # config/UI change, nodes untouched
+bash deploy/rolling-deploy.sh --node node-1       # one node
+bash deploy/rolling-deploy.sh --skip-build        # deploy the image already built
+bash deploy/rolling-deploy.sh --force-after-timeout   # ends games that outlast the drain
+```
+
+A long game can hold up its own node's replacement for as long as it lasts (capped at 90
+minutes). If the wait runs out the script stops and leaves that node stood down but still
+playing — re-running the script picks up where it left off. Nothing is left in a state
+that needs manual repair.
+
+To stand a node down or bring it back by hand — the admin panel's **Node Admin** page has
+Disable/Enable per node, and **Restart** now drains first and restarts when the node is
+empty rather than killing games. From the host:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production \
+  exec node-0 node -e 'require("http").request({port:9000,method:"POST",path:"/health/drain"}).end()'
+```
+
+`/health/status` on port 9000 (container-internal only) reports identity, version, live
+game count and drain state.
 
 Database schema changes are applied by the migration runner, which tracks what has run in
 a `SchemaMigrations` ledger:
@@ -433,15 +476,28 @@ live database without `--yes`.
 
 ## 7. Scaling game nodes
 
-Each node is one container with a unique identity:
+The stack ships with two nodes (`node-0`, `node-1`). Two is the minimum for a deploy that
+does not end games, not a capacity judgement — see §5.
 
-1. In `docker-compose.prod.yml`, duplicate the `node-0` service as `node-1` with
-   `SERVER=node-1`.
-2. In `deploy/Caddyfile`, duplicate the `@node0` matcher/handle pair for `/node-1/...`
-   pointing at `node-1:9500`.
-3. `docker compose ... up -d`.
+Each node is one container with a unique identity. To add `node-2`:
 
-The lobby discovers nodes dynamically through Redis; no lobby config changes needed.
+1. In `docker-compose.prod.yml`, duplicate the `node-1` service with `SERVER=node-2`
+   (keep `stop_grace_period`, or its drain gets SIGKILLed after 10 seconds).
+2. In `deploy/Caddyfile`, duplicate the `@node1` matcher/handle pair for `/node-2/...`
+   pointing at `node-2:9500`.
+3. `bash deploy/rolling-deploy.sh --nodes-only --node node-2`.
+
+The lobby discovers nodes dynamically through Redis; no lobby config changes needed, and
+both the deploy script and `healthcheck.sh` discover the fleet from the compose file
+rather than a hardcoded list.
+
+**Capacity.** Games are placed on the least-loaded node that is not full, disabled,
+draining or disconnected. `MAX_GAMES` (or `gameNode.maxGames`) caps a node; unset means
+unlimited, which is the default. Leave it unset until the per-node ceiling has been load
+tested (ROADMAP N10) — a cap set too low turns into "No game nodes available" for players,
+which is worse than a slow node. When you do set it, add a node before you reach the
+fleet's total: there is no queue for a full fleet.
+
 When one host is no longer enough, nodes can move to separate machines by giving them a
 public address (set `HOST`) or by fronting them with the same Caddy over a private
 network — decision deferred until load requires it.
@@ -451,7 +507,7 @@ network — decision deferred until load requires it.
 -   Set `SENTRY_DSN` in `.env.production` for error tracking (client + server support is
     already wired upstream).
 -   Point an external uptime monitor (e.g. UptimeRobot) at `https://archonarena.com/`.
--   `docker compose ... logs -f lobby node-0` for live logs; Winston writes structured
+-   `docker compose ... logs -f lobby node-0 node-1` for live logs; Winston writes structured
     logs to stdout.
 
 ## 9. Health check

@@ -39,8 +39,14 @@ DB_USER="$(grep -E '^DB_USER=' .env.production 2>/dev/null | cut -d= -f2)"
 DB_NAME="$(grep -E '^DB_NAME=' .env.production 2>/dev/null | cut -d= -f2)"
 DB_NAME="${DB_NAME:-archonarena}"
 
+# Nodes are discovered rather than listed: the fleet grows (node-0, node-1, ...)
+# and a check that names one of them reports a clean bill of health for a site
+# whose other nodes are all down.
+NODES="$($DC config --services 2>/dev/null | grep -E '^node-' | sort | tr '\n' ' ')"
+NODES="${NODES:-node-0}"
+
 echo "== Containers =="
-for svc in caddy lobby node-0 postgres redis; do
+for svc in caddy lobby $NODES postgres redis; do
     state="$($DC ps --format '{{.Service}} {{.State}}' 2>/dev/null | awk -v s="$svc" '$1==s{print $2}')"
     if [ "$state" = "running" ]; then
         ok "$svc running"
@@ -88,21 +94,42 @@ fi
 # The game-board websocket path must reach the game node through Caddy.
 # socket.io answers HTTP 200/400 to a bare polling probe; Caddy errors
 # (404 = matcher wrong, 502 = node down/unreachable) mean broken games.
-ws_code="$(probe "https://$DOMAIN/node-0/socket.io/?EIO=4&transport=polling")"
-case "$ws_code" in
-    200 | 400) ok "game-node socket path (/node-0/socket.io) reachable through Caddy" ;;
-    *) bad "game-node socket path returned $ws_code - players cannot start games" "$DC restart node-0 caddy && $DC logs --tail 50 node-0" ;;
-esac
+for svc in $NODES; do
+    ws_code="$(probe "https://$DOMAIN/$svc/socket.io/?EIO=4&transport=polling")"
+    case "$ws_code" in
+        200 | 400) ok "game-node socket path (/$svc/socket.io) reachable through Caddy" ;;
+        *) bad "$svc socket path returned $ws_code - players cannot start games on it" "check for an @$svc route in deploy/Caddyfile, then: $DC restart $svc caddy && $DC logs --tail 50 $svc" ;;
+    esac
+done
 
 echo "== Game node wiring =="
-host_val="$($DC exec -T node-0 node -e "process.env.NODE_CONFIG_ENV='production'; console.log(JSON.stringify(require('config').get('gameNode.host')))" 2>/dev/null | tail -1)"
-if [ "$host_val" = '""' ]; then
-    ok "game node advertises no address (browsers connect same-origin)"
-elif [ -z "$host_val" ]; then
-    warn "could not read game node config" "container may be mid-restart; re-run in a minute"
-else
-    bad "game node advertises host $host_val - Start will strand players" "image is stale: bash /root/deploy-archonarena.sh (rebuilds with the fixed production config)"
-fi
+for svc in $NODES; do
+    host_val="$($DC exec -T "$svc" node -e "process.env.NODE_CONFIG_ENV='production'; console.log(JSON.stringify(require('config').get('gameNode.host')))" 2>/dev/null | tail -1)"
+    if [ "$host_val" = '""' ]; then
+        ok "$svc advertises no address (browsers connect same-origin)"
+    elif [ -z "$host_val" ]; then
+        warn "could not read $svc config" "container may be mid-restart; re-run in a minute"
+    else
+        bad "$svc advertises host $host_val - Start will strand players" "image is stale: bash /root/deploy-archonarena.sh (rebuilds with the fixed production config)"
+    fi
+
+    # A node left standing down after an interrupted deploy looks healthy from
+    # every angle except the one that matters: the lobby will not place games on
+    # it, and nothing else here would say so.
+    status="$($DC exec -T "$svc" node -e '
+const http = require("http");
+http.get({host:"127.0.0.1",port:9000,path:"/health/status",timeout:4000},(res)=>{
+  let b="";res.on("data",(c)=>b+=c);res.on("end",()=>console.log(b));
+}).on("error",()=>process.exit(1));' 2>/dev/null | tail -1)"
+
+    case "$status" in
+        *'"draining":true'*)
+            warn "$svc is standing down - it accepts no new games" "finish or restart the deploy: bash deploy/rolling-deploy.sh --nodes-only --node $svc"
+            ;;
+        *'"draining":false'*) ok "$svc is accepting games" ;;
+        *) warn "could not read $svc drain state" "container may be mid-restart; re-run in a minute" ;;
+    esac
+done
 
 if $DC logs --tail 200 lobby 2>/dev/null | grep -qiE "node.*(hello|registered|connected)|HELLO"; then
     ok "lobby has seen the game node register"

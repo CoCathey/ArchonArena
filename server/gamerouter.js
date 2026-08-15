@@ -80,7 +80,7 @@ class GameRouter extends EventEmitter {
         let returnedWorker;
         for (const worker of Object.values(this.workers)) {
             if (
-                worker.numGames >= worker.maxGames ||
+                this.isWorkerFull(worker) ||
                 worker.disabled ||
                 worker.disconnected ||
                 worker.draining
@@ -96,6 +96,28 @@ class GameRouter extends EventEmitter {
         return returnedWorker;
     }
 
+    /**
+     * Whether a worker is at capacity.
+     *
+     * ARCHON: an unset maxGames means unlimited, and says so. This was written
+     * as `worker.numGames >= worker.maxGames`, which reaches the same conclusion
+     * for the wrong reason - any comparison against undefined is false, so the
+     * node looked infinitely large because the check was broken rather than
+     * because a cap was deliberately not configured. A draining node reports
+     * maxGames: 0, which is finite and therefore still enforced.
+     *
+     * @param {{ numGames: number, maxGames?: number }} worker
+     */
+    isWorkerFull(worker) {
+        const maxGames = Number(worker.maxGames);
+
+        if (!Number.isFinite(maxGames)) {
+            return false;
+        }
+
+        return worker.numGames >= maxGames;
+    }
+
     getNodeStatus() {
         return Object.values(this.workers).map((worker) => {
             return {
@@ -109,7 +131,14 @@ class GameRouter extends EventEmitter {
                     ? 'draining'
                     : 'active',
                 version: worker.version,
-                draining: worker.draining || false
+                draining: worker.draining || false,
+                // Reported separately from `status` so the admin table can label
+                // its toggle from the flag the toggle actually flips. A draining
+                // node is not disabled, and offering "Enable" for it - which is
+                // what deriving the label from `status` did - describes neither
+                // the current state nor what the button would do.
+                disabled: worker.disabled || false,
+                maxGames: Number.isFinite(Number(worker.maxGames)) ? Number(worker.maxGames) : null
             };
         });
     }

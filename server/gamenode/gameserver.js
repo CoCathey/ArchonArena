@@ -59,6 +59,8 @@ class GameServer {
         this.gameSocket.on('onFailedConnect', this.onFailedConnect.bind(this));
         this.gameSocket.on('onCloseGame', this.onCloseGame.bind(this));
         this.gameSocket.on('onCardData', this.onCardData.bind(this));
+        this.gameSocket.on('onRestartRequested', this.onRestartRequested.bind(this));
+        this.gameSocket.on('onLobbyReconnected', this.onLobbyReconnected.bind(this));
 
         var server = undefined;
 
@@ -479,6 +481,10 @@ class GameServer {
      * @param {import("../game/player")} winner
      */
     gameWon(game, reason, winner) {
+        // ARCHON: remembered so the result can be re-delivered if the lobby was
+        // not listening when it was first sent. See onLobbyReconnected.
+        game.reportedWin = { winner: winner.name, reason: reason };
+
         this.gameSocket.send('GAMEWIN', {
             game: game.getSaveState(),
             winner: winner.name,
@@ -486,6 +492,55 @@ class GameServer {
             // ARCHON: recorded play-by-play for the replay viewer.
             replay: game.getReplay()
         });
+    }
+
+    /**
+     * The node was told to restart. Drain first: the games in progress here have
+     * no other home, so they are played out before the process exits and the
+     * container's restart policy brings it back.
+     */
+    onRestartRequested() {
+        if (!this.healthServer) {
+            logger.error('Restart requested before the health server was ready');
+
+            return;
+        }
+
+        this.healthServer.startDraining();
+    }
+
+    /**
+     * The lobby has just come up. Re-deliver the results of any finished game it
+     * may not have received.
+     *
+     * ARCHON: node -> lobby messages go over Redis pub/sub, which has no
+     * buffering - anything published while the lobby's subscriber is down is
+     * dropped on the floor, with no ack and no retry. For most commands that
+     * costs nothing (the HELLO that follows resyncs the game list anyway), but a
+     * GAMEWIN lost this way is a game that finished and was then never recorded:
+     * no Games row, no replay, no rating. A lobby restart during a rebuild is
+     * exactly when it happens, and it is silent.
+     *
+     * A finished game stays in memory here for 20 minutes before
+     * clearStaleAndFinishedGames closes it, so the result is still available to
+     * send again. Everything downstream is idempotent by construction - update()
+     * is plain UPDATEs, saveReplay() is ON CONFLICT DO NOTHING, rating is
+     * guarded by RatingHistory and tournament reporting by `WinnerId IS NULL` -
+     * so a duplicate costs a few queries and changes nothing.
+     */
+    onLobbyReconnected() {
+        const finished = Object.values(this.games).filter((game) => game.reportedWin);
+
+        for (const game of finished) {
+            logger.info(`Re-reporting the result of finished game ${game.id} to the lobby`);
+
+            this.gameSocket.send('GAMEWIN', {
+                game: game.getSaveState(),
+                winner: game.reportedWin.winner,
+                reason: game.reportedWin.reason,
+                replay: game.getReplay()
+            });
+        }
     }
 
     /**
