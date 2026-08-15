@@ -36,11 +36,17 @@ export function useDeckLibrary(
         isAlliance?: boolean;
         sasMin?: number;
         sasMax?: number;
+        /**
+         * True restricts to the Unchained set, false excludes it. Undefined
+         * leaves it alone — which is only right outside a game, since every
+         * game has an opinion one way or the other.
+         */
+        unchained?: boolean;
     } = {}
 ) {
     const pageSize = options.pageSize ?? 40;
     const enabled = options.enabled !== false;
-    const { isAlliance, sasMin, sasMax } = options;
+    const { isAlliance, sasMin, sasMax, unchained } = options;
 
     const [decks, setDecks] = useState<Deck[]>([]);
     const [total, setTotal] = useState(0);
@@ -82,7 +88,8 @@ export function useDeckLibrary(
                     houses,
                     isAlliance,
                     sasMin,
-                    sasMax
+                    sasMax,
+                    unchained
                 });
                 if (id !== requestId.current) {
                     return;
@@ -111,7 +118,7 @@ export function useDeckLibrary(
                 }
             }
         },
-        [houses, isAlliance, pageSize, sasMax, sasMin, search, sort]
+        [houses, isAlliance, pageSize, sasMax, sasMin, search, sort, unchained]
     );
 
     useEffect(() => {

@@ -3,9 +3,24 @@ const crypto = require('crypto');
 const logger = require('./../log');
 
 const DEFAULT_IN_PERSON_CONFIG = {
-    // Off by default. Turning it on is a real decision about the ladder, not
-    // a default someone should discover after the fact.
-    rated: false,
+    /**
+     * ARCHON: on by default, matching every other kind of game on the site.
+     *
+     * This was off, with the reasoning that the platform did not witness these
+     * games. That is true, and it is why the safeguards below exist rather than
+     * why the default should be no: a committed in-person game already required
+     * two independent reports that agree, inside a reporting window, with both
+     * decks attached. A result nobody disputes, filed by both players, with the
+     * decks named, is the same evidence an online game produces - the engine
+     * having watched it is not what makes it true.
+     *
+     * The alternative cost is worse and less visible: most KeyForge is played
+     * on paper, and leaving it unrated meant the ladder measured only the part
+     * of the community that plays online.
+     *
+     * An admin can still turn it off site-wide in Settings > In-Person Games.
+     */
+    rated: true,
     // A paper result reported weeks later is not evidence of anything.
     reportWindowDays: 7
 };

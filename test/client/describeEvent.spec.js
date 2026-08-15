@@ -210,7 +210,10 @@ describe('describeEvent', function () {
 
             expect(has(lines, /Swiss/)).toBe(true);
             expect(has(lines, /One deck for the whole event/)).toBe(true);
-            expect(has(lines, /do not affect Amber/)).toBe(true);
+            // The default is a rated event, and the summary has to say so:
+            // this line is the only place an organizer is told, before they
+            // press create, that these games will move the ladder.
+            expect(has(lines, /move Amber/)).toBe(true);
         });
     });
 

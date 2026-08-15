@@ -176,19 +176,18 @@ const HowToPlay = () => {
                                     )
                                 },
                                 {
-                                    term: t('A game type'),
+                                    term: t('A time limit'),
                                     description: t(
-                                        'Beginner, casual or competitive. This is a promise about the ' +
-                                            'game, not a rule: beginner means your opponent may be ' +
-                                            'learning and take-backs are fine, competitive means ' +
-                                            'play it like it counts.'
+                                        'Optional, and worth setting if you do not want a game to run ' +
+                                            'all evening.'
                                     )
                                 },
                                 {
-                                    term: t('Rated or not'),
+                                    term: t('Deck restrictions'),
                                     description: t(
-                                        'A rated game moves both players’ ratings when it ends. An ' +
-                                            'unrated one is recorded in your history but changes nothing.'
+                                        'Bound the game to a SAS range, or let the site roll a random ' +
+                                            'deck from your collection, if you want a closer match than ' +
+                                            '"bring anything".'
                                     )
                                 },
                                 {
@@ -386,14 +385,30 @@ const HowToPlay = () => {
                         </P>
                     </Section>
 
-                    <Section id='rated' title={t('Rated play')}>
+                    <Section
+                        id='rated'
+                        title={t('Rated play')}
+                        lead={t(
+                            'Games count by default. Finish one against another player and it moves ' +
+                                'both ratings — there is nothing to switch on.'
+                        )}
+                    >
                         <P>
                             {t(
-                                'Rated games move your rating; unrated ones do not. The system is Elo, ' +
-                                    'adjusted twice for KeyForge: your deck’s SAS shifts what was ' +
-                                    'expected of you, and the key difference at the end scales how much ' +
-                                    'the result is worth. Beating a much stronger deck 3–0 is the ' +
-                                    'biggest single move available.'
+                                'The system is Elo, adjusted twice for KeyForge: your deck’s SAS shifts ' +
+                                    'what was expected of you, and the key difference at the end scales ' +
+                                    'how much the result is worth. Beating a much stronger deck 3–0 is ' +
+                                    'the biggest single move available.'
+                            )}
+                        </P>
+                        <P>
+                            {t(
+                                'A few things do not count, and they are the ones you would expect: a ' +
+                                    'game with no winner, one that was abandoned rather than finished, ' +
+                                    'and anything that is not a straight two-player result. Tournament ' +
+                                    'games count unless the organiser made the event unrated, and games ' +
+                                    'you played on paper count once both players have filed the same ' +
+                                    'result with their decks attached.'
                             )}
                         </P>
                         <P>

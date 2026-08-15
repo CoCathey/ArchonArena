@@ -47,7 +47,11 @@ export const defaultEventForm = {
     visibility: 'public',
     roundTimerMinutes: '',
     gameTimeLimit: '',
-    ratedGames: false,
+    // ARCHON: rated by default, matching the server. Competitive play is why
+    // someone runs an event here, and an organizer who wants a casual one can
+    // untick it - which is a decision made in advance, unlike discovering
+    // afterwards that a whole tournament never counted.
+    ratedGames: true,
     requireDeckRegistration: false,
     hideDecklists: false,
     sasMin: '',

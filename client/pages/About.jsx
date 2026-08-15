@@ -367,8 +367,10 @@ const About = () => {
                                         term: t('Archon'),
                                         description: t(
                                             'Archon Intelligence and the Tournament Lab: matchup ' +
-                                                'analysis, personal deck rankings, deck comparison and ' +
-                                                'meta analytics.'
+                                                'analysis, personal deck rankings, deck comparison, ' +
+                                                'meta analytics, and AERC analysis — your record read ' +
+                                                'by what decks are actually good at rather than by one ' +
+                                                'score.'
                                         )
                                     },
                                     {

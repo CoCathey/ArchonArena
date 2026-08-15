@@ -16,19 +16,60 @@ import { useNavigate } from 'react-router-dom';
  * ARCHON (N12): the `state` Patreon echoes back is posted with the code and
  * checked server-side against a signed cookie, so a code cannot be planted by
  * a third party. `error` is Patreon's own signal that the player declined.
+ *
+ * ## A link started in the phone app comes back here too
+ *
+ * Patreon allows one registered redirect URI and it is this website, so the app
+ * cannot be sent to directly. The app marks its `state`, this page recognises
+ * the marker and forwards the code to the app's deep link, rather than trying
+ * to complete a link for a browser that is not signed in - which is what would
+ * otherwise happen, since the system browser the app opens carries none of the
+ * player's site session.
+ *
+ * The app is listening for exactly this URL, closes its browser sheet the
+ * moment it appears, and does the exchange itself with its own bearer token.
  */
+// Must match PatreonService.MOBILE_STATE_PREFIX. Deliberately a literal rather
+// than an import: this file is bundled for the browser and the service is not.
+const MOBILE_STATE_PREFIX = 'm.';
+
 const Patreon = ({ code, state, error }) => {
     const { t } = useTranslation();
     const dispatch = useDispatch();
     const navigate = useNavigate();
     const [linkPatreon, linkState] = useLinkPatreonMutation();
     const accountLinked = useSelector((reduxState) => reduxState.account.accountLinked);
+    const isMobileLink = !!state && state.startsWith(MOBILE_STATE_PREFIX);
 
     useEffect(() => {
-        if (code && state) {
+        if (!isMobileLink) {
+            return;
+        }
+
+        const params = new URLSearchParams();
+
+        if (code) {
+            params.set('code', code);
+        }
+
+        if (state) {
+            params.set('state', state);
+        }
+
+        if (error) {
+            params.set('error', error);
+        }
+
+        // replace, not assign: the player must not be able to come back to a
+        // spent authorisation code with the browser's back button.
+        window.location.replace(`archonarena://patreon?${params.toString()}`);
+    }, [code, error, isMobileLink, state]);
+
+    useEffect(() => {
+        if (code && state && !isMobileLink) {
             linkPatreon({ code, state });
         }
-    }, [code, state, linkPatreon]);
+    }, [code, isMobileLink, state, linkPatreon]);
 
     useEffect(() => {
         if (!accountLinked) {
@@ -39,6 +80,10 @@ const Patreon = ({ code, state, error }) => {
         dispatch(accountActions.clearLinkStatus());
         navigate('/profile');
     }, [accountLinked, dispatch, navigate, t]);
+
+    if (isMobileLink) {
+        return <AlertPanel type='info' message={t('Returning you to the Archon Arena app…')} />;
+    }
 
     if (error) {
         return (
