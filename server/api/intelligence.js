@@ -3,6 +3,7 @@ const passport = require('passport');
 const { wrapAsync } = require('../util.js');
 const ArchonIntelligenceService = require('../services/membership/ArchonIntelligenceService');
 const TournamentLabService = require('../services/membership/TournamentLabService');
+const ReplayAnalysisService = require('../services/membership/ReplayAnalysisService');
 const AercAnalyticsService = require('../services/membership/AercAnalyticsService');
 const {
     requireCapability,
@@ -19,6 +20,7 @@ const { canUsePreview } = require('../services/membership/previews');
 const intelligence = new ArchonIntelligenceService();
 const tournamentLab = new TournamentLabService(undefined, intelligence);
 const preferences = new MemberPreferencesService();
+const replayAnalysis = new ReplayAnalysisService();
 const aerc = new AercAnalyticsService();
 
 /**
@@ -206,6 +208,33 @@ module.exports.init = function (server) {
             // `sets` echoes the filter, `bySet` is the breakdown - the same
             // pairing the player route uses.
             res.send({ success: true, days, sets, houses, summary, bySet });
+        })
+    );
+
+    /**
+     * ARCHON (N12): Replay Intelligence - the cross-game half of replay
+     * analysis, and the one place on the site that can answer "which house do I
+     * actually call, and how do I do when I call it".
+     *
+     * That question has no other source. As `ArchonIntelligenceService` says in
+     * its own header, the house a player chose on a given turn exists nowhere
+     * in a queryable column - only inside recorded board states - so every
+     * house figure elsewhere on the page is measured across decks CONTAINING a
+     * house rather than across turns that played it. This is the real one.
+     *
+     * Bounded by recordings parsed rather than by a date range: the work is
+     * proportional to how many are read, and each one is a JSON document.
+     */
+    server.get(
+        '/api/intelligence/replays',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.ADVANCED_REPLAYS),
+        wrapAsync(async (req, res) => {
+            const insights = await replayAnalysis.playerInsights(req.user.id, {
+                limit: req.query.limit
+            });
+
+            res.send({ success: true, ...insights });
         })
     );
 
