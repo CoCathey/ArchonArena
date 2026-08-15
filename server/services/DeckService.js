@@ -561,11 +561,13 @@ class DeckService {
                 filter += `AND ${this.mapColumn(filterObject.name)} = $${index++} `;
                 params.push(filterObject.value);
             } else if (filterObject.name === 'unchained') {
-                // ARCHON: the deck picker in an Unchained game must offer only
-                // Unchained decks, and every other game must offer none of
-                // them. getRandomDeckIdForUser has always applied this rule, so
-                // "roll a random deck" and "choose one from the list" disagreed
-                // about what was legal - the dice refused what the list offered.
+                // ARCHON: the Unchained set is playable only in an Unchained
+                // game and is the only thing playable there.
+                //
+                // The web picker expresses this by narrowing its expansion
+                // list; a client that filters by set id rather than by
+                // enumerating twenty expansions needs to say it in one flag,
+                // and getRandomDeckIdForUser already applies the same rule.
                 //
                 // Not parameterised because it is a constant, not input: the
                 // value only decides which side of the comparison to take.
