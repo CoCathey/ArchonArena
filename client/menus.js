@@ -5,6 +5,9 @@
  * @property {boolean} [showOnlyWhenLoggedIn] Whether or not this menu item only shows for logged in users
  * @property {boolean} [showOnlyWhenLoggedOut] Whether or not this menu item only shows for logged out users
  * @property {Permission} [permission] The permission required to see this menu item
+ * @property {boolean} [highlight] ARCHON (N12): render this item as a pill in
+ *   the top navigation rather than a plain link. For Archon+ only - it stops
+ *   being a signal if everything uses it.
  * @property {string} [capability] ARCHON (N12): a premium capability required to
  *   see this item. Checked against the resolved `user.capabilities` list, so an
  *   admin passes automatically. Prefer leaving premium entries VISIBLE and
@@ -27,6 +30,10 @@ export const LeftMenu = [
         showOnlyWhenLoggedIn: true,
         permission: 'canManageTournaments'
     },
+    // ARCHON (N12): Archon+ in the top navigation, for everyone. It was only
+    // reachable through a sidebar flyout and the profile dropdown, which is not
+    // findable by someone who does not already know membership exists.
+    { path: '/membership', title: 'Archon+', highlight: true },
     {
         title: 'Help',
         childItems: [

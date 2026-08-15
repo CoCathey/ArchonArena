@@ -54,32 +54,86 @@ export const TIERS = Object.freeze({
 /**
  * Does this user hold a capability?
  *
- * The admin override is NOT re-implemented here: an admin's `capabilities`
- * array already contains everything, because the server resolved it that way.
- * Adding `|| user.permissions.isAdmin` at call sites is exactly the scattered
- * special-casing the entitlement system exists to avoid, and it is the version
- * that eventually misses one.
+ * ## The client-side admin override
+ *
+ * An admin's `capabilities` array already contains everything, because the
+ * server resolved it that way - so in the normal case the array alone is
+ * enough. The explicit admin check below is a floor under that, for the case
+ * where the array is missing or stale:
+ *
+ *   - a session whose stored user predates this feature,
+ *   - a user object that reached redux by a path that does not carry
+ *     capabilities,
+ *   - anything that leaves `capabilities` undefined.
+ *
+ * In every one of those, an admin would otherwise see every premium panel
+ * locked - which is exactly the failure this system is supposed to make
+ * impossible, and it fails silently because a locked panel looks like a
+ * product decision rather than a bug.
+ *
+ * This is NOT the scattered `|| isAdmin` the entitlement system exists to
+ * avoid: `hasCapability` is the single function every client-side gate calls,
+ * so this is the same centralisation applied on this side of the wire. There
+ * is still exactly one admin check per side.
+ *
+ * `permissions.isAdmin` is preferred over `membership.isAdmin` as the signal
+ * because permissions have been on the client user object since long before
+ * memberships existed, so even a partial or stale user carries it.
+ *
+ * It grants nothing on its own. The API behind each panel enforces the same
+ * rule server-side, so a hand-edited client gets an empty panel, not data.
  *
  * @param {object} [user] the redux account user
  * @param {string} capability
  * @returns {boolean}
  */
 export function hasCapability(user, capability) {
-    return !!(user && Array.isArray(user.capabilities) && user.capabilities.includes(capability));
+    if (!user) {
+        return false;
+    }
+
+    if (isAdminUser(user)) {
+        return true;
+    }
+
+    return Array.isArray(user.capabilities) && user.capabilities.includes(capability);
 }
 
-/** The account's tier id, or 'free' for a logged-out or unknown user. */
+/** Whether the account is an administrator, by either signal the server sends. */
+export function isAdminUser(user) {
+    return !!(user && (user.permissions?.isAdmin || user.membership?.isAdmin));
+}
+
+/**
+ * The account's tier id, or 'free' for a logged-out or unknown user.
+ *
+ * An admin reads as the highest tier even when the server did not send a
+ * membership block, so the badge cannot disagree with what they can actually
+ * use.
+ */
 export function tierOf(user) {
+    if (user && !user.membership && isAdminUser(user)) {
+        return TIERS.VAULT_MASTER;
+    }
+
     return (user && user.membership && user.membership.tier) || TIERS.FREE;
 }
 
 /** Display name of the account's tier, e.g. 'Archon'. */
 export function tierNameOf(user) {
+    if (user && !user.membership && isAdminUser(user)) {
+        return 'Vault Master';
+    }
+
     return (user && user.membership && user.membership.tierName) || 'Free';
 }
 
 /** Whether the account is on any paid (or comped/admin) tier. */
 export function isPaidMember(user) {
+    if (isAdminUser(user)) {
+        return true;
+    }
+
     return !!(user && user.membership && user.membership.rank > 0);
 }
 

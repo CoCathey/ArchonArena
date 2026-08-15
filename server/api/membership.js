@@ -5,7 +5,13 @@ const { wrapAsync } = require('../util.js');
 const UserService = require('../services/UserService');
 const ConfigService = require('../services/ConfigService');
 const MembershipService = require('../services/membership/MembershipService');
-const { tierCatalog, tierById, TIER_IDS } = require('../services/membership/tiers');
+const { patreonService } = require('./patreon');
+const {
+    tierCatalog,
+    tierById,
+    tierFromPatreonMembership,
+    TIER_IDS
+} = require('../services/membership/tiers');
 const { CAPABILITY_CATALOG } = require('../services/membership/capabilities');
 const { entitlementsForRequest } = require('./requireCapability');
 
@@ -74,6 +80,98 @@ module.exports.init = function (server) {
                     lastSyncedAt: membership ? membership.lastSyncedAt : null
                 },
                 capabilities: entitlements.capabilities
+            });
+        })
+    );
+
+    /**
+     * ARCHON (N12): "does Patreon actually work?" in one call.
+     *
+     * Answering that used to mean reading three endpoints and inferring the
+     * rest, and the interesting failures are all invisible from the outside: a
+     * campaign id that never reached the container, a pledge Patreon reports
+     * under a tier title we do not recognise, a stored row that disagrees with
+     * what Patreon last said. This reports each stage of the chain separately
+     * so the broken one is obvious rather than deduced.
+     *
+     * Admin-only, and it reports the SECRET as a boolean - the whole point is
+     * to be safe to run on a live site and paste into a bug report.
+     */
+    server.get(
+        '/api/admin/patreon/diagnostics',
+        passport.authenticate('jwt', { session: false }),
+        requireAdmin,
+        wrapAsync(async (req, res) => {
+            const config = configService.getValue('patreon') || {};
+            const user = await userService.getFullUserByUsername(req.user.username);
+
+            const configured = {
+                enabled: !!config.enabled,
+                // Booleans, never the values.
+                hasClientId: !!config.clientId,
+                hasClientSecret: !!config.clientSecret,
+                callbackUrl: config.callbackUrl || null,
+                campaignId: config.campaignId || null,
+                campaignUrl: config.campaignUrl || null,
+                // Without a campaign id, a pledge to ANY creator counts here.
+                campaignScoped: !!config.campaignId,
+                tierLinks: Object.fromEntries(
+                    tierCatalog(config).map((tier) => [tier.id, tier.checkoutUrl])
+                ),
+                readyToLink: patreonService.isEnabled()
+            };
+
+            const account = {
+                linked: !!(user && user.patreon && user.patreon.access_token),
+                hasRefreshToken: !!(user && user.patreon && user.patreon.refresh_token)
+            };
+
+            // What Patreon says right now, and what we make of it. Only asked
+            // when there is a token to ask with.
+            let patreonSays = null;
+            let mapsToTier = null;
+
+            if (account.linked && patreonService.isEnabled()) {
+                const membership = await patreonService.getMembershipForUser(user);
+
+                patreonSays = {
+                    status: membership.status,
+                    tierTitles: (membership.tiers || []).map((tier) => tier.title),
+                    amountCents: membership.amountCents,
+                    lastChargeStatus: membership.lastChargeStatus
+                };
+                mapsToTier =
+                    membership.status === 'pledged'
+                        ? tierFromPatreonMembership(membership)
+                        : TIER_IDS.FREE;
+            }
+
+            const stored = await membershipService.getMembership(req.user.id);
+            const entitlements = entitlementsForRequest(req);
+
+            res.send({
+                success: true,
+                configured,
+                account,
+                patreonSays,
+                mapsToTier,
+                stored: stored
+                    ? {
+                          provider: stored.provider,
+                          tier: stored.tier,
+                          status: stored.status,
+                          expiresAt: stored.expiresAt,
+                          lastSyncedAt: stored.lastSyncedAt,
+                          grantedTier: stored.grantedTier,
+                          grantedUntil: stored.grantedUntil
+                      }
+                    : null,
+                effective: {
+                    tier: entitlements.tierId,
+                    source: entitlements.source,
+                    isAdmin: entitlements.isAdmin,
+                    capabilityCount: entitlements.capabilities.length
+                }
             });
         })
     );

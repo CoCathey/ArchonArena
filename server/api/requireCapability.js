@@ -40,6 +40,15 @@ function requireCapability(capability) {
             return res.status(401).send({ success: false, message: 'Unauthorized' });
         }
 
+        // A floor under the resolved entitlements. `entitlementsForRequest`
+        // already returns everything for an admin - via the token's capability
+        // list, or by re-resolving from permissions - but an admin being
+        // refused a premium endpoint is the one outcome this system must never
+        // produce, and the cost of checking twice is a property read.
+        if (req.user.permissions && req.user.permissions.isAdmin) {
+            return next();
+        }
+
         if (!can(entitlementsForRequest(req), capability)) {
             // 403 with the capability named, so the client can show the right
             // upgrade prompt rather than a generic error.

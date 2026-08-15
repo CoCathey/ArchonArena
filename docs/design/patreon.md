@@ -50,6 +50,69 @@ granted the supporter role here. The id is what scopes it to your campaign.
 To verify: log in, go to Profile → Integrations → Link Account, approve on Patreon, and
 you should land back on `/profile` with the row reading `Supporter - <your tier>`.
 
+## How to test it
+
+The awkward part: you probably cannot subscribe to your own campaign, so the
+tier mapping is the one stage you cannot fully exercise alone. Test the chain in
+stages instead - each one tells you which link is broken.
+
+**1. Did the configuration reach the app?**
+
+```sh
+curl -s https://archonarena.com/api/account/patreon/status
+```
+
+`{"enabled":true}` means the client id and secret are loaded. `false` means
+they stopped at the host - check `docker-compose.prod.yml` forwards them.
+
+`bash deploy/healthcheck.sh` covers the same ground and FAILS if credentials are
+set without a campaign id, which is the dangerous half-configured state.
+
+**2. Does the OAuth handshake work?** Link your own account: Profile ->
+Integrations -> Link Account, or the button on `/membership`. You do not need to
+be paying for this to prove something - a successful link with no pledge reports
+`linked`, which means the client id, secret, redirect URI and campaign scoping
+are all correct. A failure here is almost always the redirect URI not matching
+`callbackUrl` character for character.
+
+**3. What does Patreon actually say about you?** Signed in as an admin:
+
+```sh
+curl -s -H "Authorization: Bearer <your token>" \
+  https://archonarena.com/api/admin/patreon/diagnostics
+```
+
+This reports each stage separately - configuration (secrets as booleans, so it is
+safe to paste into a bug report), whether the account is linked, the raw status,
+tier titles and pledge amount Patreon returned, the tier we map that to, the row
+we stored, and the entitlement that came out. When a stage disagrees with the one
+before it, that is the broken link.
+
+**4. Does a tier actually unlock features?** Without waiting for a real patron,
+comp a tier to a SECOND, non-admin account:
+
+```sh
+curl -s -X POST -H "Authorization: Bearer <admin token>" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"testplayer","tier":"archon"}' \
+  https://archonarena.com/api/admin/memberships/grant
+```
+
+Sign in as that account: the premium panels unlock. Revoke with
+`{"username":"testplayer","tier":null}` and check they lock again. This exercises
+the entitlement system end to end but NOT the Patreon mapping - a comp is stored
+in different columns on purpose.
+
+Your own admin account is the wrong thing to test with: the override returns
+everything before any membership is read, so it can never show you what a paying
+member sees.
+
+**5. The tier mapping.** This needs a real pledge, from an account that is not
+yours - a friend, or a second Patreon account. The moment they link, step 3 shows
+their tier titles and what we mapped them to. Until then the mapping is covered
+by unit tests (`test/server/services/membership/patreonSync.spec.js`) against the
+titles and amounts in `tiers.js`, not against your live campaign.
+
 ## What was inherited, and what was wrong with it
 
 The Patreon integration came from The Crucible Online and had never been run against a

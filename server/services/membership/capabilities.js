@@ -56,99 +56,123 @@ const CAPABILITIES = {
 const CAPABILITY_CATALOG = {
     [CAPABILITIES.ELO_HISTORY]: {
         label: 'Full Elo history',
-        learn: 'See every rating change you have ever had, not just your current number.'
+        learn: 'See every rating change you have ever had, not just your current number.',
+        where: 'Archon Intelligence, and your profile'
     },
     [CAPABILITIES.EXPANDED_MATCH_HISTORY]: {
         label: 'Expanded match history',
-        learn: 'Go back through your whole match record instead of only recent games.'
+        learn: 'Go back through your whole match record instead of only recent games.',
+        where: 'Game History'
     },
     [CAPABILITIES.ADVANCED_PLAYER_STATS]: {
         label: 'Advanced player statistics',
-        learn: 'See how you perform by house, by opponent and over time.'
+        learn: 'See how you perform by house, by opponent and over time.',
+        where: 'Stats, and any player profile'
     },
     [CAPABILITIES.ADVANCED_DECK_STATS]: {
         label: 'Advanced deck statistics',
-        learn: 'See the real record, average keys and game length for each of your decks.'
+        learn: 'See the real record, average keys and game length for each of your decks.',
+        where: 'Stats → Your Decks'
     },
     [CAPABILITIES.PERFORMANCE_DASHBOARD]: {
         label: 'Performance dashboard',
-        learn: 'One page that shows whether you are actually improving.'
+        learn: 'One page that shows whether you are actually improving.',
+        where: 'Archon Intelligence'
     },
     [CAPABILITIES.PROFILE_COSMETICS]: {
         label: 'Profile customisation',
-        learn: 'Customise how your profile looks to other players.'
+        learn: 'Customise how your profile looks to other players.',
+        where: 'Profile → Appearance'
     },
     [CAPABILITIES.SUPPORTER_BADGE]: {
         label: 'Supporter badge',
-        learn: 'Show your support next to your name in the lobby and on your profile.'
+        learn: 'Show your support next to your name in the lobby and on your profile.',
+        where: 'Shown next to your name automatically'
     },
     [CAPABILITIES.HISTORICAL_STATS]: {
         label: 'Additional historical statistics',
-        learn: 'Look further back than the default window on every statistic.'
+        learn: 'Look further back than the default window on every statistic.',
+        where: 'Stats'
     },
     [CAPABILITIES.ARCHON_INTELLIGENCE]: {
         label: 'Archon Intelligence',
-        learn: 'Is this deck good, are you good with it, and how does it fare against the current meta?'
+        learn: 'Is this deck good, are you good with it, and how does it fare against the current meta?',
+        where: 'Archon+ → Archon Intelligence'
     },
     [CAPABILITIES.MATCHUP_ANALYTICS]: {
         label: 'Advanced matchup analytics',
-        learn: 'See which opposing houses you beat and which ones consistently beat you.'
+        learn: 'See which opposing houses you beat and which ones consistently beat you.',
+        where: 'Archon Intelligence → Your record by house'
     },
     [CAPABILITIES.DECK_COMPARISON]: {
         label: 'Deck comparison',
-        learn: 'Put your decks side by side on record, Elo and matchups.'
+        learn: 'Put your decks side by side on record, Elo and matchups.',
+        where: 'Archon+ → Tournament Lab'
     },
     [CAPABILITIES.PERSONAL_DECK_RANKINGS]: {
         label: 'Personal deck rankings',
-        learn: 'Rank your own decks by how they actually perform for you.'
+        learn: 'Rank your own decks by how they actually perform for you.',
+        where: 'Archon Intelligence → Deck Intelligence'
     },
     [CAPABILITIES.TOURNAMENT_LAB]: {
         label: 'Tournament Lab',
-        learn: 'Work out which of your decks to bring to an event, from your own results.'
+        learn: 'Work out which of your decks to bring to an event, from your own results.',
+        where: 'Archon+ → Tournament Lab'
     },
     [CAPABILITIES.ADVANCED_REPLAYS]: {
         label: 'Advanced replay',
-        learn: 'Walk a finished game turn by turn and find the point it was decided.'
+        learn: 'Walk a finished game turn by turn and find the point it was decided.',
+        where: 'Any finished game → Replay'
     },
     [CAPABILITIES.PRIVATE_LEAGUES]: {
         label: 'Private groups and leagues',
-        learn: 'Run an invite-only league for your playgroup.'
+        learn: 'Run an invite-only league for your playgroup.',
+        where: 'Community → Clubs'
     },
     [CAPABILITIES.CUSTOM_TOURNAMENTS]: {
         label: 'Custom tournaments',
-        learn: 'Run events with your own structure and rules.'
+        learn: 'Run events with your own structure and rules.',
+        where: 'Tournaments → Create'
     },
     [CAPABILITIES.ADVANCED_PERFORMANCE_DASHBOARD]: {
         label: 'Advanced performance dashboard',
-        learn: 'Track your results against what your rating predicted, over time.'
+        learn: 'Track your results against what your rating predicted, over time.',
+        where: 'Archon Intelligence → Player Intelligence'
     },
     [CAPABILITIES.META_ANALYTICS]: {
         label: 'Meta analytics',
-        learn: 'See what the field is actually playing and how it is performing.'
+        learn: 'See what the field is actually playing and how it is performing.',
+        where: 'Archon Intelligence → Meta Intelligence, and Stats'
     },
     [CAPABILITIES.EARLY_ACCESS]: {
         label: 'Early access',
-        learn: 'Use major new features before they are released to everyone.'
+        learn: 'Use major new features before they are released to everyone.',
+        where: 'Announced in News as features land'
     },
     [CAPABILITIES.EXPERIMENTAL_FEATURES]: {
         label: 'Experimental features',
-        learn: 'Try tools that are still being designed, and shape where they go.'
+        learn: 'Try tools that are still being designed, and shape where they go.',
+        where: 'Profile → Appearance, as they are released'
     },
     [CAPABILITIES.BETA_FEATURES]: {
         label: 'Beta features',
-        learn: 'Get new competitive tools while they are still in testing.'
+        learn: 'Get new competitive tools while they are still in testing.',
+        where: 'Announced in News'
     },
     [CAPABILITIES.ENHANCED_COSMETICS]: {
         label: 'Enhanced cosmetics',
-        learn: 'Additional profile and in-game customisation.'
+        learn: 'Additional profile and in-game customisation.',
+        where: 'Profile → Appearance'
     },
     [CAPABILITIES.ORGANIZER_TOOLS]: {
         label: 'Organiser tools',
-        learn: 'Extra capability for running events for other people.'
+        learn: 'Extra capability for running events for other people.',
+        where: 'Tournaments, when running an event'
     },
     [CAPABILITIES.PRIORITY_ACCESS]: {
         label: 'Priority access',
-        learn: 'First access to new competitive tools as they land.'
+        learn: 'First access to new competitive tools as they land.',
+        where: 'Announced in News'
     }
 };
 
