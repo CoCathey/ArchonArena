@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button as HeroButton, Spinner as HeroSpinner } from '@heroui/react';
 import { Formik } from 'formik';
 import { useTranslation } from 'react-i18next';
@@ -19,6 +19,7 @@ import { toBase64 } from '../../util.jsx';
 import BlankBg from '../../assets/img/bgs/blank.png';
 import MassMutationBg from '../../assets/img/bgs/massmutation.png';
 import AlertPanel from '../Site/AlertPanel';
+import { useSearchParams } from 'react-router-dom';
 
 /**
  * User profile settings
@@ -115,7 +116,25 @@ const Profile = ({ onSubmit, isLoading }) => {
     const [localBackground, setBackground] = useState(user?.settings.background);
     const [localCardSize, setCardSize] = useState(user?.settings.cardSize);
     const [customBg, setCustomBg] = useState(null);
-    const [activeSection, setActiveSection] = useState(ProfileSection.Account);
+    // ARCHON (N12): ?section=integrations opens that tab directly. Without it,
+    // "Manage your Patreon link" landed on the profile page's default tab and
+    // left the reader to find Integrations themselves - which is the same
+    // failure as the membership page being unreachable, one level down.
+    const [searchParams] = useSearchParams();
+    const requestedSection = String(searchParams.get('section') || '').toLowerCase();
+    const [activeSection, setActiveSection] = useState(() =>
+        Object.values(ProfileSection).includes(requestedSection)
+            ? requestedSection
+            : ProfileSection.Account
+    );
+
+    // A link to the same page with a different section still moves the tab -
+    // useState's initialiser only runs once.
+    useEffect(() => {
+        if (Object.values(ProfileSection).includes(requestedSection)) {
+            setActiveSection(requestedSection);
+        }
+    }, [requestedSection]);
 
     // ARCHON (N12): does this deployment have anything to show on Integrations?
     const { data: patreonStatus } = useGetPatreonStatusQuery();

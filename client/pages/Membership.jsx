@@ -116,9 +116,19 @@ const TierCard = ({ tier, capabilityCopy, currentTier, isAdmin, campaignUrl, onC
             <div className='mt-4 pt-3'>
                 {tier.priceUsd > 0 ? (
                     tier.checkoutUrl || campaignUrl ? (
-                        <HeroButton
-                            as='a'
-                            className='w-full'
+                        // ARCHON (N12): a real anchor, not <HeroButton as='a'>.
+                        // HeroUI's Button does not forward `href` - it renders a
+                        // <button>, so the tier buttons looked correct and did
+                        // nothing at all. Every other external link in this
+                        // codebase is a plain <a> for the same reason; this was
+                        // the only `as='a'` anywhere, and it was wrong.
+                        <a
+                            className={[
+                                'inline-flex h-9 w-full items-center justify-center rounded-md px-3 text-sm font-semibold transition',
+                                recommended
+                                    ? 'bg-amber-500 text-black hover:bg-amber-400'
+                                    : 'border border-border/70 bg-surface-secondary/60 text-foreground hover:bg-surface-secondary'
+                            ].join(' ')}
                             // Per-tier checkout when the reward id is
                             // configured, campaign page otherwise.
                             href={tier.checkoutUrl || campaignUrl}
@@ -128,12 +138,11 @@ const TierCard = ({ tier, capabilityCopy, currentTier, isAdmin, campaignUrl, onC
                             // account is linked, so remember that they went to
                             // pay and ask them to finish when they come back.
                             onClick={() => onChoose(tier.id)}
-                            variant={recommended ? 'primary' : 'tertiary'}
                         >
                             {isCurrent
                                 ? t('Manage on Patreon')
                                 : t('Choose {{tier}}', { tier: tier.name })}
-                        </HeroButton>
+                        </a>
                     ) : (
                         // No campaign configured yet: say so plainly rather than
                         // showing a button that goes nowhere.
@@ -549,7 +558,10 @@ const Membership = () => {
                                 })}
                             </span>
                         )}
-                        <Link className='text-xs text-accent hover:underline' to='/profile'>
+                        <Link
+                            className='text-xs text-accent hover:underline'
+                            to='/profile?section=integrations'
+                        >
                             {t('Manage your Patreon link')}
                         </Link>
                     </div>
