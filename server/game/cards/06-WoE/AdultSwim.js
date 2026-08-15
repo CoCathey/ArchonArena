@@ -1,5 +1,5 @@
 const Card = require('../../Card.js');
-const _ = require('underscore');
+const secureRandom = require('../../secureRandom');
 
 class AdultSwim extends Card {
     //Play: Put each creature with power 3 or lower on top of its owner's deck in a random order.
@@ -7,7 +7,9 @@ class AdultSwim extends Card {
         this.play({
             effect: "randomly put each creature with power 3 or lower on top of its owner's deck",
             gameAction: ability.actions.returnToDeck((context) => ({
-                target: _.shuffle(context.game.creaturesInPlay.filter((card) => card.power <= 3))
+                target: secureRandom.shuffle(
+                    context.game.creaturesInPlay.filter((card) => card.power <= 3)
+                )
             }))
         });
     }

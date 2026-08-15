@@ -1,5 +1,5 @@
-const _ = require('underscore');
 const Card = require('../../Card.js');
+const secureRandom = require('../../secureRandom');
 
 class ThreeSheetsToTheWind extends Card {
     // Play: Your opponent draws 3 cards, discards a random card from
@@ -19,7 +19,7 @@ class ThreeSheetsToTheWind extends Card {
                 })),
                 ability.actions.returnToDeck((context) => ({
                     target: context.player.opponent
-                        ? _.shuffle(context.player.opponent.hand).slice(0, 1)
+                        ? secureRandom.shuffle(context.player.opponent.hand).slice(0, 1)
                         : []
                 })),
                 ability.actions.purgeAtRandom((context) => ({

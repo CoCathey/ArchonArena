@@ -1,6 +1,6 @@
-const _ = require('underscore');
 const Card = require('../../Card.js');
 const EventRegistrar = require('../../eventregistrar.js');
+const secureRandom = require('../../secureRandom');
 
 class Plunder extends Card {
     // Play: Reveal a random unrevealed card from your opponent's
@@ -20,7 +20,7 @@ class Plunder extends Card {
             gameAction: ability.actions.reveal((context) => ({
                 location: 'hand',
                 chatMessage: true,
-                target: _.shuffle(
+                target: secureRandom.shuffle(
                     context.player.opponent.hand.filter(
                         (card) => !this.revealedCards.includes(card)
                     )

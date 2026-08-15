@@ -1,6 +1,5 @@
-const _ = require('underscore');
-
 const Card = require('../../Card.js');
+const secureRandom = require('../../secureRandom');
 
 class Jargogle extends Card {
     // Elusive.
@@ -51,7 +50,7 @@ class Jargogle extends Card {
                     })
                 }),
                 falseGameAction: ability.actions.archive((context) => ({
-                    target: _.sample(context.source.childCards)
+                    target: secureRandom.sample(context.source.childCards)
                 }))
             })
         });

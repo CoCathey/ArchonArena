@@ -1,5 +1,5 @@
 const AllPlayerPrompt = require('../allplayerprompt');
-const _ = require('underscore');
+const secureRandom = require('../../secureRandom');
 
 class FirstPlayerSelection extends AllPlayerPrompt {
     constructor(game) {
@@ -53,7 +53,7 @@ class FirstPlayerSelection extends AllPlayerPrompt {
 
     onCompleted() {
         if (!this.game.activePlayer) {
-            let allPlayersShuffled = _.shuffle(this.game.getPlayers());
+            let allPlayersShuffled = secureRandom.shuffle(this.game.getPlayers());
             this.game.activePlayer = allPlayersShuffled.shift();
             this.game.addMessage('{0} won the flip and is first player', this.game.activePlayer);
         }

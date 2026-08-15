@@ -21,9 +21,21 @@ describe('DeckService deck rules', function () {
         query.mockRestore();
     });
 
+    /**
+     * The roll takes two queries - count the eligible decks, then take the
+     * row at a cryptographically chosen offset - so the collection is sized
+     * first and the pick made in Node rather than by Postgres's `random()`.
+     * `owning(n)` stands in for a collection of n decks.
+     */
+    const owning = (total, row = { Id: 42 }) =>
+        query.mockResolvedValueOnce([{ Total: total }]).mockResolvedValueOnce([row]);
+
+    const countCall = () => query.mock.calls[0];
+    const fetchCall = () => query.mock.calls[1];
+
     describe('getRandomDeckIdForUser', function () {
         it('draws from all of a user own decks, ordered by chance', async function () {
-            query.mockResolvedValue([{ Id: 42 }]);
+            owning(5);
 
             const id = await service.getRandomDeckIdForUser(11, {
                 isAlliance: false,
@@ -32,47 +44,99 @@ describe('DeckService deck rules', function () {
 
             expect(id).toBe(42);
 
-            const [sql, params] = query.mock.calls[0];
-            expect(sql).toContain('ORDER BY random() LIMIT 1');
+            const [sql, params] = fetchCall();
+            expect(sql).toContain('ORDER BY d."Id" OFFSET $3 LIMIT 1');
             expect(sql).toContain('d."UserId" = $1');
             expect(sql).toContain('d."IsAlliance" = $2');
             expect(sql).toContain('e."ExpansionId" <> 601');
-            expect(params).toEqual([11, false]);
+            expect(params.slice(0, 2)).toEqual([11, false]);
+            expect(params[2]).toBeGreaterThanOrEqual(0);
+            expect(params[2]).toBeLessThan(5);
+        });
+
+        /**
+         * The one way a counted offset goes wrong: if the two queries disagree
+         * about what is eligible, the offset indexes into a set that is not the
+         * one that was measured - which either picks an ineligible deck or
+         * falls off the end and reports the user has none.
+         */
+        it('counts exactly the set it then reads from', async function () {
+            owning(9);
+
+            await service.getRandomDeckIdForUser(11, {
+                isAlliance: true,
+                sasMin: 60,
+                sasMax: 80
+            });
+
+            // The count has no ORDER BY, so its filter runs to the end.
+            const where = (sql) => {
+                const ordered = sql.indexOf('ORDER BY');
+
+                return sql.slice(sql.indexOf('WHERE'), ordered === -1 ? undefined : ordered).trim();
+            };
+
+            expect(where(countCall()[0])).toBe(where(fetchCall()[0]));
+            expect(where(fetchCall()[0])).toContain('ds."SasRating"');
+            expect(fetchCall()[1].slice(0, -1)).toEqual(countCall()[1]);
+        });
+
+        // Every deck must be reachable - including the first and the last,
+        // which an off-by-one in the offset is exactly what would lose.
+        it('can reach every deck in the collection', async function () {
+            const seen = new Set();
+
+            for (let roll = 0; roll < 300; roll++) {
+                query.mockClear();
+                owning(4);
+                await service.getRandomDeckIdForUser(11, {});
+                seen.add(fetchCall()[1].at(-1));
+            }
+
+            expect([...seen].sort()).toEqual([0, 1, 2, 3]);
         });
 
         it('restricts an unchained game to the unchained set', async function () {
+            owning(3);
+
             await service.getRandomDeckIdForUser(11, { isAlliance: false, unchainedOnly: true });
 
-            const [sql] = query.mock.calls[0];
+            const [sql] = fetchCall();
             expect(sql).toContain('e."ExpansionId" = 601');
             expect(sql).not.toContain('<> 601');
         });
 
         it('leaves alliance membership open when the game does', async function () {
+            owning(3);
+
             await service.getRandomDeckIdForUser(11, {});
 
-            const [sql, params] = query.mock.calls[0];
+            const [sql, params] = fetchCall();
             expect(sql).not.toContain('"IsAlliance"');
-            expect(params).toEqual([11]);
+            expect(params.slice(0, -1)).toEqual([11]);
         });
 
         // The SAS comparisons ride on the DeckSas join; NULL fails both, so a
         // deck DoK has not rated can never be rolled into a bounded game.
         it('applies a SAS bound to the roll', async function () {
+            owning(3);
+
             await service.getRandomDeckIdForUser(11, {
                 isAlliance: false,
                 sasMin: 60,
                 sasMax: 80
             });
 
-            const [sql, params] = query.mock.calls[0];
+            const [sql, params] = fetchCall();
             expect(sql).toContain('ds."SasRating" >= $3');
             expect(sql).toContain('ds."SasRating" <= $4');
-            expect(params).toEqual([11, false, 60, 80]);
+            expect(params.slice(0, -1)).toEqual([11, false, 60, 80]);
         });
 
         it('reports no deck as null, both for empty results and for errors', async function () {
+            // Nothing eligible: the count answers zero and no row is read.
             expect(await service.getRandomDeckIdForUser(11, {})).toBeNull();
+            expect(query).toHaveBeenCalledTimes(1);
 
             query.mockRejectedValue(new Error('db down'));
             expect(await service.getRandomDeckIdForUser(11, {})).toBeNull();

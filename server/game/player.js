@@ -7,6 +7,7 @@ const ClockSelector = require('./Clocks/ClockSelector');
 const PlayableLocation = require('./playablelocation');
 const PlayerPromptState = require('./playerpromptstate');
 const { EVENTS } = require('./Events/types');
+const secureRandom = require('./secureRandom');
 
 class Player extends GameObject {
     constructor(id, user, owner, game, clockdetails) {
@@ -231,7 +232,7 @@ class Player extends GameObject {
      * Shuffles the deck, emitting an event and displaying a message in chat
      */
     shuffleDeck(shuffledDiscardIntoDeck = false) {
-        this.deck = _.shuffle(this.deck);
+        this.deck = secureRandom.shuffle(this.deck);
         if (this.isTopCardOfDeckVisible() && this.deck.length > 0) {
             this.addTopCardOfDeckVisibleMessage();
         }

@@ -1,5 +1,5 @@
-const _ = require('underscore');
 const Card = require('../../Card.js');
+const secureRandom = require('../../secureRandom');
 
 function amountForEvents(events, controller) {
     return events.reduce(
@@ -58,7 +58,7 @@ class BarterAndGames extends Card {
             gameAction: ability.actions.reveal((context) => ({
                 location: locationFromContext(context),
                 chatMessage: true,
-                target: _.shuffle(zoneFromContext(context)).slice(0, 1)
+                target: secureRandom.shuffle(zoneFromContext(context)).slice(0, 1)
             })),
             effect: 'reveal a card',
             then: (preThenContext) => ({
@@ -86,7 +86,7 @@ class BarterAndGames extends Card {
                 gameAction: ability.actions.reveal((context) => ({
                     location: locationFromContext(context),
                     chatMessage: true,
-                    target: _.shuffle(zoneFromContext(context)).slice(0, 1)
+                    target: secureRandom.shuffle(zoneFromContext(context)).slice(0, 1)
                 })),
                 then: (preThenContext) => ({
                     alwaysTriggers: true,
