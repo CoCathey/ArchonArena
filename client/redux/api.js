@@ -304,6 +304,16 @@ export const api = createApi({
             },
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
+        // ARCHON: the same record read in AERC terms. One request draws the
+        // whole panel - the bands, the findings and the meta profile all share
+        // the trait and the set filter, and splitting them would make the
+        // panels disagree while they arrived.
+        getAercIntelligence: builder.query({
+            query: ({ trait = 'amberControl', sets = [], days = 30 } = {}) =>
+                `/intelligence/aerc?trait=${encodeURIComponent(trait)}&days=${days}` +
+                setsParam(sets, '&'),
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
         getTournamentLab: builder.query({
             query: (arg = []) => {
                 const {
@@ -1150,6 +1160,7 @@ export const {
     useGetDeckIntelligenceQuery,
     useGetPlayerIntelligenceQuery,
     useGetMetaIntelligenceQuery,
+    useGetAercIntelligenceQuery,
     useGetTournamentLabQuery,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,

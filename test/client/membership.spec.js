@@ -108,4 +108,37 @@ describe('client membership helpers', function () {
             ).toBe(false);
         });
     });
+
+    /**
+     * ARCHON: the client's capability list is a hand-maintained copy of the
+     * server's, and nothing was checking that the copy was current.
+     *
+     * The failure mode is silent and expensive: a capability added on the
+     * server gates the API correctly, but `hasCapability` on the client returns
+     * false for an id it has never heard of, so every subscriber who is
+     * entitled to the feature sees it locked. No error, no log line - the
+     * feature is simply invisible to the people paying for it. That happened
+     * while adding AERC analysis, and this is what would have caught it.
+     */
+    describe('the two capability lists', function () {
+        const serverCapabilities = require('../../server/services/membership/capabilities');
+
+        it('match the server, id for id', function () {
+            const mine = Object.entries(CAPABILITIES).sort();
+            const theirs = Object.entries(serverCapabilities.CAPABILITIES).sort();
+
+            expect(mine).toEqual(theirs);
+        });
+
+        // A capability the client can name but the catalogue cannot describe
+        // renders as a blank row on the membership page.
+        it('are all described in the catalogue', function () {
+            for (const capability of Object.values(CAPABILITIES)) {
+                expect(
+                    serverCapabilities.CAPABILITY_CATALOG[capability],
+                    `no catalogue entry for ${capability}`
+                ).toBeTruthy();
+            }
+        });
+    });
 });
