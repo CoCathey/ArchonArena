@@ -16,7 +16,9 @@ import { unregisterPush } from '../../src/push';
 import { closeGameSocket } from '../../src/net/gameSocket';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
-import { colors, spacing } from '../../src/theme';
+import { TIER_COLORS } from '../../src/membership/capabilities';
+import { currentTier, currentTierName, isAdmin, isMember } from '../../src/membership/entitlements';
+import { colors, radius, spacing } from '../../src/theme';
 import { Button, Card, ErrorBanner } from '../../src/ui/primitives';
 
 function SettingRow(props: {
@@ -45,6 +47,11 @@ export default function ProfileScreen() {
     const user = useAuthStore((state) => state.user);
     const groupHandByHouse = useSettingsStore((state) => state.groupHandByHouse);
     const setGroupHandByHouse = useSettingsStore((state) => state.setGroupHandByHouse);
+
+    const tier = currentTier(user);
+    const tierName = currentTierName(user) ?? 'Free';
+    const admin = isAdmin(user);
+    const member = isMember(user);
 
     const [busy, setBusy] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -208,6 +215,57 @@ export default function ProfileScreen() {
                 {notice ? <Text style={styles.notice}>{notice}</Text> : null}
             </Card>
 
+            {/* ARCHON (N12): Archon+ status and the way in. High on the screen
+                because "which tier am I on, and where do I manage it" is the
+                one line a member opens Profile for — the same mistake the web
+                membership page made by putting it at the bottom. */}
+            <Card style={{ marginBottom: spacing.md }}>
+                <View style={styles.membershipRow}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.sectionTitle}>Archon+</Text>
+                        <View style={styles.membershipStatus}>
+                            <View
+                                style={[
+                                    styles.tierPill,
+                                    { borderColor: TIER_COLORS[tier] ?? colors.border }
+                                ]}
+                            >
+                                <Text
+                                    style={[
+                                        styles.tierPillText,
+                                        { color: TIER_COLORS[tier] ?? colors.textDim }
+                                    ]}
+                                >
+                                    {admin ? `${tierName} · admin` : tierName}
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+                    <Button
+                        small
+                        variant='secondary'
+                        title={member ? 'Manage' : 'What you get'}
+                        onPress={() => router.push('/membership')}
+                    />
+                </View>
+
+                <View style={styles.linkRow}>
+                    <Pressable onPress={() => router.push('/intelligence')} style={styles.linkItem}>
+                        <Text style={styles.linkText}>Archon Intelligence</Text>
+                        <Text style={styles.linkHint}>
+                            Is this deck good, are you good with it, and how does it fare?
+                        </Text>
+                    </Pressable>
+                    <Pressable
+                        onPress={() => router.push('/tournament-lab')}
+                        style={styles.linkItem}
+                    >
+                        <Text style={styles.linkText}>Tournament Lab</Text>
+                        <Text style={styles.linkHint}>Which of your decks should you bring?</Text>
+                    </Pressable>
+                </View>
+            </Card>
+
             <Card style={{ marginBottom: spacing.md }}>
                 <Text style={styles.sectionTitle}>Game</Text>
                 <SettingRow
@@ -264,6 +322,47 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: colors.bg
+    },
+    membershipRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.md
+    },
+    membershipStatus: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm
+    },
+    tierPill: {
+        alignSelf: 'flex-start',
+        borderWidth: 1,
+        borderRadius: radius.pill,
+        paddingHorizontal: spacing.md,
+        paddingVertical: 2
+    },
+    tierPillText: {
+        fontSize: 12,
+        fontWeight: '700'
+    },
+    linkRow: {
+        marginTop: spacing.md,
+        borderTopWidth: 1,
+        borderTopColor: colors.border,
+        paddingTop: spacing.sm,
+        gap: spacing.sm
+    },
+    linkItem: {
+        paddingVertical: 4
+    },
+    linkText: {
+        color: colors.accent,
+        fontSize: 14,
+        fontWeight: '600'
+    },
+    linkHint: {
+        color: colors.textFaint,
+        fontSize: 11,
+        marginTop: 1
     },
     identityRow: {
         flexDirection: 'row',

@@ -120,7 +120,7 @@ describe('client membership helpers', function () {
      * feature is simply invisible to the people paying for it. That happened
      * while adding AERC analysis, and this is what would have caught it.
      */
-    describe('the two capability lists', function () {
+    describe('the capability lists', function () {
         const serverCapabilities = require('../../server/services/membership/capabilities');
 
         it('match the server, id for id', function () {
@@ -128,6 +128,20 @@ describe('client membership helpers', function () {
             const theirs = Object.entries(serverCapabilities.CAPABILITIES).sort();
 
             expect(mine).toEqual(theirs);
+        });
+
+        /**
+         * The phone keeps a third copy, and it drifted the same day this test
+         * was written: the mobile membership screens shipped without
+         * `aerc_analytics`, so a subscriber's phone would have shown the
+         * feature locked while the web showed it open. Same silent failure,
+         * one more copy - so the pin covers it too.
+         */
+        it('match the mobile app, id for id', async function () {
+            const mobile = await import('../../mobile/src/membership/capabilities.ts');
+            const theirs = Object.entries(serverCapabilities.CAPABILITIES).sort();
+
+            expect(Object.entries(mobile.CAPABILITIES).sort()).toEqual(theirs);
         });
 
         // A capability the client can name but the catalogue cannot describe

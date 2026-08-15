@@ -16,6 +16,14 @@ const membershipService = new MembershipService();
 const STATE_COOKIE = 'aa_patreon_state';
 
 /**
+ * ARCHON (N12): where the web callback sends a phone-app link back to.
+ *
+ * Matches `expo.scheme` in mobile/app.json. Patreon only ever redirects to the
+ * website, so the website is what forwards it to the app.
+ */
+const MOBILE_DEEP_LINK = 'archonarena://patreon';
+
+/**
  * ARCHON (N12): Patreon account linking.
  *
  * GET  /api/account/patreon/status     -> is it configured, and where is the
@@ -81,7 +89,11 @@ module.exports.init = function (server) {
                 return res.send({ success: false, message: 'Patreon linking is not enabled' });
             }
 
-            const authRequest = patreonService.createAuthRequest();
+            // ARCHON (N12): the phone app has no cookie jar. It authenticates
+            // with a bearer token and completes the link from a fresh process
+            // after a system browser hop, so the state has to travel with it.
+            const mobile = !!req.body && req.body.mobile === true;
+            const authRequest = patreonService.createAuthRequest({ mobile });
 
             const stateToken = jwt.sign(
                 { state: authRequest.state, linkUserId: req.user.id },
@@ -99,7 +111,17 @@ module.exports.init = function (server) {
                 maxAge: 10 * 60 * 1000
             });
 
-            res.send({ success: true, url: authRequest.url });
+            res.send({
+                success: true,
+                url: authRequest.url,
+                // Returned only to the app. It is the same signed value the
+                // cookie carries and gives away nothing extra: it is pinned to
+                // this account, expires in ten minutes, and is verified against
+                // the state Patreon echoes back. A browser client ignores it
+                // and keeps using the cookie.
+                stateToken: mobile ? stateToken : undefined,
+                deepLink: mobile ? MOBILE_DEEP_LINK : undefined
+            });
         })
     );
 
@@ -115,7 +137,11 @@ module.exports.init = function (server) {
                 return res.send({ success: false, message: 'Code is required' });
             }
 
-            const stateToken = req.cookies && req.cookies[STATE_COOKIE];
+            // Cookie first, body second. The website has a cookie; the phone
+            // app does not and sends back the token it was handed. Both are the
+            // same signed value and go through the same verification, so this
+            // is a transport difference rather than a second trust path.
+            const stateToken = (req.cookies && req.cookies[STATE_COOKIE]) || req.body.stateToken;
 
             // One shot: the state is consumed whether or not it checks out, so
             // a failed attempt cannot be replayed against the same cookie.

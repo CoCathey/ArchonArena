@@ -15,7 +15,15 @@ import type {
     PlayerStatsResult,
     RefreshToken,
     ShortCard,
-    UserDetails
+    UserDetails,
+    DeckIntelligenceResult,
+    MembershipCatalogResult,
+    MetaIntelligenceResult,
+    MyMembershipResult,
+    PatreonLinkStartResult,
+    PatreonStatusResult,
+    PlayerIntelligenceResult,
+    TournamentLabResult
 } from './types';
 
 /** Abort REST calls that hang (common on flaky mobile networks). */
@@ -497,4 +505,90 @@ export async function fetchMatchHistory() {
 
 export async function fetchGameRating(gameId: string) {
     return apiFetch<GameRatingResult>(`/api/games/${encodeURIComponent(gameId)}/rating`);
+}
+
+// ---- Archon+ membership (N12) ----
+
+/**
+ * The tier catalogue: what each tier includes, what it costs, and where it can
+ * be bought. Public, because it is a price list.
+ *
+ * Note what the app does with `checkoutUrl` and `priceUsd` is a platform
+ * decision, not a data one — see membership/storefront.ts. The catalogue is
+ * fetched the same way everywhere; iOS simply does not render the money.
+ */
+export async function fetchMembershipCatalog() {
+    return rawFetch<MembershipCatalogResult>('/api/membership/catalog');
+}
+
+/** The signed-in account's own tier and capability list. */
+export async function fetchMyMembership() {
+    return apiFetch<MyMembershipResult>('/api/membership/me');
+}
+
+/** Whether Patreon linking is configured at all. Drives whether any of it shows. */
+export async function fetchPatreonStatus() {
+    return rawFetch<PatreonStatusResult>('/api/account/patreon/status');
+}
+
+/**
+ * Begin an account link. `mobile: true` asks the server to mark the OAuth state
+ * so the website forwards the callback to the app, and to return the signed
+ * state token in the body — the app has no cookie jar to keep it in.
+ */
+export async function startPatreonLink() {
+    return apiFetch<PatreonLinkStartResult>('/api/account/patreon/link/start', {
+        method: 'POST',
+        body: { mobile: true }
+    });
+}
+
+export async function linkPatreon(params: { code: string; state: string; stateToken?: string }) {
+    return apiFetch<ApiResponse & { status?: string }>('/api/account/linkPatreon', {
+        method: 'POST',
+        body: params
+    });
+}
+
+export async function unlinkPatreon() {
+    return apiFetch<ApiResponse>('/api/account/unlinkPatreon', { method: 'POST' });
+}
+
+// ---- Archon Intelligence ----
+
+/**
+ * The player payload. Gated per section server-side, so it is worth requesting
+ * whenever the account holds ANY of its capabilities — asking only when the
+ * highest one is held is what used to leave a Supporter without the Elo history
+ * they had paid for. `locked` names the sections that were withheld.
+ */
+export async function fetchPlayerIntelligence(sets: number[] = []) {
+    return apiFetch<PlayerIntelligenceResult>(`/api/intelligence/player${setsQuery(sets)}`);
+}
+
+/** One deck, from the caller's own games. Only ever their own decks. */
+/**
+ * A set filter as a query string. Empty means every set — and that is NOT the
+ * same as sending an empty filter, which the server would read as "no sets at
+ * all", so the parameter is omitted rather than sent blank.
+ */
+function setsQuery(sets: number[]): string {
+    return sets.length ? `?sets=${sets.join(',')}` : '';
+}
+
+export async function fetchDeckIntelligence(deckId: number) {
+    return apiFetch<DeckIntelligenceResult>(`/api/intelligence/deck/${deckId}`);
+}
+
+export async function fetchMetaIntelligence(days = 30, sets: number[] = []) {
+    const query = sets.length ? `&sets=${sets.join(',')}` : '';
+
+    return apiFetch<MetaIntelligenceResult>(`/api/intelligence/meta?days=${days}${query}`);
+}
+
+/** Compare up to four of your own decks. No decks selected still returns candidates. */
+export async function fetchTournamentLab(deckIds: number[] = []) {
+    const query = deckIds.length ? `?decks=${deckIds.join(',')}` : '';
+
+    return apiFetch<TournamentLabResult>(`/api/intelligence/tournament-lab${query}`);
 }
