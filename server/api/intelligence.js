@@ -5,6 +5,7 @@ const ArchonIntelligenceService = require('../services/membership/ArchonIntellig
 const TournamentLabService = require('../services/membership/TournamentLabService');
 const { requireCapability, requireAnyCapability, sectionsFor } = require('./requireCapability');
 const { CAPABILITIES } = require('../services/membership/capabilities');
+const { parseSets } = require('../services/membership/setFilter');
 
 const intelligence = new ArchonIntelligenceService();
 const tournamentLab = new TournamentLabService(undefined, intelligence);
@@ -24,6 +25,12 @@ const tournamentLab = new TournamentLabService(undefined, intelligence);
  * games unless the deck is theirs. There is no route here that lets one player
  * read another's per-deck record - that would be a privacy change wearing a
  * premium feature's clothes.
+ *
+ * Sets: every route that aggregates takes `?sets=800,874` - a comma-separated
+ * list of set codes, the same numbers an event stores in AllowedSets and the
+ * same ones the client's expansion constants use. Absent or empty means every
+ * set. Junk entries are dropped rather than 400'd: a narrowing filter arriving
+ * malformed should show more than the caller asked for, never fail the page.
  */
 module.exports.init = function (server) {
     server.get(
@@ -73,7 +80,10 @@ module.exports.init = function (server) {
         vsExpectation: CAPABILITIES.PERFORMANCE_DASHBOARD,
         // Archon
         rankings: CAPABILITIES.PERSONAL_DECK_RANKINGS,
-        byHouse: CAPABILITIES.MATCHUP_ANALYTICS
+        byHouse: CAPABILITIES.MATCHUP_ANALYTICS,
+        // The set counterpart of byHouse - same shape, same question asked of a
+        // different dimension - so it is sold with it rather than separately.
+        bySet: CAPABILITIES.MATCHUP_ANALYTICS
     };
 
     server.get(
@@ -81,13 +91,22 @@ module.exports.init = function (server) {
         passport.authenticate('jwt', { session: false }),
         requireAnyCapability(Object.values(PLAYER_SECTIONS)),
         wrapAsync(async (req, res) => {
+            const sets = parseSets(req.query.sets);
             const { allowed, locked } = sectionsFor(req, PLAYER_SECTIONS);
 
             const producers = {
+                // Not set-filtered, deliberately: a rating is one number across
+                // every set, so narrowing the series would draw a line with the
+                // games that moved it missing from underneath it.
                 ratingHistory: () => intelligence.playerRatingHistory(req.user.id, { limit: 500 }),
-                vsExpectation: () => intelligence.playerVsExpectation(req.user.id, {}),
-                rankings: () => intelligence.playerDeckRankings(req.user.id, {}),
-                byHouse: () => intelligence.playerByOwnHouse(req.user.id)
+                vsExpectation: () => intelligence.playerVsExpectation(req.user.id, { sets }),
+                rankings: () => intelligence.playerDeckRankings(req.user.id, { sets }),
+                byHouse: () => intelligence.playerByOwnHouse(req.user.id, { sets }),
+                // Also unfiltered, for the opposite reason: this is the table
+                // the filter is chosen FROM, so narrowing it to the current
+                // selection would collapse it to one row and hide the
+                // comparison that makes the filter worth setting.
+                bySet: () => intelligence.playerBySet(req.user.id)
             };
 
             const results = await Promise.all(allowed.map((section) => producers[section]()));
@@ -96,8 +115,9 @@ module.exports.init = function (server) {
             );
 
             // `locked` tells the client which panels to render as upgrade
-            // prompts rather than as missing.
-            res.send({ success: true, ...payload, locked });
+            // prompts rather than as missing. `sets` echoes the filter back so
+            // the client can tell "no filter" from "filter returned nothing".
+            res.send({ success: true, sets, ...payload, locked });
         })
     );
 
@@ -107,13 +127,18 @@ module.exports.init = function (server) {
         requireCapability(CAPABILITIES.META_ANALYTICS),
         wrapAsync(async (req, res) => {
             const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+            const sets = parseSets(req.query.sets);
 
-            const [houses, summary] = await Promise.all([
-                intelligence.metaHouses({ days }),
-                intelligence.metaSummary({ days })
+            const [houses, summary, bySet] = await Promise.all([
+                intelligence.metaHouses({ days, sets }),
+                intelligence.metaSummary({ days, sets }),
+                // Also unfiltered: the set table is the map, not the territory.
+                intelligence.metaSets({ days })
             ]);
 
-            res.send({ success: true, days, houses, summary });
+            // `sets` echoes the filter, `bySet` is the breakdown - the same
+            // pairing the player route uses.
+            res.send({ success: true, days, sets, houses, summary, bySet });
         })
     );
 
@@ -130,7 +155,13 @@ module.exports.init = function (server) {
                 // an easy way to make the database do a lot of work per request.
                 .slice(0, 8);
 
-            const comparison = await tournamentLab.compare(req.user.id, deckIds);
+            // `tournament` scopes to a real event and wins over `sets`; the
+            // service reads the event's own AllowedSets rather than trusting
+            // a list the caller assembled.
+            const comparison = await tournamentLab.compare(req.user.id, deckIds, {
+                sets: parseSets(req.query.sets),
+                tournamentId: req.query.tournament || null
+            });
 
             res.send({ success: true, ...comparison });
         })

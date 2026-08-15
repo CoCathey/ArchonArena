@@ -1,4 +1,12 @@
 const logger = require('../../log');
+const {
+    parseSets,
+    setPredicate,
+    SET_COLUMNS,
+    SET_JOIN,
+    SET_GROUP_BY,
+    asSet
+} = require('./setFilter');
 
 /**
  * ARCHON (N12): Archon Intelligence - the analytics behind the Archon tier.
@@ -28,6 +36,21 @@ const logger = require('../../log');
  *   opposing house         opponent's GamePlayers -> Decks -> DeckHouses
  *   over time              RatingHistory."CreatedAt" ordered series
  *   meta prevalence        DeckHouses across all finished games in a window
+ *   set                    Decks."ExpansionId" -> Expansions (see below)
+ *
+ * ## Sets
+ *
+ * Every figure here can be narrowed to a set, and several are also reported
+ * broken down BY set, because in KeyForge the set is not a cosmetic label - a
+ * deck belongs to exactly one, houses are not evenly distributed across them,
+ * and events routinely restrict which ones may be brought. A house win rate
+ * averaged over every set that has ever existed answers a question nobody is
+ * asking; "how does Untamed do in Æmber Skies" is the real one.
+ *
+ * A deck's own record is deliberately NOT set-filterable: a deck IS one set, so
+ * the filter would either be a no-op or empty the panel. What a deck gets
+ * instead is `byOpposingSet` - how it fares against decks from each set - which
+ * is the per-deck question the set dimension actually answers.
  *
  * What is NOT, and why:
  *
@@ -111,6 +134,8 @@ class ArchonIntelligenceService {
             playerFilter = ` AND gp."PlayerId" = $${params.length}`;
         }
 
+        // The deck's own set travels with its record: a deck belongs to exactly
+        // one, and every screen that shows a deck wants to say which.
         const rows = await this.safeQuery(
             'SELECT ' +
                 '  COUNT(*)::int AS "games", ' +
@@ -120,22 +145,27 @@ class ArchonIntelligenceService {
                 '  AVG(gp."Turn")::float AS "avgTurns", ' +
                 '  AVG(EXTRACT(EPOCH FROM (g."FinishedAt" - g."StartedAt")))::float AS "avgSeconds", ' +
                 '  MIN(g."FinishedAt") AS "firstPlayed", ' +
-                '  MAX(g."FinishedAt") AS "lastPlayed" ' +
+                '  MAX(g."FinishedAt") AS "lastPlayed", ' +
+                `  ${SET_COLUMNS} ` +
                 'FROM "GamePlayers" gp ' +
                 'JOIN "Games" g ON g."Id" = gp."GameId" ' +
-                `WHERE gp."DeckId" = $1 AND ${DECIDED}${playerFilter}`,
+                'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                SET_JOIN('d') +
+                ` WHERE gp."DeckId" = $1 AND ${DECIDED}${playerFilter} ` +
+                `GROUP BY ${SET_GROUP_BY}`,
             params,
             'deckOverview'
         );
 
         if (!rows || !rows.length || !rows[0].games) {
-            return { games: 0, wins: 0, losses: 0, winRate: null, available: false };
+            return { games: 0, wins: 0, losses: 0, winRate: null, set: null, available: false };
         }
 
         const row = rows[0];
 
         return {
             available: true,
+            set: asSet(row),
             games: row.games,
             wins: row.wins,
             losses: row.games - row.wins,
@@ -251,6 +281,58 @@ class ArchonIntelligenceService {
     }
 
     /**
+     * Record split by the SET the opposing deck came from.
+     *
+     * The per-deck counterpart to the opposing-house table, and unlike that one
+     * the counts here sum to the game count rather than three times it: a deck
+     * has three houses but exactly one set.
+     *
+     * This is the per-deck question the set dimension actually answers. A deck
+     * that is 70% against the older sets and 40% against the newest one is
+     * telling its owner something specific about what to bring, and an average
+     * over both hides it.
+     */
+    async deckByOpposingSet(deckId, { userId = null } = {}) {
+        const params = [deckId];
+        let playerFilter = '';
+
+        if (userId) {
+            params.push(userId);
+            playerFilter = ` AND gp."PlayerId" = $${params.length}`;
+        }
+
+        const rows = await this.safeQuery(
+            `SELECT ${SET_COLUMNS}, ` +
+                '  COUNT(*)::int AS "games", ' +
+                '  COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId")::int AS "wins" ' +
+                'FROM "GamePlayers" gp ' +
+                'JOIN "Games" g ON g."Id" = gp."GameId" ' +
+                'JOIN "GamePlayers" ogp ON ogp."GameId" = gp."GameId" AND ogp."PlayerId" <> gp."PlayerId" ' +
+                'JOIN "Decks" od ON od."Id" = ogp."DeckId" ' +
+                SET_JOIN('od') +
+                ` WHERE gp."DeckId" = $1 AND ${DECIDED}${playerFilter} ` +
+                `GROUP BY ${SET_GROUP_BY} ORDER BY "games" DESC`,
+            params,
+            'deckByOpposingSet'
+        );
+
+        if (!rows || !rows.length) {
+            return { available: false, rows: [] };
+        }
+
+        return {
+            available: true,
+            rows: rows.map((row) => ({
+                set: asSet(row),
+                games: row.games,
+                wins: row.wins,
+                losses: row.games - row.wins,
+                winRate: row.games ? row.wins / row.games : null
+            }))
+        };
+    }
+
+    /**
      * Going first vs second.
      *
      * Real only for games played after migration 62 added
@@ -327,24 +409,36 @@ class ArchonIntelligenceService {
      * Ordered by win rate but carrying the game count, because a 100% win rate
      * over two games is not a ranking and the UI needs to be able to say so.
      */
-    async playerDeckRankings(userId, { minGames = 1, limit = 100 } = {}) {
+    async playerDeckRankings(userId, { minGames = 1, limit = 100, sets = [] } = {}) {
+        const params = [userId];
+        // Narrowing to a set is how a player asks the question they actually
+        // have before an event: not "which of my decks is best" but "which of
+        // the ones I am allowed to bring is best".
+        const setFilter = setPredicate(parseSets(sets), params, 'd');
+
+        params.push(Math.max(1, Number(minGames) || 1));
+        const minGamesParam = params.length;
+        params.push(Math.min(Number(limit) || 100, 500));
+
         const rows = await this.safeQuery(
             'SELECT d."Id" AS "deckId", d."Name" AS "deckName", d."Uuid" AS "uuid", ' +
                 '  COUNT(*)::int AS "games", ' +
                 '  COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId")::int AS "wins", ' +
                 '  AVG(gp."Keys")::float AS "avgKeys", ' +
                 '  MAX(g."FinishedAt") AS "lastPlayed", ' +
-                '  ds."SasRating" AS "sas" ' +
+                '  ds."SasRating" AS "sas", ' +
+                `  ${SET_COLUMNS} ` +
                 'FROM "GamePlayers" gp ' +
                 'JOIN "Games" g ON g."Id" = gp."GameId" ' +
                 'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
-                'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
-                `WHERE gp."PlayerId" = $1 AND ${DECIDED} ` +
-                'GROUP BY d."Id", d."Name", d."Uuid", ds."SasRating" ' +
-                'HAVING COUNT(*) >= $2 ' +
+                SET_JOIN('d') +
+                ' LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                `WHERE gp."PlayerId" = $1 AND ${DECIDED}${setFilter} ` +
+                `GROUP BY d."Id", d."Name", d."Uuid", ds."SasRating", ${SET_GROUP_BY} ` +
+                `HAVING COUNT(*) >= $${minGamesParam} ` +
                 'ORDER BY (COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId"))::float / COUNT(*) DESC, ' +
-                '  COUNT(*) DESC LIMIT $3',
-            [userId, Math.max(1, Number(minGames) || 1), Math.min(Number(limit) || 100, 500)],
+                `  COUNT(*) DESC LIMIT $${params.length}`,
+            params,
             'playerDeckRankings'
         );
 
@@ -356,6 +450,7 @@ class ArchonIntelligenceService {
             deckId: row.deckId,
             deckName: row.deckName,
             uuid: row.uuid,
+            set: asSet(row),
             games: row.games,
             wins: row.wins,
             losses: row.games - row.wins,
@@ -363,6 +458,53 @@ class ArchonIntelligenceService {
             avgKeysAtEnd: row.avgKeys,
             lastPlayed: row.lastPlayed,
             sas: row.sas
+        }));
+    }
+
+    /**
+     * The player's record broken down by the set their deck came from.
+     *
+     * The set counterpart to `playerByOwnHouse`, and a cleaner number than that
+     * one: a deck has one set, so these rows sum to the player's actual game
+     * count and the percentages are shares of real games rather than of slots.
+     *
+     * It answers "which sets do I actually play well" - which is a different
+     * and more actionable question than which decks, because a player can go
+     * and acquire another deck from a set that suits them.
+     */
+    async playerBySet(userId) {
+        const rows = await this.safeQuery(
+            `SELECT ${SET_COLUMNS}, ` +
+                '  COUNT(*)::int AS "games", ' +
+                '  COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId")::int AS "wins", ' +
+                '  COUNT(DISTINCT gp."DeckId")::int AS "decks", ' +
+                '  MAX(g."FinishedAt") AS "lastPlayed" ' +
+                'FROM "GamePlayers" gp ' +
+                'JOIN "Games" g ON g."Id" = gp."GameId" ' +
+                'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                SET_JOIN('d') +
+                ` WHERE gp."PlayerId" = $1 AND ${DECIDED} ` +
+                `GROUP BY ${SET_GROUP_BY} ORDER BY "games" DESC`,
+            [userId],
+            'playerBySet'
+        );
+
+        if (!rows || !rows.length) {
+            return [];
+        }
+
+        const total = rows.reduce((sum, row) => sum + row.games, 0);
+
+        return rows.map((row) => ({
+            set: asSet(row),
+            games: row.games,
+            wins: row.wins,
+            losses: row.games - row.wins,
+            winRate: row.games ? row.wins / row.games : null,
+            decks: row.decks,
+            // Share of this player's own games, so it sums to 100%.
+            share: total ? row.games / total : null,
+            lastPlayed: row.lastPlayed
         }));
     }
 
@@ -422,7 +564,7 @@ class ArchonIntelligenceService {
      * wins a purely rating-based model predicted. The gap is the part that is
      * the player.
      */
-    async playerVsExpectation(userId, { sinceDays = null } = {}) {
+    async playerVsExpectation(userId, { sinceDays = null, sets = [] } = {}) {
         const params = [userId];
         let sinceFilter = '';
 
@@ -431,12 +573,28 @@ class ArchonIntelligenceService {
             sinceFilter = ` AND rh."CreatedAt" >= now() AT TIME ZONE 'utc' - ($${params.length} || ' days')::interval`;
         }
 
+        // RatingHistory has no deck of its own, so a set filter has to travel
+        // back through GamePlayers on (GameId, UserId) - the pair that table is
+        // uniquely indexed on - to reach the deck that was actually played.
+        const wanted = parseSets(sets);
+        let setFilter = '';
+
+        if (wanted.length) {
+            params.push(wanted);
+            setFilter =
+                ' AND EXISTS (SELECT 1 FROM "GamePlayers" gp ' +
+                '  JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                '  JOIN "Expansions" xset ON xset."Id" = d."ExpansionId" ' +
+                '  WHERE gp."GameId" = rh."GameId" AND gp."PlayerId" = rh."UserId" ' +
+                `  AND xset."ExpansionId" = ANY($${params.length}))`;
+        }
+
         const rows = await this.safeQuery(
             'SELECT COUNT(*)::int AS "games", ' +
                 '  COUNT(*) FILTER (WHERE rh."Won")::int AS "wins", ' +
                 '  SUM(rh."Expected")::float AS "expectedWins" ' +
                 'FROM "RatingHistory" rh ' +
-                `WHERE rh."UserId" = $1${sinceFilter}`,
+                `WHERE rh."UserId" = $1${sinceFilter}${setFilter}`,
             params,
             'playerVsExpectation'
         );
@@ -466,18 +624,24 @@ class ArchonIntelligenceService {
      * decks that CONTAIN a house, not turns played in it. The UI carries the
      * same caveat.
      */
-    async playerByOwnHouse(userId) {
+    async playerByOwnHouse(userId, { sets = [] } = {}) {
+        const params = [userId];
+        // Houses are not evenly spread across sets, so an unfiltered house
+        // table is partly a record of which sets the player happens to own.
+        const setFilter = setPredicate(parseSets(sets), params, 'd');
+
         const rows = await this.safeQuery(
             'SELECT h."Code" AS "house", h."Name" AS "houseName", ' +
                 '  COUNT(*)::int AS "games", ' +
                 '  COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId")::int AS "wins" ' +
                 'FROM "GamePlayers" gp ' +
                 'JOIN "Games" g ON g."Id" = gp."GameId" ' +
+                'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                 'JOIN "DeckHouses" dh ON dh."DeckId" = gp."DeckId" ' +
                 'JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
-                `WHERE gp."PlayerId" = $1 AND ${DECIDED} ` +
+                `WHERE gp."PlayerId" = $1 AND ${DECIDED}${setFilter} ` +
                 'GROUP BY h."Code", h."Name" ORDER BY "games" DESC',
-            [userId],
+            params,
             'playerByOwnHouse'
         );
 
@@ -499,19 +663,28 @@ class ArchonIntelligenceService {
     /**
      * What the field is playing, and how it is doing - site-wide, over a window.
      */
-    async metaHouses({ days = 30 } = {}) {
+    async metaHouses({ days = 30, sets = [] } = {}) {
+        const params = [Math.max(1, Number(days) || 30)];
+        // The most important filter on this page. House prevalence is a
+        // property OF a set - each one ships a different distribution - so a
+        // figure averaged across every set that has ever been printed describes
+        // no format anybody actually plays.
+        const setFilter = setPredicate(parseSets(sets), params, 'd');
+
         const rows = await this.safeQuery(
             'SELECT h."Code" AS "house", h."Name" AS "houseName", ' +
                 '  COUNT(*)::int AS "appearances", ' +
                 '  COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId")::int AS "wins" ' +
                 'FROM "GamePlayers" gp ' +
                 'JOIN "Games" g ON g."Id" = gp."GameId" ' +
+                'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                 'JOIN "DeckHouses" dh ON dh."DeckId" = gp."DeckId" ' +
                 'JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
                 `WHERE ${DECIDED} ` +
-                "AND g.\"FinishedAt\" >= now() AT TIME ZONE 'utc' - ($1 || ' days')::interval " +
+                "AND g.\"FinishedAt\" >= now() AT TIME ZONE 'utc' - ($1 || ' days')::interval" +
+                `${setFilter} ` +
                 'GROUP BY h."Code", h."Name" ORDER BY "appearances" DESC',
-            [Math.max(1, Number(days) || 30)],
+            params,
             'metaHouses'
         );
 
@@ -538,16 +711,21 @@ class ArchonIntelligenceService {
     }
 
     /** Overall shape of the meta window, for context under the house table. */
-    async metaSummary({ days = 30 } = {}) {
+    async metaSummary({ days = 30, sets = [] } = {}) {
+        const params = [Math.max(1, Number(days) || 30)];
+        const setFilter = setPredicate(parseSets(sets), params, 'd');
+
         const rows = await this.safeQuery(
             'SELECT COUNT(*)::int AS "games", ' +
                 '  COUNT(DISTINCT gp."PlayerId")::int AS "players", ' +
                 '  COUNT(DISTINCT gp."DeckId")::int AS "decks", ' +
                 '  AVG(EXTRACT(EPOCH FROM (g."FinishedAt" - g."StartedAt")))::float AS "avgSeconds" ' +
                 'FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+                'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                 `WHERE ${DECIDED} ` +
-                "AND g.\"FinishedAt\" >= now() AT TIME ZONE 'utc' - ($1 || ' days')::interval",
-            [Math.max(1, Number(days) || 30)],
+                "AND g.\"FinishedAt\" >= now() AT TIME ZONE 'utc' - ($1 || ' days')::interval" +
+                setFilter,
+            params,
             'metaSummary'
         );
 
@@ -566,17 +744,71 @@ class ArchonIntelligenceService {
     }
 
     /**
+     * Which sets the field is actually playing, and how they are doing.
+     *
+     * Deliberately NOT filtered by set - this is the table you read to decide
+     * what to filter the rest of the page to. `share` is a share of decks
+     * brought to games in the window, and because a deck has exactly one set
+     * these sum to 100%, unlike the house table above.
+     *
+     * The honest caution: a set's win rate here is mostly a statement about who
+     * plays it and against what, not about the cards. A set played
+     * predominantly by experienced players will read strong. It is a map of the
+     * field, not a power ranking, and the UI says so.
+     */
+    async metaSets({ days = 30 } = {}) {
+        const rows = await this.safeQuery(
+            `SELECT ${SET_COLUMNS}, ` +
+                '  COUNT(*)::int AS "games", ' +
+                '  COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId")::int AS "wins", ' +
+                '  COUNT(DISTINCT gp."DeckId")::int AS "decks", ' +
+                '  COUNT(DISTINCT gp."PlayerId")::int AS "players" ' +
+                'FROM "GamePlayers" gp ' +
+                'JOIN "Games" g ON g."Id" = gp."GameId" ' +
+                'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                SET_JOIN('d') +
+                ` WHERE ${DECIDED} ` +
+                "AND g.\"FinishedAt\" >= now() AT TIME ZONE 'utc' - ($1 || ' days')::interval " +
+                `GROUP BY ${SET_GROUP_BY} ORDER BY "games" DESC`,
+            [Math.max(1, Number(days) || 30)],
+            'metaSets'
+        );
+
+        if (!rows || !rows.length) {
+            return { available: false, rows: [], totalGames: 0 };
+        }
+
+        const total = rows.reduce((sum, row) => sum + row.games, 0);
+
+        return {
+            available: true,
+            totalGames: total,
+            rows: rows.map((row) => ({
+                set: asSet(row),
+                games: row.games,
+                wins: row.wins,
+                winRate: row.games ? row.wins / row.games : null,
+                decks: row.decks,
+                players: row.players,
+                // One set per deck, so unlike houses this really is a share.
+                share: total ? row.games / total : null
+            }))
+        };
+    }
+
+    /**
      * Everything Deck Intelligence needs for one deck, in one call.
      */
     async deckIntelligence(deckId, { userId = null } = {}) {
-        const [overview, rating, byOpposingHouse, byTurnOrder] = await Promise.all([
+        const [overview, rating, byOpposingHouse, byOpposingSet, byTurnOrder] = await Promise.all([
             this.deckOverview(deckId, { userId }),
             this.deckRating(deckId, userId),
             this.deckByOpposingHouse(deckId, { userId }),
+            this.deckByOpposingSet(deckId, { userId }),
             this.deckByTurnOrder(deckId, { userId })
         ]);
 
-        return { overview, rating, byOpposingHouse, byTurnOrder };
+        return { overview, rating, byOpposingHouse, byOpposingSet, byTurnOrder };
     }
 }
 

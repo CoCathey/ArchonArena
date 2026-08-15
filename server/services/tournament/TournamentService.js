@@ -1701,9 +1701,12 @@ class TournamentService {
         const rows = await this.db.query(
             'SELECT d."Id", d."UserId", d."Name", d."Uuid", d."ExpansionId", d."IsAlliance", ' +
                 'd."AlliancePods", ds."SasRating", ' +
+                // The SET CODE, not the row id - see the set legality check below.
+                'e."ExpansionId" AS "SetCode", ' +
                 '(SELECT json_agg(h."Code") FROM "DeckHouses" dh ' +
                 'JOIN "Houses" h ON h."Id" = dh."HouseId" WHERE dh."DeckId" = d."Id") AS "Houses" ' +
                 'FROM "Decks" d ' +
+                'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
                 'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" WHERE d."Id" = $1',
             [deckId]
         );
@@ -1738,10 +1741,26 @@ class TournamentService {
             }
         }
 
-        // Set legality: the deck's expansion must be on the allow list.
+        /**
+         * Set legality: the deck's expansion must be on the allow list.
+         *
+         * AllowedSets holds SET CODES - 341, 800 - because that is what the
+         * organiser checked in the event form, which is built from the client's
+         * expansion constants. `Decks."ExpansionId"` is something else entirely:
+         * a foreign key into `Expansions."Id"`, which counts 1, 2, 3.
+         *
+         * Comparing those two raises no error. It is simply never equal, so
+         * every deck registered for a set-restricted event was rejected with a
+         * message saying its set was not allowed - including decks from sets
+         * that were. Hence "SetCode" in the query above.
+         */
         const allowedSets = this.parseJsonColumn(tournament.AllowedSets);
 
-        if (allowedSets && allowedSets.length > 0 && !allowedSets.includes(deck.ExpansionId)) {
+        if (
+            allowedSets &&
+            allowedSets.length > 0 &&
+            !allowedSets.map(Number).includes(Number(deck.SetCode))
+        ) {
             return {
                 success: false,
                 message: 'That deck is from a set this event does not allow'

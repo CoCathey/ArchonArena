@@ -1,4 +1,12 @@
 const logger = require('../../log');
+const {
+    parseSets,
+    setPredicate,
+    SET_COLUMNS,
+    SET_JOIN,
+    SET_GROUP_BY,
+    asSet
+} = require('./setFilter');
 
 /**
  * ARCHON (N12): the Tournament Lab.
@@ -16,6 +24,18 @@ const logger = require('../../log');
  * size rather than about the deck. A player comparing two decks needs to know
  * which of the two records they can believe, and a 3-game 100% sitting next to
  * a 40-game 58% with no such marker is actively misleading.
+ *
+ * ## Sets are the first filter, not a refinement
+ *
+ * Most real events restrict which sets may be brought, and a comparison that
+ * includes decks the player cannot legally register is worse than useless - it
+ * is a recommendation to show up with an illegal deck. So the Lab takes an
+ * event's set list, either directly or by being pointed at a tournament, and
+ * narrows the candidates before it computes anything.
+ *
+ * When it is scoped to a tournament it also scopes the meta panel underneath to
+ * the same sets, because "what you would be walking into" means the field of
+ * that event's format, not the field in general.
  */
 
 /** Below this, a record is shown but flagged as too thin to lean on. */
@@ -34,28 +54,36 @@ class TournamentLabService {
      * Ordered by games played: the decks worth considering for an event are the
      * ones there is a record for, and a collection can run to hundreds.
      */
-    async candidates(userId, { limit = 60 } = {}) {
+    async candidates(userId, { limit = 60, sets = [] } = {}) {
+        const params = [userId];
+        const setFilter = setPredicate(parseSets(sets), params, 'd');
+
+        params.push(Math.min(Number(limit) || 60, 200));
+
         try {
             return (
                 await this.db.query(
                     'SELECT d."Id" AS "deckId", d."Name" AS "deckName", d."Uuid" AS "uuid", ' +
                         '  COUNT(*)::int AS "games", ' +
                         '  COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId")::int AS "wins", ' +
-                        '  MAX(g."FinishedAt") AS "lastPlayed", ds."SasRating" AS "sas" ' +
+                        '  MAX(g."FinishedAt") AS "lastPlayed", ds."SasRating" AS "sas", ' +
+                        `  ${SET_COLUMNS} ` +
                         'FROM "GamePlayers" gp ' +
                         'JOIN "Games" g ON g."Id" = gp."GameId" ' +
                         'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
-                        'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                        SET_JOIN('d') +
+                        ' LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
                         'WHERE gp."PlayerId" = $1 AND g."FinishedAt" IS NOT NULL ' +
-                        '  AND g."WinnerId" IS NOT NULL ' +
-                        'GROUP BY d."Id", d."Name", d."Uuid", ds."SasRating" ' +
-                        'ORDER BY COUNT(*) DESC, MAX(g."FinishedAt") DESC LIMIT $2',
-                    [userId, Math.min(Number(limit) || 60, 200)]
+                        `  AND g."WinnerId" IS NOT NULL${setFilter} ` +
+                        `GROUP BY d."Id", d."Name", d."Uuid", ds."SasRating", ${SET_GROUP_BY} ` +
+                        `ORDER BY COUNT(*) DESC, MAX(g."FinishedAt") DESC LIMIT $${params.length}`,
+                    params
                 )
             ).map((row) => ({
                 deckId: row.deckId,
                 deckName: row.deckName,
                 uuid: row.uuid,
+                set: asSet(row),
                 games: row.games,
                 wins: row.wins,
                 winRate: row.games ? row.wins / row.games : null,
@@ -66,6 +94,55 @@ class TournamentLabService {
             logger.error('Tournament Lab candidates failed: %s', err.message);
 
             return [];
+        }
+    }
+
+    /**
+     * The sets an event allows, for scoping the Lab to a real tournament.
+     *
+     * An event with no restriction stores null, which means every set - so the
+     * empty list this returns is the correct answer for it, not a failure. The
+     * caller cannot tell those apart from the list alone, which is why the
+     * tournament's name and its restriction are returned together.
+     */
+    async tournamentSets(tournamentId) {
+        const id = parseInt(tournamentId, 10);
+
+        if (!Number.isFinite(id)) {
+            return null;
+        }
+
+        try {
+            const rows = await this.db.query(
+                'SELECT "Id", "Name", "AllowedSets" FROM "Tournaments" WHERE "Id" = $1',
+                [id]
+            );
+            const tournament = rows && rows[0];
+
+            if (!tournament) {
+                return null;
+            }
+
+            let allowed = tournament.AllowedSets;
+
+            if (typeof allowed === 'string') {
+                try {
+                    allowed = JSON.parse(allowed);
+                } catch (err) {
+                    allowed = null;
+                }
+            }
+
+            return {
+                id: tournament.Id,
+                name: tournament.Name,
+                sets: parseSets(Array.isArray(allowed) ? allowed : []),
+                restricted: Array.isArray(allowed) && allowed.length > 0
+            };
+        } catch (err) {
+            logger.error('Tournament Lab could not read event sets: %s', err.message);
+
+            return null;
         }
     }
 
@@ -109,13 +186,25 @@ class TournamentLabService {
      * @param {number} userId
      * @param {number[]} deckIds
      */
-    async compare(userId, deckIds = []) {
-        const candidates = await this.candidates(userId);
+    async compare(userId, deckIds = [], { sets = [], tournamentId = null } = {}) {
+        // An event's own list wins over a hand-picked one: if the player said
+        // "compare for THIS event", the event decides what is legal.
+        const event = tournamentId ? await this.tournamentSets(tournamentId) : null;
+        const scope = event && event.restricted ? event.sets : parseSets(sets);
+
+        const candidates = await this.candidates(userId, { sets: scope });
+        const scoping = {
+            sets: scope,
+            tournament: event ? { id: event.id, name: event.name } : null,
+            // An unrestricted event is worth saying out loud - otherwise a
+            // player who scoped to it wonders why nothing was filtered.
+            tournamentAllowsAllSets: !!event && !event.restricted
+        };
 
         if (!deckIds.length) {
             // Nothing selected yet: the UI shows the picker, so send only the
             // candidate list rather than doing per-deck work nobody asked for.
-            return { candidates, decks: [], meta: null };
+            return { candidates, decks: [], meta: null, scoping };
         }
 
         const owned = new Set(candidates.map((candidate) => candidate.deckId));
@@ -125,10 +214,11 @@ class TournamentLabService {
             requested.map(async (deckId) => {
                 const candidate = candidates.find((entry) => entry.deckId === deckId);
 
-                const [overview, rating, byOpposingHouse, form] = await Promise.all([
+                const [overview, rating, byOpposingHouse, byOpposingSet, form] = await Promise.all([
                     this.intelligence.deckOverview(deckId, { userId }),
                     this.intelligence.deckRating(deckId, userId),
                     this.intelligence.deckByOpposingHouse(deckId, { userId }),
+                    this.intelligence.deckByOpposingSet(deckId, { userId }),
                     this.recentForm(userId, deckId, {})
                 ]);
 
@@ -140,14 +230,23 @@ class TournamentLabService {
                     .slice()
                     .sort((a, b) => (b.winRate ?? 0) - (a.winRate ?? 0));
 
+                const setRows = byOpposingSet.available ? byOpposingSet.rows : [];
+
                 return {
                     deckId,
                     deckName: candidate ? candidate.deckName : null,
                     uuid: candidate ? candidate.uuid : null,
                     sas: candidate ? candidate.sas : null,
+                    set: candidate ? candidate.set : overview.set || null,
                     overview,
                     rating,
                     byOpposingHouse: houseRows,
+                    byOpposingSet: setRows,
+                    // When the comparison is scoped, the only opposing-set rows
+                    // worth showing are the ones that event can actually field.
+                    vsScopedSets: scope.length
+                        ? setRows.filter((row) => row.set && scope.includes(row.set.id))
+                        : setRows,
                     bestMatchups: ranked.slice(0, 3),
                     worstMatchups: ranked.slice(-3).reverse(),
                     form,
@@ -157,11 +256,14 @@ class TournamentLabService {
             })
         );
 
-        // The field they would be bringing it into, so the comparison can be
-        // read against what people are actually playing.
-        const meta = await this.intelligence.metaHouses({ days: 30 });
+        // The field they would be bringing it into - narrowed to the same sets,
+        // because the field of a set-restricted event is not the field at large.
+        const [meta, metaSets] = await Promise.all([
+            this.intelligence.metaHouses({ days: 30, sets: scope }),
+            this.intelligence.metaSets({ days: 30 })
+        ]);
 
-        return { candidates, decks, meta };
+        return { candidates, decks, meta, metaSets, scoping };
     }
 }
 

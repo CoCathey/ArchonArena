@@ -20,6 +20,21 @@ const getRefreshTokenFromStorage = () => {
     }
 };
 
+/**
+ * `sets=800,928`, or nothing at all for an empty list.
+ *
+ * Leaving the parameter off rather than sending `sets=` keeps the unfiltered
+ * request on a single cache key no matter how the caller spelled "no filter",
+ * and means an accidental empty array can never read as "no sets are allowed".
+ */
+const setsParam = (sets, prefix = '?') => {
+    const codes = (Array.isArray(sets) ? sets : [sets])
+        .map((set) => parseInt(set, 10))
+        .filter((set) => Number.isFinite(set) && set > 0);
+
+    return codes.length ? `${prefix}sets=${codes.join(',')}` : '';
+};
+
 const isUnauthorizedError = (error = {}) => {
     const rawStatus = [error.status, error.originalStatus, error.data?.status]
         .filter((entry) => entry !== undefined && entry !== null)
@@ -266,21 +281,43 @@ export const api = createApi({
             invalidatesTags: [TAG_TYPES.MEMBERSHIP, TAG_TYPES.INTELLIGENCE]
         }),
         // ARCHON (N12): Archon Intelligence.
+        //
+        // The set filter travels as `sets=800,928` - set codes, the same
+        // numbers an event's allowed-sets list holds. An empty list is left off
+        // the URL entirely so "no filter" and "filter for nothing" stay
+        // distinguishable, and so the unfiltered query keeps one cache key.
         getDeckIntelligence: builder.query({
             query: (deckId) => `/intelligence/deck/${deckId}`,
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
         getPlayerIntelligence: builder.query({
-            query: () => '/intelligence/player',
+            query: (sets = []) => `/intelligence/player${setsParam(sets)}`,
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
         getMetaIntelligence: builder.query({
-            query: (days = 30) => `/intelligence/meta?days=${days}`,
+            // Called with a bare number for a long time; still is, in places.
+            query: (arg = 30) => {
+                const { days = 30, sets = [] } =
+                    typeof arg === 'object' && arg ? arg : { days: arg };
+
+                return `/intelligence/meta?days=${days}${setsParam(sets, '&')}`;
+            },
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
         getTournamentLab: builder.query({
-            query: (deckIds = []) =>
-                `/intelligence/tournament-lab?decks=${encodeURIComponent(deckIds.join(','))}`,
+            query: (arg = []) => {
+                const {
+                    decks = [],
+                    sets = [],
+                    tournament = null
+                } = Array.isArray(arg) ? { decks: arg } : arg || {};
+
+                return (
+                    `/intelligence/tournament-lab?decks=${encodeURIComponent(decks.join(','))}` +
+                    setsParam(sets, '&') +
+                    (tournament ? `&tournament=${encodeURIComponent(tournament)}` : '')
+                );
+            },
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
         // ARCHON (N12): is Patreon configured on this deployment, and where is
