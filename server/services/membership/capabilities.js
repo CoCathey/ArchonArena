@@ -157,14 +157,16 @@ const CAPABILITY_CATALOG = {
     },
     [CAPABILITIES.ADVANCED_REPLAYS]: {
         label: 'Replay analysis',
-        // Was "walk a finished game turn by turn and find the point it was
-        // decided" - which is exactly what ReplayViewer already does for every
-        // signed-in account, for free. Selling it at Archon was charging for the
-        // free tier. What is actually unbuilt is analysis layered over the
-        // replay, so that is what this now describes.
-        learn: 'Analysis layered over a replay. Stepping through replays is free for everyone.',
-        where: 'Any finished game → Replay',
-        planned: true
+        // The line here has to keep saying what is NOT sold, because the
+        // obvious reading of "advanced replays" is the replay viewer, and that
+        // is free for everyone. What membership buys is the reading of a game
+        // rather than the watching of it - and above all the house-by-house
+        // record, which exists in no other table on the site.
+        learn:
+            'Which house you call each turn and how you do when you call it, your amber per ' +
+            'turn, and the turn each game stopped changing hands. Watching replays is free ' +
+            'for everyone.',
+        where: 'Any finished game → Replay, and Archon Intelligence → Replay Intelligence'
     },
     [CAPABILITIES.PRIVATE_LEAGUES]: {
         label: 'League play for your club',

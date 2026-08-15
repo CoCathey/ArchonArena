@@ -13,7 +13,8 @@ import {
     useGetAercIntelligenceQuery,
     useGetDeckIntelligenceQuery,
     useGetPlayerIntelligenceQuery,
-    useGetMetaIntelligenceQuery
+    useGetMetaIntelligenceQuery,
+    useGetReplayIntelligenceQuery
 } from '../redux/api';
 
 /**
@@ -535,6 +536,138 @@ const DeckIntelligence = ({ decks, t }) => {
 
 DeckIntelligence.propTypes = { decks: PropTypes.array, t: PropTypes.func };
 
+/**
+ * ARCHON (N12): Replay Intelligence.
+ *
+ * The one panel on this page whose numbers come from recorded games rather than
+ * from a column, and the only place on the site that can answer which house a
+ * player actually calls. Every other house figure here is measured across decks
+ * CONTAINING a house, because which house was called on a turn is recorded
+ * nowhere else - the caveat under "your record by house" says exactly that, and
+ * this is the panel that lifts it.
+ */
+const ReplayIntelligence = ({ insights, t }) => {
+    if (!insights) {
+        return <div className='p-3 text-sm text-muted'>{t('Loading…')}</div>;
+    }
+
+    if (!insights.available) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {insights.reason ||
+                    t('No recorded games yet — finish one and it is analysed here.')}
+            </div>
+        );
+    }
+
+    return (
+        <div className='space-y-3 p-1'>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                <Stat
+                    label={t('Games analysed')}
+                    value={insights.games}
+                    hint={t('{{wins}} won', { wins: insights.wins })}
+                />
+                <Stat
+                    label={t('Amber per turn')}
+                    value={num(insights.amberPerTurn)}
+                    hint={t('turns that gained any')}
+                />
+                <Stat
+                    label={t('First key')}
+                    value={num(insights.firstKeyRound)}
+                    hint={t('average turn')}
+                />
+                <Stat
+                    label={t('Game length')}
+                    value={num(insights.turnsPerGame)}
+                    hint={t('your turns')}
+                />
+            </div>
+
+            <div>
+                <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
+                    {t('Houses you call, and how you do when you call them')}
+                </div>
+                <div className='space-y-1.5'>
+                    {insights.byHouse.map((row) => (
+                        <div className='flex items-center gap-2 text-xs' key={row.house}>
+                            <div className='w-28 shrink-0 truncate text-foreground'>
+                                {t(row.house)}
+                            </div>
+                            <div className='h-2 flex-1 overflow-hidden rounded bg-surface-secondary'>
+                                <div
+                                    className={
+                                        row.winRate >= 0.5
+                                            ? 'h-full bg-emerald-500/70'
+                                            : 'h-full bg-red-500/70'
+                                    }
+                                    style={{ width: `${Math.round((row.winRate ?? 0) * 100)}%` }}
+                                />
+                            </div>
+                            <div className='w-10 shrink-0 text-right text-foreground'>
+                                {pct(row.winRate)}
+                            </div>
+                            <div
+                                className='w-20 shrink-0 text-right text-muted'
+                                title={t('turns called')}
+                            >
+                                {t('{{count}} turns', { count: row.turns })}
+                            </div>
+                            <div
+                                className='w-12 shrink-0 text-right text-muted'
+                                title={t('share of your turns')}
+                            >
+                                {pct(row.share)}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                <p className='m-0 pt-1 text-[11px] text-muted'>
+                    {t(
+                        'Counted per turn, from recorded board states — this is the house you ' +
+                            'actually called, not the houses your deck contains. The win rate is ' +
+                            'over the games in which you called it at least once.'
+                    )}
+                </p>
+            </div>
+
+            {insights.vsHouse.length > 0 && (
+                <div>
+                    <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
+                        {t('What the other side called')}
+                    </div>
+                    <div className='flex flex-wrap gap-1.5 text-xs'>
+                        {insights.vsHouse.map((row) => (
+                            <span
+                                className='rounded bg-surface-secondary/60 px-1.5 py-0.5'
+                                key={row.house}
+                            >
+                                <span className='text-foreground'>{t(row.house)}</span>{' '}
+                                <span className='text-muted'>
+                                    {pct(row.winRate)} ({row.games})
+                                </span>
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {insights.skipped > 0 && (
+                <p className='m-0 text-[11px] text-muted'>
+                    {t(
+                        '{{count}} of your recorded games are from before board states were ' +
+                            'captured and could not be read.',
+                        { count: insights.skipped }
+                    )}
+                </p>
+            )}
+        </div>
+    );
+};
+
+ReplayIntelligence.propTypes = { insights: PropTypes.object, t: PropTypes.func };
+
 const ArchonIntelligence = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -549,6 +682,7 @@ const ArchonIntelligence = () => {
     ];
     const unlocked = playerSections.some((capability) => hasCapability(user, capability));
     const canMeta = hasCapability(user, CAPABILITIES.META_ANALYTICS);
+    const canReplays = hasCapability(user, CAPABILITIES.ADVANCED_REPLAYS);
     const canAerc = hasCapability(user, CAPABILITIES.AERC_ANALYTICS);
     // Empty means every set, which is what both the control and the server
     // already take it to mean.
@@ -568,6 +702,12 @@ const ArchonIntelligence = () => {
         { days: 30, sets },
         { skip: !user || !canMeta }
     );
+    // Not set-filtered: a recording carries the game, not the deck row the set
+    // filter is built from, and reading 25 JSON documents per filter change is
+    // not a cost worth paying for a narrowing this panel cannot honour.
+    const { data: replays } = useGetReplayIntelligenceQuery(25, {
+        skip: !user || !canReplays
+    });
     // Only fetched when the AERC lens is actually showing: it is the most
     // expensive query on the page and nobody is reading it in SAS mode.
     const { data: aerc, isFetching: aercLoading } = useGetAercIntelligenceQuery(
@@ -1060,13 +1200,34 @@ const ArchonIntelligence = () => {
                         )}
                         <p className='m-0 pt-1 text-[11px] text-muted'>
                             {t(
-                                'Measured across decks that CONTAIN each house. Which house you chose ' +
-                                    'on a given turn is not recorded outside replays, so this is not a ' +
-                                    'per-turn figure.'
+                                'Measured across decks that CONTAIN each house — not the house you ' +
+                                    'called on a given turn, which is recorded only inside replays. ' +
+                                    'Replay Intelligence, below, is the per-turn figure.'
                             )}
                         </p>
                     </div>
                 </PremiumLock>
+            </Panel>
+
+            {/* ---- Replay Intelligence ---------------------------------- */}
+            <Panel
+                type='default'
+                compactHeader
+                title={t('Replay Intelligence — the house you actually call')}
+            >
+                <PremiumLock
+                    capability={CAPABILITIES.ADVANCED_REPLAYS}
+                    preview={<SamplePanel />}
+                    minHeight={200}
+                >
+                    <ReplayIntelligence insights={replays} t={t} />
+                </PremiumLock>
+                <p className='m-0 px-1 pt-2 text-[11px] text-muted'>
+                    {t(
+                        'Read from your last 25 recorded games. Any finished game also carries its ' +
+                            'own turn-by-turn analysis — open it from Game History.'
+                    )}
+                </p>
             </Panel>
 
             {/* ---- Meta Intelligence ------------------------------------ */}

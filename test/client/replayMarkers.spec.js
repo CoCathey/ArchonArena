@@ -1,4 +1,9 @@
-import { findKeyForges, keyCount, orderPlayersForPerspective } from '../../client/replayMarkers';
+import {
+    findKeyForges,
+    findTurns,
+    keyCount,
+    orderPlayersForPerspective
+} from '../../client/replayMarkers';
 
 describe('findKeyForges', function () {
     const snapshot = (messageIndex, keysByPlayer) => ({
@@ -162,5 +167,54 @@ describe('keyCount', function () {
         expect(keyCount(null)).toBeNull();
         expect(keyCount(NaN)).toBeNull();
         expect(keyCount('two')).toBeNull();
+    });
+});
+
+/**
+ * ARCHON: turn boundaries, for the viewer's turn jumps.
+ *
+ * A KeyForge game is a sequence of turns and that is how anyone describes one
+ * to somebody else, so it is the navigation the log always needed. Derived from
+ * the recorded round number and active player rather than parsed out of the
+ * log, for the same reason the forges are: log wording is localised and changes
+ * with the engine, the round number does not.
+ */
+describe('findTurns', function () {
+    const frame = (messageIndex, round, activePlayer, house) => ({
+        messageIndex,
+        board: {
+            round,
+            activePlayer,
+            players: [{ name: activePlayer, activeHouse: house }]
+        }
+    });
+
+    it('reports where each turn began', function () {
+        const turns = findTurns([
+            frame(0, 1, 'alice', 'brobnar'),
+            frame(6, 1, 'alice', 'brobnar'),
+            frame(11, 1, 'bob', 'untamed'),
+            frame(19, 2, 'alice', 'shadows')
+        ]);
+
+        expect(turns).toEqual([
+            { messageIndex: 0, round: 1, player: 'alice', house: 'brobnar' },
+            { messageIndex: 11, round: 1, player: 'bob', house: 'untamed' },
+            { messageIndex: 19, round: 2, player: 'alice', house: 'shadows' }
+        ]);
+    });
+
+    // The house is called a moment into the turn, so the frame that opens it
+    // usually has none yet.
+    it('picks up the house from a later frame of the same turn', function () {
+        const turns = findTurns([frame(0, 1, 'alice', undefined), frame(4, 1, 'alice', 'logos')]);
+
+        expect(turns.length).toBe(1);
+        expect(turns[0].house).toBe('logos');
+    });
+
+    it('ignores frames with nothing to place them by', function () {
+        expect(findTurns([{ messageIndex: 0, board: {} }, { messageIndex: 1 }])).toEqual([]);
+        expect(findTurns(undefined)).toEqual([]);
     });
 });

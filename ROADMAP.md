@@ -1752,6 +1752,35 @@ much stronger deck pays less.
 -   [x] **Share links for replays** (public, no auth, revocable, per-replay token) (**N1**).
 -   [x] **Match history filters** by deck, opponent, format and result, applied in SQL before
         the row limit (**N1**).
+-   [x] **Replays were being recorded and then thrown away.** A board frame carried full card
+        summaries — around 1.1 KB per card, most of it a ten-language locale block and
+        interaction state a recording can never use — so a mid-game frame came to 27 KB and a
+        capped recording to 16 MB, eight times `replay.maxCaptureKb`. Every normal-length
+        game's replay was refused at the point of storage, leaving one warn line in the node's
+        log and a site where no replay ever loaded. Frames now reference a card table written
+        once per recording (~1.1 KB per frame, ~0.5 MB for a whole game). `deploy/healthcheck.sh`
+        already FAILed on "0 replays for N finished games"; this is what it was reporting.
+-   [x] **Capture is driven by the engine, not by the socket layer** — `Game.continue()`
+        records, rather than only `GameServer.sendGameState`, so anything that advances a game
+        records one and the capture is testable end to end. The winning position is captured
+        explicitly in `recordWinner`: without it a replay ended on the board as it stood
+        _before_ the deciding key was forged.
+-   [x] **A long game is thinned, not truncated** — at the frame cap the recording is halved
+        and capture continues, instead of stopping dead and leaving the half of the game that
+        decided it with no board at all.
+-   [x] **Replay viewer fixes**: forged keys rendered as `[object Object]` (the engine's key
+        map printed straight into the text), board cards collapsed to slivers (`CardImage`
+        renders `h-full w-full` into a box with no size), and the board shown before the first
+        recorded frame was one from later in the game.
+-   [x] **Turn navigation, playback and card zoom** in the viewer: one jump button per turn
+        labelled with the house that was called, play/pause with speed, arrow-key stepping.
+-   [x] **Replay analysis** (**N12**, Archon tier `advanced_replays`): every turn with the
+        house called on it, amber per turn, the key race, and the point after which the winner
+        was never headed. Read from recorded board state only — never parsed out of the
+        localised message log — and surfaced both on a game's replay and, aggregated over a
+        player's last 25 recordings, as Replay Intelligence on Archon Intelligence. It answers
+        the one question no other table on the site can: which house you actually call, and how
+        you do when you call it.
 -   [ ] Two bots playing each other continuously, watchable by anyone — permanent content for the
         Watch hub and a continuous engine soak test → **F9**.
 

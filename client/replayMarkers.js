@@ -81,6 +81,58 @@ export function findKeyForges(snapshots) {
 }
 
 /**
+ * Where each turn began, read off the recorded board frames.
+ *
+ * A turn is a run of frames with the same round number and the same active
+ * player. Derived rather than parsed out of the log for the same reason the
+ * forges are: the log wording is localised and changes with the engine, the
+ * round number and the active player do not.
+ *
+ * @param {Array<{messageIndex: number, board?: object}>} snapshots
+ * @returns {Array<{messageIndex: number, round: number, player: string, house?: string}>}
+ */
+export function findTurns(snapshots) {
+    const turns = [];
+    let current = null;
+
+    for (const snapshot of snapshots || []) {
+        const board = snapshot?.board;
+
+        if (!board || board.round == null || !board.activePlayer) {
+            continue;
+        }
+
+        if (current && current.round === board.round && current.player === board.activePlayer) {
+            // The house is chosen a moment into the turn, so the frame that
+            // opens it often has none yet. Take the first one that does.
+            if (!current.house) {
+                current.house = houseFor(board, board.activePlayer);
+            }
+
+            continue;
+        }
+
+        current = {
+            messageIndex: snapshot.messageIndex,
+            round: board.round,
+            player: board.activePlayer,
+            house: houseFor(board, board.activePlayer)
+        };
+
+        turns.push(current);
+    }
+
+    return turns;
+}
+
+/** The house a player had chosen in a board frame, if any. */
+function houseFor(board, name) {
+    const player = (board.players || []).find((candidate) => candidate?.name === name);
+
+    return player ? player.activeHouse : undefined;
+}
+
+/**
  * Order a snapshot's players so `perspective` is rendered last - i.e. at the
  * bottom, where your own side of the table is in the live game.
  *

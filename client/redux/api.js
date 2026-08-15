@@ -304,6 +304,12 @@ export const api = createApi({
             },
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
+        // ARCHON (N12): Replay Intelligence - what a player's recorded games
+        // say about how they play. Archon+ only, enforced at the endpoint.
+        getReplayIntelligence: builder.query({
+            query: (limit = 25) => `/intelligence/replays?limit=${limit}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
         // ARCHON: the same record read in AERC terms. One request draws the
         // whole panel - the bands, the findings and the meta profile all share
         // the trait and the set filter, and splitting them would make the
@@ -1104,6 +1110,15 @@ export const api = createApi({
         getSharedReplay: builder.query({
             query: (token) => `/replays/shared/${encodeURIComponent(token)}`
         }),
+        // ARCHON (N12): the analysis of one game. Archon+ only, and your own
+        // game (or one shared with you) - both enforced at the endpoint.
+        getGameReplayAnalysis: builder.query({
+            query: (gameId) => `/games/${encodeURIComponent(gameId)}/replay/analysis`,
+            providesTags: (result, error, gameId) => [{ type: TAG_TYPES.GAMES, id: gameId }]
+        }),
+        getSharedReplayAnalysis: builder.query({
+            query: (token) => `/replays/shared/${encodeURIComponent(token)}/analysis`
+        }),
         shareReplay: builder.mutation({
             query: (gameId) => ({
                 url: `/games/${encodeURIComponent(gameId)}/share`,
@@ -1311,6 +1326,9 @@ export const {
     useGetGameFiltersQuery,
     useGetGameReplayQuery,
     useGetSharedReplayQuery,
+    useGetGameReplayAnalysisQuery,
+    useGetSharedReplayAnalysisQuery,
+    useGetReplayIntelligenceQuery,
     useShareReplayMutation,
     useUnshareReplayMutation,
     useGetNotificationsQuery,

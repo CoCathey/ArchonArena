@@ -218,3 +218,173 @@ describe('replay access', function () {
         expect(response.body.reason).toBe('not-recorded');
     });
 });
+
+/**
+ * ARCHON (N12): replay analysis is a premium endpoint AND a private one.
+ *
+ * Two gates, and both matter. Dropping the capability check gives away what the
+ * Archon tier is sold on; dropping the ownership check hands any member a
+ * turn-by-turn reading of anyone's game, which is worse than the replay leak
+ * this file was written for - the analysis is the replay, summarised.
+ *
+ * Driven against the shipped module rather than a copy, so a refactor that
+ * loses either gate fails here.
+ */
+describe('replay analysis access', function () {
+    const participants = { 'game-mine': [7], 'game-theirs': [99] };
+    const analysed = [];
+
+    const gameService = {
+        isGameParticipant: async (gameId, userId) => (participants[gameId] || []).includes(userId),
+        getReplay: async (gameId) => ({ gameId, snapshots: [] }),
+        getReplayByShareToken: async (token) =>
+            token === 'good-token' ? { gameId: 'game-shared', snapshots: [] } : null,
+        describeMissingReplay: async () => 'not-recorded'
+    };
+
+    const replayAnalysis = {
+        analyse: (replay) => {
+            analysed.push(replay);
+
+            return { available: true, turns: [] };
+        }
+    };
+
+    const routes = [];
+
+    beforeAll(function () {
+        const record =
+            (method) =>
+            (path, ...handlers) =>
+                routes.push({ method, path, handlers });
+
+        require('../../../server/api/games.js').init(
+            {
+                get: record('get'),
+                post: record('post'),
+                put: record('put'),
+                patch: record('patch'),
+                delete: record('delete'),
+                use: () => {}
+            },
+            { gameService, replayAnalysis }
+        );
+    });
+
+    const routeFor = (path) => routes.find((r) => r.method === 'get' && r.path === path);
+
+    /** Drive a registered route's whole middleware chain, as Express would. */
+    const drive = async (path, params, user) => {
+        const route = routeFor(path);
+
+        expect(route, `${path} is not registered`).toBeDefined();
+
+        const sent = {};
+        const res = {
+            status(code) {
+                sent.status = code;
+
+                return this;
+            },
+            send(body) {
+                sent.status = sent.status || 200;
+                sent.body = body;
+
+                return this;
+            }
+        };
+        const req = { params, user, query: {} };
+
+        // Skip passport, which is always first; run everything after it, in
+        // order, stopping as soon as one of them responds.
+        for (const handler of route.handlers.slice(1)) {
+            let advanced = false;
+
+            await handler(req, res, (err) => {
+                if (err) {
+                    throw err;
+                }
+
+                advanced = true;
+            });
+
+            if (!advanced) {
+                break;
+            }
+        }
+
+        return sent;
+    };
+
+    const member = { id: 7, permissions: {}, capabilities: ['advanced_replays'], membership: {} };
+    const free = { id: 7, permissions: {}, capabilities: [], membership: {} };
+
+    it('analyses a member their own game', async function () {
+        const response = await drive(
+            '/api/games/:gameId/replay/analysis',
+            { gameId: 'game-mine' },
+            member
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.analysis.available).toBe(true);
+    });
+
+    it('refuses a member a game they were not in', async function () {
+        const response = await drive(
+            '/api/games/:gameId/replay/analysis',
+            { gameId: 'game-theirs' },
+            member
+        );
+
+        expect(response.status).toBe(403);
+        expect(response.body.reason).toBe('not-your-game');
+        expect(response.body.analysis).toBeUndefined();
+    });
+
+    it('refuses a free account their own game, naming what would unlock it', async function () {
+        const response = await drive(
+            '/api/games/:gameId/replay/analysis',
+            { gameId: 'game-mine' },
+            free
+        );
+
+        expect(response.status).toBe(403);
+        expect(response.body.capability).toBe('advanced_replays');
+        expect(response.body.upgradeRequired).toBe(true);
+        expect(response.body.analysis).toBeUndefined();
+    });
+
+    // The replay behind a share link is public; the analysis of it is not.
+    it('analyses a shared replay for a member', async function () {
+        const response = await drive(
+            '/api/replays/shared/:token/analysis',
+            { token: 'good-token' },
+            member
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.analysis.available).toBe(true);
+    });
+
+    it('refuses a shared replay analysis to a free account', async function () {
+        const response = await drive(
+            '/api/replays/shared/:token/analysis',
+            { token: 'good-token' },
+            free
+        );
+
+        expect(response.status).toBe(403);
+        expect(response.body.capability).toBe('advanced_replays');
+    });
+
+    it('404s an unknown share token rather than analysing nothing', async function () {
+        const response = await drive(
+            '/api/replays/shared/:token/analysis',
+            { token: 'no-such-token' },
+            member
+        );
+
+        expect(response.status).toBe(404);
+    });
+});
