@@ -37,6 +37,10 @@ import Teams from './pages/Teams';
 import TeamDetail from './pages/TeamDetail';
 // ARCHON (N13): in-person (paper) game tracking
 import InPersonGames from './pages/InPersonGames';
+// ARCHON (N14): self-serve mobile app pages
+import MobileIos from './pages/MobileIos';
+import MobileAndroid from './pages/MobileAndroid';
+import MobileRequestsAdmin from './pages/MobileRequestsAdmin';
 // ARCHON (N8): admin operations dashboard
 import AnalyticsAdmin from './pages/AnalyticsAdmin';
 // ARCHON (N5): reports and the moderation queue
@@ -142,6 +146,11 @@ const AppRoutes = ({ currentGame, user }) => {
                 path='/admin/bug-reports'
                 element={requirePermission('isAdmin', <BugReportsAdmin />)}
             />
+            {/* ARCHON (N14): the queue of iOS TestFlight requests (admin only) */}
+            <Route
+                path='/admin/mobile-requests'
+                element={requirePermission('isAdmin', <MobileRequestsAdmin />)}
+            />
             {/* ARCHON: runtime site settings (admin only) */}
             <Route
                 path='/admin/settings'
@@ -201,24 +210,9 @@ const AppRoutes = ({ currentGame, user }) => {
             {/* ARCHON (N13): record a game played across a table */}
             <Route path='/play/in-person' element={<InPersonGames />} />
             <Route path='/play/in-person/:id' element={<InPersonGames />} />
-            <Route
-                path='/mobile/ios'
-                element={
-                    <Placeholder
-                        title='iPhone App'
-                        description='The Archon Arena iPhone app is on its way to the App Store. Until then, the site works great in Safari on your phone.'
-                    />
-                }
-            />
-            <Route
-                path='/mobile/android'
-                element={
-                    <Placeholder
-                        title='Android App'
-                        description='The Archon Arena Android app is on its way to Google Play. Until then, the site works great in Chrome on your phone.'
-                    />
-                }
-            />
+            {/* ARCHON (N14): self-serve iOS TestFlight requests + Android beta link */}
+            <Route path='/mobile/ios' element={<MobileIos />} />
+            <Route path='/mobile/android' element={<MobileAndroid />} />
             {/* ARCHON: the statistics pages - site stats, your own Amber, and
                 the rankings - used to be scattered across Play, Community and
                 two top-level tabs. They are one Stats section now, and Top

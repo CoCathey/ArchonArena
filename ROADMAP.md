@@ -1067,7 +1067,7 @@ events, which feed one tournament standing rather than the open ladder.
         about someone behaving badly. The report carries both accounts of the game side by
         side and accuses neither player.
 
-#### N14 — App distribution: Android beta and iOS TestFlight requests
+#### N14 — App distribution: Android beta and iOS TestFlight requests _(mostly done)_
 
 **Why:** builds are already in testers' hands — the owner has had friends running the app on both
 iOS and Android for a while, invited by hand. So the app is not the gap; **self-serve** is.
@@ -1076,20 +1076,32 @@ the beta is knowing the owner personally. That does not scale past the current c
 the whole of what is left here.
 **Tasks**
 
--   `/mobile/android`: link straight to the Google Play beta track (or a signed APK) with install
-    instructions.
--   `/mobile/ios`: a form that requests a TestFlight invite — the requester's account and the
-    Apple ID email — plus an admin view of pending requests to work through. Apple caps external
-    TestFlight testers, so the queue is the point: it lets the owner work through requests in
-    order rather than field them over chat.
--   Show the current beta build number and what changed in it, so a tester knows if they are behind.
+-   [x] `/mobile/ios`: a form that requests a TestFlight invite — the Apple ID email, one open
+        request per account (`TestFlightRequests`, migration 66/70) — plus an admin queue at
+        `/admin/mobile-requests` to work through them in order (`TestFlightService`,
+        `server/api/mobile.js`). Apple caps external testers and enrollment stays entirely
+        manual in App Store Connect, so nothing here talks to Apple; it only replaces "ask the
+        owner over chat" with a queue, an inbox like `BugReportService` rather than a ticketing
+        system. Resolving a request (invite sent, or declined) is one click, and the same
+        account can ask again once its previous request is resolved — the partial unique index
+        on `(UserId) WHERE Status = 'pending'` allows exactly that and no more.
+-   [x] `/mobile/android`: the install link is **(admin-config)** rather than hardcoded — the
+        same shape **N12** used for Patreon credentials. Empty means "not open yet", which the
+        page says plainly instead of a dead link; setting `mobile.androidInstallUrl` from
+        Site Settings needs no redeploy once a Play Store beta track or a signed APK exists.
+-   [x] Beta build number and changelog for both platforms, **(admin-config)**
+        (`mobile.iosBuildNumber` / `mobile.iosChangelog` / `mobile.androidBuildNumber` /
+        `mobile.androidChangelog`), rendered on the respective page only when set.
 
-**Depends on:** I6 (email template) for the invite request; folds into N2 once notifications exist.
+**Depends on:** nothing — email confirmation turned out unnecessary; the request itself is the
+confirmation, shown immediately and readable again any time the player returns to `/mobile/ios`.
 **Acceptance criteria**
 
--   A signed-in player can request an iOS beta invite in one action and gets a confirmation.
--   An admin can see and clear pending invite requests.
--   The Android page links to an install that works on a clean device.
+-   [x] A signed-in player can request an iOS beta invite in one action and gets a confirmation.
+-   [x] An admin can see and clear pending invite requests.
+-   [ ] The Android page links to an install that works on a clean device — code-complete and
+        dormant like Patreon before it: **owner action** is setting `mobile.androidInstallUrl`
+        once a real Play Store beta track or signed APK exists to link to.
 
 #### N15 — Move-by-move clarity in the apps _(done on web; passive attribution open on mobile)_
 
@@ -1790,8 +1802,9 @@ much stronger deck pays less.
 -   [ ] PWA: installable, push notifications for round pairings/turn timers → **N6**/**N2**.
 -   [ ] Show each move as it happens in the Expo app, rather than only inside the slide-up log
         sheet → **N15**.
--   [ ] Turn the `/mobile/android` placeholder into a real link to the beta build, and
-        `/mobile/ios` into a TestFlight invite request → **N14**.
+-   [x] Turn the `/mobile/android` placeholder into a real link to the beta build (admin-config,
+        dormant until a beta track exists), and `/mobile/ios` into a TestFlight invite request
+        with an admin queue → **N14**.
 -   [ ] App Store release, Android build, platform feature parity (tournaments, community,
         profiles) → **F7**.
 

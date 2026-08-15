@@ -23,6 +23,8 @@ const bugReports = require('./bug-reports');
 const notifications = require('./notifications');
 // ARCHON: in-person (paper) game tracking
 const inPersonGames = require('./in-person-games');
+// ARCHON (N14): self-serve iOS TestFlight requests + mobile app info
+const mobile = require('./mobile');
 // ARCHON: admin analytics and operations dashboard
 const analytics = require('./analytics');
 // ARCHON: reports and the moderation queue
@@ -71,6 +73,8 @@ module.exports.init = function (server, options) {
     notifications.init(server);
     // ARCHON: in-person (paper) game tracking
     inPersonGames.init(server);
+    // ARCHON (N14): self-serve iOS TestFlight requests + mobile app info
+    mobile.init(server);
     // ARCHON: admin analytics and operations dashboard
     analytics.init(server);
     // ARCHON: reports and the moderation queue

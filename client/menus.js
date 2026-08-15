@@ -156,6 +156,11 @@ export const SidebarMenu = [
             { path: '/terms', title: 'Terms of Service' },
             { path: '/admin/settings', title: 'Site Settings', permission: 'isAdmin' },
             { path: '/admin/bug-reports', title: 'Bug Reports', permission: 'isAdmin' },
+            {
+                path: '/admin/mobile-requests',
+                title: 'TestFlight Requests',
+                permission: 'isAdmin'
+            },
             { path: '/news', title: 'News Admin', permission: 'canEditNews' },
             { path: '/users', title: 'User Admin', permission: 'canManageUsers' },
             { path: '/nodes', title: 'Node Admin', permission: 'canManageNodes' },

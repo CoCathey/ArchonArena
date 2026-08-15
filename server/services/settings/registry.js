@@ -607,6 +607,48 @@ const REGISTRY = {
             }
         }
     },
+    // ARCHON (N14): the self-serve mobile pages. The apps exist; what is
+    // admin-config here is the parts that would otherwise need a redeploy -
+    // a new beta build number, and the Android install link once a Play
+    // Store beta track or a signed APK actually exists. Empty means "not
+    // ready yet", which the pages render honestly instead of a broken link.
+    mobile: {
+        title: 'Mobile Apps',
+        description:
+            'Beta build info shown on /mobile/ios and /mobile/android, and the Android install link once a beta track exists. Leave a field empty to show "not available yet" instead of stale info.',
+        fields: {
+            iosBuildNumber: {
+                type: 'text',
+                label: 'iOS beta build number',
+                maxLength: 40,
+                default: ''
+            },
+            iosChangelog: {
+                type: 'text',
+                label: "iOS beta - what's new",
+                maxLength: 2000,
+                default: ''
+            },
+            androidBuildNumber: {
+                type: 'text',
+                label: 'Android beta build number',
+                maxLength: 40,
+                default: ''
+            },
+            androidChangelog: {
+                type: 'text',
+                label: "Android beta - what's new",
+                maxLength: 2000,
+                default: ''
+            },
+            androidInstallUrl: {
+                type: 'text',
+                label: 'Android install link (Play Store beta or signed APK; empty = not open yet)',
+                maxLength: 500,
+                default: ''
+            }
+        }
+    },
     // ARCHON (N8): gradual rollout. Every flag defaults to the behaviour the
     // site already has, so an unset flag is never a behaviour change.
     features: {

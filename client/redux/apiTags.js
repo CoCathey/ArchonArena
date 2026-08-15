@@ -34,5 +34,7 @@ export const TAG_TYPES = {
     // ARCHON (N12): premium membership and entitlements.
     MEMBERSHIP: 'Membership',
     // ARCHON (N12): Archon Intelligence analytics.
-    INTELLIGENCE: 'Intelligence'
+    INTELLIGENCE: 'Intelligence',
+    // ARCHON (N14): mobile app info + TestFlight requests.
+    MOBILE: 'Mobile'
 };

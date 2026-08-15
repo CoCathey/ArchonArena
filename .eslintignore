@@ -5,4 +5,7 @@ public
 *.ts
 # The Expo mobile app is a separate project with its own TS/toolchain; the
 # root (web) ESLint config cannot parse its .tsx files. It lints itself.
-mobile
+# Anchored to the repo root - an unanchored `mobile` also matches
+# server/services/mobile/ and test/server/services/mobile/, silently
+# excluding them from lint too.
+/mobile

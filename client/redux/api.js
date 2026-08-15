@@ -465,6 +465,35 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.BUG_REPORTS]
         }),
+        // ARCHON (N14): mobile app info + self-serve TestFlight requests
+        getMobileInfo: builder.query({
+            query: () => '/mobile/info',
+            providesTags: [TAG_TYPES.MOBILE]
+        }),
+        getMyTestFlightRequest: builder.query({
+            query: () => '/mobile/testflight-request',
+            providesTags: [TAG_TYPES.MOBILE]
+        }),
+        submitTestFlightRequest: builder.mutation({
+            query: (appleIdEmail) => ({
+                url: '/mobile/testflight-request',
+                method: 'POST',
+                body: { appleIdEmail }
+            }),
+            invalidatesTags: [TAG_TYPES.MOBILE]
+        }),
+        getTestFlightRequests: builder.query({
+            query: (params) => ({ url: '/admin/mobile/testflight-requests', params }),
+            providesTags: [TAG_TYPES.MOBILE]
+        }),
+        setTestFlightRequestStatus: builder.mutation({
+            query: ({ id, status }) => ({
+                url: `/admin/mobile/testflight-requests/${id}/status`,
+                method: 'POST',
+                body: { status }
+            }),
+            invalidatesTags: [TAG_TYPES.MOBILE]
+        }),
         // ARCHON: community (friends, members, clubs)
         getFriends: builder.query({
             query: () => '/friends',
@@ -1154,6 +1183,11 @@ export const {
     useSubmitBugReportMutation,
     useGetBugReportsQuery,
     useSetBugReportStatusMutation,
+    useGetMobileInfoQuery,
+    useGetMyTestFlightRequestQuery,
+    useSubmitTestFlightRequestMutation,
+    useGetTestFlightRequestsQuery,
+    useSetTestFlightRequestStatusMutation,
     useGetFriendsQuery,
     useFriendActionMutation,
     useGetMembersQuery,
