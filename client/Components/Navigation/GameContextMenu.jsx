@@ -7,6 +7,7 @@ import {
     gameSendMessage,
     lobbyLeaveGameRequested
 } from '../../redux/socketActions';
+import PlayerName from '../Site/PlayerName';
 
 const GameContextMenu = ({ mobile = false }) => {
     const currentGame = useSelector((state) => state.lobby.currentGame);
@@ -113,7 +114,9 @@ const GameContextMenu = ({ mobile = false }) => {
                         }
                     >
                         {currentGame.spectators.map((spectator) => (
-                            <li key={spectator.id}>{spectator.name}</li>
+                            <li key={spectator.id}>
+                                <PlayerName username={spectator.name} />
+                            </li>
                         ))}
                     </ul>
                 )}

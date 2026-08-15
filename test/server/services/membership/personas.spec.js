@@ -616,14 +616,42 @@ describe('the supporter badge', function () {
         expect(patron.getShortSummary().role).toBe('supporter');
     });
 
-    it('does not leak the tier itself to other players', function () {
-        // The badge says "this person supports the site". It must not turn into
-        // a public readout of what someone pays.
+    it('names the tier, because the badge is meant to distinguish them', function () {
         const patron = user({}, { tier: TIER_IDS.VAULT_MASTER, status: 'active' });
+
+        expect(patron.getShortSummary().tier).toBe(TIER_IDS.VAULT_MASTER);
+        expect(patron.getShortSummary().tierName).toBe('Vault Master');
+    });
+
+    it('exposes the tier and nothing else about the membership', function () {
+        // The line: a badge says which tier somebody supports at. It is not a
+        // public readout of when they renew, who they pay through, or what
+        // else that tier unlocks.
+        const patron = user(
+            {},
+            {
+                tier: TIER_IDS.VAULT_MASTER,
+                status: 'active',
+                provider: 'patreon',
+                externalId: 'patreon-99',
+                expiresAt: new Date('2030-01-01T00:00:00Z')
+            }
+        );
         const summary = patron.getShortSummary();
 
         expect(summary.membership).toBeUndefined();
         expect(summary.capabilities).toBeUndefined();
-        expect(JSON.stringify(summary)).not.toContain(TIER_IDS.VAULT_MASTER);
+        expect(JSON.stringify(summary)).not.toContain('patreon');
+        expect(JSON.stringify(summary)).not.toContain('2030');
+    });
+
+    it('does not advertise an admin as a patron of a tier they do not pay for', function () {
+        // The admin override resolves to the highest tier so every feature
+        // opens. Broadcasting that would tell the lobby every administrator is
+        // a Vault Master patron.
+        const summary = user({ isAdmin: true }).getShortSummary();
+
+        expect(summary.role).toBe('admin');
+        expect(summary.tier).toBe(TIER_IDS.FREE);
     });
 });

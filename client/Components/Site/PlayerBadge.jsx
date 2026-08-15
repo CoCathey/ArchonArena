@@ -1,0 +1,118 @@
+import React from 'react';
+import PropTypes from 'prop-types';
+import { useTranslation } from 'react-i18next';
+
+import { TIERS } from '../../membership';
+
+/**
+ * ARCHON (N12): the mark shown next to a player's name.
+ *
+ * Supporter is sold as "show your support next to your name", and a badge only
+ * works if it reads at a glance in a dense list - a leaderboard row is 28
+ * pixels tall and already carries a rank, an avatar, a rating and a record. So
+ * it is a key, sized to the text around it, and the tier is the fill:
+ *
+ *   Supporter    outline key, emerald  - "I keep the lights on"
+ *   Archon       solid key, amber      - the recommended tier, and it looks it
+ *   Vault Master solid key with a glow and a ring, violet
+ *
+ * One shape at three weights rather than three unrelated icons: the ladder is
+ * legible without a legend, and a row of names reads as a row of names rather
+ * than as a sticker album.
+ *
+ * Site roles that are not tiers - admin, tournament winners, contributors -
+ * keep the name colour they have always had and get no key, because they are
+ * not memberships and a badge that means two different things means neither.
+ */
+
+const TIER_STYLE = Object.freeze({
+    [TIERS.SUPPORTER]: {
+        className: 'text-emerald-400',
+        fill: 'none',
+        ring: false
+    },
+    [TIERS.ARCHON]: {
+        className: 'text-amber-400',
+        fill: 'currentColor',
+        ring: false
+    },
+    [TIERS.VAULT_MASTER]: {
+        className: 'text-violet-400 drop-shadow-[0_0_3px_rgba(167,139,250,0.65)]',
+        fill: 'currentColor',
+        ring: true
+    }
+});
+
+/**
+ * A key, drawn to sit on the text baseline next to a name.
+ *
+ * `em` units rather than a fixed size so it scales with whatever it is placed
+ * beside - a 12px table row and a 20px profile heading both get a key in
+ * proportion, with no per-call-site sizing.
+ */
+const KeyGlyph = ({ fill, ring }) => (
+    <svg
+        aria-hidden='true'
+        className='inline-block h-[0.95em] w-[0.95em] shrink-0 align-[-0.1em]'
+        fill='none'
+        stroke='currentColor'
+        strokeLinecap='round'
+        strokeLinejoin='round'
+        strokeWidth='1.8'
+        viewBox='0 0 24 24'
+    >
+        {ring && <circle cx='12' cy='12' opacity='0.35' r='11' strokeWidth='1.2' />}
+        <circle cx='9' cy='9' fill={fill} r='4' />
+        <path d='M12 12 19 19' />
+        <path d='M16.5 15.5 18.5 13.5' />
+        <path d='M19 19 17 21' />
+    </svg>
+);
+
+KeyGlyph.propTypes = {
+    fill: PropTypes.string,
+    ring: PropTypes.bool
+};
+
+/**
+ * @param {object} props
+ * @param {string} [props.tier] tier id; anything not a paid tier renders nothing
+ * @param {string} [props.tierName] display name, used for the tooltip
+ * @param {boolean} [props.withLabel] also show the tier name in words
+ */
+const PlayerBadge = ({ tier, tierName, withLabel = false }) => {
+    const { t } = useTranslation();
+    const style = TIER_STYLE[tier];
+
+    if (!style) {
+        return null;
+    }
+
+    const label = tierName || tier;
+    // Said in full for a screen reader, because a key glyph on its own says
+    // nothing at all to one.
+    const description = t('{{tier}} member', { tier: label });
+
+    return (
+        <span
+            className={`inline-flex items-center gap-1 ${style.className}`}
+            title={description}
+            aria-label={description}
+            role='img'
+        >
+            <KeyGlyph fill={style.fill} ring={style.ring} />
+            {withLabel && <span className='text-[0.8em] font-medium'>{label}</span>}
+        </span>
+    );
+};
+
+PlayerBadge.displayName = 'PlayerBadge';
+
+PlayerBadge.propTypes = {
+    tier: PropTypes.string,
+    tierName: PropTypes.string,
+    withLabel: PropTypes.bool
+};
+
+export default PlayerBadge;
+export { TIER_STYLE };

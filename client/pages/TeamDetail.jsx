@@ -6,6 +6,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
+import PlayerName from '../Components/Site/PlayerName';
 import { countryName } from '../geo';
 import { useGetTeamQuery, useTeamActionMutation } from '../redux/api';
 
@@ -147,12 +148,11 @@ const TeamDetail = () => {
                             key={member.userId}
                             className='flex items-center gap-2 rounded bg-surface-secondary/50 px-2 py-1.5 text-sm'
                         >
-                            <Link
-                                href={`/players/${encodeURIComponent(member.username)}`}
-                                className='font-semibold text-foreground hover:text-amber-300 hover:underline'
-                            >
-                                {member.username}
-                            </Link>
+                            <PlayerName
+                                className='hover:text-amber-300'
+                                link
+                                username={member.username}
+                            />
                             {member.role === 'captain' && (
                                 <span className='rounded bg-accent/20 px-1.5 text-xs text-amber-300'>
                                     {t('Captain')}

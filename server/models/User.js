@@ -1,8 +1,8 @@
 const Settings = require('../settings');
 // ARCHON (N12): the single authority on premium access. See its header for why
 // the admin override lives there and nowhere else.
-const { resolveEntitlements, can } = require('../services/membership/entitlements');
-const { CAPABILITIES } = require('../services/membership/capabilities');
+const { resolveEntitlements } = require('../services/membership/entitlements');
+const { publicBadge } = require('../services/membership/publicBadge');
 
 class User {
     constructor(userData) {
@@ -95,43 +95,31 @@ class User {
     }
 
     /**
-     * ARCHON (N12): the supporter badge, as the membership tiers sell it.
+     * ARCHON (N12): what other people see next to this account's name.
      *
      * `isSupporter` above is the legacy Roles-table flag, granted by hand. The
      * Supporter tier sells "show your support next to your name", and paying on
      * Patreon does not touch that table - so every Patreon member was buying a
      * badge that nobody, including them, could see.
      *
-     * Read as a capability rather than as a tier, so it follows the tiers if the
-     * badge ever moves, and so an admin has it for the same reason they have
-     * everything else.
+     * Resolved through `publicBadge` rather than here, so the badge on a lobby
+     * seat, in chat, on a leaderboard row and on a profile all come from one
+     * function. Note it does NOT apply the admin override: see publicBadge.
      */
-    get hasSupporterBadge() {
-        return can(this.getEntitlements(), CAPABILITIES.SUPPORTER_BADGE);
+    get publicBadge() {
+        return publicBadge({
+            permissions: this.userData.permissions || {},
+            membership: this.userData.membership
+        });
     }
 
     get role() {
-        if (this.isAdmin) {
-            return 'admin';
-        }
+        return this.publicBadge.role;
+    }
 
-        if (this.isWinner) {
-            return 'winner';
-        }
-
-        if (this.isPreviousWinner) {
-            return 'previouswinner';
-        }
-
-        if (this.isContributor) {
-            return 'contributor';
-        }
-
-        if (this.isSupporter || this.hasSupporterBadge) {
-            return 'supporter';
-        }
-
-        return 'user';
+    /** The tier id other people may see, or 'free'. */
+    get publicTier() {
+        return this.publicBadge.tier;
     }
 
     get avatar() {
@@ -248,11 +236,19 @@ class User {
     }
 
     getShortSummary() {
+        // Resolved once: `role` and `tier` both come from the same badge, and
+        // this runs for every user in every lobby broadcast.
+        const badge = this.publicBadge;
+
         return {
             username: this.username,
             avatar: this.avatar,
             name: this.username,
-            role: this.role
+            role: badge.role,
+            // ARCHON (N12): the tier, so a lobby seat can show which one
+            // without a second lookup. Name only - never expiry or provider.
+            tier: badge.tier,
+            tierName: badge.tierName
         };
     }
 

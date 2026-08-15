@@ -1,5 +1,4 @@
 import React from 'react';
-import Link from '../Navigation/Link';
 import { useTranslation, Trans } from 'react-i18next';
 import { Button } from '@heroui/react';
 import { faDice, faLock } from '@fortawesome/free-solid-svg-icons';
@@ -8,7 +7,7 @@ import Icon from '../Icon';
 import Panel from '../Site/Panel';
 import Avatar from '../Site/Avatar';
 import PlayerAmber from '../Site/PlayerAmber';
-import { getRoleClass } from '../../util';
+import PlayerName from '../Site/PlayerName';
 
 /**
  * @typedef PendingGamePlayersProps
@@ -140,10 +139,6 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                         );
                     }
 
-                    // ARCHON (N12): was `${role}-role`, which no stylesheet
-                    // defines - see the same fix in GameList.
-                    const userClass = `username truncate ${getRoleClass(player.role)}`;
-
                     const deckSelected = !!player.deck?.selected;
                     const deckName = playerIsMe
                         ? deckSelected
@@ -166,12 +161,15 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                         >
                             <div className='flex min-w-0 items-center gap-2'>
                                 <Avatar imgPath={player.avatar} />
-                                <Link
-                                    href={`/players/${encodeURIComponent(player.name)}`}
-                                    className={`${userClass} hover:underline`}
-                                >
-                                    {player.name}
-                                </Link>
+                                {/* ARCHON (N12): was `${role}-role`, a keyteki
+                                    class name nothing defines, so a supporter
+                                    in a game lobby looked like anyone else. */}
+                                <PlayerName
+                                    className='username'
+                                    link
+                                    role={player.role}
+                                    username={player.name}
+                                />
                                 <PlayerAmber
                                     username={player.name}
                                     format={currentGame.gameFormat}

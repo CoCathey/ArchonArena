@@ -11,8 +11,8 @@ import Avatar from '../Site/Avatar';
 import AlertPanel from '../Site/AlertPanel';
 import PlayerAmber from '../Site/PlayerAmber';
 import Link from '../Navigation/Link';
+import PlayerName from '../Site/PlayerName';
 import { lobbyActions } from '../../redux/slices/lobbySlice';
-import { getRoleClass } from '../../util';
 import TimeLimitIcon from '../../assets/img/Timelimit.png';
 import ShowHandIcon from '../../assets/img/ShowHandIcon.png';
 import SealedIcon from '../../assets/img/sealed.png';
@@ -293,26 +293,22 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
                                                 // supporter in the lobby list
                                                 // rendered exactly like everyone
                                                 // else. getRoleClass is what the
-                                                // stylesheet actually keys on.
-                                                const userClass = `username ${getRoleClass(
-                                                    player.role
-                                                )}`;
-
+                                                // stylesheet actually keys on -
+                                                // now inside PlayerName, which
+                                                // also carries the tier badge.
                                                 return (
                                                     <div
                                                         key={`${game.id}-${player.name}`}
                                                         className='flex min-h-11 items-center gap-2 rounded-md border border-border/45 bg-surface-secondary/55 px-2 py-1.5 text-foreground'
                                                     >
                                                         <Avatar imgPath={player.avatar} />
-                                                        <span className={userClass}>
-                                                            <Link
-                                                                href={`/players/${encodeURIComponent(
-                                                                    player.name
-                                                                )}`}
-                                                                className='hover:text-amber-300 hover:underline'
-                                                            >
-                                                                {player.name}
-                                                            </Link>
+                                                        <span className='username'>
+                                                            <PlayerName
+                                                                className='hover:text-amber-300'
+                                                                link
+                                                                role={player.role}
+                                                                username={player.name}
+                                                            />
                                                         </span>
                                                         <PlayerAmber
                                                             username={player.name}

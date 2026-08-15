@@ -5,6 +5,7 @@ const { wrapAsync } = require('../util.js');
 const UserService = require('../services/UserService');
 const ConfigService = require('../services/ConfigService');
 const MembershipService = require('../services/membership/MembershipService');
+const BadgeService = require('../services/membership/BadgeService');
 const { patreonService } = require('./patreon');
 const {
     tierCatalog,
@@ -18,6 +19,7 @@ const { entitlementsForRequest } = require('./requireCapability');
 const configService = new ConfigService();
 const userService = new UserService(configService);
 const membershipService = new MembershipService();
+const badgeService = new BadgeService();
 
 /** Mirrors admin-settings.js - isAdmin only. */
 const requireAdmin = (req, res, next) => {
@@ -32,6 +34,7 @@ const requireAdmin = (req, res, next) => {
  * ARCHON (N12): membership status, the tier catalogue, and admin grants.
  *
  * GET  /api/membership/catalog        -> the price list (public)
+ * GET  /api/membership/badges         -> badges for a list of players (public)
  * GET  /api/membership/me             -> the caller's own entitlements
  * GET  /api/admin/memberships         -> who has what (admin)
  * POST /api/admin/memberships/grant   -> comp a tier to an account (admin)
@@ -53,6 +56,29 @@ module.exports.init = function (server) {
                 // pricing page describe a feature the same way.
                 capabilities: CAPABILITY_CATALOG
             });
+        })
+    );
+
+    /**
+     * ARCHON (N12): badges for a set of players, so any list of names can show
+     * who supports the site.
+     *
+     * Public, and deliberately so: a badge whose whole purpose is that other
+     * people see it cannot require the viewer to be signed in. It exposes the
+     * tier NAME and nothing else - no expiry, no provider, no billing, and no
+     * admin-override tier (see publicBadge for why that one matters).
+     *
+     * GET /api/membership/badges?usernames=alice,bob
+     */
+    server.get(
+        '/api/membership/badges',
+        wrapAsync(async (req, res) => {
+            const usernames = String(req.query.usernames || '')
+                .split(',')
+                .map((name) => name.trim())
+                .filter(Boolean);
+
+            res.send({ success: true, badges: await badgeService.getBadges(usernames) });
         })
     );
 

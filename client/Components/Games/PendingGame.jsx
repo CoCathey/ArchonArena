@@ -4,6 +4,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import { Button, Input, toast } from '@heroui/react';
 
 import Panel from '../Site/Panel';
+import PlayerName from '../Site/PlayerName';
 import AlertPanel from '../Site/AlertPanel';
 import Messages from '../GameBoard/Messages';
 import SelectDeckModal from './SelectDeckModal';
@@ -538,7 +539,7 @@ const PendingGame = () => {
                 >
                     <div className='flex flex-wrap gap-x-3 gap-y-1 text-sm text-foreground/85'>
                         {currentGame.spectators.map((spectator) => (
-                            <span key={spectator.name}>{spectator.name}</span>
+                            <PlayerName key={spectator.name} username={spectator.name} />
                         ))}
                     </div>
                 </Panel>

@@ -24,6 +24,7 @@ import { TouchBackend } from 'react-dnd-touch-backend';
 
 import Application from './Application';
 import ErrorBoundary from './Components/Site/ErrorBoundary';
+import { PlayerBadgeProvider } from './Components/Site/PlayerName';
 
 import './i18n';
 
@@ -133,10 +134,16 @@ const render = async () => {
         <Provider store={store}>
             <BrowserRouter>
                 <DndProvider backend={TouchBackend} options={{ enableMouseEvents: true }}>
-                    <div className='body'>
-                        <Toast.Provider placement='top end' />
-                        {content}
-                    </div>
+                    {/* ARCHON (N12): membership badges next to player names.
+                        Mounted at the root so any <PlayerName> anywhere in the
+                        app resolves, and so the names on one screen resolve in
+                        one request rather than one per row. */}
+                    <PlayerBadgeProvider>
+                        <div className='body'>
+                            <Toast.Provider placement='top end' />
+                            {content}
+                        </div>
+                    </PlayerBadgeProvider>
                 </DndProvider>
             </BrowserRouter>
         </Provider>

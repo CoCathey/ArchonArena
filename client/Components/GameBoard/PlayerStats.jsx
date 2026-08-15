@@ -18,6 +18,7 @@ import Icon from '../Icon';
 
 import { Constants } from '../../constants';
 import Avatar from '../Site/Avatar';
+import PlayerName from '../Site/PlayerName';
 
 import CardPileLink from './CardPileLink';
 import DrawDeck from './DrawDeck';
@@ -194,7 +195,11 @@ const PlayerStats = ({
                 className={`pr-1 player-info ${activePlayer ? 'active-player' : 'inactive-player'}`}
             >
                 <Avatar imgPath={user?.avatar} />
-                <span className='player-name'>{user?.username || t('Noone')}</span>
+                {user?.username ? (
+                    <PlayerName className='player-name' role={user.role} username={user.username} />
+                ) : (
+                    <span className='player-name'>{t('Noone')}</span>
+                )}
             </div>
         </div>
     );

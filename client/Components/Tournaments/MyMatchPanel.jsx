@@ -5,7 +5,7 @@ import { Button as HeroButton } from '@heroui/react';
 
 import Panel from '../Site/Panel';
 import AmberValue from '../Site/AmberValue';
-import Link from '../Navigation/Link';
+import PlayerName from '../Site/PlayerName';
 import MatchScheduler from './MatchScheduler';
 
 /**
@@ -124,12 +124,11 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                 <div>
                     <span className='text-muted'>{t('Opponent')}: </span>
                     {opponent?.username ? (
-                        <Link
-                            href={`/players/${encodeURIComponent(opponent.username)}`}
-                            className='font-semibold text-foreground hover:text-amber-300 hover:underline'
-                        >
-                            {opponent.username}
-                        </Link>
+                        <PlayerName
+                            className='hover:text-amber-300'
+                            link
+                            username={opponent.username}
+                        />
                     ) : (
                         <span className='font-semibold text-foreground'>{t('Unknown')}</span>
                     )}

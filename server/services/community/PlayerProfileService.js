@@ -17,27 +17,10 @@
  * matching the member directory and the leaderboards.
  */
 const logger = require('../../log');
-const { resolveEntitlements, can } = require('../membership/entitlements');
-const { CAPABILITIES } = require('../membership/capabilities');
+const { publicBadge, permissionsFromRoleNames } = require('../membership/publicBadge');
 const { membershipFromDbRow } = require('../membership/mapRow');
 
 const BIO_MAX_LENGTH = 280;
-
-/**
- * ARCHON (N12): the badge, in the same order User.role uses.
- *
- * Deliberately not routed through UserService.mapPermissions: this is a display
- * concern on an unauthenticated endpoint, not authorization, and importing the
- * user service here would drag the whole account stack into a public profile
- * read. Nothing is granted from this - it decides a text colour.
- */
-const ROLE_BY_PRIORITY = [
-    ['Admin', 'admin'],
-    ['TournamentWinner', 'winner'],
-    ['PreviousTournamentWinner', 'previouswinner'],
-    ['Contributor', 'contributor'],
-    ['Supporter', 'supporter']
-];
 
 class PlayerProfileService {
     constructor(db = require('../../db')) {
@@ -67,10 +50,10 @@ class PlayerProfileService {
             return null;
         }
 
-        const [clubs, recentGames, role] = await Promise.all([
+        const [clubs, recentGames, badge] = await Promise.all([
             this.getClubs(user.Id),
             this.getRecentGames(user.Id),
-            this.getRole(user.Id)
+            this.getBadge(user.Id)
         ]);
 
         return {
@@ -80,7 +63,9 @@ class PlayerProfileService {
             state: user.State,
             bio: user.Bio || null,
             joined: user.Registered,
-            role,
+            role: badge.role,
+            tier: badge.tier,
+            tierName: badge.tierName,
             clubs,
             recentGames
         };
@@ -99,10 +84,11 @@ class PlayerProfileService {
      * capability. Both land on the same string, and the same colours the lobby
      * uses.
      *
-     * @returns {Promise<string>} one of admin/winner/previouswinner/contributor/supporter/user
+     * @returns {Promise<{role: string, tier: string, tierName: string|null}>}
      */
-    async getRole(userId) {
-        let roleNames = new Set();
+    async getBadge(userId) {
+        let roleNames = [];
+        let membership;
 
         try {
             const rows = await this.db.query(
@@ -111,37 +97,33 @@ class PlayerProfileService {
                 [userId]
             );
 
-            roleNames = new Set((rows || []).map((row) => row.Name));
+            roleNames = (rows || []).map((row) => row.Name);
         } catch (err) {
             // A profile that renders without a badge is fine; one that 500s is
             // not. Same reasoning as the membership lookup below.
             logger.warn('Failed to look up roles for player profile', err);
         }
 
-        for (const [roleName, role] of ROLE_BY_PRIORITY) {
-            if (roleNames.has(roleName)) {
-                return role;
-            }
-        }
-
         try {
             const rows = await this.db.query('SELECT * FROM "Memberships" WHERE "UserId" = $1', [
                 userId
             ]);
-            const entitlements = resolveEntitlements({
-                user: { permissions: {} },
-                membership: membershipFromDbRow(rows && rows[0])
-            });
 
-            if (can(entitlements, CAPABILITIES.SUPPORTER_BADGE)) {
-                return 'supporter';
-            }
+            membership = membershipFromDbRow(rows && rows[0]);
         } catch (err) {
             // The Memberships migration may not have run yet.
             logger.warn('Failed to look up membership for player profile', err);
         }
 
-        return 'user';
+        return publicBadge({
+            permissions: permissionsFromRoleNames(roleNames),
+            membership: membership || null
+        });
+    }
+
+    /** @deprecated use getBadge - kept so the role alone is still one call. */
+    async getRole(userId) {
+        return (await this.getBadge(userId)).role;
     }
 
     /** The bio as the account owner would edit it (no public/disabled gating). */

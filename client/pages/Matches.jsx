@@ -5,6 +5,7 @@ import { Button as HeroButton } from '@heroui/react';
 import AlertPanel from '../Components/Site/AlertPanel';
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
+import PlayerName from '../Components/Site/PlayerName';
 import { useGetUserGamesQuery, useGetGameFiltersQuery } from '../redux/api';
 
 import { Trans, useTranslation } from 'react-i18next';
@@ -178,12 +179,11 @@ const Matches = () => {
                   <tr key={game.gameId}>
                       <td>{game.decks[0].name}</td>
                       <td className='whitespace-nowrap'>
-                          <Link
-                              href={`/players/${encodeURIComponent(game.players[1].name)}`}
-                              className='hover:text-amber-300 hover:underline'
-                          >
-                              {game.players[1].name}
-                          </Link>
+                          <PlayerName
+                              className='hover:text-amber-300'
+                              link
+                              username={game.players[1].name}
+                          />
                       </td>
                       <td>{game.decks[1].name}</td>
                       <td>{computeWinner(game)}</td>
