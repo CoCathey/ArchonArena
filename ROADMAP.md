@@ -233,8 +233,13 @@ moment it matters most. Players finish a rated game with no feedback that anythi
         placement countdown while a rating is still provisional.
 -   [x] Unrated games render an explicit "not rated" line rather than a blank panel — an
         unrated game is a 200 with `rated: false`, not a 404 the client has to interpret.
--   [ ] Rematch / view-replay / back-to-lobby actions alongside the result (the engine's own
-        rematch prompt already sits directly below it).
+-   [x] View-replay / back-to-lobby actions on `GameResultPanel` itself. Rematch was left where
+        it already was rather than duplicated: `GameWonPrompt` renders its own Rematch/Continue
+        buttons immediately below the panel via `ActivePlayerPrompt`, and it already knows to
+        withhold rematch in a tournament game — a second copy on the panel would have had to
+        re-derive that. "Back to Lobby" reuses the exact leave-over-both-sockets sequence
+        `GameContextMenu`'s "Leave Game" used, now shared from one place
+        (`client/Components/GameBoard/leaveGame.js`) instead of duplicated.
 
 **Blocks:** N4.
 **Acceptance criteria**
@@ -1834,11 +1839,13 @@ turns a feature-complete site into a habit.
         still support them, they are simply not offerable. Re-list them by restoring their
         entries in `GameFormats.jsx`, `GameLobby.jsx`, `QuickMatchPanel.jsx`,
         `pages/Tournaments.jsx` and `mobile/app/new-game.tsx`.
--   [ ] Post-game result screen with the Amber change → **I4**.
+-   [x] Post-game result screen with the Amber change → **I4**.
 -   [ ] Matchmaking parameters **(admin-config)**: base tolerance, widening rate, max wait.
 -   [x] **Queue health telemetry** (depth, wait time) — recorded as it happens, since the
         queue is in-memory and leaves no trace afterwards (migration 45).
--   [ ] Rematch and rated-rematch flow from the result screen → **I4**.
+-   [x] Rematch and rated-rematch flow from the result screen → **I4**. Rematch is the engine's
+        existing `GameWonPrompt`, rendered directly below the result panel; `GameResultPanel`
+        adds View Replay and Back to Lobby beside it.
 
 ## Phase 19 — Sustainability & supporter program
 

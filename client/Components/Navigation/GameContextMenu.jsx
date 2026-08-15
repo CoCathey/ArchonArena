@@ -2,11 +2,8 @@ import React, { useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@heroui/react';
-import {
-    gameCloseRequested,
-    gameSendMessage,
-    lobbyLeaveGameRequested
-} from '../../redux/socketActions';
+import { gameSendMessage } from '../../redux/socketActions';
+import { leaveGameActions } from '../GameBoard/leaveGame';
 import PlayerName from '../Site/PlayerName';
 
 const GameContextMenu = ({ mobile = false }) => {
@@ -51,21 +48,10 @@ const GameContextMenu = ({ mobile = false }) => {
         return true;
     };
 
-    // ARCHON: leave over BOTH sockets. The game-socket emits are the normal
-    // path, but if that socket is dead (the player was stranded at an
-    // unresponsive board) they go nowhere — so also send `leavegame` over the
-    // independent, still-alive lobby socket. That guarantees the player can
-    // always escape and lets the server tear the game down instead of leaving a
-    // ghost in the lobby list.
     const leaveViaBothSockets = (conceding) => {
-        if (conceding) {
-            dispatch(gameSendMessage('concede'));
+        for (const action of leaveGameActions(currentGame?.id, conceding)) {
+            dispatch(action);
         }
-        dispatch(gameSendMessage('leavegame'));
-        if (currentGame?.id) {
-            dispatch(lobbyLeaveGameRequested(currentGame.id));
-        }
-        dispatch(gameCloseRequested());
     };
 
     const onLeaveClick = () => {

@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useDispatch } from 'react-redux';
+import { Button } from '@heroui/react';
 
 import AmberValue from '../Site/AmberValue';
+import Link from '../Navigation/Link';
 import { useGetGameRatingQuery } from '../../redux/api';
+import { leaveGameActions } from './leaveGame';
 
 const POOL_LABELS = {
     archon: 'Archon',
@@ -39,6 +43,13 @@ const keyMarginLabel = (keyDiff) => {
  * is untouched — no new coupling, and nothing here can delay or block leaving
  * the game.
  *
+ * Also carries the two actions a player wants at this exact moment and had to
+ * go elsewhere for before: reviewing the game just played and returning to the
+ * lobby. Rematch is deliberately not duplicated here - it already renders
+ * immediately below, as one of the engine's own end-of-game prompt buttons
+ * (GameWonPrompt, via ActivePlayerPrompt), which also knows to withhold it in
+ * a tournament game; a second copy on this panel would have to re-derive that.
+ *
  * @param {{ gameId?: string, username?: string, winner?: string }} props
  */
 // Rating is written asynchronously after GAMEWIN, so a single request almost
@@ -51,6 +62,7 @@ const RATING_POLL_ATTEMPTS = 10;
 
 const GameResultPanel = ({ gameId, username, winner }) => {
     const { t } = useTranslation();
+    const dispatch = useDispatch();
     // Fixed at mount rather than counted per request, so a slow network cannot
     // stretch the wait indefinitely.
     const [deadline] = useState(() => Date.now() + RATING_POLL_MS * RATING_POLL_ATTEMPTS);
@@ -79,90 +91,123 @@ const GameResultPanel = ({ gameId, username, winner }) => {
         return null;
     }
 
+    let body;
+
     // Still expected: say so rather than claim it was not rated.
     if (!data.rated && data.pending && pollingInterval !== 0) {
-        return (
-            <div className='rounded-md border border-border/60 bg-surface-secondary/60 px-3 py-2 text-center text-xs text-muted'>
-                {t('Rating this game...')}
-            </div>
+        body = <div className='text-center text-xs text-muted'>{t('Rating this game...')}</div>;
+    } else {
+        const you = (data.players || []).find(
+            (player) => player.username?.toLowerCase() === username?.toLowerCase()
         );
+
+        // An unrated game is a normal outcome, not an error — say so plainly
+        // instead of leaving a blank space where the result would be, and say
+        // WHY when the server knows. "Not rated" with no reason is the kind of
+        // thing players reasonably read as a bug.
+        if (!data.rated || !you) {
+            const reason = data.reason;
+
+            body = (
+                <div className='text-center text-xs text-muted'>
+                    {winner
+                        ? t('{{winner}} won. This game was not rated.', { winner })
+                        : t('This game was not rated.')}
+                    {reason ? <span className='ml-1'>{t(reason)}</span> : null}
+                </div>
+            );
+        } else {
+            const won = you.won;
+            const change = you.change;
+            const sign = change > 0 ? '+' : '';
+            const poolLabel = POOL_LABELS[data.pool] || data.pool;
+            const placementsLeft = you.provisional
+                ? Math.max(0, you.provisionalGames - (you.gamesPlayed || 0))
+                : 0;
+
+            body = (
+                <>
+                    <div className='flex flex-wrap items-center justify-center gap-x-3 gap-y-1'>
+                        <span
+                            className={`text-sm font-semibold ${
+                                won ? 'text-emerald-300' : 'text-muted'
+                            }`}
+                        >
+                            {won ? t('Victory') : t('Defeat')}
+                        </span>
+
+                        <span
+                            className={`text-lg font-bold tabular-nums ${
+                                change > 0
+                                    ? 'text-emerald-300'
+                                    : change < 0
+                                    ? 'text-rose-300'
+                                    : 'text-muted'
+                            }`}
+                        >
+                            {sign}
+                            {change}
+                        </span>
+
+                        <AmberValue value={you.ratingAfter} showLabel />
+
+                        <span className='text-xs text-muted'>{t(poolLabel)}</span>
+                    </div>
+
+                    <div className='mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5 text-xs text-muted'>
+                        {you.keyDiff != null && (
+                            <span>
+                                {t('Key margin: {{keys}}', { keys: keyMarginLabel(you.keyDiff) })}
+                            </span>
+                        )}
+                        {/* The SAS gap is what makes this Elo variant KeyForge-specific:
+                            winning up in deck power pays more than winning down. */}
+                        {you.ownSas != null && you.opponentSas != null && (
+                            <span>
+                                {t('SAS {{own}} vs {{opponent}}', {
+                                    own: you.ownSas,
+                                    opponent: you.opponentSas
+                                })}
+                            </span>
+                        )}
+                        {placementsLeft > 0 && (
+                            <span className='text-amber-300'>
+                                {t('{{count}} more placement game(s)', { count: placementsLeft })}
+                            </span>
+                        )}
+                    </div>
+                </>
+            );
+        }
     }
-
-    const you = (data.players || []).find(
-        (player) => player.username?.toLowerCase() === username?.toLowerCase()
-    );
-
-    // An unrated game is a normal outcome, not an error — say so plainly
-    // instead of leaving a blank space where the result would be, and say WHY
-    // when the server knows. "Not rated" with no reason is the kind of thing
-    // players reasonably read as a bug.
-    if (!data.rated || !you) {
-        const reason = data.reason;
-
-        return (
-            <div className='rounded-md border border-border/60 bg-surface-secondary/60 px-3 py-2 text-center text-xs text-muted'>
-                {winner
-                    ? t('{{winner}} won. This game was not rated.', { winner })
-                    : t('This game was not rated.')}
-                {reason ? <span className='ml-1'>{t(reason)}</span> : null}
-            </div>
-        );
-    }
-
-    const won = you.won;
-    const change = you.change;
-    const sign = change > 0 ? '+' : '';
-    const poolLabel = POOL_LABELS[data.pool] || data.pool;
-    const placementsLeft = you.provisional
-        ? Math.max(0, you.provisionalGames - (you.gamesPlayed || 0))
-        : 0;
 
     return (
         <div className='rounded-md border border-border/60 bg-surface-secondary/60 px-3 py-2'>
-            <div className='flex flex-wrap items-center justify-center gap-x-3 gap-y-1'>
-                <span
-                    className={`text-sm font-semibold ${won ? 'text-emerald-300' : 'text-muted'}`}
+            {body}
+            {/* ARCHON: rematch already lives directly below this panel, in the
+                engine's own end-of-game prompt (GameWonPrompt, rendered
+                through ActivePlayerPrompt) — the two most useful next steps
+                the panel didn't already offer were leaving and reviewing the
+                game just played. */}
+            <div className='mt-2 flex items-center justify-center gap-2 border-t border-border/40 pt-2'>
+                <Link
+                    href={`/replay/${gameId}`}
+                    className='inline-flex h-7 items-center rounded-md px-2 text-xs font-medium text-muted transition hover:bg-surface-secondary/55 hover:text-foreground'
                 >
-                    {won ? t('Victory') : t('Defeat')}
-                </span>
-
-                <span
-                    className={`text-lg font-bold tabular-nums ${
-                        change > 0
-                            ? 'text-emerald-300'
-                            : change < 0
-                            ? 'text-rose-300'
-                            : 'text-muted'
-                    }`}
+                    {t('View Replay')}
+                </Link>
+                <Button
+                    variant='light'
+                    size='sm'
+                    className='h-7 px-2 text-xs'
+                    onPress={() => {
+                        for (const action of leaveGameActions(gameId, false)) {
+                            dispatch(action);
+                        }
+                    }}
                 >
-                    {sign}
-                    {change}
-                </span>
-
-                <AmberValue value={you.ratingAfter} showLabel />
-
-                <span className='text-xs text-muted'>{t(poolLabel)}</span>
-            </div>
-
-            <div className='mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5 text-xs text-muted'>
-                {you.keyDiff != null && (
-                    <span>{t('Key margin: {{keys}}', { keys: keyMarginLabel(you.keyDiff) })}</span>
-                )}
-                {/* The SAS gap is what makes this Elo variant KeyForge-specific:
-                    winning up in deck power pays more than winning down. */}
-                {you.ownSas != null && you.opponentSas != null && (
-                    <span>
-                        {t('SAS {{own}} vs {{opponent}}', {
-                            own: you.ownSas,
-                            opponent: you.opponentSas
-                        })}
-                    </span>
-                )}
-                {placementsLeft > 0 && (
-                    <span className='text-amber-300'>
-                        {t('{{count}} more placement game(s)', { count: placementsLeft })}
-                    </span>
-                )}
+                    {t('Back to Lobby')}
+                </Button>
             </div>
         </div>
     );
