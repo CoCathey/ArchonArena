@@ -35,6 +35,7 @@ const CAPABILITIES = {
     CUSTOM_TOURNAMENTS: 'custom_tournaments',
     ADVANCED_PERFORMANCE_DASHBOARD: 'advanced_performance_dashboard',
     META_ANALYTICS: 'meta_analytics',
+    AERC_ANALYTICS: 'aerc_analytics',
     EARLY_ACCESS: 'early_access',
 
     // --- Vault Master --------------------------------------------------------
@@ -197,6 +198,13 @@ const CAPABILITY_CATALOG = {
         label: 'Meta analytics',
         learn: 'See what the field is actually playing and how it is performing.',
         where: 'Archon Intelligence → Meta Intelligence, and Stats'
+    },
+    [CAPABILITIES.AERC_ANALYTICS]: {
+        label: 'AERC analysis',
+        learn:
+            'Read your record in AERC terms instead of SAS: which kinds of deck you play ' +
+            'well, which kinds beat you, and what to lean into against them.',
+        where: 'Archon Intelligence → AERC'
     },
     [CAPABILITIES.EARLY_ACCESS]: {
         label: 'Early access',

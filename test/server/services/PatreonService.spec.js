@@ -123,6 +123,51 @@ describe('PatreonService', function () {
             expect(first.state.length).toBeGreaterThanOrEqual(24);
             expect(new URL(first.url).searchParams.get('state')).toBe(first.state);
         });
+
+        /**
+         * ARCHON (N12): the phone app cannot be redirected to.
+         *
+         * Patreon allows one registered redirect URI and it is the website, so
+         * a link started in the app comes back to the browser. The marker on
+         * the state is how the web callback page knows to forward it to the
+         * app's deep link instead of trying to complete a link for a browser
+         * session that is not signed in.
+         */
+        describe('a link started on a phone', function () {
+            it('marks the state so the site forwards it to the app', function () {
+                expect(service.createAuthRequest({ mobile: true }).state).toMatch(/^m\./);
+            });
+
+            it('does not mark a browser link', function () {
+                expect(service.createAuthRequest().state).not.toMatch(/^m\./);
+                expect(service.createAuthRequest({ mobile: false }).state).not.toMatch(/^m\./);
+            });
+
+            it('still sends the marked state to Patreon verbatim', function () {
+                // The marker only survives the round trip if it is part of the
+                // state Patreon echoes back.
+                const request = service.createAuthRequest({ mobile: true });
+
+                expect(new URL(request.url).searchParams.get('state')).toBe(request.state);
+            });
+
+            it('keeps the same registered redirect URI', function () {
+                // The whole point of the marker is that no second URI has to be
+                // registered; sending a custom scheme here would be rejected.
+                const params = new URL(service.createAuthRequest({ mobile: true }).url)
+                    .searchParams;
+
+                expect(params.get('redirect_uri')).toBe('https://site/patreon');
+            });
+
+            it('is still unguessable', function () {
+                const first = service.createAuthRequest({ mobile: true });
+                const second = service.createAuthRequest({ mobile: true });
+
+                expect(first.state).not.toBe(second.state);
+                expect(first.state.length).toBeGreaterThanOrEqual(26);
+            });
+        });
     });
 
     describe('pledge status', function () {

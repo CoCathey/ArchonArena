@@ -703,7 +703,35 @@ class TournamentService {
 
     async create(actor, options) {
         const config = this.getConfig();
-        const { errors, values } = this.parseEventOptions(options, config);
+
+        /**
+         * ARCHON: a new event is rated unless its organizer says otherwise.
+         *
+         * It used to be the reverse - `!!options.ratedGames` meant an absent
+         * field was an unrated event - so every event created by anything that
+         * did not explicitly tick the box produced games that never touched the
+         * ladder. Competitive play is the point of running an event here, and
+         * "my tournament results did not count" is discovered after the fact,
+         * when it can no longer be fixed.
+         *
+         * Only ABSENT means "use the default". An explicit `false` is an
+         * organizer's decision and is respected, which is also why this lives
+         * here rather than in `parseEventOptions`: the edit path seeds every
+         * field from the existing row, and a default applied there would
+         * silently re-rate an event that had deliberately been made unrated.
+         *
+         * The site-wide `allowRated` setting still overrides everything; see
+         * parseEventOptions.
+         */
+        const requested = {
+            ...options,
+            ratedGames:
+                options.ratedGames === undefined || options.ratedGames === null
+                    ? true
+                    : options.ratedGames
+        };
+
+        const { errors, values } = this.parseEventOptions(requested, config);
 
         if (errors.length > 0) {
             return { success: false, message: errors[0] };

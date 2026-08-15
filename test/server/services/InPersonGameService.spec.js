@@ -276,6 +276,22 @@ describe('InPersonGameService', function () {
             expect(sql).toContain("'irl'");
         });
 
+        /**
+         * Every other test here injects `settings`, so none of them says
+         * anything about what happens when an admin has never touched the
+         * setting - which is the state almost every deployment is in. It used
+         * to default off, so paper games were silently unrated everywhere.
+         */
+        it('rates on a site that has never configured in-person games', async function () {
+            settings = undefined;
+
+            const result = await service.report(5, 2, REPORT);
+
+            expect(result.rated).toBe(true);
+            expect(result.unratedReason).toBeNull();
+            expect(ratingService.processGame).toHaveBeenCalled();
+        });
+
         it('records but does not rate when the site has IRL rating off', async function () {
             settings = { rated: false };
 

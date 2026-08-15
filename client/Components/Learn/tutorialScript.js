@@ -1807,12 +1807,12 @@ export const TutorialSteps = [
         },
         title: 'Find an opponent',
         body: [
-            '**Play → Play Online** lists open games; join one, or start your own and pick a name, a format and whether it is beginner, casual or competitive.',
+            '**Play → Play Online** lists open games; join one, or start your own and pick a name, a format, and any limits you want on time or deck power.',
             '**Quick Match** is the fastest route: choose a format and the lobby pairs you with an available opponent near your rating, with no waiting for someone to open a table.',
             'If you would rather watch first, **Watch** shows games in progress.'
         ],
         platform:
-            'Beginner games are exactly what they sound like. Nobody minds you asking rules questions in chat.'
+            'Every finished game against another player counts towards your rating - there is nothing to switch on. Nobody minds you asking rules questions in chat.'
     },
     {
         chapter: 'Playing on Archon Arena',

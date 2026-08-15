@@ -4,6 +4,7 @@ const { wrapAsync } = require('../util.js');
 const ArchonIntelligenceService = require('../services/membership/ArchonIntelligenceService');
 const TournamentLabService = require('../services/membership/TournamentLabService');
 const ReplayAnalysisService = require('../services/membership/ReplayAnalysisService');
+const AercAnalyticsService = require('../services/membership/AercAnalyticsService');
 const { requireCapability, requireAnyCapability, sectionsFor } = require('./requireCapability');
 const { CAPABILITIES } = require('../services/membership/capabilities');
 const { parseSets } = require('../services/membership/setFilter');
@@ -11,6 +12,7 @@ const { parseSets } = require('../services/membership/setFilter');
 const intelligence = new ArchonIntelligenceService();
 const tournamentLab = new TournamentLabService(undefined, intelligence);
 const replayAnalysis = new ReplayAnalysisService();
+const aerc = new AercAnalyticsService();
 
 /**
  * ARCHON (N12): Archon Intelligence and the Tournament Lab.
@@ -168,6 +170,58 @@ module.exports.init = function (server) {
             });
 
             res.send({ success: true, ...insights });
+        })
+    );
+
+    /**
+     * ARCHON: the same record, read in AERC terms instead of SAS.
+     *
+     * One request rather than one per panel: every panel here shares the
+     * band cut points and the same filter, and firing nine requests to draw one
+     * screen would be slower and would make the panels disagree while they
+     * arrived.
+     *
+     * `trait` picks the trait the per-band panels are computed for - the
+     * headline findings walk all of them regardless, because the whole point is
+     * to tell a player which trait to look at.
+     */
+    server.get(
+        '/api/intelligence/aerc',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.AERC_ANALYTICS),
+        wrapAsync(async (req, res) => {
+            const requested = String(req.query.trait || '');
+            // Guarded rather than trusted: the trait name is interpolated into
+            // SQL as a JSON key, so an unknown one must never reach the query.
+            const trait = AercAnalyticsService.isTrait(requested)
+                ? requested
+                : AercAnalyticsService.traits[0].key;
+            const sets = parseSets(req.query.sets);
+            const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+
+            const [own, opponent, houses, findings, meta, cards] = await Promise.all([
+                aerc.byOwnTrait(req.user.id, trait, { sets }),
+                aerc.byOpponentTrait(req.user.id, trait, { sets }),
+                aerc.housesVsOpponentTrait(req.user.id, trait, { sets }),
+                aerc.findings(req.user.id, { sets }),
+                aerc.metaTraitProfile({ days, sets }),
+                aerc.byCard(req.user.id, { sets })
+            ]);
+
+            res.send({
+                success: true,
+                trait,
+                sets,
+                days,
+                traits: AercAnalyticsService.traits,
+                minConfidentGames: AercAnalyticsService.MIN_CONFIDENT_GAMES,
+                own,
+                opponent,
+                houses,
+                findings,
+                meta,
+                cards
+            });
         })
     );
 

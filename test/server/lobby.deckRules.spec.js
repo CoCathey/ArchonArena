@@ -85,6 +85,10 @@ describe('Lobby deck rules', function () {
             sendHandoff: vi.fn(),
             applyDeckSelection: Lobby.prototype.applyDeckSelection,
             checkSasBound: Lobby.prototype.checkSasBound,
+            // The Unchained set rule. These decks carry no expansion, so it has
+            // nothing to say here - but onSelectDeck calls it on every
+            // selection, and a harness missing it fails as "not a function".
+            checkUnchained: Lobby.prototype.checkUnchained,
             deckConstraintsFor: Lobby.prototype.deckConstraintsFor,
             // The tournament deck lock, which onSelectDeck consults on every
             // selection. These games are not tournament tables, so it has
@@ -375,5 +379,92 @@ describe('Lobby deck rules', function () {
             expect(created.luckyDice).toBe(false);
             expect(created.sasBound).toBeUndefined();
         });
+    });
+});
+
+/**
+ * ARCHON: the Unchained set rule, enforced where it is possible rather than
+ * only where it is easy.
+ *
+ * It lived on the random-deck path alone, so the dice refused decks the list
+ * had offered - and a client that simply asked for a deck id could put an
+ * Unchained deck into a normal game, or anything into an Unchained one.
+ */
+describe('Lobby.checkUnchained', function () {
+    const lobby = Object.create(Lobby.prototype);
+    const deck = (expansion) => ({ name: 'Test Deck', expansion });
+
+    const refusal = (gameFormat, expansion) => {
+        try {
+            lobby.checkUnchained({ gameFormat }, deck(expansion));
+        } catch (err) {
+            return err;
+        }
+
+        return undefined;
+    };
+
+    it('accepts an Unchained deck in an Unchained game', function () {
+        expect(refusal('unchained', 601)).toBeUndefined();
+    });
+
+    it('accepts an ordinary deck in an ordinary game', function () {
+        expect(refusal('normal', 855)).toBeUndefined();
+    });
+
+    it('refuses an ordinary deck in an Unchained game', function () {
+        const err = refusal('unchained', 855);
+
+        expect(err).toBeTruthy();
+        // playerMessage is what reaches the player; without it the click dies
+        // silently, which is the failure this whole path exists to avoid.
+        expect(err.playerMessage).toContain('only accepts decks from the Unchained set');
+    });
+
+    it('refuses an Unchained deck in an ordinary game', function () {
+        const err = refusal('normal', 601);
+
+        expect(err).toBeTruthy();
+        expect(err.playerMessage).toContain('only be played in an Unchained game');
+    });
+
+    it('refuses an Unchained deck in every other format too', function () {
+        for (const format of ['sealed', 'alliance', 'reversal', 'adaptive-bo1']) {
+            expect(refusal(format, 601), `${format} should refuse an Unchained deck`).toBeTruthy();
+        }
+    });
+
+    it('refuses a standalone deck that is not Unchained in an Unchained game', function () {
+        // Otherwise the mode means nothing: the point is that both sides come
+        // from that pool.
+        let err;
+
+        try {
+            lobby.checkUnchained({ gameFormat: 'unchained' }, deck(855), true);
+        } catch (caught) {
+            err = caught;
+        }
+
+        expect(err).toBeTruthy();
+    });
+
+    it('leaves standalone decks alone in every other format', function () {
+        // Both clients have always offered the curated standalone list
+        // unfiltered in every format. Refusing one now would break something
+        // that works today over a set the player did not choose to be in.
+        expect(() => lobby.checkUnchained({ gameFormat: 'normal' }, deck(601), true)).not.toThrow();
+    });
+
+    it('says nothing about a deck with no expansion recorded', function () {
+        // Standalone decks carry no expansion; refusing them here would break
+        // a path that has nothing to do with this rule.
+        expect(refusal('normal', undefined)).toBeUndefined();
+        expect(refusal('unchained', null)).toBeUndefined();
+        expect(lobby.checkUnchained({ gameFormat: 'normal' }, undefined)).toBeUndefined();
+    });
+
+    it('compares numerically, so a string expansion is not a hole', function () {
+        expect(refusal('normal', '601')).toBeTruthy();
+        expect(refusal('unchained', '601')).toBeUndefined();
     });
 });

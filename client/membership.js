@@ -34,6 +34,7 @@ export const CAPABILITIES = Object.freeze({
     CUSTOM_TOURNAMENTS: 'custom_tournaments',
     ADVANCED_PERFORMANCE_DASHBOARD: 'advanced_performance_dashboard',
     META_ANALYTICS: 'meta_analytics',
+    AERC_ANALYTICS: 'aerc_analytics',
     EARLY_ACCESS: 'early_access',
 
     // Vault Master

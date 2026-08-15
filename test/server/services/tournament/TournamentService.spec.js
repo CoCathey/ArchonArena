@@ -2685,6 +2685,67 @@ describe('TournamentService', function () {
         });
     });
 
+    /**
+     * ARCHON: an event counts unless its organizer says otherwise.
+     *
+     * The old default was the reverse, and it failed quietly: nothing errored,
+     * the event ran normally, and the games simply never reached the ladder.
+     * Nobody finds that out until afterwards, when it cannot be fixed.
+     *
+     * The interesting cases are not "does the default apply" but the two ways
+     * a default can do damage - overriding a deliberate choice, and leaking
+     * into the edit path where every field is re-sent.
+     */
+    describe('rated by default', function () {
+        const ratedFlagOf = (id) => db.state.tournaments.find((row) => row.Id === id).RatedGames;
+
+        it('rates a new event when nothing was said about it', async function () {
+            const id = await createSwiss(0);
+
+            expect(ratedFlagOf(id)).toBe(true);
+        });
+
+        it('respects an organizer who explicitly asked for an unrated event', async function () {
+            const id = await createSwiss(0, { ratedGames: false });
+
+            expect(ratedFlagOf(id)).toBe(false);
+        });
+
+        /**
+         * The edit path seeds every field from the existing row, so a default
+         * applied during parsing would re-rate this event the first time its
+         * organizer changed its name. That is why the default lives in
+         * `create` rather than in `parseEventOptions`.
+         */
+        it('does not re-rate an unrated event when something else is edited', async function () {
+            const id = await createSwiss(0, { ratedGames: false });
+
+            await service.updateSettings(id, organizer, { name: 'Renamed, still casual' });
+
+            expect(ratedFlagOf(id)).toBe(false);
+        });
+
+        it('lets an organizer turn an unrated event on later', async function () {
+            const id = await createSwiss(0, { ratedGames: false });
+
+            await service.updateSettings(id, organizer, { ratedGames: true });
+
+            expect(ratedFlagOf(id)).toBe(true);
+        });
+
+        it('keeps the site-wide switch above the default', async function () {
+            // An admin who turned rating off means it, and a default cannot
+            // out-rank a setting.
+            service = new TournamentService(db, {
+                settingsService: { getSection: () => ({ allowRated: false }) }
+            });
+
+            const id = await createSwiss(0);
+
+            expect(ratedFlagOf(id)).toBe(false);
+        });
+    });
+
     describe('KeyForge deck rules', function () {
         it('validates create options for the KeyForge conditions', async function () {
             const bad = async (options) =>
