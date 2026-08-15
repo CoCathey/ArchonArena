@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
@@ -8,7 +8,11 @@ import Panel from '../Components/Site/Panel';
 import AlertPanel from '../Components/Site/AlertPanel';
 import PremiumLock from '../Components/Membership/PremiumLock';
 import { CAPABILITIES, hasCapability } from '../membership';
-import { useGetPlayerIntelligenceQuery, useGetMetaIntelligenceQuery } from '../redux/api';
+import {
+    useGetDeckIntelligenceQuery,
+    useGetPlayerIntelligenceQuery,
+    useGetMetaIntelligenceQuery
+} from '../redux/api';
 
 /**
  * ARCHON (N12): Archon Intelligence.
@@ -110,10 +114,270 @@ const SamplePanel = () => (
     </div>
 );
 
+/**
+ * ARCHON (N12): the Elo history a Supporter is sold.
+ *
+ * The endpoint has always returned this; nothing rendered it, so "Full Elo
+ * history" was a promise with no surface. Inline SVG rather than a charting
+ * dependency - it is one polyline over a series the server already shaped
+ * oldest-first.
+ */
+const EloHistory = ({ history, t }) => {
+    if (!history || !history.length) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {t('No rated games yet — your rating history appears here once you play.')}
+            </div>
+        );
+    }
+
+    const ratings = history.map((entry) => entry.ratingAfter);
+    const min = Math.min(...ratings);
+    const max = Math.max(...ratings);
+    // A flat series would divide by zero and collapse the line onto an edge.
+    const span = max - min || 1;
+    const width = 600;
+    const height = 120;
+
+    const points = history
+        .map((entry, index) => {
+            const x = history.length === 1 ? width / 2 : (index / (history.length - 1)) * width;
+            const y = height - ((entry.ratingAfter - min) / span) * height;
+
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+        })
+        .join(' ');
+
+    const first = history[0];
+    const last = history[history.length - 1];
+    const net = last.ratingAfter - first.ratingBefore;
+
+    return (
+        <div className='space-y-2 p-1'>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                <Stat label={t('Current')} value={last.ratingAfter} />
+                <Stat
+                    label={t('Net change')}
+                    tone={net >= 0 ? 'good' : 'bad'}
+                    value={`${net >= 0 ? '+' : ''}${net}`}
+                />
+                <Stat label={t('Peak')} value={max} />
+                <Stat label={t('Rated games')} value={history.length} />
+            </div>
+
+            <div className='overflow-x-auto'>
+                <svg
+                    className='w-full'
+                    height={height}
+                    preserveAspectRatio='none'
+                    role='img'
+                    aria-label={t('Rating over time')}
+                    viewBox={`0 0 ${width} ${height}`}
+                >
+                    <polyline
+                        fill='none'
+                        points={points}
+                        stroke='currentColor'
+                        strokeWidth='2'
+                        className='text-accent'
+                    />
+                </svg>
+            </div>
+
+            <div className='overflow-x-auto'>
+                <table className='w-full min-w-[420px] text-xs'>
+                    <thead>
+                        <tr className='border-b border-border/70 text-left text-muted'>
+                            <th className='py-1 pr-2 font-medium'>{t('Date')}</th>
+                            <th className='py-1 pr-2 font-medium'>{t('Opponent')}</th>
+                            <th className='py-1 pr-2 text-right font-medium'>{t('Result')}</th>
+                            <th className='py-1 pr-2 text-right font-medium'>{t('Change')}</th>
+                            <th className='py-1 pr-2 text-right font-medium'>{t('Rating')}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {[...history]
+                            .reverse()
+                            .slice(0, 25)
+                            .map((entry, index) => (
+                                <tr className='border-b border-border/40' key={index}>
+                                    <td className='py-1 pr-2 text-muted'>
+                                        {new Date(entry.at).toLocaleDateString()}
+                                    </td>
+                                    <td className='py-1 pr-2 text-foreground'>
+                                        {entry.opponent || '—'}
+                                    </td>
+                                    <td
+                                        className={`py-1 pr-2 text-right ${
+                                            entry.won ? 'text-emerald-300' : 'text-red-300'
+                                        }`}
+                                    >
+                                        {entry.won ? t('Win') : t('Loss')}
+                                    </td>
+                                    <td
+                                        className={`py-1 pr-2 text-right ${
+                                            entry.change >= 0 ? 'text-emerald-300' : 'text-red-300'
+                                        }`}
+                                    >
+                                        {entry.change >= 0 ? '+' : ''}
+                                        {entry.change}
+                                    </td>
+                                    <td className='py-1 pr-2 text-right text-foreground'>
+                                        {entry.ratingAfter}
+                                    </td>
+                                </tr>
+                            ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+EloHistory.propTypes = { history: PropTypes.array, t: PropTypes.func };
+
+/**
+ * ARCHON (N12): "Is this deck good?" - the first of the three questions.
+ *
+ * The endpoint has been built, gated and tested since Archon Intelligence
+ * shipped, and nothing called it, so the headline promise of the tier was two
+ * thirds true. This is its surface: pick one of your decks and see its record,
+ * what it does against each opposing house, and how the rating moved while you
+ * played it.
+ *
+ * The deck list is the rankings the page already loads, so choosing a deck
+ * costs one request rather than two.
+ */
+const DeckIntelligence = ({ decks, t }) => {
+    const [deckId, setDeckId] = useState(null);
+    const selected = deckId || (decks.length ? decks[0].deckId : null);
+
+    const { data, isFetching } = useGetDeckIntelligenceQuery(selected, { skip: !selected });
+
+    if (!decks.length) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {t('Play a few games with a deck and its breakdown appears here.')}
+            </div>
+        );
+    }
+
+    const mine = data?.mine;
+    const everyone = data?.everyone;
+
+    return (
+        <div className='space-y-3 p-1'>
+            <div className='flex flex-wrap gap-1.5'>
+                {decks.slice(0, 12).map((deck) => (
+                    <button
+                        className={[
+                            'rounded-full border px-2.5 py-1 text-xs transition',
+                            deck.deckId === selected
+                                ? 'border-amber-500/60 bg-amber-500/15 text-amber-200'
+                                : 'border-border/70 bg-surface-secondary/60 text-foreground hover:border-border'
+                        ].join(' ')}
+                        key={deck.deckId}
+                        onClick={() => setDeckId(deck.deckId)}
+                        type='button'
+                    >
+                        {deck.deckName}
+                        <span className='ml-1.5 text-muted'>{deck.games}g</span>
+                    </button>
+                ))}
+            </div>
+
+            {isFetching && <div className='text-sm text-muted'>{t('Loading…')}</div>}
+
+            {mine?.overview?.available && (
+                <>
+                    <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                        <Stat
+                            label={t('Your record')}
+                            value={`${mine.overview.wins}–${mine.overview.losses}`}
+                            hint={pct(mine.overview.winRate)}
+                        />
+                        <Stat
+                            label={t('Avg keys at end')}
+                            value={num(mine.overview.avgKeysAtEnd)}
+                            hint={t('caps at 3 for online games')}
+                        />
+                        <Stat label={t('Avg length')} value={duration(mine.overview.avgSeconds)} />
+                        <Stat
+                            label={t('Rating swing')}
+                            tone={(mine.rating?.netSwing ?? 0) >= 0 ? 'good' : 'bad'}
+                            value={
+                                mine.rating?.available
+                                    ? `${mine.rating.netSwing >= 0 ? '+' : ''}${
+                                          mine.rating.netSwing
+                                      }`
+                                    : '—'
+                            }
+                        />
+                    </div>
+
+                    {everyone?.available && everyone.games > mine.overview.games && (
+                        <p className='m-0 text-xs text-muted'>
+                            {t(
+                                'Across every player who has used this deck: {{wins}}–{{losses}} ({{rate}}).',
+                                {
+                                    wins: everyone.wins,
+                                    losses: everyone.losses,
+                                    rate: pct(everyone.winRate)
+                                }
+                            )}
+                        </p>
+                    )}
+
+                    {mine.byOpposingHouse?.available && (
+                        <div className='space-y-1.5'>
+                            <div className='text-[11px] uppercase tracking-wide text-muted'>
+                                {t('Against decks containing')}
+                            </div>
+                            {mine.byOpposingHouse.rows.map((row) => (
+                                <HouseBar key={row.house} row={row} t={t} />
+                            ))}
+                        </div>
+                    )}
+
+                    <div className='text-xs text-muted'>
+                        {mine.byTurnOrder?.available ? (
+                            <span>
+                                {t('Going first: {{first}} · Going second: {{second}}', {
+                                    first: pct(mine.byTurnOrder.first.winRate),
+                                    second: pct(mine.byTurnOrder.second.winRate)
+                                })}
+                            </span>
+                        ) : (
+                            <span>{mine.byTurnOrder?.reason}</span>
+                        )}
+                    </div>
+                </>
+            )}
+
+            {mine && !mine.overview?.available && !isFetching && (
+                <div className='text-sm text-muted'>
+                    {t('No finished games with this deck yet.')}
+                </div>
+            )}
+        </div>
+    );
+};
+
+DeckIntelligence.propTypes = { decks: PropTypes.array, t: PropTypes.func };
+
 const ArchonIntelligence = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
-    const unlocked = hasCapability(user, CAPABILITIES.ARCHON_INTELLIGENCE);
+    // The payload is gated per section server-side, so fetch it whenever the
+    // account can see any of them. Gating this on ARCHON_INTELLIGENCE meant a
+    // Supporter never even asked for the Elo history they had paid for.
+    const playerSections = [
+        CAPABILITIES.ELO_HISTORY,
+        CAPABILITIES.PERFORMANCE_DASHBOARD,
+        CAPABILITIES.PERSONAL_DECK_RANKINGS,
+        CAPABILITIES.MATCHUP_ANALYTICS
+    ];
+    const unlocked = playerSections.some((capability) => hasCapability(user, capability));
     const canMeta = hasCapability(user, CAPABILITIES.META_ANALYTICS);
 
     // Skipped entirely when locked: a 403 round trip per panel teaches nobody
@@ -158,7 +422,7 @@ const ArchonIntelligence = () => {
             {/* ---- Player Intelligence ---------------------------------- */}
             <Panel type='default' compactHeader title={t('Player Intelligence')}>
                 <PremiumLock
-                    capability={CAPABILITIES.ARCHON_INTELLIGENCE}
+                    capability={CAPABILITIES.PERFORMANCE_DASHBOARD}
                     preview={<SamplePanel />}
                     minHeight={220}
                 >
@@ -199,7 +463,28 @@ const ArchonIntelligence = () => {
                 </PremiumLock>
             </Panel>
 
-            {/* ---- Deck Intelligence ------------------------------------ */}
+            {/* ---- Elo history (Supporter) ------------------------------ */}
+            <Panel type='default' compactHeader title={t('Your rating history')}>
+                <PremiumLock
+                    capability={CAPABILITIES.ELO_HISTORY}
+                    preview={<SamplePanel />}
+                    minHeight={200}
+                >
+                    <EloHistory history={player?.ratingHistory} t={t} />
+                </PremiumLock>
+            </Panel>
+
+            {/* ---- Deck Intelligence: is this deck good? ---------------- */}
+            <Panel type='default' compactHeader title={t('Deck Intelligence — is this deck good?')}>
+                <PremiumLock
+                    capability={CAPABILITIES.ARCHON_INTELLIGENCE}
+                    preview={<SamplePanel />}
+                    minHeight={220}
+                >
+                    <DeckIntelligence decks={rankings} t={t} />
+                </PremiumLock>
+            </Panel>
+
             <Panel type='default' compactHeader title={t('Deck Intelligence — your decks ranked')}>
                 <PremiumLock
                     capability={CAPABILITIES.PERSONAL_DECK_RANKINGS}

@@ -96,26 +96,57 @@ const TierCard = ({ tier, capabilityCopy, currentTier, isAdmin, campaignUrl, onC
                         <span>{line}</span>
                     </li>
                 ))}
-                {(tier.adds || []).map((capability) => (
-                    <li className='flex gap-1.5' key={capability}>
-                        <CheckGlyph />
-                        <span>
-                            <span className='font-medium'>
-                                {capabilityCopy?.[capability]?.label || capability}
-                            </span>
-                            {capabilityCopy?.[capability]?.learn && (
-                                <span className='block text-muted'>
-                                    {capabilityCopy[capability].learn}
+                {(tier.adds || [])
+                    .filter((capability) => !capabilityCopy?.[capability]?.planned)
+                    .map((capability) => (
+                        <li className='flex gap-1.5' key={capability}>
+                            <CheckGlyph />
+                            <span>
+                                <span className='font-medium'>
+                                    {capabilityCopy?.[capability]?.label || capability}
                                 </span>
-                            )}
-                        </span>
+                                {capabilityCopy?.[capability]?.learn && (
+                                    <span className='block text-muted'>
+                                        {capabilityCopy[capability].learn}
+                                    </span>
+                                )}
+                            </span>
+                        </li>
+                    ))}
+
+                {/* ARCHON (N12): planned work is shown, but never as something
+                    you are buying today. An audit found thirteen capabilities
+                    advertised with nothing behind them; listing them with a tick
+                    alongside working features is how that happened. */}
+                {(tier.adds || []).some((capability) => capabilityCopy?.[capability]?.planned) && (
+                    <li className='mt-2 border-t border-border/60 pt-2'>
+                        <div className='mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted'>
+                            {t('Planned — not available yet')}
+                        </div>
+                        <ul className='m-0 flex list-none flex-col gap-1 p-0'>
+                            {(tier.adds || [])
+                                .filter((capability) => capabilityCopy?.[capability]?.planned)
+                                .map((capability) => (
+                                    <li className='flex gap-1.5 text-muted' key={capability}>
+                                        <span aria-hidden='true' className='mt-0.5 shrink-0'>
+                                            ○
+                                        </span>
+                                        <span>
+                                            {capabilityCopy?.[capability]?.label || capability}
+                                        </span>
+                                    </li>
+                                ))}
+                        </ul>
                     </li>
-                ))}
+                )}
             </ul>
 
             <div className='mt-4 pt-3'>
                 {tier.priceUsd > 0 ? (
-                    tier.checkoutUrl || campaignUrl ? (
+                    // `purchasable` is false when a tier delivers nothing today
+                    // that the tier below already includes. Offering checkout
+                    // for it would be charging for nothing.
+                    tier.purchasable && (tier.checkoutUrl || campaignUrl) ? (
                         // ARCHON (N12): a real anchor, not <HeroButton as='a'>.
                         // HeroUI's Button does not forward `href` - it renders a
                         // <button>, so the tier buttons looked correct and did
@@ -147,7 +178,9 @@ const TierCard = ({ tier, capabilityCopy, currentTier, isAdmin, campaignUrl, onC
                         // No campaign configured yet: say so plainly rather than
                         // showing a button that goes nowhere.
                         <div className='rounded border border-border/70 bg-surface-secondary/60 px-2 py-1.5 text-center text-xs text-muted'>
-                            {t('Coming soon')}
+                            {tier.purchasable === false
+                                ? t('Not available yet — nothing in this tier is built')
+                                : t('Coming soon')}
                         </div>
                     )
                 ) : (
@@ -310,7 +343,16 @@ const ComparisonTable = ({ tiers, capabilityCopy, currentTier, t }) => {
                                         ].join(' ')}
                                         key={tier.id}
                                     >
-                                        {tier.rank >= introducedBy.rank ? (
+                                        {copy?.planned ? (
+                                            // Planned everywhere it would apply,
+                                            // rather than a tick that says it
+                                            // works today.
+                                            <span className='text-[10px] uppercase tracking-wide text-muted'>
+                                                {tier.rank >= introducedBy.rank
+                                                    ? t('Planned')
+                                                    : '—'}
+                                            </span>
+                                        ) : tier.rank >= introducedBy.rank ? (
                                             <Tick />
                                         ) : (
                                             <span className='text-muted'>—</span>
@@ -342,18 +384,20 @@ const WhereToFindIt = ({ tiers, capabilityCopy, t }) => (
                 <div key={tier.id}>
                     <h4 className='m-0 mb-1 text-sm font-semibold text-foreground'>{tier.name}</h4>
                     <dl className='m-0 grid gap-x-4 gap-y-1 sm:grid-cols-2'>
-                        {(tier.adds || []).map((capability) => {
-                            const copy = capabilityCopy?.[capability];
+                        {(tier.adds || [])
+                            .filter((capability) => !capabilityCopy?.[capability]?.planned)
+                            .map((capability) => {
+                                const copy = capabilityCopy?.[capability];
 
-                            return (
-                                <div className='flex gap-2 text-xs' key={capability}>
-                                    <dt className='shrink-0 text-foreground'>
-                                        {copy?.label || capability}
-                                    </dt>
-                                    <dd className='m-0 text-muted'>{copy?.where || '—'}</dd>
-                                </div>
-                            );
-                        })}
+                                return (
+                                    <div className='flex gap-2 text-xs' key={capability}>
+                                        <dt className='shrink-0 text-foreground'>
+                                            {copy?.label || capability}
+                                        </dt>
+                                        <dd className='m-0 text-muted'>{copy?.where || '—'}</dd>
+                                    </div>
+                                );
+                            })}
                     </dl>
                 </div>
             ))}
@@ -422,6 +466,41 @@ const Membership = () => {
 
     return (
         <div className='mx-auto max-w-6xl space-y-3 p-3'>
+            {/* ARCHON (N12): what you currently have, before what you could buy.
+                This sat at the foot of the page, below the pitch, the grid, the
+                comparison table and the funding note - so the one line a
+                signed-in member actually comes here for (which tier am I on,
+                and where do I manage it) was the last thing on the page. */}
+            {user && (
+                <Panel type='default' compactHeader title={t('Your membership')}>
+                    <div className='flex flex-wrap items-center gap-3 text-sm'>
+                        <span
+                            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                                TIER_BADGE_CLASS[currentTier] || TIER_BADGE_CLASS.free
+                            }`}
+                        >
+                            {mine?.membership?.tierName || t('Free')}
+                        </span>
+                        {mine?.membership?.complimentary && (
+                            <span className='text-xs text-muted'>{t('Complimentary access')}</span>
+                        )}
+                        {mine?.membership?.expiresAt && (
+                            <span className='text-xs text-muted'>
+                                {t('Renews or expires {{date}}', {
+                                    date: new Date(mine.membership.expiresAt).toLocaleDateString()
+                                })}
+                            </span>
+                        )}
+                        <Link
+                            className='text-xs text-accent hover:underline'
+                            to='/profile?section=integrations'
+                        >
+                            {t('Manage your Patreon link')}
+                        </Link>
+                    </div>
+                </Panel>
+            )}
+
             <Panel type='default' compactHeader title={t('Archon Arena Membership')}>
                 <div className='space-y-2'>
                     <h2 className='m-0 text-xl font-semibold text-foreground'>
@@ -537,36 +616,6 @@ const Membership = () => {
                     )}
                 </p>
             </Panel>
-
-            {user && (
-                <Panel type='default' compactHeader title={t('Your membership')}>
-                    <div className='flex flex-wrap items-center gap-3 text-sm'>
-                        <span
-                            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
-                                TIER_BADGE_CLASS[currentTier] || TIER_BADGE_CLASS.free
-                            }`}
-                        >
-                            {mine?.membership?.tierName || t('Free')}
-                        </span>
-                        {mine?.membership?.complimentary && (
-                            <span className='text-xs text-muted'>{t('Complimentary access')}</span>
-                        )}
-                        {mine?.membership?.expiresAt && (
-                            <span className='text-xs text-muted'>
-                                {t('Renews or expires {{date}}', {
-                                    date: new Date(mine.membership.expiresAt).toLocaleDateString()
-                                })}
-                            </span>
-                        )}
-                        <Link
-                            className='text-xs text-accent hover:underline'
-                            to='/profile?section=integrations'
-                        >
-                            {t('Manage your Patreon link')}
-                        </Link>
-                    </div>
-                </Panel>
-            )}
 
             <Panel type='default' compactHeader title={t('Questions')}>
                 <dl className='m-0 space-y-2 text-sm'>

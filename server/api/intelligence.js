@@ -3,7 +3,7 @@ const passport = require('passport');
 const { wrapAsync } = require('../util.js');
 const ArchonIntelligenceService = require('../services/membership/ArchonIntelligenceService');
 const TournamentLabService = require('../services/membership/TournamentLabService');
-const { requireCapability } = require('./requireCapability');
+const { requireCapability, requireAnyCapability, sectionsFor } = require('./requireCapability');
 const { CAPABILITIES } = require('../services/membership/capabilities');
 
 const intelligence = new ArchonIntelligenceService();
@@ -54,19 +54,50 @@ module.exports.init = function (server) {
         })
     );
 
+    /**
+     * ARCHON (N12): this payload spans three tiers, so it is gated per section
+     * rather than as a whole.
+     *
+     * It used to require ARCHON_INTELLIGENCE for everything - which meant a
+     * Supporter, who is sold "Full Elo history" and a "Performance dashboard"
+     * for $5, got a 403 on the only endpoint that serves them. They were paying
+     * for two things they could not reach. Gating on the lowest capability and
+     * filtering the sections is what actually matches what was sold.
+     *
+     * Sections are computed only when the caller is entitled to them, so this
+     * also stops doing four queries for someone who may see one.
+     */
+    const PLAYER_SECTIONS = {
+        // Supporter
+        ratingHistory: CAPABILITIES.ELO_HISTORY,
+        vsExpectation: CAPABILITIES.PERFORMANCE_DASHBOARD,
+        // Archon
+        rankings: CAPABILITIES.PERSONAL_DECK_RANKINGS,
+        byHouse: CAPABILITIES.MATCHUP_ANALYTICS
+    };
+
     server.get(
         '/api/intelligence/player',
         passport.authenticate('jwt', { session: false }),
-        requireCapability(CAPABILITIES.ARCHON_INTELLIGENCE),
+        requireAnyCapability(Object.values(PLAYER_SECTIONS)),
         wrapAsync(async (req, res) => {
-            const [rankings, vsExpectation, byHouse, ratingHistory] = await Promise.all([
-                intelligence.playerDeckRankings(req.user.id, {}),
-                intelligence.playerVsExpectation(req.user.id, {}),
-                intelligence.playerByOwnHouse(req.user.id),
-                intelligence.playerRatingHistory(req.user.id, { limit: 500 })
-            ]);
+            const { allowed, locked } = sectionsFor(req, PLAYER_SECTIONS);
 
-            res.send({ success: true, rankings, vsExpectation, byHouse, ratingHistory });
+            const producers = {
+                ratingHistory: () => intelligence.playerRatingHistory(req.user.id, { limit: 500 }),
+                vsExpectation: () => intelligence.playerVsExpectation(req.user.id, {}),
+                rankings: () => intelligence.playerDeckRankings(req.user.id, {}),
+                byHouse: () => intelligence.playerByOwnHouse(req.user.id)
+            };
+
+            const results = await Promise.all(allowed.map((section) => producers[section]()));
+            const payload = Object.fromEntries(
+                allowed.map((section, index) => [section, results[index]])
+            );
+
+            // `locked` tells the client which panels to render as upgrade
+            // prompts rather than as missing.
+            res.send({ success: true, ...payload, locked });
         })
     );
 

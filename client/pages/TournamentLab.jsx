@@ -285,7 +285,13 @@ const TournamentLab = () => {
 
                     {isFetching && <div className='text-sm text-muted'>{t('Comparing…')}</div>}
 
-                    {decks.length > 0 && (
+                    {/* The side-by-side grid IS the deck_comparison promise, so
+                        it is gated on that capability rather than only on
+                        TOURNAMENT_LAB. Both are Archon today, so nothing
+                        changes for anyone - but the promise is now enforced
+                        where it is delivered, instead of being advertised with
+                        nothing checking it. */}
+                    {decks.length > 0 && hasCapability(user, CAPABILITIES.DECK_COMPARISON) && (
                         <div
                             className='grid gap-2'
                             style={{

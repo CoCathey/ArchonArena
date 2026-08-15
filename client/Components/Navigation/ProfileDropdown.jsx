@@ -6,7 +6,14 @@ import Icon from '../Icon';
 import { faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
 
 import Avatar from '../Site/Avatar';
-import { isPaidMember, tierNameOf, tierOf, TIER_BADGE_CLASS } from '../../membership';
+import {
+    CAPABILITIES,
+    hasCapability,
+    isPaidMember,
+    tierNameOf,
+    tierOf,
+    TIER_BADGE_CLASS
+} from '../../membership';
 
 /**
  * @typedef ProfileMenuProps
@@ -84,7 +91,10 @@ const ProfileMenu = ({ menu, mobile = false, user }) => {
                     their own account. Paid tiers get their badge; free accounts
                     get a quiet upgrade entry rather than a nag. */}
                 <div className='mb-1 border-b border-border/60 px-3 py-1.5'>
-                    {isPaidMember(user) ? (
+                    {/* Gated on the capability that promises it, not on
+                        "pays us money" - so a comped or admin account gets the
+                        badge too, and the promise is enforced where it is made. */}
+                    {hasCapability(user, CAPABILITIES.SUPPORTER_BADGE) && isPaidMember(user) ? (
                         <span
                             className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium ${
                                 TIER_BADGE_CLASS[tierOf(user)] || TIER_BADGE_CLASS.free
