@@ -861,11 +861,17 @@ class UserService extends EventEmitter {
             user.membership = undefined;
         }
 
-        // ARCHON (N12): profile cosmetics, loaded here for the same reason as
-        // the membership above - User.getShortSummary carries them into every
-        // lobby broadcast, and doing it per broadcast would be a query per
-        // player per update. Best-effort on the same terms: no table, no
-        // cosmetics, and the account still loads.
+        // ARCHON (N12): the account's cosmetic choices, loaded next to the
+        // membership because the two are only meaningful together - whether a
+        // stored choice is honoured is decided against the entitlements the row
+        // above resolves to, so a lapsed member's frame stops rendering without
+        // anything being rewritten. Loading it here also keeps
+        // User.getShortSummary synchronous, which matters because it runs for
+        // every player in every lobby broadcast.
+        //
+        // Same best-effort contract: a missing table or a failed query leaves
+        // the account looking like every other account, which is exactly what
+        // the free tier looks like.
         try {
             const cosmetics = await db.query(
                 'SELECT * FROM "ProfileCosmetics" WHERE "UserId" = $1',

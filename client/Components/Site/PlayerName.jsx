@@ -191,9 +191,9 @@ const TIER_TEXT_CLASS = Object.freeze({
  * @param {string} [props.tier] pass when the payload already carries it
  * @param {string} [props.tierName]
  * @param {string} [props.role] site role, for the name colour
- * @param {object} [props.cosmetics] ARCHON (N12): the player's resolved
- *        cosmetics, for the name effect. Pass when the payload carries them;
- *        otherwise the badge lookup brings them along.
+ * @param {object} [props.cosmetics] ARCHON (N12): the player's cosmetics, for
+ *        the name effect and the key finish. Pass when the payload carries
+ *        them; otherwise the badge lookup brings them along.
  * @param {boolean} [props.link] link through to their profile
  * @param {boolean} [props.plain] skip the role colour, keep the badge
  * @param {string} [props.className] applied to the name text
@@ -216,9 +216,10 @@ const PlayerName = ({
     const effectiveTier = tier !== undefined ? tier : looked && looked.tier;
     const effectiveName = tierName !== undefined ? tierName : looked && looked.tierName;
     const effectiveRole = role !== undefined ? role : looked && looked.role;
-    // ARCHON (N12): the badge lookup carries the name effect for pages whose
-    // payload does not, so a leaderboard gets them without its own query. Only
-    // members ever have one - the server resolves it away when a pledge lapses.
+    // ARCHON (N12): the badge lookup carries these for pages whose payload does
+    // not, so a leaderboard gets them without its own query. Only members ever
+    // have one, and the server drops it from the badge once a pledge lapses -
+    // so there is nothing to check here.
     const effectiveCosmetics = cosmetics !== undefined ? cosmetics : looked && looked.cosmetics;
     const effectClass = nameEffectClass(effectiveCosmetics);
 
@@ -252,7 +253,11 @@ const PlayerName = ({
             ) : (
                 <span className={`${textClass} truncate`}>{label}</span>
             )}
-            <PlayerBadge tier={effectiveTier} tierName={effectiveName} />
+            <PlayerBadge
+                cosmetics={effectiveCosmetics}
+                tier={effectiveTier}
+                tierName={effectiveName}
+            />
         </span>
     );
 };

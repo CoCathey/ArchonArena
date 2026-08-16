@@ -46,7 +46,7 @@ import {
  * save - `sanitizeCosmetics` names the slot and stores nothing.
  */
 
-const SLOT_ORDER = ['accent', 'banner', 'frame', 'title', 'nameEffect'];
+const SLOT_ORDER = ['accent', 'banner', 'frame', 'title', 'nameEffect', 'badgeFinish'];
 
 /** The catalogue entry for a slot, or undefined. */
 const slotFrom = (catalog, id) => (catalog || []).find((slot) => slot.id === id);
@@ -297,6 +297,7 @@ const ProfileCosmetics = () => {
                                             accentHex={preview.accentHex}
                                             option={option}
                                             slotId={slot.id}
+                                            tier={tierOf(user)}
                                             username={user?.username}
                                         />
                                     </OptionTile>
@@ -367,7 +368,11 @@ const CosmeticPreview = ({ cosmetics, user, t }) => {
                         <span className={`font-semibold ${nameEffectClass(cosmetics)}`}>
                             {user?.username || t('Your name')}
                         </span>
-                        <PlayerBadge tier={tierOf(user)} tierName={user?.membership?.tierName} />
+                        <PlayerBadge
+                            cosmetics={cosmetics}
+                            tier={tierOf(user)}
+                            tierName={user?.membership?.tierName}
+                        />
                     </div>
                     {cosmetics.titleLabel ? (
                         <div
@@ -386,7 +391,7 @@ const CosmeticPreview = ({ cosmetics, user, t }) => {
 };
 
 /** The visual for one option, which differs per slot. */
-const OptionSwatch = ({ slotId, option, accentHex, username }) => {
+const OptionSwatch = ({ slotId, option, accentHex, username, tier }) => {
     if (slotId === 'accent') {
         return (
             <span
@@ -430,6 +435,17 @@ const OptionSwatch = ({ slotId, option, accentHex, username }) => {
                 >
                     {username || 'Archon'}
                 </span>
+            </span>
+        );
+    }
+
+    if (slotId === 'badgeFinish') {
+        // The real badge, at the tier the viewer actually holds - a finish
+        // previewed on a tier they do not have would be a preview of somebody
+        // else's key.
+        return (
+            <span className='flex h-8 items-center justify-center text-lg'>
+                <PlayerBadge cosmetics={{ badgeFinish: option.id }} tier={tier} />
             </span>
         );
     }

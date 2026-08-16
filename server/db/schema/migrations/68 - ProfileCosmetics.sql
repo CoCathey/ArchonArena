@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS public."ProfileCosmetics"
     "Title" text COLLATE pg_catalog."default",
     -- How the name is drawn in lists ('glow' | 'gradient' | 'shimmer').
     "NameEffect" text COLLATE pg_catalog."default",
+    -- How the membership key beside the name is drawn. Came across from the
+    -- parallel cosmetics implementation this one absorbed - the key is a
+    -- genuinely separate surface from the name and the avatar.
+    "BadgeFinish" text COLLATE pg_catalog."default",
 
     "CreatedAt" timestamp without time zone NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
     "UpdatedAt" timestamp without time zone NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
@@ -63,3 +67,24 @@ CREATE TABLE IF NOT EXISTS public."ProfileCosmetics"
 )
 
 TABLESPACE pg_default;
+
+-- ---------------------------------------------------------------------------
+-- Retiring "MembershipCosmetics"
+-- ---------------------------------------------------------------------------
+--
+-- Two implementations of member cosmetics were written in parallel and both
+-- reached main within the hour. The other one stored slot/choice pairs in
+-- "MembershipCosmetics" (created by 67 - MembershipPreferences.sql); this one
+-- won the fold, and its key-finish slot came across into the catalogue above.
+--
+-- Dropped rather than left behind because nothing reads or writes it any more,
+-- and a table with no code path is debris the next person has to rule out.
+-- Safe to drop rather than migrate: neither implementation had shipped when
+-- they were reconciled, so the table has never held a row anywhere. Guarded
+-- anyway, for a database that never ran that migration at all.
+--
+-- 67 itself is deliberately NOT edited. It is already applied wherever it has
+-- been applied, and the migration ledger checksums files - rewriting history
+-- there makes `npm run migrate` refuse to continue, which is exactly the loud
+-- failure it is designed to produce.
+DROP TABLE IF EXISTS public."MembershipCosmetics";

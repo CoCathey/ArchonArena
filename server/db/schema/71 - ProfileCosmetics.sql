@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS public."ProfileCosmetics"
     "Title" text COLLATE pg_catalog."default",
     -- How the name is drawn in lists ('glow' | 'gradient' | 'shimmer').
     "NameEffect" text COLLATE pg_catalog."default",
+    -- How the membership key beside the name is drawn. Came across from the
+    -- parallel cosmetics implementation this one absorbed - the key is a
+    -- genuinely separate surface from the name and the avatar.
+    "BadgeFinish" text COLLATE pg_catalog."default",
 
     "CreatedAt" timestamp without time zone NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
     "UpdatedAt" timestamp without time zone NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),

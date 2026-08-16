@@ -2,10 +2,6 @@ const logger = require('../../log');
 const { publicBadge, permissionsFromRoleNames } = require('./publicBadge');
 const { membershipFromDbRow } = require('./mapRow');
 const { TIER_IDS } = require('./tiers');
-const { resolveEntitlements } = require('./entitlements');
-// ARCHON (N12): name effects travel with the badge, so every list that renders
-// a name gets them without a second lookup.
-const { resolveCosmetics } = require('./cosmetics');
 
 /**
  * ARCHON (N12): badges for a list of players, in one query.
@@ -56,11 +52,15 @@ class BadgeService {
      * this never drags a user's whole permission set onto a public endpoint.
      */
     async query(withCosmetics, wanted) {
-        const cosmeticColumns = withCosmetics ? ', pc."Accent", pc."NameEffect"' : '';
+        // Only the slots that can be drawn beside a name - see PUBLIC_SLOTS
+        // in cosmetics.js. A banner has nowhere to go in a list.
+        const cosmeticColumns = withCosmetics
+            ? ', pc."Accent", pc."Frame", pc."NameEffect", pc."BadgeFinish"'
+            : '';
         const cosmeticJoin = withCosmetics
             ? 'LEFT JOIN "ProfileCosmetics" pc ON pc."UserId" = u."Id" '
             : '';
-        const cosmeticGroup = withCosmetics ? ', pc."Accent", pc."NameEffect"' : '';
+        const cosmeticGroup = cosmeticColumns;
 
         return this.db.query(
             'SELECT u."Username", ' +
@@ -83,40 +83,26 @@ class BadgeService {
     }
 
     /**
-     * The list-sized part of a player's cosmetics, or null when there is
-     * nothing to send.
+     * The stored cosmetic choices on a row, in the shape the catalogue reads.
      *
-     * Resolved against the owner's entitlements rather than trusted from the
-     * row: the stored selection outlives a membership on purpose, so this is
-     * the point at which a lapsed pledge stops rendering.
-     *
-     * @returns {{accentHex: string, nameEffect: string}|null}
+     * Deliberately NOT resolved here: `publicBadge` resolves them against the
+     * same entitlements it derives the tier from, so there is one place that
+     * decides when a lapsed pledge stops rendering rather than two that can
+     * disagree.
      */
-    cosmeticsFor(row, permissions, membership) {
-        if (!this.withCosmetics || (!row.NameEffect && !row.Accent)) {
+    storedCosmetics(row) {
+        if (!this.withCosmetics) {
             return null;
         }
 
-        const entitlements = resolveEntitlements({ user: { permissions }, membership });
-        const resolved = resolveCosmetics(
-            { accent: row.Accent, nameEffect: row.NameEffect },
-            entitlements.capabilities
-        );
-
-        // The accent only travels with an effect that uses it. On its own it
-        // would colour nothing in a list, and this payload is one row per name.
-        if (resolved.nameEffect === 'none') {
-            return null;
-        }
-
-        return { accentHex: resolved.accentHex, nameEffect: resolved.nameEffect };
+        return {
+            accent: row.Accent,
+            frame: row.Frame,
+            nameEffect: row.NameEffect,
+            badgeFinish: row.BadgeFinish
+        };
     }
 
-    /**
-     * @param {string[]} usernames
-     * @returns {Promise<Object<string, {role: string, tier: string, tierName: string|null}>>}
-     *          keyed by lowercased username; players with nothing to show are omitted
-     */
     async getBadges(usernames) {
         const wanted = [
             ...new Set(
@@ -172,18 +158,21 @@ class BadgeService {
                 GrantedTier: row.GrantedTier,
                 GrantedUntil: row.GrantedUntil
             });
-            const badge = publicBadge({ permissions, membership });
-            // ARCHON (N12): the name effect, resolved against what the account
-            // may currently use - the same lapse rule as the badge itself, so a
-            // shimmer stops on the day the pledge does. Only the two fields a
-            // *list* can use: a leaderboard has nowhere to put a banner.
-            const cosmetics = this.cosmeticsFor(row, permissions, membership);
+            // ARCHON (N12): cosmetics ride along with the badge, so every list
+            // that renders a name gets them without a second lookup. publicBadge
+            // resolves them against what the account may currently use, which
+            // is what stops a shimmer on the day the pledge does.
+            const badge = publicBadge({
+                permissions,
+                membership,
+                cosmetics: this.storedCosmetics(row)
+            });
 
-            if (badge.role === 'user' && badge.tier === TIER_IDS.FREE && !cosmetics) {
+            if (badge.role === 'user' && badge.tier === TIER_IDS.FREE && !badge.cosmetics) {
                 continue;
             }
 
-            badges[row.Username.toLowerCase()] = cosmetics ? { ...badge, cosmetics } : badge;
+            badges[row.Username.toLowerCase()] = badge;
         }
 
         return badges;

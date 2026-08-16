@@ -5,7 +5,7 @@ const { resolveEntitlements } = require('../services/membership/entitlements');
 const { publicBadge } = require('../services/membership/publicBadge');
 // ARCHON (N12): profile cosmetics ride along with the user so a lobby seat
 // shows them without a second lookup per player.
-const { resolveCosmetics, isDefaultCosmetics } = require('../services/membership/cosmetics');
+const { publicCosmetics: cosmeticsFor } = require('../services/membership/cosmetics');
 
 class User {
     constructor(userData) {
@@ -112,25 +112,17 @@ class User {
     get publicBadge() {
         return publicBadge({
             permissions: this.userData.permissions || {},
-            membership: this.userData.membership
+            membership: this.userData.membership,
+            // ARCHON (N12): the cosmetic slots this account has chosen. Filtered
+            // against the same entitlements the tier comes from inside
+            // publicBadge, so a lapsed membership stops rendering its nameplate
+            // on exactly the day it stops unlocking features.
+            cosmetics: this.userData.cosmetics
         });
     }
 
     get role() {
         return this.publicBadge.role;
-    }
-
-    /**
-     * ARCHON (N12): the cosmetics this account may currently display.
-     *
-     * Resolved rather than read: the stored selection deliberately outlives a
-     * membership, so this is where a lapsed pledge stops rendering. Unlike
-     * `publicBadge`, the admin override applies - an accent colour makes no
-     * claim about anybody's billing, and an admin who cannot see the frame
-     * they just chose is a bug report, not a policy.
-     */
-    get cosmetics() {
-        return resolveCosmetics(this.userData.cosmetics, this.getEntitlements().capabilities);
     }
 
     /** The tier id other people may see, or 'free'. */
@@ -208,7 +200,12 @@ class User {
                 expiresAt: entitlements.expiresAt,
                 source: entitlements.source
             },
-            capabilities: entitlements.capabilities
+            capabilities: entitlements.capabilities,
+            // ARCHON (N12): what this account has chosen to look like, filtered
+            // to what it may still use. Sent with the user so the profile panel
+            // and the player's own name render their choice immediately rather
+            // than after a second request.
+            cosmetics: cosmeticsFor(this.userData.cosmetics, entitlements)
         };
     }
 
@@ -239,9 +236,6 @@ class User {
             onboarded: !!this.userData.onboarded,
             // ARCHON: linked Decks of KeyForge account (prefills bulk import)
             dokUsername: this.userData.dokUsername || null,
-            // ARCHON (N12): the account's own cosmetics, so the client can
-            // draw its own avatar frame without asking for it separately.
-            cosmetics: this.cosmetics,
             // ARCHON (N12): premium membership. The client gates UI on
             // `capabilities` and never re-derives it from the tier - the server
             // is the only thing that decides, so a hand-edited client cannot
@@ -258,7 +252,6 @@ class User {
         // Resolved once: `role` and `tier` both come from the same badge, and
         // this runs for every user in every lobby broadcast.
         const badge = this.publicBadge;
-        const cosmetics = this.cosmetics;
 
         return {
             username: this.username,
@@ -269,10 +262,13 @@ class User {
             // without a second lookup. Name only - never expiry or provider.
             tier: badge.tier,
             tierName: badge.tierName,
-            // Omitted entirely when nothing is set, which is most accounts -
-            // this goes out to every client on every lobby update, and a
-            // default block per user would be most of the message.
-            ...(isDefaultCosmetics(cosmetics) ? {} : { cosmetics })
+            // Carried for the same reason as the tier: a seat that already
+            // has the tier skips the badge lookup entirely, so without this a
+            // member's frame and name effect would appear everywhere except
+            // the lobby. Already absent when nothing is set - publicBadge omits
+            // it - which matters on a message sent to every client on every
+            // lobby update.
+            cosmetics: badge.cosmetics
         };
     }
 

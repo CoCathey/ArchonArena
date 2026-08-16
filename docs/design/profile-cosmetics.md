@@ -21,18 +21,21 @@ competitive outcome.
 | Avatar frame   | brass, aember, shadow, verdant, crimson | prismatic (follows the accent) |
 | Title          | 10 curated titles                       | 2 more                         |
 | Name effect    | glow                                    | gradient, shimmer              |
+| Key finish     | standard                                | etched, radiant                |
 | Bio length     | 1000 characters (280 free)              | 1000                           |
 
 Where they appear: the accent, banner, frame and title on `/players/:username`;
-the frame and name effect anywhere a name or avatar is rendered - lobby chat,
-game seats, the game list, the nav.
+the frame, name effect and key finish anywhere a name or avatar is rendered -
+lobby chat, game seats, the game list, the nav. `publicCosmetics` is the
+list-sized subset that rides along with a badge lookup; the profile page gets
+the full set.
 
 ## Shape
 
 ```
 server/services/membership/cosmetics.js      the catalogue + all the rules
 server/services/community/ProfileCosmeticsService.js   read/write the row
-server/db/schema/migrations/67 - ProfileCosmetics.sql  one row per user
+server/db/schema/migrations/68 - ProfileCosmetics.sql  one row per user
 client/cosmetics.js                          id -> pixels, and nothing else
 client/Components/Profile/ProfileCosmetics.jsx  the editor, with live preview
 ```
@@ -104,6 +107,17 @@ Rerun it after adding art.
     all five of its capabilities were unbuilt. `enhanced_cosmetics` is the first
     of them to ship, so the tier is now on sale - automatically, with no flag to
     flip.
+-   **Two implementations landed on main; this is the merged one.** A parallel
+    build shipped `nameplate` (five fixed name colours) and `badgeFinish` in a
+    `MembershipCosmetics` table with its own catalogue and settings panel. The
+    key finish came across as a sixth slot here - the key beside a name is a
+    genuinely separate surface, and nothing here covered it. The nameplate did
+    not: it is `accent` plus `nameEffect` with a smaller palette. Neither had
+    shipped, so no stored choice was lost. That build's preview programme and
+    organiser export are untouched and unrelated; only its cosmetics half was
+    folded in, and `MembershipCosmetics` is dropped by
+    `68 - ProfileCosmetics.sql` rather than by editing the applied migration
+    that created it.
 -   **A deployment that has not migrated still works.** Every reader tolerates
     `ProfileCosmetics` being absent; `BadgeService` retries without the join and
     stops asking, because losing every badge on the site over a decoration table

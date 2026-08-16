@@ -37,6 +37,20 @@ const { CAPABILITIES } = require('./capabilities');
  * badge follows - and comes back exactly as they left it if they resubscribe.
  * Deleting the selection would punish someone for pausing a pledge, and
  * rendering it forever would sell it once.
+ *
+ * ## Why there is one catalogue and not two
+ *
+ * Two implementations of member cosmetics were written in parallel and both
+ * reached main. This one absorbed the other rather than sitting beside it: a
+ * second catalogue, table and settings panel doing the same job is how a
+ * player ends up with two "Appearance" sections that disagree about what they
+ * chose.
+ *
+ * What came across is `badgeFinish` - the key beside the name is genuinely a
+ * separate surface from the name and the avatar, and nothing here covered it.
+ * What did not is that design's `nameplate` slot, five fixed name colours,
+ * which is `accent` plus `nameEffect` with a smaller palette. Neither had
+ * shipped, so no stored choice was lost in either direction.
  */
 
 /** The slots a player can set. Ids are the wire/DB field names. */
@@ -45,7 +59,8 @@ const SLOTS = Object.freeze({
     BANNER: 'banner',
     FRAME: 'frame',
     TITLE: 'title',
-    NAME_EFFECT: 'nameEffect'
+    NAME_EFFECT: 'nameEffect',
+    BADGE_FINISH: 'badgeFinish'
 });
 
 const SUPPORTER = CAPABILITIES.PROFILE_COSMETICS;
@@ -161,6 +176,19 @@ const NAME_EFFECTS = [
     { id: 'shimmer', label: 'Shimmer', capability: ENHANCED }
 ];
 
+/**
+ * How the membership key beside the name is drawn.
+ *
+ * The finish is applied ON TOP of the tier's colour and shape, never instead
+ * of them - the key still has to say which tier at a glance, which is the
+ * entire reason it is a key and not a sticker.
+ */
+const BADGE_FINISHES = [
+    { id: 'standard', label: 'Standard', capability: null },
+    { id: 'etched', label: 'Etched', capability: ENHANCED },
+    { id: 'radiant', label: 'Radiant', capability: ENHANCED }
+];
+
 const SLOT_CATALOG = Object.freeze({
     [SLOTS.ACCENT]: {
         id: SLOTS.ACCENT,
@@ -198,6 +226,13 @@ const SLOT_CATALOG = Object.freeze({
         description: 'How your name is drawn in lobbies, leaderboards and chat.',
         default: 'none',
         options: NAME_EFFECTS
+    },
+    [SLOTS.BADGE_FINISH]: {
+        id: SLOTS.BADGE_FINISH,
+        label: 'Key finish',
+        description: 'How the membership key beside your name is drawn.',
+        default: 'standard',
+        options: BADGE_FINISHES
     }
 });
 
@@ -355,6 +390,54 @@ function resolveCosmetics(stored, capabilities) {
 }
 
 /**
+ * The slots a LIST can use: the ones that attach to a name or an avatar.
+ *
+ * A leaderboard row has nowhere to put a banner and no room for a title, and
+ * this payload is one entry per name on every page that shows names.
+ */
+const PUBLIC_SLOTS = [SLOTS.FRAME, SLOTS.NAME_EFFECT, SLOTS.BADGE_FINISH];
+
+/**
+ * What to send alongside a public badge.
+ *
+ * Same resolution as `resolveCosmetics` - so a lapsed pledge stops rendering
+ * here on exactly the day it stops rendering on the profile - trimmed to what
+ * fits beside a name, with defaults omitted entirely. `accentHex` rides along
+ * only when something in the set actually uses it, because the stylesheet
+ * already falls back to the site amber and a colour that tints nothing is a
+ * field per row for no reason.
+ *
+ * @param {object|null} stored
+ * @param {object|string[]} entitlements resolved entitlements, or a capability list
+ * @returns {object|null} null when there is nothing to show
+ */
+function publicCosmetics(stored, entitlements) {
+    const capabilities = Array.isArray(entitlements)
+        ? entitlements
+        : (entitlements && entitlements.capabilities) || [];
+    const visible = {};
+
+    for (const slot of PUBLIC_SLOTS) {
+        const value = stored && stored[slot];
+
+        if (value && value !== SLOT_CATALOG[slot].default && canUse(slot, value, capabilities)) {
+            visible[slot] = value;
+        }
+    }
+
+    if (!Object.keys(visible).length) {
+        return null;
+    }
+
+    // Only the effects that are drawn in the accent colour need it.
+    if (visible.nameEffect || visible.frame === 'prismatic') {
+        visible.accentHex = resolveCosmetics(stored, capabilities).accentHex;
+    }
+
+    return visible;
+}
+
+/**
  * Is a resolved selection the same as picking nothing?
  *
  * Used to keep default cosmetics out of list payloads - most accounts have
@@ -461,6 +544,7 @@ module.exports = {
     bioMaxLength,
     defaultCosmetics,
     resolveCosmetics,
+    publicCosmetics,
     sanitizeCosmetics,
     isDefaultCosmetics,
     cosmeticsCatalog,

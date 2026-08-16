@@ -196,6 +196,27 @@ describe('BadgeService', function () {
             expect(badges.patron).toBeUndefined();
         });
 
+        it('carries the key finish, the slot folded in from the parallel build', async function () {
+            const badges = await service([
+                patron({ Tier: TIER_IDS.VAULT_MASTER, BadgeFinish: 'radiant' })
+            ]).getBadges(['patron']);
+
+            expect(badges.patron.cosmetics.badgeFinish).toBe('radiant');
+        });
+
+        it('shows an admin the cosmetics they chose, but still not a tier', async function () {
+            // publicBadge strips the admin override before deciding the tier,
+            // because that is a claim about money. A frame is not, and an admin
+            // who cannot see the one they picked would file a bug.
+            const badges = await service([
+                { Username: 'boss', Roles: ['Admin'], Tier: null, Status: null, Frame: 'prismatic' }
+            ]).getBadges(['boss']);
+
+            expect(badges.boss.tier).toBe(TIER_IDS.FREE);
+            expect(badges.boss.role).toBe('admin');
+            expect(badges.boss.cosmetics.frame).toBe('prismatic');
+        });
+
         it('sends nothing when only an accent is set', async function () {
             // An accent alone colours nothing in a list, and this payload is
             // one row per name on every page that shows names.

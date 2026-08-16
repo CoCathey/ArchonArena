@@ -102,12 +102,25 @@ export function accentStyle(cosmetics) {
     return hex ? { '--cosmetic-accent': hex } : {};
 }
 
+/**
+ * Key finishes, applied on top of the tier's own colour rather than replacing
+ * it - the key says which tier, the finish is the personalisation, and losing
+ * the first to express the second would make the badge mean less than it did.
+ */
+export const KEY_FINISH_CLASS = Object.freeze({
+    standard: '',
+    etched: 'opacity-80',
+    radiant: 'drop-shadow-[0_0_5px_currentColor]'
+});
+
 /** The class for a slot, falling back to the default for an unknown id. */
 const classFor = (map, value) => map[value] || map.none;
 
 export const frameClass = (cosmetics) => classFor(FRAME_CLASS, cosmetics && cosmetics.frame);
 export const nameEffectClass = (cosmetics) =>
     classFor(NAME_EFFECT_CLASS, cosmetics && cosmetics.nameEffect);
+export const keyFinishClass = (cosmetics) =>
+    KEY_FINISH_CLASS[(cosmetics && cosmetics.badgeFinish) || 'standard'] || '';
 
 /** The banner image for a selection, or null when there is none to draw. */
 export function bannerArt(cosmetics) {

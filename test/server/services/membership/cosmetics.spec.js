@@ -3,6 +3,7 @@ const {
     bioMaxLength,
     defaultCosmetics,
     resolveCosmetics,
+    publicCosmetics,
     sanitizeCosmetics,
     isDefaultCosmetics,
     cosmeticsCatalog,
@@ -170,6 +171,64 @@ describe('profile cosmetics', function () {
             expect(normalizeAccentHex('rebeccapurple')).toBeNull();
             expect(normalizeAccentHex('#fff')).toBeNull();
             expect(normalizeAccentHex('')).toBeNull();
+        });
+    });
+
+    /**
+     * ARCHON (N12): the slots that ride along with a public badge.
+     *
+     * This payload is one entry per name on every page that lists people, so
+     * what it leaves out matters as much as what it carries.
+     */
+    describe('publicCosmetics', function () {
+        it('carries only what fits beside a name', function () {
+            const visible = publicCosmetics(everything, SUPPORTER);
+
+            expect(visible).toMatchObject({ frame: 'brass', nameEffect: 'glow' });
+            // A leaderboard row has nowhere to put either of these.
+            expect(visible.banner).toBeUndefined();
+            expect(visible.title).toBeUndefined();
+        });
+
+        it('is null when the account has chosen nothing to show', function () {
+            expect(publicCosmetics(null, VAULT_MASTER)).toBeNull();
+            expect(publicCosmetics({ banner: 'mars', title: 'vault_diver' }, SUPPORTER)).toBeNull();
+        });
+
+        it('is null once the pledge that bought it lapses', function () {
+            expect(publicCosmetics(everything, [])).toBeNull();
+        });
+
+        it('sends the accent only when something is drawn in it', function () {
+            // A colour that tints nothing is a field per row for no reason.
+            expect(
+                publicCosmetics({ badgeFinish: 'etched' }, VAULT_MASTER).accentHex
+            ).toBeUndefined();
+            expect(publicCosmetics({ nameEffect: 'glow' }, SUPPORTER).accentHex).toMatch(
+                /^#[0-9a-f]{6}$/i
+            );
+        });
+    });
+
+    /**
+     * The key finish came across from the parallel implementation this one
+     * absorbed; its nameplate slot did not, being accent + name effect with a
+     * smaller palette.
+     */
+    describe('the key finish', function () {
+        it('is Vault Master only, and standard for everybody else', function () {
+            expect(resolveCosmetics({ badgeFinish: 'radiant' }, SUPPORTER).badgeFinish).toBe(
+                'standard'
+            );
+            expect(resolveCosmetics({ badgeFinish: 'radiant' }, VAULT_MASTER).badgeFinish).toBe(
+                'radiant'
+            );
+        });
+
+        it('travels with the badge, which is the only place a key is drawn', function () {
+            expect(publicCosmetics({ badgeFinish: 'etched' }, VAULT_MASTER)).toEqual({
+                badgeFinish: 'etched'
+            });
         });
     });
 

@@ -22,7 +22,8 @@ const COLUMNS = Object.freeze({
     banner: 'Banner',
     frame: 'Frame',
     title: 'Title',
-    nameEffect: 'NameEffect'
+    nameEffect: 'NameEffect',
+    badgeFinish: 'BadgeFinish'
 });
 
 /** @param {object|null|undefined} row @returns {object} a full selection */
