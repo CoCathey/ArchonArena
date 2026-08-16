@@ -19,6 +19,7 @@ import DeckFilterBar from '../src/decks/DeckFilterBar';
 import DeckPreview from '../src/decks/DeckPreview';
 import DeckRow from '../src/decks/DeckRow';
 import { useDeckLibrary } from '../src/decks/useDeckLibrary';
+import { ReportPlayerButton } from '../src/safety/ReportPlayerSheet';
 import { formatLabel, isUnchainedFormat } from '../src/game/gameFormats';
 import {
     allPlayersReady,
@@ -205,10 +206,19 @@ export default function PendingGameScreen() {
                 {players.map((player) => (
                     <Card key={player.name} style={styles.playerRow}>
                         <View style={{ flex: 1 }}>
-                            <Text style={styles.playerName}>
-                                {player.name}
-                                {player.owner ? '  ⭐' : ''}
-                            </Text>
+                            <View style={styles.playerNameRow}>
+                                <Text style={styles.playerName}>
+                                    {player.name}
+                                    {player.owner ? '  ⭐' : ''}
+                                </Text>
+                                {/* ARCHON: Guideline 1.2 - reporting and
+                                    blocking have to be reachable where the chat
+                                    is, which is here and in the game itself.
+                                    Not offered against yourself. */}
+                                {player.name !== username ? (
+                                    <ReportPlayerButton username={player.name} />
+                                ) : null}
+                            </View>
                             <View style={styles.deckStatusRow}>
                                 <Text
                                     style={[
@@ -533,6 +543,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: spacing.sm,
         gap: spacing.md
+    },
+    playerNameRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm
     },
     playerName: {
         color: colors.text,

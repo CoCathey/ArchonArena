@@ -236,6 +236,30 @@ export function avatarUrl(avatar?: unknown): string | undefined {
     return `${serverUrl()}/img/avatar/${avatar}.png`;
 }
 
+/**
+ * ARCHON: delete this account, permanently.
+ *
+ * Apple's Guideline 5.1.1(v) requires that an app which lets somebody create an
+ * account also lets them delete it from inside the app — a support email or a
+ * "visit our website" is explicitly not enough. The website has had this since
+ * before the app existed; this is the same endpoint, so the two cannot drift.
+ *
+ * The password is re-checked server-side even though the caller is already
+ * authenticated: a phone left unlocked on a table is exactly the situation this
+ * confirmation exists for.
+ *
+ * What it does is anonymise rather than drop rows — the identity is erased
+ * (username, email, password, avatar, Patreon and Decks of KeyForge
+ * credentials, every token) while the games this player took part in stay
+ * intact, because a finished game belongs to their opponent too.
+ */
+export async function deleteAccount(username: string, password: string) {
+    return apiFetch<ApiResponse>(`/api/account/${encodeURIComponent(username)}/delete`, {
+        method: 'POST',
+        body: { password }
+    });
+}
+
 export async function logout(): Promise<void> {
     const { refreshToken } = useAuthStore.getState();
     try {
@@ -432,6 +456,70 @@ export async function removePushToken(token: string) {
         method: 'POST',
         body: { token }
     });
+}
+
+// ---- Safety: reporting and blocking (App Store Guideline 1.2) ----
+
+/**
+ * ARCHON: the safety controls an app with chat has to carry.
+ *
+ * App Store Review Guideline 1.2 requires apps with user-generated content to
+ * provide a way to report offensive content AND a way to block abusive users,
+ * both reachable in the app. Archon Arena has lobby chat, in-game chat, club
+ * boards and free-text profiles, so it is squarely a UGC app - and these
+ * existed only on the website until now.
+ *
+ * Both are the endpoints the website already uses, so a report from a phone
+ * lands in the same moderation queue as one from a browser.
+ */
+export interface ModerationOptions extends ApiResponse {
+    targetTypes?: string[];
+    reasons?: string[];
+}
+
+/** The reasons a report may be filed under, as the server defines them. */
+export async function fetchModerationOptions() {
+    return rawFetch<ModerationOptions>('/api/moderation/options');
+}
+
+export async function submitReport(body: {
+    targetType: 'player' | 'message' | 'deck' | 'club' | 'store' | 'inPersonGame';
+    targetUsername?: string;
+    targetId?: string | number;
+    reason: string;
+    details?: string;
+}) {
+    return apiFetch<ApiResponse>('/api/reports', { method: 'POST', body });
+}
+
+/**
+ * Block a player. The lobby stops showing you their games, chat and presence,
+ * and stops showing you to them.
+ */
+export async function blockPlayer(username: string) {
+    const me = useAuthStore.getState().user?.username;
+
+    return apiFetch<ApiResponse>(`/api/account/${encodeURIComponent(me ?? '')}/blocklist`, {
+        method: 'POST',
+        body: { username }
+    });
+}
+
+export async function unblockPlayer(username: string) {
+    const me = useAuthStore.getState().user?.username;
+
+    return apiFetch<ApiResponse>(
+        `/api/account/${encodeURIComponent(me ?? '')}/blocklist/${encodeURIComponent(username)}`,
+        { method: 'DELETE' }
+    );
+}
+
+export async function fetchBlockList() {
+    const me = useAuthStore.getState().user?.username;
+
+    return apiFetch<ApiResponse & { blockList?: string[] }>(
+        `/api/account/${encodeURIComponent(me ?? '')}/blocklist`
+    );
 }
 
 // ---- Friends ----

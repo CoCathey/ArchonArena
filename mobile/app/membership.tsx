@@ -198,7 +198,7 @@ export default function MembershipScreen() {
             load();
         } else if (outcome.status === 'declined') {
             setError('Patreon did not authorise the link. Nothing on your account changed.');
-        } else if (outcome.status === 'failed') {
+        } else if (outcome.status === 'unsupported' || outcome.status === 'failed') {
             setError(outcome.message);
         }
         // 'cancelled' is the player closing the sheet — not an error, no message.

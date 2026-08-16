@@ -640,10 +640,17 @@ class ModerationService {
 
         // Lifting a ban has to put the account back, or the row says "revoked"
         // while the player still cannot log in.
+        //
+        // ARCHON: except where the account has since been DELETED by its owner.
+        // "Disabled" carries both meanings, so without the DeletedAt guard
+        // revoking a stale ban would un-disable a wiped, password-less row and
+        // return it to the member directory - resurrecting an account whose
+        // owner asked for it to be gone.
         if (rows[0].Action === 'ban') {
-            await this.db.query('UPDATE "Users" SET "Disabled" = false WHERE "Id" = $1', [
-                rows[0].TargetUserId
-            ]);
+            await this.db.query(
+                'UPDATE "Users" SET "Disabled" = false WHERE "Id" = $1 AND "DeletedAt" IS NULL',
+                [rows[0].TargetUserId]
+            );
         }
 
         await this.audit(actor, 'moderation.revoke', {

@@ -49,6 +49,8 @@ export type LinkOutcome =
     | { status: 'linked'; tier?: string }
     | { status: 'cancelled' }
     | { status: 'declined' }
+    /** The server predates the app's link flow — see connectPatreon. */
+    | { status: 'unsupported'; message: string }
     | { status: 'failed'; message: string };
 
 /**
@@ -119,6 +121,27 @@ export async function connectPatreon(): Promise<LinkOutcome> {
         return {
             status: 'failed',
             message: start.message ?? 'Patreon linking is not available right now.'
+        };
+    }
+
+    // ARCHON (N12): stop here rather than opening a browser that cannot finish.
+    //
+    // `mobile: true` asks the server for a state token the app can carry, since
+    // it has no cookie jar. A server that predates the mobile flow ignores the
+    // flag and answers with a URL alone - and if it does, its /patreon page is
+    // the old one too, which will try to complete the link in a browser that
+    // carries none of the player's session instead of forwarding to the app.
+    //
+    // Without this check that failure is invisible: the sheet opens, Patreon
+    // redirects, nothing comes back, and the grace period reports it as the
+    // player having changed their mind. Telling them plainly is worth more than
+    // a consent screen that leads nowhere.
+    if (!start.stateToken) {
+        return {
+            status: 'unsupported',
+            message:
+                'Connecting Patreon from the app is not available yet — Archon Arena needs an ' +
+                'update on our side. Nothing on your account has changed.'
         };
     }
 

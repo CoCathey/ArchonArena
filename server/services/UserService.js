@@ -775,13 +775,50 @@ class UserService extends EventEmitter {
                 // DokApiKey belongs on this list for the same reason PatreonToken
                 // does: it is a live credential for somebody else's account, and
                 // a deleted user's must not outlive them.
-                'UPDATE "Users" SET "Username" = $1, "Email" = $2, "Password" = NULL, "Verified" = false, "Disabled" = true, "Settings_Avatar" = NULL, "Settings_CustomBackground" = NULL, "PatreonToken" = NULL, "DokApiKey" = NULL, "DokAutoSync" = false, "ResetToken" = NULL, "TokenExpires" = NULL, "ActivationToken" = NULL, "ActivationTokenExpiry" = NULL, "RegisterIp" = NULL WHERE "Id" = $3',
+                //
+                // ARCHON: Bio, Country, State and DokUsername were missing, and
+                // the first three are exactly what PlayerProfileService selects
+                // for the PUBLIC profile - so a deleted account kept showing the
+                // biography and location its owner had written, under the name
+                // `deleted-user-N`. DokUsername is a third party's handle for
+                // the same person and goes with the rest of their identity.
+                'UPDATE "Users" SET "Username" = $1, "Email" = $2, "Password" = NULL, "Verified" = false, "Disabled" = true, "Settings_Avatar" = NULL, "Settings_CustomBackground" = NULL, "Bio" = NULL, "Country" = NULL, "State" = NULL, "DokUsername" = NULL, "PatreonToken" = NULL, "DokApiKey" = NULL, "DokAutoSync" = false, "ResetToken" = NULL, "TokenExpires" = NULL, "ActivationToken" = NULL, "ActivationTokenExpiry" = NULL, "RegisterIp" = NULL, "DeletedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = $3',
                 [anonymizedUsername, anonymizedEmail, user.id]
             );
 
             await db.queryTran(client, 'DELETE FROM "UserRoles" WHERE "UserId" = $1', [user.id]);
             await db.queryTran(client, 'DELETE FROM "RefreshToken" WHERE "UserId" = $1', [user.id]);
             await db.queryTran(client, 'DELETE FROM "BlockList" WHERE "UserId" = $1', [user.id]);
+
+            // ARCHON: a linked SSO identity is both personal data and a live way
+            // back in. The OIDC callback refuses a disabled account, so leaving
+            // the row was not a takeover - it was worse in a quieter way: the
+            // identity stayed bound to the dead account forever (linkIdentity
+            // does ON CONFLICT DO NOTHING), so somebody who deleted their
+            // account and signed up again could never use SSO again. They got
+            // "This account is disabled" for an account they no longer had.
+            await db.queryTran(client, 'DELETE FROM "UserOidcIdentities" WHERE "UserId" = $1', [
+                user.id
+            ]);
+
+            // Their devices must stop ringing. The FK cascades on a real row
+            // delete, but this anonymises rather than deletes, so nothing was
+            // firing and a deleted account's phone kept receiving its pairings.
+            await db.queryTran(client, 'DELETE FROM "PushTokens" WHERE "UserId" = $1', [user.id]);
+
+            // The in-app notification centre holds opponent names, event names
+            // and match times - other people's business as much as theirs.
+            await db.queryTran(client, 'DELETE FROM "Notifications" WHERE "UserId" = $1', [
+                user.id
+            ]);
+
+            // A deleted player should leave everyone's friends list rather than
+            // sit in it as `deleted-user-N`, and the edge says who they knew.
+            await db.queryTran(
+                client,
+                'DELETE FROM "Friendships" WHERE "RequesterId" = $1 OR "AddresseeId" = $1',
+                [user.id]
+            );
 
             await db.queryTran(client, 'COMMIT');
             await client.release();

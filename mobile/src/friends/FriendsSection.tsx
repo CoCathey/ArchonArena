@@ -9,6 +9,7 @@ import { useFriendsStore } from '../stores/friendsStore';
 import { useLobbyStore } from '../stores/lobbyStore';
 import { colors, radius, spacing } from '../theme';
 import { Button, Card, EmptyState, ErrorBanner, TextField } from '../ui/primitives';
+import { ReportPlayerButton } from '../safety/ReportPlayerSheet';
 
 /**
  * ARCHON: friends, as a section of the Profile tab rather than a tab of its own.
@@ -87,6 +88,9 @@ function FriendRow(props: {
                 loading={props.removing}
                 onPress={() => props.onRemove(friend)}
             />
+            {/* Guideline 1.2: reporting and blocking have to be reachable from
+                wherever you can see another player, not buried in settings. */}
+            <ReportPlayerButton username={friend.username} />
         </View>
     );
 }

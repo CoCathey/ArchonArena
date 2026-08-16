@@ -52,7 +52,17 @@ class Server {
                 this.userService
                     .getUserById(jwtPayload.id)
                     .then((user) => {
-                        if (user) {
+                        // ARCHON: a disabled account must stop working NOW, not
+                        // when its access token happens to expire.
+                        //
+                        // Login, refresh, OIDC and the lobby socket all refuse a
+                        // disabled account; this strategy did not, so a token
+                        // already in someone's hands stayed good for its full
+                        // five minutes. That is five minutes of API access for
+                        // an account a moderator has just banned - and for one
+                        // its owner has just asked to have deleted, since
+                        // deletion disables the row.
+                        if (user && !user.disabled) {
                             return done(null, user.getWireSafeDetails());
                         }
 

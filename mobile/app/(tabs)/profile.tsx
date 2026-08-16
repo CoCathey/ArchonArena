@@ -19,7 +19,9 @@ import { useSettingsStore } from '../../src/stores/settingsStore';
 import { TIER_COLORS } from '../../src/membership/capabilities';
 import { currentTier, currentTierName, isAdmin, isMember } from '../../src/membership/entitlements';
 import { colors, radius, spacing } from '../../src/theme';
+import DeleteAccountSection from '../../src/account/DeleteAccountSection';
 import FriendsSection from '../../src/friends/FriendsSection';
+import BlockedPlayersSection from '../../src/safety/BlockedPlayersSection';
 import { Button, Card, ErrorBanner } from '../../src/ui/primitives';
 
 function SettingRow(props: {
@@ -326,13 +328,24 @@ export default function ProfileScreen() {
             <Text style={styles.friendsHeading}>Friends</Text>
             <FriendsSection />
 
+            {/* ARCHON: Guideline 1.2 asks for the ability to block abusive
+                users; a block you cannot lift is a worse control than none.
+                Renders nothing when the list is empty. */}
+            <BlockedPlayersSection />
+
             <Button
                 title='Sign out'
-                variant='danger'
+                variant='secondary'
                 onPress={signOut}
                 loading={busy}
                 style={{ marginTop: spacing.md }}
             />
+
+            {/* ARCHON: required by App Store Guideline 5.1.1(v) - an app with
+                account creation must offer deletion from inside the app. Last
+                on the screen and visually separated, because it is the one
+                action here that cannot be undone. */}
+            <DeleteAccountSection />
 
             <Text style={styles.footer}>
                 Archon Arena mobile · KeyForge is a trademark of Fantasy Flight Games / Ghost
