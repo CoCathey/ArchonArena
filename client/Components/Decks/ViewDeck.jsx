@@ -6,6 +6,7 @@ import Icon from '../Icon';
 import { faSync } from '@fortawesome/free-solid-svg-icons';
 
 import DeckSummary from './DeckSummary';
+import ShareDeckModal from './ShareDeckModal';
 import AercBreakdown from './AercBreakdown';
 import Panel from '../Site/Panel';
 import {
@@ -33,6 +34,7 @@ const ViewDeck = ({ deck }) => {
     const user = useSelector((state) => state.account.user);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
     const showAccolades = user?.settings?.optionSettings?.showAccolades ?? true;
 
     const handleDeleteClick = () => {
@@ -71,11 +73,32 @@ const ViewDeck = ({ deck }) => {
                             </span>
                         </Button>
                     ) : null}
+                    {/* ARCHON: lending is for decks you own. A deck a friend
+                        lent you is theirs to lend, not yours to pass on. */}
+                    {!deck.sharedFrom && (
+                        <Button variant='tertiary' onPress={() => setIsShareModalOpen(true)}>
+                            <Trans>Share with a friend</Trans>
+                        </Button>
+                    )}
                     <Button variant='danger' onPress={() => setIsDeleteModalOpen(true)}>
                         <Trans>Delete</Trans>
                     </Button>
                 </div>
             </div>
+            {/* ARCHON: a borrowed deck says so, everywhere it is shown. It is
+                legal, rated and pooled with its owner's games - but an event
+                with an ownership rule needs to know, and so does the player
+                looking at their own collection wondering where it came from. */}
+            {deck.sharedFrom && (
+                <div className='mb-2 text-center'>
+                    <span
+                        className='inline-block rounded border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-300'
+                        title={t('Your games with it count towards this deck’s record.')}
+                    >
+                        {t('Shared by {{name}}', { name: deck.sharedFrom })}
+                    </span>
+                </div>
+            )}
             <div className='min-h-0 flex-1 overflow-auto pe-1'>
                 {/* ARCHON: the list payload carries only this account's record
                     with the deck; the detail endpoint also carries every
@@ -119,6 +142,11 @@ const ViewDeck = ({ deck }) => {
                     </HeroModal.Dialog>
                 </HeroModal.Container>
             </HeroModal.Backdrop>
+            <ShareDeckModal
+                deck={deck}
+                isOpen={isShareModalOpen}
+                onOpenChange={setIsShareModalOpen}
+            />
         </Panel>
     );
 };

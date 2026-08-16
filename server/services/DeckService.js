@@ -63,6 +63,18 @@ const globalRecord = (outcome) =>
     'ELSE gp."DeckUuid" = d."Uuid" END ' +
     `AND ${outcome})`;
 
+/**
+ * ARCHON: who lent this deck, by name.
+ *
+ * "SharedFromUserId" arrives with d.*, but an id is not something the badge can
+ * render, and a join would change the row count on a query that already has
+ * three. A scalar subquery on an indexed primary key is the cheap way to answer
+ * a question most rows do not ask - it is null for every deck somebody
+ * imported themselves.
+ */
+const SHARED_FROM_SQL =
+    '(SELECT "Username" FROM "Users" WHERE "Id" = d."SharedFromUserId") AS "SharedFromUsername", ';
+
 const GLOBAL_RECORD_SQL = {
     wins: globalRecord('g."WinnerId" = gp."PlayerId"'),
     losses: globalRecord('g."WinnerId" IS NOT NULL AND g."WinnerId" != gp."PlayerId"')
@@ -251,6 +263,7 @@ class DeckService {
                     'CASE WHEN "GlobalWinCount" + "GlobalLoseCount" = 0 THEN 0 ELSE (CAST("GlobalWinCount" AS FLOAT) / ("GlobalWinCount" + "GlobalLoseCount")) * 100 END AS "GlobalWinRate" ' +
                     'FROM ( ' +
                     `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
+                    SHARED_FROM_SQL +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = d."UserId" AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "WinCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != d."UserId" AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "LoseCount", ' +
                     `${GLOBAL_RECORD_SQL.wins} AS "GlobalWinCount", ` +
@@ -694,6 +707,7 @@ class DeckService {
                     // alias to `deckcount`, so mapDeck's `deck.DeckCount` was
                     // undefined and every deck's usage level computed as 0.
                     `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
+                    SHARED_FROM_SQL +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     // ARCHON: SAS joined HERE rather than attached to the page
@@ -1542,6 +1556,7 @@ class DeckService {
         try {
             decks = await db.query(
                 `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
+                    SHARED_FROM_SQL +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     'FROM "Decks" d ' +
@@ -1991,6 +2006,10 @@ class DeckService {
             globalWins: deck.GlobalWinCount,
             globalLosses: deck.GlobalLoseCount,
             globalWinRate: deck.GlobalWinRate,
+            // ARCHON: a deck a friend lent them, rather than one they imported.
+            // Undefined on the paths that do not select it, so the badge is
+            // absent rather than wrongly claiming the deck is their own.
+            sharedFrom: deck.SharedFromUsername || undefined,
             // Present when the row came from a query that joins DeckSas.
             // attachStats fills this in for the paths that do not.
             sasRating: deck.SasRating != null ? deck.SasRating : undefined

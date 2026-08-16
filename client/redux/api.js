@@ -924,6 +924,35 @@ export const api = createApi({
             }),
             invalidatesTags: [{ type: TAG_TYPES.DECKS, id: DECKS_LIST_ID }]
         }),
+        // ARCHON: lending a deck to a friend. An offer they accept, so the
+        // sharer's mutation touches only the offer list - nothing lands in
+        // anyone's collection until the accept below.
+        shareDeck: builder.mutation({
+            query: ({ deckId, username }) => ({
+                url: `/decks/${deckId}/share`,
+                method: 'POST',
+                body: { username }
+            }),
+            invalidatesTags: [TAG_TYPES.DECK_SHARES]
+        }),
+        getDeckShares: builder.query({
+            query: () => '/deck-shares',
+            providesTags: [TAG_TYPES.DECK_SHARES]
+        }),
+        acceptDeckShare: builder.mutation({
+            query: (shareId) => ({ url: `/deck-shares/${shareId}/accept`, method: 'POST' }),
+            // The accept is the moment a deck appears in the collection, so the
+            // deck list has to be refetched as well as the offers.
+            invalidatesTags: [TAG_TYPES.DECK_SHARES, { type: TAG_TYPES.DECKS, id: DECKS_LIST_ID }]
+        }),
+        declineDeckShare: builder.mutation({
+            query: (shareId) => ({ url: `/deck-shares/${shareId}/decline`, method: 'POST' }),
+            invalidatesTags: [TAG_TYPES.DECK_SHARES]
+        }),
+        revokeDeckShare: builder.mutation({
+            query: (shareId) => ({ url: `/deck-shares/${shareId}`, method: 'DELETE' }),
+            invalidatesTags: [TAG_TYPES.DECK_SHARES]
+        }),
         deleteDecks: builder.mutation({
             query: (deckIds) => ({
                 url: '/decks/bulk-delete',
@@ -1332,6 +1361,11 @@ export const {
     useGetDecksQuery,
     useGetDeckQuery,
     useDeleteDeckMutation,
+    useShareDeckMutation,
+    useGetDeckSharesQuery,
+    useAcceptDeckShareMutation,
+    useDeclineDeckShareMutation,
+    useRevokeDeckShareMutation,
     useDeleteDecksMutation,
     useSaveDeckMutation,
     usePrepareDokImportMutation,

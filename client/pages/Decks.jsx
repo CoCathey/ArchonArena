@@ -10,6 +10,7 @@ import ViewDeck from '../Components/Decks/ViewDeck';
 import ImportDeck from '../Components/Decks/ImportDeck';
 import DokImport from '../Components/Decks/DokImport';
 import DeckSearch from '../Components/Decks/DeckSearch';
+import DeckShareOffers from '../Components/Decks/DeckShareOffers';
 import ApiStatus from '../Components/Site/ApiStatus';
 import { useDeleteDecksMutation } from '../redux/api';
 import { cardsActions } from '../redux/slices/cardsSlice';
@@ -74,6 +75,9 @@ const DecksComponent = () => {
     return (
         <div className='flex h-[calc(100dvh-65px)] flex-col overflow-hidden'>
             <ApiStatus state={apiState} onClose={() => dispatch(cardsActions.clearDeckStatus())} />
+            {/* ARCHON: renders nothing unless a deck is actually waiting on
+                somebody, so it costs no space on the ordinary day. */}
+            <DeckShareOffers />
             <div className='grid min-h-0 flex-1 gap-3 lg:grid-cols-2'>
                 <div className='min-h-0'>
                     <Panel

@@ -79,8 +79,30 @@ const BANDS = ['Low', 'Mid', 'High', 'Very high'];
  */
 const MIN_CONFIDENT_GAMES = 10;
 
+/**
+ * How far a band's win rate must sit from the baseline before it is worth
+ * saying out loud. Ten points, the same bar `findings` applies to the gap
+ * between two bands: below that the difference is noise wearing a headline.
+ */
+const MIN_EDGE = 0.1;
+
 /** A trait's value for a deck alias, as a number, or NULL when DoK had none. */
 const traitValue = (sasAlias, trait) => `(${sasAlias}."RawData" ->> '${trait}')::numeric`;
+
+/**
+ * ARCHON: the opponent's SAS row, reached without requiring their deck to still
+ * exist.
+ *
+ * This used to be a plain join through "Decks" on ogp."DeckId", which is null
+ * for any opponent who has since deleted the deck - so every game against a
+ * deck its owner later tidied away silently left the analysis. The uuid the
+ * game itself recorded (migration 71) does not care what is in anyone's
+ * collection today, and the "Decks" join stays as the fallback for rows written
+ * before that column existed.
+ */
+const OPPONENT_SAS_JOIN =
+    'LEFT JOIN "Decks" od ON od."Id" = ogp."DeckId" ' +
+    'JOIN "DeckSas" ods ON ods."Uuid" = COALESCE(ogp."DeckUuid", od."Uuid") ';
 
 class AercAnalyticsService {
     constructor(db = require('../../db')) {
@@ -262,13 +284,52 @@ class AercAnalyticsService {
                 'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                 'JOIN "GamePlayers" ogp ON ogp."GameId" = gp."GameId" ' +
                 '  AND ogp."PlayerId" <> gp."PlayerId" ' +
-                'JOIN "Decks" od ON od."Id" = ogp."DeckId" ' +
-                'JOIN "DeckSas" ods ON ods."Uuid" = od."Uuid" ' +
+                OPPONENT_SAS_JOIN +
                 `WHERE gp."PlayerId" = $1 AND ${DECIDED}${setFilter} ` +
                 `  AND ${traitValue('ods', trait)} IS NOT NULL ` +
                 'GROUP BY 1',
             params,
             'byOpponentTrait'
+        );
+
+        return { trait, cuts, bands: this.shapeBands(rows, cuts) };
+    }
+
+    /**
+     * ARCHON: the deck's own record against each band of an opponent trait.
+     *
+     * The player-level version answers "which kind of deck beats ME". This one
+     * answers "which kind of deck does THIS DECK beat", which is the question a
+     * player actually has in front of them when they are choosing what to
+     * bring, and it is the only form that can say a deck is good against
+     * something rather than that its pilot is.
+     *
+     * Pooled across every copy of the deck, by the uuid the game recorded. Deck
+     * matchup samples are thin enough as it is, and a friend playing your deck
+     * is still that deck playing that matchup. `deck` comes from
+     * `resolveDeck`, which is where ownership is established.
+     */
+    async deckByOpponentTrait(deck, trait) {
+        const cuts = await this.bandCuts(trait);
+
+        if (!deck || !cuts) {
+            return null;
+        }
+
+        const rows = await this.safeQuery(
+            `SELECT ${this.bandCase('ods', trait, cuts)} AS "band", ` +
+                '  COUNT(*)::int AS "games", ' +
+                '  COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId")::int AS "wins" ' +
+                'FROM "GamePlayers" gp ' +
+                'JOIN "Games" g ON g."Id" = gp."GameId" ' +
+                'JOIN "GamePlayers" ogp ON ogp."GameId" = gp."GameId" ' +
+                '  AND ogp."PlayerId" <> gp."PlayerId" ' +
+                OPPONENT_SAS_JOIN +
+                `WHERE ${deck.predicate} AND ${DECIDED} ` +
+                `  AND ${traitValue('ods', trait)} IS NOT NULL ` +
+                'GROUP BY 1',
+            [deck.param],
+            'deckByOpponentTrait'
         );
 
         return { trait, cuts, bands: this.shapeBands(rows, cuts) };
@@ -507,6 +568,161 @@ class AercAnalyticsService {
         }
 
         return found.sort((a, b) => b.gap - a.gap).slice(0, Math.max(1, Number(limit) || 5));
+    }
+
+    /**
+     * ARCHON: turn a deck id into the thing every deck query here matches on.
+     *
+     * A deck's identity is its Master Vault uuid, so that is what the games are
+     * matched by - which pools every copy of the deck and survives any one
+     * owner deleting theirs. Alliance and standalone decks have no uuid and
+     * fall back to the row id, which means their profile covers that row alone.
+     *
+     * Returns null for a deck that does not exist. Ownership is NOT checked
+     * here: the caller decides who may ask, because a shared deck is legitimately
+     * readable by more than its importer.
+     */
+    async resolveDeck(deckId) {
+        const rows = await this.safeQuery(
+            'SELECT "Id", "Uuid", "Name", "UserId" FROM "Decks" WHERE "Id" = $1',
+            [deckId],
+            'resolveDeck'
+        );
+
+        const row = rows && rows[0];
+
+        if (!row) {
+            return null;
+        }
+
+        return {
+            id: row.Id,
+            uuid: row.Uuid,
+            name: row.Name,
+            userId: row.UserId,
+            pooled: !!row.Uuid,
+            predicate: row.Uuid ? 'gp."DeckUuid" = $1' : 'gp."DeckId" = $1',
+            param: row.Uuid || row.Id
+        };
+    }
+
+    /** The deck's overall record, on the same games the bands are cut from. */
+    async deckRecord(deck) {
+        if (!deck) {
+            return null;
+        }
+
+        const rows = await this.safeQuery(
+            'SELECT COUNT(*)::int AS "games", ' +
+                '  COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId")::int AS "wins" ' +
+                'FROM "GamePlayers" gp ' +
+                'JOIN "Games" g ON g."Id" = gp."GameId" ' +
+                `WHERE ${deck.predicate} AND ${DECIDED}`,
+            [deck.param],
+            'deckRecord'
+        );
+
+        const row = (rows && rows[0]) || { games: 0, wins: 0 };
+
+        return {
+            games: row.games,
+            wins: row.wins,
+            losses: row.games - row.wins,
+            winRate: row.games ? row.wins / row.games : null
+        };
+    }
+
+    /**
+     * ARCHON: what this deck is good against, and what beats it.
+     *
+     * Every trait, banded the same site-wide way as everywhere else, with the
+     * bands the deck over- and under-performs its OWN average in. The baseline
+     * matters: measured against the site the answer would mostly restate which
+     * decks are strong, and the player already knows this deck's overall win
+     * rate. Measured against itself it says something they cannot see - this
+     * deck does better than it usually does when the other side is short on
+     * creature control.
+     *
+     * The bar for saying anything at all is deliberately high, and it is the
+     * same bar `findings` uses at player level:
+     *
+     *   - both the band and the deck's overall record must clear
+     *     MIN_CONFIDENT_GAMES, so a 100% record over two games is never a
+     *     headline;
+     *   - the edge must be at least MIN_EDGE, because five points is noise
+     *     dressed as a finding.
+     *
+     * A deck with too few games gets `bands` and an empty good/bad list rather
+     * than an invented story, and the caller is told how many games short it is.
+     */
+    async deckStrategyProfile(deckId, { minGames = MIN_CONFIDENT_GAMES } = {}) {
+        const deck = await this.resolveDeck(deckId);
+
+        if (!deck) {
+            return null;
+        }
+
+        const record = await this.deckRecord(deck);
+        const threshold = Math.max(1, Number(minGames) || MIN_CONFIDENT_GAMES);
+        const traits = [];
+
+        for (const trait of TRAITS) {
+            const result = await this.deckByOpponentTrait(deck, trait.key);
+
+            if (result) {
+                traits.push({ ...trait, ...result });
+            }
+        }
+
+        const goodAgainst = [];
+        const badAgainst = [];
+
+        if (record && record.games >= threshold && record.winRate !== null) {
+            for (const trait of traits) {
+                for (const band of trait.bands) {
+                    if (band.games < threshold || band.winRate === null) {
+                        continue;
+                    }
+
+                    const edge = band.winRate - record.winRate;
+
+                    if (Math.abs(edge) < MIN_EDGE) {
+                        continue;
+                    }
+
+                    const entry = {
+                        trait: trait.key,
+                        label: trait.label,
+                        short: trait.short,
+                        band: band.band,
+                        from: band.from,
+                        to: band.to,
+                        games: band.games,
+                        wins: band.wins,
+                        losses: band.losses,
+                        winRate: band.winRate,
+                        edge
+                    };
+
+                    (edge > 0 ? goodAgainst : badAgainst).push(entry);
+                }
+            }
+        }
+
+        goodAgainst.sort((a, b) => b.edge - a.edge);
+        badAgainst.sort((a, b) => a.edge - b.edge);
+
+        return {
+            deck: { id: deck.id, uuid: deck.uuid, name: deck.name, pooled: deck.pooled },
+            record,
+            // What the reader needs to know before believing any of it.
+            threshold,
+            enoughGames: !!record && record.games >= threshold,
+            gamesShort: record ? Math.max(0, threshold - record.games) : threshold,
+            traits,
+            goodAgainst,
+            badAgainst
+        };
     }
 }
 

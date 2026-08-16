@@ -419,6 +419,131 @@ EloHistory.propTypes = { history: PropTypes.array, t: PropTypes.func };
  * The deck list is the rankings the page already loads, so choosing a deck
  * costs one request rather than two.
  */
+/**
+ * ARCHON: what a deck is good against, and what beats it.
+ *
+ * Deliberately not a chart. The useful form of this is a sentence a player can
+ * act on before they choose what to bring - "you win more than usual against
+ * decks short on creature control" - and every line carries the record it came
+ * from, because a claim about a matchup is worth exactly its sample size.
+ *
+ * Opponent traits rather than houses: a house is a colour, and AERC is the
+ * nearest thing KeyForge has to a strategy axis. The bands are the same
+ * site-wide quartiles the rest of the AERC analysis uses, so "high creature
+ * control" means the same thing here as everywhere else.
+ */
+const StrategyLine = ({ entry, tone, t }) => (
+    <li className='flex flex-wrap items-baseline gap-x-2 gap-y-0.5'>
+        <span className={tone === 'good' ? 'text-emerald-300' : 'text-rose-300'}>
+            {t('{{band}} {{trait}}', { band: entry.band, trait: entry.label })}
+        </span>
+        <span className='text-foreground'>{pct(entry.winRate)}</span>
+        <span className='text-xs text-muted'>
+            {t('({{wins}}–{{losses}}, {{sign}}{{edge}} vs this deck’s average)', {
+                wins: entry.wins,
+                losses: entry.losses,
+                sign: entry.edge > 0 ? '+' : '−',
+                edge: pct(Math.abs(entry.edge))
+            })}
+        </span>
+    </li>
+);
+
+StrategyLine.propTypes = { entry: PropTypes.object, tone: PropTypes.string, t: PropTypes.func };
+
+const DeckStrategy = ({ strategy, locked, t }) => {
+    if (locked) {
+        return (
+            <p className='m-0 text-xs text-muted'>
+                {t(
+                    'What this deck beats and what beats it, in AERC terms, is part of AERC analysis.'
+                )}
+            </p>
+        );
+    }
+
+    if (!strategy) {
+        return null;
+    }
+
+    if (!strategy.enoughGames) {
+        return (
+            <p className='m-0 text-xs text-muted'>
+                {t(
+                    '{{n}} more finished game(s) and this deck can say what it is good and bad against.',
+                    { n: strategy.gamesShort }
+                )}
+            </p>
+        );
+    }
+
+    const nothingToSay = !strategy.goodAgainst.length && !strategy.badAgainst.length;
+
+    return (
+        <div className='space-y-2 rounded-md border border-border/50 bg-surface-secondary/25 p-2.5'>
+            <div className='text-[11px] uppercase tracking-wide text-muted'>
+                {t('Good against, bad against')}
+            </div>
+
+            {nothingToSay ? (
+                <p className='m-0 text-xs text-muted'>
+                    {t(
+                        'No matchup stands out yet — this deck performs about the same whatever it is up against.'
+                    )}
+                </p>
+            ) : (
+                <div className='grid gap-3 sm:grid-cols-2'>
+                    <div>
+                        <div className='mb-1 text-xs font-semibold text-emerald-300'>
+                            {t('Beats')}
+                        </div>
+                        <ul className='m-0 list-none space-y-1 p-0 text-sm'>
+                            {strategy.goodAgainst.slice(0, 4).map((entry) => (
+                                <StrategyLine
+                                    entry={entry}
+                                    key={`${entry.trait}-${entry.band}`}
+                                    t={t}
+                                    tone='good'
+                                />
+                            ))}
+                            {!strategy.goodAgainst.length && (
+                                <li className='text-xs text-muted'>{t('Nothing yet.')}</li>
+                            )}
+                        </ul>
+                    </div>
+                    <div>
+                        <div className='mb-1 text-xs font-semibold text-rose-300'>
+                            {t('Loses to')}
+                        </div>
+                        <ul className='m-0 list-none space-y-1 p-0 text-sm'>
+                            {strategy.badAgainst.slice(0, 4).map((entry) => (
+                                <StrategyLine
+                                    entry={entry}
+                                    key={`${entry.trait}-${entry.band}`}
+                                    t={t}
+                                    tone='bad'
+                                />
+                            ))}
+                            {!strategy.badAgainst.length && (
+                                <li className='text-xs text-muted'>{t('Nothing yet.')}</li>
+                            )}
+                        </ul>
+                    </div>
+                </div>
+            )}
+
+            <p className='m-0 text-[11px] text-muted'>
+                {t(
+                    'Measured across every copy of this deck ({{games}} games, {{rate}} overall), against opponents Decks of KeyForge has rated. A record, not a cause.',
+                    { games: strategy.record.games, rate: pct(strategy.record.winRate) }
+                )}
+            </p>
+        </div>
+    );
+};
+
+DeckStrategy.propTypes = { strategy: PropTypes.object, locked: PropTypes.bool, t: PropTypes.func };
+
 const DeckIntelligence = ({ decks, t }) => {
     const [deckId, setDeckId] = useState(null);
     const selected = deckId || (decks.length ? decks[0].deckId : null);
@@ -522,6 +647,8 @@ const DeckIntelligence = ({ decks, t }) => {
                             <span>{mine.byTurnOrder?.reason}</span>
                         )}
                     </div>
+
+                    <DeckStrategy strategy={data?.strategy} locked={data?.strategyLocked} t={t} />
                 </>
             )}
 

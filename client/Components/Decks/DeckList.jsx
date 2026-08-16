@@ -174,9 +174,21 @@ const DeckList = ({
                                 ? 'text-[color:color-mix(in_oklab,var(--brand)_78%,black)] dark:text-[color:var(--brand-strong)]'
                                 : ''
                         }`}
-                        title={row.original.name}
+                        title={
+                            row.original.sharedFrom
+                                ? t('Shared by {{name}}', { name: row.original.sharedFrom })
+                                : row.original.name
+                        }
                     >
                         {row.original.name}
+                        {/* ARCHON: a borrowed deck is marked in the list too -
+                            spotting which decks are not yours should not take
+                            opening each one. */}
+                        {row.original.sharedFrom && (
+                            <span className='ml-1 text-sky-400' aria-hidden='true'>
+                                ↩
+                            </span>
+                        )}
                     </span>
                 ),
                 enableColumnFilter: false,

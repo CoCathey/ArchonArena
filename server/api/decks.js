@@ -29,6 +29,14 @@ const tournamentService = new TournamentService();
 const DeckImportJobService = require('../services/deckimport/DeckImportJobService');
 const deckImportService = new DeckImportJobService(configService);
 
+// ARCHON: lending a deck to a friend. Notifications are injected the same way
+// the community services take them - shared process-wide, and never able to
+// fail the operation that raised them.
+const DeckShareService = require('../services/community/DeckShareService');
+const deckShareService = new DeckShareService(require('../db'), {
+    notificationService: require('../services/notifications')
+});
+
 // ARCHON: a remembered DoK account, so a collection can keep itself current.
 const UserService = require('../services/UserService');
 const DokLinkService = require('../services/dok/DokLinkService');
@@ -93,6 +101,17 @@ const catalogSearchLimit = rateLimit({
     windowMs: 60 * 1000,
     max: 60,
     message: 'Too many deck searches. Please slow down a moment.'
+});
+
+// ARCHON: sharing a deck raises a notification that mails by default, and it is
+// addressed at a named person. The friendship requirement already bounds who
+// can be reached; this bounds how often, so a fallen-out friendship cannot be
+// turned into an inbox full of deck offers.
+const deckShareLimit = rateLimit({
+    name: 'deck-share',
+    windowMs: 60 * 60 * 1000,
+    max: 30,
+    message: 'You have shared a lot of decks recently. Please wait a while before sharing more.'
 });
 
 module.exports.init = function (server) {
@@ -676,6 +695,115 @@ module.exports.init = function (server) {
                     message: error.message || 'Failed to update accolade shown status'
                 });
             }
+        })
+    );
+
+    // ARCHON: lending a deck to a friend. See DeckShareService for why this is
+    // an offer rather than a write into somebody else's collection.
+    //
+    // Every refusal here carries `reason` as well as `message`, so the client
+    // can tell "they already have it" from "you are not friends" without
+    // matching on prose.
+    server.post(
+        '/api/decks/:id/share',
+        passport.authenticate('jwt', { session: false }),
+        deckShareLimit,
+        wrapAsync(async function (req, res) {
+            const deckId = parseInt(req.params.id, 10);
+
+            if (!Number.isFinite(deckId)) {
+                return res.status(400).send({ success: false, message: 'Invalid deck id' });
+            }
+
+            if (!req.body || !req.body.username) {
+                return res
+                    .status(400)
+                    .send({ success: false, message: 'Say who to share it with' });
+            }
+
+            const result = await deckShareService.share(req.user, deckId, req.body.username);
+
+            if (!result.ok) {
+                return res
+                    .status(result.reason === 'no-such-deck' ? 404 : 400)
+                    .send({ success: false, reason: result.reason, message: result.message });
+            }
+
+            res.send({ success: true, ...result });
+        })
+    );
+
+    server.get(
+        '/api/deck-shares',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async function (req, res) {
+            res.send({ success: true, ...(await deckShareService.overview(req.user.id)) });
+        })
+    );
+
+    server.post(
+        '/api/deck-shares/:id/accept',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async function (req, res) {
+            const shareId = parseInt(req.params.id, 10);
+
+            if (!Number.isFinite(shareId)) {
+                return res.status(400).send({ success: false, message: 'Invalid offer' });
+            }
+
+            const result = await deckShareService.accept(req.user, shareId);
+
+            if (!result.ok) {
+                return res
+                    .status(400)
+                    .send({ success: false, reason: result.reason, message: result.message });
+            }
+
+            res.send({ success: true, ...result });
+        })
+    );
+
+    server.post(
+        '/api/deck-shares/:id/decline',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async function (req, res) {
+            const shareId = parseInt(req.params.id, 10);
+
+            if (!Number.isFinite(shareId)) {
+                return res.status(400).send({ success: false, message: 'Invalid offer' });
+            }
+
+            const result = await deckShareService.decline(req.user, shareId);
+
+            if (!result.ok) {
+                return res
+                    .status(400)
+                    .send({ success: false, reason: result.reason, message: result.message });
+            }
+
+            res.send({ success: true });
+        })
+    );
+
+    server.delete(
+        '/api/deck-shares/:id',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async function (req, res) {
+            const shareId = parseInt(req.params.id, 10);
+
+            if (!Number.isFinite(shareId)) {
+                return res.status(400).send({ success: false, message: 'Invalid offer' });
+            }
+
+            const result = await deckShareService.revoke(req.user, shareId);
+
+            if (!result.ok) {
+                return res
+                    .status(400)
+                    .send({ success: false, reason: result.reason, message: result.message });
+            }
+
+            res.send({ success: true });
         })
     );
 };

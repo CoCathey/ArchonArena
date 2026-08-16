@@ -66,6 +66,21 @@ const CATEGORIES = {
         description: 'Someone accepted the friend request you sent.',
         defaults: { inApp: true, email: false, push: false }
     },
+    // Mails by default for the same reason a friend request does: it is
+    // addressed to one person and it is waiting on them. An offer nobody sees
+    // is a deck nobody borrows.
+    'deck.shared': {
+        group: 'Community',
+        label: 'Decks shared with you',
+        description: 'A friend has offered to lend you one of their decks.',
+        defaults: { inApp: true, email: true, push: false }
+    },
+    'deck.share.accepted': {
+        group: 'Community',
+        label: 'Deck shares accepted',
+        description: 'A friend accepted a deck you offered to lend them.',
+        defaults: { inApp: true, email: false, push: false }
+    },
     'club.join': {
         group: 'Community',
         label: 'Club joins',

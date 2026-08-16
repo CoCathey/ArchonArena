@@ -63,14 +63,34 @@ module.exports.init = function (server) {
                 return res.status(403).send({ success: false, message: 'Not your deck' });
             }
 
-            const [mine, everyone] = await Promise.all([
+            // ARCHON: what this deck is good and bad against, in AERC terms.
+            //
+            // Sold with the rest of the AERC analysis rather than with deck
+            // intelligence, so a section the caller has not bought is simply
+            // absent rather than 403'ing the whole page. Pooled across every
+            // copy of the deck - aggregate only, and about the deck rather than
+            // about any player, which is what keeps it on the right side of the
+            // scoping rule above.
+            const wantsStrategy =
+                (req.user.permissions && req.user.permissions.isAdmin) ||
+                can(entitlementsForRequest(req), CAPABILITIES.AERC_ANALYTICS);
+
+            const [mine, everyone, strategy] = await Promise.all([
                 // "Am I good with this deck?" - only my games.
                 intelligence.deckIntelligence(deckId, { userId: req.user.id }),
                 // "Is this a good deck?" - everyone's games with this deck row.
-                intelligence.deckOverview(deckId, {})
+                intelligence.deckOverview(deckId, {}),
+                wantsStrategy ? aerc.deckStrategyProfile(deckId) : Promise.resolve(null)
             ]);
 
-            res.send({ success: true, deckId, mine, everyone });
+            res.send({
+                success: true,
+                deckId,
+                mine,
+                everyone,
+                strategy,
+                strategyLocked: !wantsStrategy
+            });
         })
     );
 
