@@ -32,6 +32,12 @@ export interface CardSummary {
     powerPrinted?: number;
     armorPrinted?: number;
     modifiedPower?: number;
+    /**
+     * Cards currently acting on this one (server/game/Card.js
+     * getEffectSourceNames), e.g. a Banner of Battle boosting this
+     * creature's power. Never includes the card itself.
+     */
+    effectSources?: string[];
     tokens?: Record<string, number>;
     upgrades?: CardSummary[];
     childCards?: CardSummary[];

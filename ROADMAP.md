@@ -1100,7 +1100,7 @@ the whole of what is left here.
 -   An admin can see and clear pending invite requests.
 -   The Android page links to an install that works on a clean device.
 
-#### N15 — Move-by-move clarity in the apps _(done on web; passive attribution open on mobile)_
+#### N15 — Move-by-move clarity in the apps _(done)_
 
 **Why:** the Expo app keeps the play-by-play behind a slide-up sheet (`LogSheet`), so on a phone
 it is easy to miss what the opponent just did. And on both clients a prompt often asks for a
@@ -1128,8 +1128,11 @@ show it.
         every effect carries the context of the card that applied it — and `getSummary` now
         sends `effectSources`, which the card zoom lists as "Affected by ...". Self is excluded,
         because a card naming itself would be on nearly every creature and says nothing.
--   [ ] Same for the Expo app: it gets `effectSources` in the card summary for free, but nothing
-        renders it yet.
+-   [x] **Same for the Expo app.** It already got `effectSources` in the card summary for free;
+        `CardZoomOverlay` now renders it as a caption band across the bottom of the zoomed card,
+        matching the web card zoom's "Affected by ..." treatment. Attribution stays with the
+        card/token being zoomed even while its "show card underneath" toggle is flipped, since an
+        effect on a token creature is not acting on the card art shown underneath it.
 
 **Depends on:** nothing hard — the engine already tracks each ability's source card.
 **Acceptance criteria**
@@ -1694,7 +1697,7 @@ much stronger deck pays less.
 -   [ ] Accessibility pass (keyboard nav, contrast, screen-reader landmarks) → **N6**.
 -   [ ] Replace the `/learn` placeholder with a tutorial that teaches inside a real game →
         **N11**, then the wider Learn hub → **F6**.
--   [ ] Name the card and ability responsible in every prompt ("…because of Gateway to Dis")
+-   [x] Name the card and ability responsible in every prompt ("…because of Gateway to Dis")
         → **N15**.
 
 ## Phase 9 — Player identity & community
@@ -1835,7 +1838,7 @@ much stronger deck pays less.
         mobile network resilience (timeouts, reconnect).
 -   [ ] Mobile-responsive web as the baseline → **N6**.
 -   [ ] PWA: installable, push notifications for round pairings/turn timers → **N6**/**N2**.
--   [ ] Show each move as it happens in the Expo app, rather than only inside the slide-up log
+-   [x] Show each move as it happens in the Expo app, rather than only inside the slide-up log
         sheet → **N15**.
 -   [ ] Turn the `/mobile/android` placeholder into a real link to the beta build, and
         `/mobile/ios` into a TestFlight invite request → **N14**.
