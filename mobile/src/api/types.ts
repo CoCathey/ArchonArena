@@ -419,7 +419,12 @@ export interface MembershipTier {
     id: string;
     name: string;
     rank: number;
-    priceUsd: number;
+    /**
+     * Absent where purchase links are not allowed — the client strips it, so a
+     * price cannot be rendered from a field that is not there. See
+     * fetchMembershipCatalog.
+     */
+    priceUsd?: number;
     tagline?: string;
     recommended?: boolean;
     /** Free-tier lines, listed in words rather than as capabilities. */

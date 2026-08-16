@@ -15,6 +15,7 @@ import {
     RETURN_URL
 } from '../src/membership/patreonCallback';
 import { allowsPurchaseLinks, upgradePromptFor } from '../src/membership/storePolicy';
+import { withoutPurchaseInfo } from '../src/membership/catalogPolicy';
 import type { UserDetails } from '../src/api/types';
 
 const user = (extra: Partial<UserDetails> = {}): UserDetails =>
@@ -119,6 +120,84 @@ describe('store policy', () => {
         // not like the most permissive platform we happen to support.
         expect(allowsPurchaseLinks('visionos')).toBe(false);
         expect(allowsPurchaseLinks('')).toBe(false);
+    });
+});
+
+/**
+ * The strongest form of the store rule: the money is not merely hidden, it is
+ * not in the data.
+ *
+ * A `showMoney &&` guard is something a future edit has to remember. An absent
+ * field is something it cannot get wrong — and the type says the field may be
+ * absent, so a screen that forgets cannot even compile a price block.
+ */
+describe('the catalogue an iOS build receives', () => {
+    const catalog = {
+        success: true,
+        tiers: [
+            {
+                id: 'free',
+                name: 'Free',
+                rank: 0,
+                priceUsd: 0,
+                includes: ['Unlimited games'],
+                purchasable: false,
+                checkoutUrl: null
+            },
+            {
+                id: 'archon',
+                name: 'Archon',
+                rank: 2,
+                priceUsd: 10,
+                tagline: 'Understand your decks, your play, and the field.',
+                adds: ['archon_intelligence'],
+                purchasable: true,
+                checkoutUrl: 'https://www.patreon.com/checkout/cocathey?rid=29339861'
+            }
+        ],
+        capabilities: {
+            archon_intelligence: { label: 'Archon Intelligence', learn: 'Is this deck good?' }
+        }
+    };
+
+    const stripped = withoutPurchaseInfo(catalog);
+
+    it('carries no price', () => {
+        for (const tier of stripped.tiers ?? []) {
+            expect(tier.priceUsd, `${tier.name} still has a price`).toBeUndefined();
+        }
+    });
+
+    it('carries no checkout link', () => {
+        for (const tier of stripped.tiers ?? []) {
+            expect(tier.checkoutUrl, `${tier.name} still has a checkout link`).toBeUndefined();
+        }
+    });
+
+    it('contains no patreon.com anywhere in the payload', () => {
+        // The blunt version of the same question, in case a link ever arrives
+        // on a field nobody thought about.
+        expect(JSON.stringify(stripped)).not.toContain('patreon.com');
+        expect(JSON.stringify(stripped)).not.toContain('$');
+    });
+
+    it('still says what membership includes', () => {
+        // 3.1.3(b) permits exactly this. Stripping the description too would
+        // give up the thing the screen is for.
+        const archon = (stripped.tiers ?? []).find((tier) => tier.id === 'archon');
+
+        expect(archon?.adds).toEqual(['archon_intelligence']);
+        expect(archon?.tagline).toBeTruthy();
+        expect(stripped.capabilities?.archon_intelligence.label).toBe('Archon Intelligence');
+    });
+
+    it('leaves the tiers themselves in place', () => {
+        expect((stripped.tiers ?? []).map((tier) => tier.id)).toEqual(['free', 'archon']);
+    });
+
+    it('does not mutate the payload it was given', () => {
+        // The caller may hand the same object to something else.
+        expect(catalog.tiers[1].priceUsd).toBe(10);
     });
 });
 

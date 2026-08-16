@@ -54,7 +54,10 @@ function TierCard(props: {
         <Card style={tier.recommended ? { ...styles.tierCard, borderColor: accent } : styles.tierCard}>
             <View style={styles.tierHead}>
                 <Text style={[styles.tierName, { color: accent }]}>{tier.name}</Text>
-                {showMoney ? (
+                {/* `priceUsd` is absent, not zero, where purchase links are
+                    not allowed - so this renders nothing rather than "Free"
+                    for every tier. */}
+                {showMoney && tier.priceUsd !== undefined ? (
                     <Text style={styles.tierPrice}>
                         {tier.priceUsd > 0 ? `$${tier.priceUsd}/mo` : 'Free'}
                     </Text>
@@ -99,7 +102,7 @@ function TierCard(props: {
             {/* Checkout is offered only where the store rules allow it AND only
                 for a tier that delivers something the tier below does not —
                 `purchasable` is computed server-side for exactly that. */}
-            {showMoney && tier.priceUsd > 0 ? (
+            {showMoney && (tier.priceUsd ?? 0) > 0 ? (
                 tier.purchasable && tier.checkoutUrl ? (
                     <Button
                         title={isCurrent ? 'Manage on Patreon' : `Choose ${tier.name}`}
