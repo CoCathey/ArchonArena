@@ -112,7 +112,7 @@ export function ReportPlayerSheet(props: {
             props.onBlocked?.();
             Alert.alert(
                 'Blocked',
-                `You will not see ${username} in chat, and they will not see you. You can undo this in Profile.`
+                `You will not see ${username} in the lobby or in chat, and they will not see you. You can undo this in Profile.`
             );
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not block that player.');
@@ -131,8 +131,8 @@ export function ReportPlayerSheet(props: {
 
                     <Text style={styles.label}>Block</Text>
                     <Text style={styles.body}>
-                        Takes effect immediately. You will not see each other&apos;s chat, games or
-                        presence.
+                        You will not see each other in the lobby, in chat or in each other&apos;s
+                        game lists. A game already in progress is not interrupted.
                     </Text>
                     <Button
                         title={busy === 'block' ? 'Blocking…' : `Block ${username}`}

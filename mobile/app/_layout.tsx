@@ -168,6 +168,11 @@ export default function RootLayout() {
                     name='membership'
                     options={{ title: 'Archon+', headerBackTitle: 'Back' }}
                 />
+                {/* The registered `archonarena://patreon` deep link. Normally
+                    swallowed by the auth session; this exists so a cold start
+                    on that URL does not land on expo-router's unmatched-route
+                    error page in a shipped build. */}
+                <Stack.Screen name='patreon' options={{ headerShown: false }} />
                 <Stack.Screen
                     name='intelligence'
                     options={{ title: 'Archon Intelligence', headerBackTitle: 'Back' }}

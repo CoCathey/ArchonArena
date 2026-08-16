@@ -88,7 +88,11 @@ function TierCard(props: {
                 />
             ))}
 
-            {planned.length ? (
+            {/* ARCHON: a roadmap is fine on the web, but Guideline 2.1 treats
+                "coming soon" content in a shipped build as incompleteness. So
+                the planned list is shown only where the tiers are sold; on iOS
+                the card lists what the tier DOES include and stops. */}
+            {showMoney && planned.length ? (
                 <View style={styles.plannedBlock}>
                     <Text style={styles.plannedHeading}>PLANNED — NOT AVAILABLE YET</Text>
                     {planned.map((capability) => (

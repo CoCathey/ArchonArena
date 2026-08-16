@@ -20,6 +20,7 @@ import { TIER_COLORS } from '../../src/membership/capabilities';
 import { currentTier, currentTierName, isAdmin, isMember } from '../../src/membership/entitlements';
 import { colors, radius, spacing } from '../../src/theme';
 import DeleteAccountSection from '../../src/account/DeleteAccountSection';
+import LegalLinksSection from '../../src/account/LegalLinksSection';
 import FriendsSection from '../../src/friends/FriendsSection';
 import BlockedPlayersSection from '../../src/safety/BlockedPlayersSection';
 import { Button, Card, ErrorBanner } from '../../src/ui/primitives';
@@ -332,6 +333,11 @@ export default function ProfileScreen() {
                 users; a block you cannot lift is a worse control than none.
                 Renders nothing when the list is empty. */}
             <BlockedPlayersSection />
+
+            {/* ARCHON: Guideline 5.1.1(i) wants the privacy policy reachable
+                IN the app, and 1.2 wants published contact information. Both
+                land here, above the destructive controls. */}
+            <LegalLinksSection />
 
             <Button
                 title='Sign out'

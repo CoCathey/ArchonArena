@@ -815,6 +815,14 @@ class UserService extends EventEmitter {
                 user.id
             ]);
 
+            // ARCHON: the membership row. The delete screen tells the player
+            // their linked Patreon is erased, and PatreonToken above is - but
+            // the resolved tier lived on separately, so a deleted account still
+            // resolved to Archon and its capabilities. Note this ends the
+            // ENTITLEMENT, not the pledge: only Patreon can cancel the billing,
+            // which is why the app says so before asking for a password.
+            await db.queryTran(client, 'DELETE FROM "Memberships" WHERE "UserId" = $1', [user.id]);
+
             // Their chosen banner, accent, frame and title. Cosmetic, but it
             // is a choice they made about how they appear, and a tombstone
             // wearing somebody's old colours is not anonymous.

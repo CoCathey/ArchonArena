@@ -102,6 +102,14 @@ export function DeleteAccountSection() {
                 Games you have finished stay in your opponents&apos; match history, and past
                 tournament results stay in those events — with your name removed.
             </Text>
+            {/* Guideline 5.1.1(v) is explicit that if deleting the account does
+                not also cancel a subscription, the app must say so and say
+                where to cancel. Archon+ is billed by Patreon, which we cannot
+                cancel on someone's behalf. */}
+            <Text style={styles.caveat}>
+                If you support Archon Arena on Patreon, deleting this account does not cancel that
+                pledge. Cancel it in your Patreon account settings.
+            </Text>
 
             <Button
                 title='Delete account'

@@ -130,6 +130,15 @@ describe('account deletion', function () {
         expect(deletedFrom()).toContain('PushTokens');
     });
 
+    it('ends the membership entitlement', async function () {
+        // PatreonToken is nulled on "Users", but the resolved tier lived in its
+        // own row - so a deleted account still resolved to Archon, with every
+        // capability that carries.
+        await service.anonymizeUser({ id: 42 });
+
+        expect(deletedFrom()).toContain('Memberships');
+    });
+
     it('removes the chosen cosmetics', async function () {
         // A tombstone wearing somebody's old banner and accent colour is not
         // anonymous.
