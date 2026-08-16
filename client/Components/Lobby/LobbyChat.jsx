@@ -5,6 +5,8 @@ import { faTimes } from '@fortawesome/free-solid-svg-icons';
 
 import Avatar from '../Site/Avatar';
 import { getRoleClass } from '../../util';
+// ARCHON (N12): profile cosmetics - the avatar frame and the name effect.
+import { accentStyle, nameEffectClass } from '../../cosmetics';
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -256,7 +258,12 @@ const LobbyChat = ({
                 );
             });
 
-            const userClass = `username ${getRoleClass(firstMessage.user.role)}`;
+            // ARCHON (N12): a member's name effect, which arrives with the
+            // message (User.getShortSummary) rather than needing a lookup.
+            const cosmetics = firstMessage.user.cosmetics;
+            const userClass = `username ${getRoleClass(firstMessage.user.role)} ${nameEffectClass(
+                cosmetics
+            )}`;
 
             return (
                 <div
@@ -272,11 +279,16 @@ const LobbyChat = ({
                     }`}
                 >
                     <div className='shrink-0 pt-0.5'>
-                        <Avatar imgPath={firstMessage.user.avatar} />
+                        <Avatar
+                            cosmetics={firstMessage.user.cosmetics}
+                            imgPath={firstMessage.user.avatar}
+                        />
                     </div>
                     <div className='min-w-0 flex-1'>
                         <div className='flex items-center gap-2 leading-5'>
-                            <span className={userClass}>{firstMessage.user.username}</span>
+                            <span className={userClass} style={accentStyle(cosmetics)}>
+                                {firstMessage.user.username}
+                            </span>
                             <span className='inline-flex items-center text-foreground/50'>
                                 {timestamp}
                             </span>

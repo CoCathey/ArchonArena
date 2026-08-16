@@ -5,16 +5,22 @@ import { Button as HeroButton, Label, toast } from '@heroui/react';
 import Panel from '../Site/Panel';
 import { useGetBioQuery, useSetBioMutation } from '../../redux/api';
 
+/** The free-tier limit, and what to assume before the server answers. */
 const BIO_MAX_LENGTH = 280;
 
 /**
  * ARCHON (I3): optional short bio, shown on the public profile.
+ *
+ * ARCHON (N12): members get a longer one. The limit comes from the server with
+ * the bio rather than being decided here - the same request already knows the
+ * caller's entitlements, and a client-side limit would only be a suggestion.
  */
 const ProfileBio = () => {
     const { t } = useTranslation();
     const { data } = useGetBioQuery();
     const [setBio, setState] = useSetBioMutation();
     const [bio, setBioValue] = useState('');
+    const maxLength = data?.maxLength || BIO_MAX_LENGTH;
 
     useEffect(() => {
         if (data) {
@@ -47,13 +53,13 @@ const ProfileBio = () => {
                 id='profileBio'
                 className='w-full rounded-md border border-border/65 bg-surface-secondary/55 px-3 py-2 text-sm text-foreground focus:border-border/90 focus:outline-none dark:border-border/80 dark:bg-surface-secondary/85'
                 rows={3}
-                maxLength={BIO_MAX_LENGTH}
+                maxLength={maxLength}
                 placeholder={t('Tell other players a little about yourself')}
                 value={bio}
                 onChange={(event) => setBioValue(event.target.value)}
             />
             <div className='mt-1 text-right text-xs text-muted'>
-                {bio.length}/{BIO_MAX_LENGTH}
+                {bio.length}/{maxLength}
             </div>
             <div className='mt-2'>
                 <HeroButton

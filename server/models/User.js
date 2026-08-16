@@ -3,6 +3,8 @@ const Settings = require('../settings');
 // the admin override lives there and nowhere else.
 const { resolveEntitlements } = require('../services/membership/entitlements');
 const { publicBadge } = require('../services/membership/publicBadge');
+// ARCHON (N12): profile cosmetics ride along with the user so a lobby seat
+// shows them without a second lookup per player.
 const { publicCosmetics: cosmeticsFor } = require('../services/membership/cosmetics');
 
 class User {
@@ -260,9 +262,12 @@ class User {
             // without a second lookup. Name only - never expiry or provider.
             tier: badge.tier,
             tierName: badge.tierName,
-            // Carried for the same reason as the tier: a seat that already has
-            // the tier skips the badge lookup entirely, so without this a
-            // member's nameplate would appear everywhere except the lobby.
+            // Carried for the same reason as the tier: a seat that already
+            // has the tier skips the badge lookup entirely, so without this a
+            // member's frame and name effect would appear everywhere except
+            // the lobby. Already absent when nothing is set - publicBadge omits
+            // it - which matters on a message sent to every client on every
+            // lobby update.
             cosmetics: badge.cosmetics
         };
     }

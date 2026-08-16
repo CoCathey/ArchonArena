@@ -289,19 +289,6 @@ export const api = createApi({
                 TAG_TYPES.INTELLIGENCE
             ]
         }),
-        // The cosmetics catalogue and this account's choices, in one read.
-        getMembershipCosmetics: builder.query({
-            query: () => '/membership/cosmetics',
-            providesTags: [{ type: TAG_TYPES.MEMBERSHIP, id: 'COSMETICS' }]
-        }),
-        setMembershipCosmetics: builder.mutation({
-            query: (choices) => ({
-                url: '/membership/cosmetics',
-                method: 'POST',
-                body: { choices }
-            }),
-            invalidatesTags: [{ type: TAG_TYPES.MEMBERSHIP, id: 'COSMETICS' }]
-        }),
         getAdminMemberships: builder.query({
             query: () => '/admin/memberships',
             providesTags: [TAG_TYPES.MEMBERSHIP]
@@ -448,6 +435,24 @@ export const api = createApi({
                 body: { bio }
             }),
             invalidatesTags: [TAG_TYPES.BIO]
+        }),
+        // ARCHON (N12): profile cosmetics. One GET for the editor - the whole
+        // catalogue with each option marked locked or not, plus this account's
+        // current selection - so the page needs no second request to know what
+        // it may offer.
+        getCosmetics: builder.query({
+            query: () => '/account/cosmetics',
+            providesTags: [TAG_TYPES.COSMETICS]
+        }),
+        setCosmetics: builder.mutation({
+            query: (cosmetics) => ({
+                url: '/account/cosmetics',
+                method: 'PUT',
+                body: { cosmetics }
+            }),
+            // The bio limit rises with the same capability, and the public
+            // profile is what the editor is previewing.
+            invalidatesTags: [TAG_TYPES.COSMETICS, TAG_TYPES.USER]
         }),
         getLeaderboard: builder.query({
             query: (params) => ({
@@ -1224,8 +1229,6 @@ export const {
     // ARCHON (N12): Vault Master - the preview programme and cosmetics
     useGetMembershipPreviewsQuery,
     useSetMembershipPreviewMutation,
-    useGetMembershipCosmeticsQuery,
-    useSetMembershipCosmeticsMutation,
     useGetDeckIntelligenceQuery,
     useGetPlayerIntelligenceQuery,
     useGetMetaIntelligenceQuery,
@@ -1244,6 +1247,9 @@ export const {
     useSetLocationMutation,
     useGetBioQuery,
     useSetBioMutation,
+    // ARCHON (N12): profile cosmetics.
+    useGetCosmeticsQuery,
+    useSetCosmeticsMutation,
     useGetSiteContentQuery,
     useAdminSetRatingMutation,
     useAdminResetRatingsMutation,

@@ -81,13 +81,21 @@ function publicBadge({
         role = 'supporter';
     }
 
-    // Resolved against the SAME entitlements the tier came from, admin override
-    // and all - which is what makes a cosmetic stop the day the membership that
-    // bought it lapses, without anybody sweeping the table. The stored choice
-    // survives; only its visibility ends. An admin is deliberately not granted
-    // cosmetics here for the same reason they are not granted a tier: this is
-    // what the public sees, and it must not assert something about money.
-    const visible = publicCosmetics(cosmetics, entitlements);
+    // Resolved against live entitlements, which is what makes a cosmetic stop
+    // the day the membership that bought it lapses, without anybody sweeping
+    // the table. The stored choice survives; only its visibility ends.
+    //
+    // Note these are NOT the admin-stripped entitlements the tier came from.
+    // The tier is a claim about money and must not be asserted for an admin who
+    // does not pay; a frame or a key finish asserts nothing of the kind, and
+    // resolving it without the override produces the genuinely confusing
+    // outcome instead - an admin picks a finish in an editor that offers it,
+    // saves successfully, and then cannot find it next to their own name. Same
+    // rule the profile page follows (PlayerProfileService.getIdentity).
+    const visible = publicCosmetics(
+        cosmetics,
+        resolveEntitlements({ user: { permissions }, membership, now })
+    );
 
     return {
         role,

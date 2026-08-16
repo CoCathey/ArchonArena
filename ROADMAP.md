@@ -1005,9 +1005,18 @@ tiers, and perks that cannot touch competitive fairness.
 -   Owner: create the Patreon campaign and tiers; set `PATREON_CLIENT_ID`,
     `PATREON_CLIENT_SECRET` and `PATREON_CAMPAIGN_ID`, then link your own account to verify the
     round trip against the live campaign.
--   Define supporter perks — cosmetic and convenience only: custom backgrounds and card backs,
-    avatar frames, a supporter badge, longer replay retention, larger deck-import batches.
-    **(admin-config)** which tier unlocks which perk.
+-   [x] **Profile customisation** — the first cosmetic perks to actually exist, and what
+        `profile_cosmetics` (Supporter) and `enhanced_cosmetics` (Vault Master) were already being
+        sold as. Five slots: accent colour, profile banner, avatar frame, title and name effect,
+        plus a longer bio. The catalogue and its per-option tier gating live in one file
+        (`server/services/membership/cosmetics.js`); the client maps ids to pixels and never
+        decides who may use what. A lapsed pledge stops rendering the same day the badge does,
+        without deleting the selection — resubscribing restores it. Shipping enhanced cosmetics
+        also makes Vault Master purchasable for the first time: `isTierPurchasable` had correctly
+        refused to sell a tier whose every capability was unbuilt. See
+        [docs/design/profile-cosmetics.md](docs/design/profile-cosmetics.md).
+-   Remaining supporter perks — cosmetic and convenience only: custom card backs, longer replay
+    retention, larger deck-import batches. **(admin-config)** which tier unlocks which perk.
 -   A "Support Archon Arena" page saying plainly where the money goes, with an opt-in supporter
     list.
 
@@ -1765,6 +1774,15 @@ much stronger deck pays less.
         recorded frame was one from later in the game.
 -   [x] **Turn navigation, playback and card zoom** in the viewer: one jump button per turn
         labelled with the house that was called, play/pause with speed, arrow-key stepping.
+-   [x] **Replay Intelligence on the phone** — the aggregate half is on the Expo app's
+        Intelligence screen, where a list of houses with one number each reads better than it
+        does on the web: the five-column row folds to a bar, a percentage and a sub-line, with
+        the house icons the app already has. It loads outside the screen's `load()` because it
+        is the one panel the set filter cannot narrow, and re-parsing 25 stored recordings on
+        every tap of a set chip is a phone's latency and data allowance spent on an answer that
+        never changes. The per-game turn-by-turn analysis is deliberately NOT there: the app
+        has no replay viewer to hang it on, and a six-column turn table is the wrong thing at
+        390 points wide.
 -   [x] **Replay analysis** (**N12**, Archon tier `advanced_replays`): every turn with the
         house called on it, amber per turn, the key race, and the point after which the winner
         was never headed. Read from recorded board state only — never parsed out of the

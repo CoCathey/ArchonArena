@@ -129,11 +129,13 @@ const CAPABILITY_CATALOG = {
     },
     [CAPABILITIES.PROFILE_COSMETICS]: {
         label: 'Profile customisation',
-        // Planned. Worded as intent, not as a claim about today - the only
-        // customisation that exists is the board background, which is free.
-        learn: 'Customise how your profile looks.',
-        where: 'Profile → Appearance',
-        planned: true
+        // Shipped: an accent colour, a banner, an avatar frame, a title and a
+        // longer bio, gated per option in
+        // server/services/membership/cosmetics.js. Until then the only
+        // customisation on the site was the board background, which is free -
+        // so this was being sold and did not exist.
+        learn: 'Give your profile an accent colour, a banner, an avatar frame and a title.',
+        where: 'Profile → Appearance'
     },
     [CAPABILITIES.SUPPORTER_BADGE]: {
         label: 'Supporter badge',
@@ -245,9 +247,11 @@ const CAPABILITY_CATALOG = {
     [CAPABILITIES.ENHANCED_COSMETICS]: {
         label: 'Enhanced cosmetics',
         // Was "additional profile and in-game customisation", which described
-        // nothing that existed. What exists is public: the colour your name is
-        // drawn in and the finish on your key, everywhere either appears.
-        learn: 'Choose the colour of your name and the finish on your key, everywhere they appear.',
+        // nothing that existed. What exists now is mostly public: any accent
+        // colour you like, animated name effects, the prismatic avatar frame
+        // and the finish on your key - the last three visible to everyone,
+        // everywhere a name or an avatar appears.
+        learn: 'Any accent colour, animated name effects, the prismatic frame and your key finish.',
         where: 'Profile → Appearance'
     },
     [CAPABILITIES.ORGANIZER_TOOLS]: {

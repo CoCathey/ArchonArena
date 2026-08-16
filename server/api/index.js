@@ -56,6 +56,13 @@ module.exports.init = function (server, options) {
     // must beat the parameterised ones.
     membership.init(server);
     intelligence.init(server);
+    // ARCHON: community (friends, members, clubs) and the profile a member
+    // edits. Before account.init for the same reason as everything above it:
+    // it owns the fixed paths /api/account/bio and /api/account/cosmetics, and
+    // registered after the parameterised route they were both answered with
+    // 403 Unauthorized ('bio' parsed as somebody else's username), which is
+    // why saving a bio silently failed.
+    community.init(server);
     account.init(server, options);
     // ARCHON: OIDC SSO login (Keybringer)
     oidc.init(server);
@@ -63,8 +70,6 @@ module.exports.init = function (server, options) {
     adminSettings.init(server);
     // ARCHON: native tournament engine
     tournaments.init(server);
-    // ARCHON: community (friends, members, clubs)
-    community.init(server);
     // ARCHON: beta bug reports
     bugReports.init(server);
     // ARCHON: notification centre + preferences

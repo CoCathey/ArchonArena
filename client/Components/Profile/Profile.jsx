@@ -10,11 +10,11 @@ import ProfileBackground from './ProfileBackground';
 import KeyforgeGameSettings from './KeyforgeGameSettings';
 // ARCHON (N2): per-category notification delivery preferences
 import NotificationPreferences from './NotificationPreferences';
-// ARCHON (N12): Vault Master - the preview programme, and the cosmetics other
-// people actually see.
+// ARCHON (N12): Vault Master - the preview programme.
 import PreviewProgram from './PreviewProgram';
-import MembershipCosmetics from './MembershipCosmetics';
 import ProfileCardSize from './ProfileCardSize';
+// ARCHON (N12): what profile_cosmetics / enhanced_cosmetics buy.
+import ProfileCosmetics from './ProfileCosmetics';
 import { Constants } from '../../constants';
 // ARCHON (N12): drives whether the Integrations tab is offered at all
 import { useGetOidcStatusQuery, useGetPatreonStatusQuery } from '../../redux/api';
@@ -361,16 +361,21 @@ const Profile = ({ onSubmit, isLoading }) => {
                                                     }
                                                     onCardSizeSelected={(name) => setCardSize(name)}
                                                 />
-                                                {/* ARCHON (N12): saves on
-                                                    selection, not through the
-                                                    form's Save button - it is
-                                                    not part of the profile
-                                                    form. Placed last because
+                                                {/* ARCHON (N12): profile cosmetics. Saves
+                                                    through its own endpoint
+                                                    rather than the form's Save
+                                                    button - the two are
+                                                    validated against different
+                                                    things, and a swatch should
+                                                    not be able to fail because
+                                                    an email address is
+                                                    invalid. Placed last because
                                                     everything above it is a
                                                     private setting and this is
-                                                    the one other people see. */}
+                                                    the part other people
+                                                    see. */}
                                                 <div className='border-t border-border/60 pt-3'>
-                                                    <MembershipCosmetics />
+                                                    <ProfileCosmetics />
                                                 </div>
                                             </div>
                                         )}

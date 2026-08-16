@@ -1,261 +1,295 @@
 const {
-    COSMETIC_SLOTS,
-    COSMETICS,
     SLOT_IDS,
-    defaultChoice,
-    isAllowed,
-    sanitiseCosmetics,
+    bioMaxLength,
+    defaultCosmetics,
+    resolveCosmetics,
     publicCosmetics,
-    cosmeticCatalog
+    sanitizeCosmetics,
+    isDefaultCosmetics,
+    cosmeticsCatalog,
+    normalizeAccentHex
 } = require('../../../../server/services/membership/cosmetics');
 const { CAPABILITIES } = require('../../../../server/services/membership/capabilities');
-const { TIER_IDS, capabilitiesForTier } = require('../../../../server/services/membership/tiers');
-const { publicBadge } = require('../../../../server/services/membership/publicBadge');
+const {
+    TIER_IDS,
+    capabilitiesForTier,
+    tierCatalog
+} = require('../../../../server/services/membership/tiers');
 
 /**
- * ARCHON (N12): cosmetics are the one membership benefit that is visible to
- * strangers, which makes them the one where getting entitlement wrong is
- * visible to strangers too.
+ * ARCHON (N12): profile cosmetics.
  *
- * Two failures matter and both are tested here:
- *
- *   - storing something that was never paid for (a hand-edited client);
- *   - still showing something after the membership that bought it has lapsed.
- *
- * The second is the one a sweep job would get wrong. It is checked at read
- * time, so it needs no sweep and cannot be late.
+ * `profile_cosmetics` and `enhanced_cosmetics` were sold before either
+ * existed - Supporter promised "customise how your profile looks" while the
+ * only customisation on the site was the free game board background. These
+ * tests are about the two rules that make the feature honest: you get exactly
+ * what your tier includes, and you stop getting it when you stop paying,
+ * without losing what you chose.
  */
-describe('membership cosmetics', function () {
-    const FREE = capabilitiesForTier(TIER_IDS.FREE);
-    const ARCHON = capabilitiesForTier(TIER_IDS.ARCHON);
-    const VAULT_MASTER = capabilitiesForTier(TIER_IDS.VAULT_MASTER);
 
-    describe('the catalogue', function () {
-        it('starts every slot with a free option', function () {
-            // A slot whose default is paid for would render as locked for the
-            // whole free tier, which is a downgrade wearing a feature's clothes.
-            for (const slot of SLOT_IDS) {
-                const first = COSMETICS[slot].options[0];
+const SUPPORTER = capabilitiesForTier(TIER_IDS.SUPPORTER);
+const VAULT_MASTER = capabilitiesForTier(TIER_IDS.VAULT_MASTER);
 
-                expect(first.capability, `${slot} defaults to a paid option`).toBeFalsy();
-                expect(defaultChoice(slot)).toBe(first.id);
-            }
+const everything = {
+    accent: 'sanctum',
+    banner: 'logos',
+    frame: 'brass',
+    title: 'vault_diver',
+    nameEffect: 'glow'
+};
+
+describe('profile cosmetics', function () {
+    describe('resolveCosmetics', function () {
+        it('gives a free account the defaults, whatever it has stored', function () {
+            // Nothing is deleted when a membership lapses, so a free account
+            // can legitimately have a full selection on file.
+            expect(resolveCosmetics(everything, [])).toMatchObject(defaultCosmetics());
         });
 
-        it('labels every option and gives unique ids inside a slot', function () {
-            for (const slot of SLOT_IDS) {
-                const ids = COSMETICS[slot].options.map((option) => option.id);
-
-                expect(new Set(ids).size, `${slot} has duplicate option ids`).toBe(ids.length);
-
-                for (const option of COSMETICS[slot].options) {
-                    expect(option.label, `${slot}/${option.id} has no label`).toBeTruthy();
-                }
-            }
+        it('gives a supporter what Supporter includes', function () {
+            expect(resolveCosmetics(everything, SUPPORTER)).toMatchObject(everything);
         });
 
-        it('marks locked options rather than hiding them', function () {
-            const free = cosmeticCatalog(FREE);
-            const master = cosmeticCatalog(VAULT_MASTER);
-
-            expect(free.length).toBe(master.length);
-
-            for (let index = 0; index < free.length; index += 1) {
-                expect(free[index].options.length).toBe(master[index].options.length);
-            }
-
-            const anyLockedForFree = free.some((slot) =>
-                slot.options.some((option) => option.locked)
-            );
-            const anyLockedForMaster = master.some((slot) =>
-                slot.options.some((option) => option.locked)
+        it('does not give a supporter a Vault Master option', function () {
+            const resolved = resolveCosmetics(
+                { ...everything, frame: 'prismatic', nameEffect: 'shimmer' },
+                SUPPORTER
             );
 
-            expect(anyLockedForFree).toBe(true);
-            expect(anyLockedForMaster).toBe(false);
+            // Only the two locked slots fall back; the rest of the selection
+            // is untouched.
+            expect(resolved.frame).toBe('none');
+            expect(resolved.nameEffect).toBe('none');
+            expect(resolved.accent).toBe('sanctum');
+            expect(resolved.banner).toBe('logos');
         });
 
-        it('gates every non-default option on the Vault Master capability', function () {
-            for (const slot of SLOT_IDS) {
-                for (const option of COSMETICS[slot].options.slice(1)) {
-                    expect(option.capability, `${slot}/${option.id} is free by accident`).toBe(
-                        CAPABILITIES.ENHANCED_COSMETICS
-                    );
-                }
-            }
+        it('stops rendering the moment a pledge lapses, and restores it after', function () {
+            const stored = { ...everything, frame: 'prismatic' };
+
+            expect(resolveCosmetics(stored, []).frame).toBe('none');
+            // The same stored row, with the membership back.
+            expect(resolveCosmetics(stored, VAULT_MASTER).frame).toBe('prismatic');
+        });
+
+        it('resolves the accent to a colour so a payload carries one', function () {
+            expect(resolveCosmetics({ accent: 'logos' }, SUPPORTER).accentHex).toMatch(
+                /^#[0-9a-f]{6}$/i
+            );
+            // Free accounts get the site amber rather than nothing.
+            expect(resolveCosmetics({ accent: 'logos' }, []).accentHex).toMatch(/^#[0-9a-f]{6}$/i);
+        });
+
+        it('resolves a title to its label, so nothing renders a raw id', function () {
+            expect(resolveCosmetics({ title: 'chain_breaker' }, SUPPORTER).titleLabel).toBe(
+                'Chain Breaker'
+            );
+            expect(resolveCosmetics({ title: 'chain_breaker' }, []).titleLabel).toBeNull();
+        });
+
+        it('falls back for an id this build no longer knows about', function () {
+            // The catalogue is code, so an option can be retired. A stored
+            // value that no longer exists must not render as itself.
+            expect(resolveCosmetics({ frame: 'retired-in-2027' }, VAULT_MASTER).frame).toBe('none');
+        });
+
+        it('takes a custom accent only from Vault Master', function () {
+            expect(resolveCosmetics({ accent: '#7fd3f0' }, SUPPORTER).accent).toBe('default');
+            expect(resolveCosmetics({ accent: '#7fd3f0' }, VAULT_MASTER).accent).toBe('#7fd3f0');
         });
     });
 
-    describe('what may be stored', function () {
-        const paidOption = COSMETICS[COSMETIC_SLOTS.NAMEPLATE].options[1].id;
-
-        it('keeps a choice the account is entitled to', function () {
-            expect(
-                sanitiseCosmetics({ [COSMETIC_SLOTS.NAMEPLATE]: paidOption }, VAULT_MASTER)
-            ).toEqual({ [COSMETIC_SLOTS.NAMEPLATE]: paidOption });
-        });
-
-        it('drops a choice the account is not entitled to', function () {
-            expect(sanitiseCosmetics({ [COSMETIC_SLOTS.NAMEPLATE]: paidOption }, ARCHON)).toEqual(
-                {}
-            );
-            expect(sanitiseCosmetics({ [COSMETIC_SLOTS.NAMEPLATE]: paidOption }, FREE)).toEqual({});
-        });
-
-        it('drops unknown slots and unknown options', function () {
-            expect(
-                sanitiseCosmetics(
-                    { notASlot: 'whatever', [COSMETIC_SLOTS.NAMEPLATE]: 'not-an-option' },
-                    VAULT_MASTER
-                )
-            ).toEqual({});
-        });
-
-        it('reads the default and null both as "back to default"', function () {
-            // Explicitly null rather than absent, so the storage layer can tell
-            // "clear this" from "not mentioned".
-            expect(
-                sanitiseCosmetics(
-                    {
-                        [COSMETIC_SLOTS.NAMEPLATE]: defaultChoice(COSMETIC_SLOTS.NAMEPLATE),
-                        [COSMETIC_SLOTS.BADGE_FINISH]: null
-                    },
-                    FREE
-                )
-            ).toEqual({
-                [COSMETIC_SLOTS.NAMEPLATE]: null,
-                [COSMETIC_SLOTS.BADGE_FINISH]: null
-            });
-        });
-
-        it('keeps the valid half of a request that also contains a stale one', function () {
-            // A tab left open across a downgrade sends both. Refusing the whole
-            // request would lose the change the player actually just made.
-            const result = sanitiseCosmetics(
-                {
-                    [COSMETIC_SLOTS.NAMEPLATE]: paidOption,
-                    [COSMETIC_SLOTS.BADGE_FINISH]: null
-                },
-                ARCHON
+    describe('sanitizeCosmetics', function () {
+        it('rejects rather than silently defaulting, and names the slot', function () {
+            // The save path is not the render path: quietly storing something
+            // other than what was sent is how a settings page ends up lying
+            // about its own state.
+            const result = sanitizeCosmetics(
+                { frame: 'prismatic', title: 'vault_diver' },
+                SUPPORTER
             );
 
-            expect(result).toEqual({ [COSMETIC_SLOTS.BADGE_FINISH]: null });
+            expect(result.rejected).toEqual(['frame']);
+            expect(result.cosmetics).toEqual({ title: 'vault_diver' });
         });
 
-        it('accepts an entitlements object as well as a capability list', function () {
-            expect(
-                sanitiseCosmetics(
-                    { [COSMETIC_SLOTS.NAMEPLATE]: paidOption },
-                    { capabilities: VAULT_MASTER }
-                )
-            ).toEqual({ [COSMETIC_SLOTS.NAMEPLATE]: paidOption });
+        it('only touches the slots it was sent', function () {
+            const result = sanitizeCosmetics({ banner: 'mars' }, SUPPORTER);
+
+            expect(result.cosmetics).toEqual({ banner: 'mars' });
+            expect(result.rejected).toEqual([]);
+        });
+
+        it('treats null and empty string as "None"', function () {
+            const result = sanitizeCosmetics({ frame: null, title: '' }, SUPPORTER);
+
+            expect(result.cosmetics).toEqual({ frame: 'none', title: 'none' });
+            expect(result.rejected).toEqual([]);
+        });
+
+        it('refuses an unknown option even from the top tier', function () {
+            expect(sanitizeCosmetics({ banner: 'not-a-banner' }, VAULT_MASTER).rejected).toEqual([
+                'banner'
+            ]);
+        });
+
+        it('refuses anything that is not a colour in the custom accent', function () {
+            // The one field whose value is data rather than an id, so the one
+            // that has to be validated as data.
+            for (const bad of ['red', 'javascript:alert(1)', '#12', 'url(x)', '#ggghhh']) {
+                expect(sanitizeCosmetics({ accent: bad }, VAULT_MASTER).rejected).toEqual([
+                    'accent'
+                ]);
+            }
+        });
+
+        it('ignores keys that are not cosmetic slots', function () {
+            const result = sanitizeCosmetics(
+                { banner: 'mars', tier: 'vault_master', isAdmin: true },
+                SUPPORTER
+            );
+
+            expect(result.cosmetics).toEqual({ banner: 'mars' });
         });
     });
 
-    describe('what other people see', function () {
-        const stored = {
-            [COSMETIC_SLOTS.NAMEPLATE]: COSMETICS[COSMETIC_SLOTS.NAMEPLATE].options[1].id,
-            [COSMETIC_SLOTS.BADGE_FINISH]: COSMETICS[COSMETIC_SLOTS.BADGE_FINISH].options[1].id
-        };
-
-        it('shows a paid-up member their choices', function () {
-            expect(publicCosmetics(stored, VAULT_MASTER)).toEqual(stored);
+    describe('normalizeAccentHex', function () {
+        it('keeps a colour that already reads on a dark board', function () {
+            expect(normalizeAccentHex('#7FD3F0')).toBe('#7fd3f0');
         });
 
-        it('shows nothing once the membership has lapsed', function () {
-            // The row is untouched - they get it all back if they come back -
-            // but nobody sees it in the meantime.
-            expect(publicCosmetics(stored, ARCHON)).toBeNull();
-            expect(publicCosmetics(stored, FREE)).toBeNull();
+        it('lightens one that does not, rather than refusing it', function () {
+            // A colour picker that rejects a third of its own range is a bug
+            // report; an invisible name the player cannot see is worse.
+            const lightened = normalizeAccentHex('#101020');
+
+            expect(lightened).not.toBe('#101020');
+            expect(parseInt(lightened.slice(1, 3), 16)).toBeGreaterThan(0x10);
         });
 
-        it('omits a slot left at its default', function () {
-            expect(
-                publicCosmetics(
-                    { [COSMETIC_SLOTS.NAMEPLATE]: defaultChoice(COSMETIC_SLOTS.NAMEPLATE) },
-                    VAULT_MASTER
-                )
-            ).toBeNull();
-        });
-
-        it('is null rather than an empty object when there is nothing to say', function () {
-            expect(publicCosmetics(null, VAULT_MASTER)).toBeNull();
-            expect(publicCosmetics({}, VAULT_MASTER)).toBeNull();
-        });
-    });
-
-    describe('isAllowed', function () {
-        it('is false for anything the catalogue does not contain', function () {
-            expect(isAllowed('nope', 'ember', VAULT_MASTER)).toBe(false);
-            expect(isAllowed(COSMETIC_SLOTS.NAMEPLATE, 'chartreuse', VAULT_MASTER)).toBe(false);
-        });
-
-        it('is true for a free option at every tier', function () {
-            expect(
-                isAllowed(COSMETIC_SLOTS.NAMEPLATE, defaultChoice(COSMETIC_SLOTS.NAMEPLATE), FREE)
-            ).toBe(true);
+        it('is null for anything that is not a hex colour', function () {
+            expect(normalizeAccentHex('rebeccapurple')).toBeNull();
+            expect(normalizeAccentHex('#fff')).toBeNull();
+            expect(normalizeAccentHex('')).toBeNull();
         });
     });
 
     /**
-     * The badge is where a cosmetic actually reaches another player, so the
-     * lapsing rule is checked through it as well as in isolation - these are the
-     * two places it could be got wrong independently.
+     * ARCHON (N12): the slots that ride along with a public badge.
+     *
+     * This payload is one entry per name on every page that lists people, so
+     * what it leaves out matters as much as what it carries.
      */
-    describe('through the public badge', function () {
-        const chosen = {
-            [COSMETIC_SLOTS.NAMEPLATE]: COSMETICS[COSMETIC_SLOTS.NAMEPLATE].options[1].id
-        };
-        const active = (tier) => ({ tier, status: 'active' });
+    describe('publicCosmetics', function () {
+        it('carries only what fits beside a name', function () {
+            const visible = publicCosmetics(everything, SUPPORTER);
 
-        it('carries a paying Vault Master their nameplate', function () {
-            const badge = publicBadge({
-                membership: active(TIER_IDS.VAULT_MASTER),
-                cosmetics: chosen
-            });
-
-            expect(badge.tier).toBe(TIER_IDS.VAULT_MASTER);
-            expect(badge.cosmetics).toEqual(chosen);
+            expect(visible).toMatchObject({ frame: 'brass', nameEffect: 'glow' });
+            // A leaderboard row has nowhere to put either of these.
+            expect(visible.banner).toBeUndefined();
+            expect(visible.title).toBeUndefined();
         });
 
-        it('drops it the moment the membership lapses', function () {
-            const badge = publicBadge({
-                membership: { tier: TIER_IDS.VAULT_MASTER, status: 'cancelled' },
-                cosmetics: chosen
-            });
-
-            expect(badge.tier).toBe(TIER_IDS.FREE);
-            expect(badge.cosmetics).toBeUndefined();
+        it('is null when the account has chosen nothing to show', function () {
+            expect(publicCosmetics(null, VAULT_MASTER)).toBeNull();
+            expect(publicCosmetics({ banner: 'mars', title: 'vault_diver' }, SUPPORTER)).toBeNull();
         });
 
-        it('drops it for a lower tier that somehow has a row stored', function () {
-            const badge = publicBadge({
-                membership: active(TIER_IDS.ARCHON),
-                cosmetics: chosen
-            });
-
-            expect(badge.tier).toBe(TIER_IDS.ARCHON);
-            expect(badge.cosmetics).toBeUndefined();
+        it('is null once the pledge that bought it lapses', function () {
+            expect(publicCosmetics(everything, [])).toBeNull();
         });
 
-        it('does not give an admin cosmetics they have not bought', function () {
-            // Same reason publicBadge does not give an admin a tier: this is
-            // what the public sees, and it must not assert something about
-            // money that is not true.
-            const badge = publicBadge({
-                permissions: { isAdmin: true },
-                membership: null,
-                cosmetics: chosen
-            });
+        it('sends the accent only when something is drawn in it', function () {
+            // A colour that tints nothing is a field per row for no reason.
+            expect(
+                publicCosmetics({ badgeFinish: 'etched' }, VAULT_MASTER).accentHex
+            ).toBeUndefined();
+            expect(publicCosmetics({ nameEffect: 'glow' }, SUPPORTER).accentHex).toMatch(
+                /^#[0-9a-f]{6}$/i
+            );
+        });
+    });
 
-            expect(badge.role).toBe('admin');
-            expect(badge.cosmetics).toBeUndefined();
+    /**
+     * The key finish came across from the parallel implementation this one
+     * absorbed; its nameplate slot did not, being accent + name effect with a
+     * smaller palette.
+     */
+    describe('the key finish', function () {
+        it('is Vault Master only, and standard for everybody else', function () {
+            expect(resolveCosmetics({ badgeFinish: 'radiant' }, SUPPORTER).badgeFinish).toBe(
+                'standard'
+            );
+            expect(resolveCosmetics({ badgeFinish: 'radiant' }, VAULT_MASTER).badgeFinish).toBe(
+                'radiant'
+            );
         });
 
-        it('omits the key entirely when there is nothing chosen', function () {
-            const badge = publicBadge({ membership: active(TIER_IDS.VAULT_MASTER) });
+        it('travels with the badge, which is the only place a key is drawn', function () {
+            expect(publicCosmetics({ badgeFinish: 'etched' }, VAULT_MASTER)).toEqual({
+                badgeFinish: 'etched'
+            });
+        });
+    });
 
-            expect(Object.prototype.hasOwnProperty.call(badge, 'cosmetics')).toBe(false);
+    describe('the catalogue', function () {
+        it('marks locked options rather than hiding them', function () {
+            const accents = cosmeticsCatalog([]).find((slot) => slot.id === 'accent');
+            const sanctum = accents.options.find((option) => option.id === 'sanctum');
+
+            expect(sanctum.locked).toBe(true);
+            expect(sanctum.capability).toBe(CAPABILITIES.PROFILE_COSMETICS);
+            // The default is never locked - it is what everybody already has.
+            expect(accents.options.find((option) => option.id === 'default').locked).toBe(false);
+        });
+
+        it('unlocks per capability, not per tier name', function () {
+            const catalog = cosmeticsCatalog(SUPPORTER);
+            const frames = catalog.find((slot) => slot.id === 'frame');
+
+            expect(frames.options.find((option) => option.id === 'brass').locked).toBe(false);
+            expect(frames.options.find((option) => option.id === 'prismatic').locked).toBe(true);
+        });
+
+        it('covers every slot, so the editor cannot miss one', function () {
+            expect(cosmeticsCatalog([]).map((slot) => slot.id)).toEqual(SLOT_IDS);
+        });
+    });
+
+    describe('bio length', function () {
+        it('is the free limit without the capability and longer with it', function () {
+            expect(bioMaxLength([])).toBe(280);
+            expect(bioMaxLength(SUPPORTER)).toBeGreaterThan(280);
+        });
+    });
+
+    describe('isDefaultCosmetics', function () {
+        it('is true for an untouched selection, so lists can omit it', function () {
+            expect(isDefaultCosmetics(defaultCosmetics())).toBe(true);
+            expect(isDefaultCosmetics(null)).toBe(true);
+            expect(isDefaultCosmetics({ ...defaultCosmetics(), frame: 'brass' })).toBe(false);
+        });
+    });
+
+    /**
+     * `isTierPurchasable` refuses to sell a tier that delivers nothing its
+     * predecessor does not already include. Vault Master failed that check
+     * from the day it was written - all five of its capabilities were unbuilt,
+     * so $20 a month bought nothing over Archon's $10 - and enhanced cosmetics
+     * is the first of them to actually ship.
+     */
+    describe('what shipping this changes about the tiers', function () {
+        it('makes Vault Master purchasable, because it now delivers something', function () {
+            const vaultMaster = tierCatalog().find((tier) => tier.id === TIER_IDS.VAULT_MASTER);
+
+            expect(vaultMaster.purchasable).toBe(true);
+            expect(vaultMaster.liveCapabilities).toContain(CAPABILITIES.ENHANCED_COSMETICS);
+        });
+
+        it('counts both cosmetics capabilities as live rather than planned', function () {
+            const supporter = tierCatalog().find((tier) => tier.id === TIER_IDS.SUPPORTER);
+
+            expect(supporter.liveCapabilities).toContain(CAPABILITIES.PROFILE_COSMETICS);
         });
     });
 });

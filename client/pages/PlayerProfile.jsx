@@ -12,6 +12,8 @@ import AmberValue from '../Components/Site/AmberValue';
 import ReportButton from '../Components/Site/ReportButton';
 import PlayerName from '../Components/Site/PlayerName';
 import { TIER_BADGE_CLASS } from '../membership';
+// ARCHON (N12): profile cosmetics - banner, accent, frame, title.
+import { accentStyle, bannerArt } from '../cosmetics';
 import {
     useGetPlayerProfileQuery,
     useGetPlayerStatsQuery,
@@ -85,6 +87,11 @@ const PlayerProfile = () => {
     }
 
     const location = [profile.state, profile.country].filter(Boolean).join(', ');
+    // ARCHON (N12): already resolved against what this account may currently
+    // use, so nothing here needs to know about tiers - a lapsed pledge simply
+    // arrives with defaults.
+    const cosmetics = profile.cosmetics;
+    const banner = bannerArt(cosmetics);
     const podiums = events.filter((event) => event.placement && event.placement <= 3);
     // Ranked top finishes only, newest season first.
     const seasonBadges = (ratingsData?.seasonHistory || []).filter(
@@ -92,10 +99,31 @@ const PlayerProfile = () => {
     );
 
     return (
-        <div className='mx-auto w-full max-w-3xl space-y-4'>
+        <div className='mx-auto w-full max-w-3xl space-y-4' style={accentStyle(cosmetics)}>
+            {/* ARCHON (N12): the member's banner, the first thing profile
+                customisation buys. It sits above the panel rather than inside
+                it so the art runs the full width, and it is only rendered when
+                the player has chosen one - the server has already dropped it
+                if their membership lapsed. */}
+            {banner && (
+                <div className='overflow-hidden rounded-md border border-border/70'>
+                    <div
+                        className='relative h-28 sm:h-36'
+                        style={{
+                            backgroundImage: `url(${banner})`,
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center'
+                        }}
+                    >
+                        {/* Fades the art out into the page rather than
+                            ending it on a hard edge above the panel. */}
+                        <div className='absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-background to-transparent' />
+                    </div>
+                </div>
+            )}
             <Panel title={profile.username}>
                 <div className='flex items-center gap-3'>
-                    <Avatar imgPath={profile.avatar} />
+                    <Avatar cosmetics={cosmetics} imgPath={profile.avatar} />
                     <div className='min-w-0'>
                         {/* ARCHON (N12): the supporter badge is sold as "next
                             to your name in the lobby and on your profile", and
@@ -106,6 +134,7 @@ const PlayerProfile = () => {
                         <div className='flex items-center gap-2 text-lg'>
                             <PlayerName
                                 className='font-semibold'
+                                cosmetics={cosmetics}
                                 role={profile.role}
                                 tier={profile.tier}
                                 tierName={profile.tierName}
@@ -121,6 +150,17 @@ const PlayerProfile = () => {
                                 </span>
                             )}
                         </div>
+                        {/* The member's chosen title, in their accent colour.
+                            Curated rather than free text, so it needs no
+                            moderation pass before it appears. */}
+                        {cosmetics?.titleLabel && (
+                            <div
+                                className='text-xs font-medium'
+                                style={{ color: 'var(--cosmetic-accent)' }}
+                            >
+                                {cosmetics.titleLabel}
+                            </div>
+                        )}
                         <div className='flex flex-wrap gap-x-3 text-xs text-muted'>
                             {location && <span>{location}</span>}
                             {profile.joined && (

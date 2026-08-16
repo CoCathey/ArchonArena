@@ -25,6 +25,7 @@ import type {
     PatreonLinkStartResult,
     PatreonStatusResult,
     PlayerIntelligenceResult,
+    ReplayIntelligenceResult,
     TournamentLabResult
 } from './types';
 
@@ -695,6 +696,19 @@ export async function fetchMetaIntelligence(days = 30, sets: number[] = []) {
     const query = sets.length ? `&sets=${sets.join(',')}` : '';
 
     return apiFetch<MetaIntelligenceResult>(`/api/intelligence/meta?days=${days}${query}`);
+}
+
+/**
+ * ARCHON (N12): Replay Intelligence — the houses you actually call.
+ *
+ * Deliberately takes no set filter, unlike everything else on the Intelligence
+ * screen. A recording is a game, not the deck row the set filter is built from,
+ * so the server could not honour a narrowing here; and each request parses that
+ * many stored JSON documents, which is not work to repeat on a phone every time
+ * somebody taps a set chip.
+ */
+export async function fetchReplayIntelligence(limit = 25) {
+    return apiFetch<ReplayIntelligenceResult>(`/api/intelligence/replays?limit=${limit}`);
 }
 
 /** Compare up to four of your own decks. No decks selected still returns candidates. */

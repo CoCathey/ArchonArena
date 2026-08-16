@@ -51,31 +51,3 @@ CREATE INDEX IF NOT EXISTS "IX_MembershipPreviews_Preview"
     ON public."MembershipPreviews" USING btree
     ("Preview" ASC NULLS LAST, "Enabled" ASC NULLS LAST)
     TABLESPACE pg_default;
-
--- ---------------------------------------------------------------------------
--- Cosmetic choices
--- ---------------------------------------------------------------------------
---
--- Slot/choice pairs rather than a column per cosmetic, so adding a slot is an
--- edit to the catalogue in code and not a migration. Both are free text for the
--- same reason the tier column on Memberships is: the catalogue lives in
--- server/services/membership/cosmetics.js, and a value this build does not
--- recognise resolves to the default rather than erroring.
---
--- Only non-default choices are stored. The default is the absence of a row.
-
-CREATE TABLE IF NOT EXISTS public."MembershipCosmetics"
-(
-    "UserId" integer NOT NULL,
-    "Slot" text COLLATE pg_catalog."default" NOT NULL,
-    "Choice" text COLLATE pg_catalog."default" NOT NULL,
-    "UpdatedAt" timestamp without time zone NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
-
-    CONSTRAINT "PK_MembershipCosmetics" PRIMARY KEY ("UserId", "Slot"),
-    CONSTRAINT "FK_MembershipCosmetics_Users" FOREIGN KEY ("UserId")
-        REFERENCES public."Users" ("Id") MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE CASCADE
-)
-
-TABLESPACE pg_default;

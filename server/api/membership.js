@@ -8,7 +8,6 @@ const MembershipService = require('../services/membership/MembershipService');
 const BadgeService = require('../services/membership/BadgeService');
 const MemberPreferencesService = require('../services/membership/MemberPreferencesService');
 const { previewCatalog, previewById } = require('../services/membership/previews');
-const { cosmeticCatalog, sanitiseCosmetics } = require('../services/membership/cosmetics');
 const { patreonService } = require('./patreon');
 const {
     tierCatalog,
@@ -42,9 +41,6 @@ const requireAdmin = (req, res, next) => {
  * GET  /api/membership/me             -> the caller's own entitlements
  * GET  /api/membership/previews       -> the preview programme, for this account
  * POST /api/membership/previews       -> switch a preview on or off
- * GET  /api/membership/cosmetics      -> the cosmetics catalogue and this
- *                                        account's choices
- * POST /api/membership/cosmetics      -> choose cosmetics
  * GET  /api/admin/memberships         -> who has what (admin)
  * POST /api/admin/memberships/grant   -> comp a tier to an account (admin)
  *
@@ -189,76 +185,6 @@ module.exports.init = function (server) {
             const choices = await preferencesService.getPreviewChoices(req.user.id);
 
             res.send({ success: true, previews: previewCatalog(entitlements, choices) });
-        })
-    );
-
-    /**
-     * ARCHON (N12): the cosmetics catalogue, and what this account has picked.
-     *
-     * The whole catalogue every time, with the locked options marked - the
-     * panel is where a player finds out that a membership changes something
-     * other people can see, and hiding the options they do not have would
-     * make it a panel with one row in it.
-     */
-    server.get(
-        '/api/membership/cosmetics',
-        passport.authenticate('jwt', { session: false }),
-        wrapAsync(async (req, res) => {
-            const entitlements = entitlementsForRequest(req);
-            const chosen = await preferencesService.getCosmetics(req.user.id);
-
-            res.send({
-                success: true,
-                slots: cosmeticCatalog(entitlements),
-                // What is stored, filtered to what may still be used, so the
-                // panel shows the same thing everybody else sees.
-                chosen: sanitiseCosmetics(chosen, entitlements)
-            });
-        })
-    );
-
-    server.post(
-        '/api/membership/cosmetics',
-        passport.authenticate('jwt', { session: false }),
-        wrapAsync(async (req, res) => {
-            const entitlements = entitlementsForRequest(req);
-            const requested = (req.body && req.body.choices) || {};
-
-            if (typeof requested !== 'object' || Array.isArray(requested)) {
-                return res.send({ success: false, message: 'Nothing to change' });
-            }
-
-            // The one place that decides what may be stored. Unknown slots and
-            // options this account is not entitled to are dropped rather than
-            // 400'd, so a stale tab saving one valid change and one stale one
-            // still applies the valid change.
-            const allowed = sanitiseCosmetics(requested, entitlements);
-            const refused = Object.keys(requested).filter(
-                (slot) => !Object.prototype.hasOwnProperty.call(allowed, slot)
-            );
-
-            if (!Object.keys(allowed).length) {
-                return res.status(refused.length ? 403 : 400).send({
-                    success: false,
-                    message: refused.length
-                        ? 'Those cosmetics are not part of your membership.'
-                        : 'Nothing to change',
-                    upgradeRequired: refused.length > 0
-                });
-            }
-
-            await preferencesService.setCosmetics(req.user.id, allowed);
-
-            const chosen = await preferencesService.getCosmetics(req.user.id);
-
-            res.send({
-                success: true,
-                slots: cosmeticCatalog(entitlements),
-                chosen: sanitiseCosmetics(chosen, entitlements),
-                // Named rather than silently dropped: a switch that appears to
-                // save and does not is worse than one that says why.
-                refused
-            });
         })
     );
 
