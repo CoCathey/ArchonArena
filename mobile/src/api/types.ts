@@ -518,6 +518,43 @@ export interface SetRow {
     share?: number | null;
 }
 
+/**
+ * One house in the replay breakdown.
+ *
+ * Not a `HouseRow`: this is counted per TURN CALLED, read out of recorded board
+ * states, where `HouseRow` counts games played with a deck that contains the
+ * house. They answer different questions and must not be rendered by the same
+ * component as though they were the same number.
+ */
+export interface ReplayHouseRow {
+    house: string;
+    /** Turns on which this player called this house. */
+    turns?: number;
+    /** Games in which they called it at least once. */
+    games: number;
+    wins?: number;
+    winRate: number | null;
+    /** Share of all turns they called, across the sample. */
+    share?: number | null;
+}
+
+/** ARCHON (N12): what a player's recorded games say about how they play. */
+export interface ReplayIntelligenceResult extends ApiResponse {
+    /** False with a `reason` when there is nothing to read yet. */
+    available?: boolean;
+    reason?: string;
+    /** Recordings actually analysed, and those that could not be. */
+    games?: number;
+    skipped?: number;
+    wins?: number;
+    amberPerTurn?: number | null;
+    turnsPerGame?: number | null;
+    firstKeyRound?: number | null;
+    decisiveRound?: number | null;
+    byHouse?: ReplayHouseRow[];
+    vsHouse?: ReplayHouseRow[];
+}
+
 export interface PlayerIntelligenceResult extends ApiResponse {
     ratingHistory?: RatingHistoryEntry[];
     /** Echo of the filter, so "no filter" is distinguishable from "matched nothing". */

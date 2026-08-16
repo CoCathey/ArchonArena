@@ -1765,6 +1765,15 @@ much stronger deck pays less.
         recorded frame was one from later in the game.
 -   [x] **Turn navigation, playback and card zoom** in the viewer: one jump button per turn
         labelled with the house that was called, play/pause with speed, arrow-key stepping.
+-   [x] **Replay Intelligence on the phone** — the aggregate half is on the Expo app's
+        Intelligence screen, where a list of houses with one number each reads better than it
+        does on the web: the five-column row folds to a bar, a percentage and a sub-line, with
+        the house icons the app already has. It loads outside the screen's `load()` because it
+        is the one panel the set filter cannot narrow, and re-parsing 25 stored recordings on
+        every tap of a set chip is a phone's latency and data allowance spent on an answer that
+        never changes. The per-game turn-by-turn analysis is deliberately NOT there: the app
+        has no replay viewer to hang it on, and a six-column turn table is the wrong thing at
+        390 points wide.
 -   [x] **Replay analysis** (**N12**, Archon tier `advanced_replays`): every turn with the
         house called on it, amber per turn, the key race, and the point after which the winner
         was never headed. Read from recorded board state only — never parsed out of the

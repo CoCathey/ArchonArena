@@ -2,6 +2,7 @@ import React from 'react';
 import { Image } from 'expo-image';
 import { StyleSheet, View } from 'react-native';
 import { colors } from '../theme';
+import { houseKey } from './houseNames';
 
 const HOUSE_ICONS: Record<string, number> = {
     brobnar: require('../../assets/img/houses/brobnar.png'),
@@ -24,21 +25,16 @@ const HOUSE_ICONS: Record<string, number> = {
 /** Every house, in the order the card sets introduced them. */
 export const HOUSES: string[] = Object.keys(HOUSE_ICONS);
 
-/** Display name for a house code ('staralliance' -> 'Star Alliance'). */
-const HOUSE_LABELS: Record<string, string> = {
-    staralliance: 'Star Alliance'
-};
-
-export function houseLabel(house: string): string {
-    const key = house.toLowerCase().replace(/\s+/g, '');
-    return HOUSE_LABELS[key] ?? house.charAt(0).toUpperCase() + house.slice(1);
-}
+// The naming lives in houseNames.ts, which imports nothing native, so a module
+// that only needs to name a house can do it without pulling in a component.
+// Re-exported here because this is where everything already imports it from.
+export { houseLabel } from './houseNames';
 
 export function houseIconSource(house?: string): number | undefined {
     if (!house) {
         return undefined;
     }
-    return HOUSE_ICONS[house.toLowerCase().replace(/\s+/g, '')];
+    return HOUSE_ICONS[houseKey(house)];
 }
 
 export default function HouseIcon(props: {
