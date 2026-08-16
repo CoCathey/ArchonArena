@@ -48,6 +48,10 @@ export default function ProfileScreen() {
     const user = useAuthStore((state) => state.user);
     const groupHandByHouse = useSettingsStore((state) => state.groupHandByHouse);
     const setGroupHandByHouse = useSettingsStore((state) => state.setGroupHandByHouse);
+    const hideHandOnOpponentTurn = useSettingsStore((state) => state.hideHandOnOpponentTurn);
+    const setHideHandOnOpponentTurn = useSettingsStore(
+        (state) => state.setHideHandOnOpponentTurn
+    );
 
     const tier = currentTier(user);
     const tierName = currentTierName(user) ?? 'Free';
@@ -274,6 +278,12 @@ export default function ProfileScreen() {
                     hint='Sorts your hand into house order instead of draw order.'
                     value={groupHandByHouse}
                     onChange={setGroupHandByHouse}
+                />
+                <SettingRow
+                    label="Hide my hand on the opponent's turn"
+                    hint='Stands the hand down while they play, so the board and log have the screen. Tap it to look, and it comes back on its own whenever the game asks you something.'
+                    value={hideHandOnOpponentTurn}
+                    onChange={setHideHandOnOpponentTurn}
                 />
             </Card>
 
