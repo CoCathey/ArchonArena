@@ -214,6 +214,19 @@ else
     warn "could not check for unrated games" "run: $DC exec lobby npm run backfill:ratings"
 fi
 
+# Games whose deck link was cut by a deletion. Since migration 71 a deleted
+# deck no longer orphans its games - the uuid recorded on the game re-links
+# them when the deck is imported again - so anything left here predates that
+# and needs the replay-based recovery. Reported rather than alarmed: the games
+# still happened and are still rated, it is only the per-deck stats that are
+# missing them, and some of these are genuinely unrecoverable.
+orphan_games="$(psql_q $'SELECT COUNT(*) FROM "GamePlayers" WHERE "DeckId" IS NULL AND "DeckUuid" IS NULL')"
+if [ "${orphan_games:-0}" -eq 0 ] 2>/dev/null; then
+    ok "every game is linked to the deck it was played with"
+else
+    warn "${orphan_games} game row(s) lost their deck to an old deletion" "run: $DC exec lobby npm run relink:decks"
+fi
+
 # A table with nothing in it, next to finished games, is the other way replays
 # silently do not work: recording switched off, or the game node never sending
 # one. Only meaningful once games have actually finished.

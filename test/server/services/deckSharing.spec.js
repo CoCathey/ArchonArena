@@ -183,6 +183,18 @@ describe('shared decks', function () {
             expect(sql).toContain('g."WinnerId" IS NOT NULL AND g."WinnerId" != gp."PlayerId"');
         });
 
+        it('counts the uuid the GAME recorded, not a live deck row', async function () {
+            // An owner who has since deleted their copy still played those
+            // games. Matching through "Decks" dropped them the moment the row
+            // went, which took half the deck's history away from the owners
+            // who kept theirs.
+            const service = new DeckService(configService, {});
+
+            await service.getById(7);
+
+            expect(queries[0].sql).toContain('gp."DeckUuid" = d."Uuid"');
+        });
+
         it('leaves the pooled record off the list, which does not ask for it', async function () {
             const service = new DeckService(configService, {});
 
@@ -191,6 +203,78 @@ describe('shared decks', function () {
             // Undefined rather than zero, so the UI can tell "not asked" from
             // "nobody has played it".
             expect(decks[0].globalWins).toBeUndefined();
+        });
+    });
+
+    describe('deleting a deck and importing it again', function () {
+        const newDeck = (uuid) => ({
+            uuid,
+            name: 'Test Deck',
+            identity: 'Test Deck',
+            expansion: 453,
+            isAlliance: false,
+            lastUpdated: new Date(),
+            houses: ['brobnar', 'dis', 'logos'],
+            cards: [{ id: 'sneklifter', count: 1 }]
+        });
+
+        const relinkQuery = () =>
+            queries.find((entry) => /UPDATE "GamePlayers" SET "DeckId"/.test(entry.sql));
+
+        beforeEach(function () {
+            const previous = db.query;
+
+            db.query = vi.fn(async (sql, params) => {
+                if (/INSERT INTO "Decks"/.test(sql)) {
+                    queries.push({ sql, params });
+
+                    return [{ Id: 42 }];
+                }
+
+                return previous(sql, params);
+            });
+        });
+
+        // THE DEFECT: "GamePlayers"."DeckId" is ON DELETE SET NULL, so deleting
+        // a deck cut every game loose, and re-importing wrote a NEW row with a
+        // new id that the old games did not point at. The record read zero.
+        it('points the orphaned games at the new row', async function () {
+            const service = new DeckService(configService, { getAllCards: async () => ({}) });
+
+            await service.insertDeck(newDeck('uuid-1'), { id: 3, username: 'alice' });
+
+            const relink = relinkQuery();
+
+            expect(relink).toBeTruthy();
+            expect(relink.params).toEqual([42, 3, 'uuid-1']);
+        });
+
+        it("adopts only this account's orphans, and only orphans", async function () {
+            const service = new DeckService(configService, { getAllCards: async () => ({}) });
+
+            await service.insertDeck(newDeck('uuid-1'), { id: 3, username: 'alice' });
+
+            const { sql } = relinkQuery();
+
+            // Another owner's games belong to their copy...
+            expect(sql).toContain('"PlayerId" = $2');
+            // ...and a row that still has a deck is not orphaned.
+            expect(sql).toContain('"DeckId" IS NULL');
+            expect(sql).toContain('"DeckUuid" = $3');
+        });
+
+        it('does not go looking when the deck has no uuid to match on', async function () {
+            // Alliance decks are built rather than imported; there is no
+            // durable identity to re-link by, and an unscoped UPDATE here
+            // would adopt somebody else's orphans.
+            const service = new DeckService(configService, { getAllCards: async () => ({}) });
+
+            await service.insertDeck(
+                { ...newDeck(undefined), isAlliance: true },
+                { id: 3, username: 'alice' }
+            );
+
+            expect(relinkQuery()).toBeUndefined();
         });
     });
 });

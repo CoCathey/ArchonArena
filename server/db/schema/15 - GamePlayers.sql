@@ -7,6 +7,11 @@ CREATE TABLE public."GamePlayers"
     "GameId" integer NOT NULL,
     "PlayerId" integer NOT NULL,
     "DeckId" integer,
+    -- ARCHON: the deck's Master Vault uuid, recorded at game time. "DeckId" is
+    -- ON DELETE SET NULL, so deleting a deck used to erase its game record
+    -- rather than archive it; this outlives the row and is what re-links the
+    -- games when the deck is imported again. See migration 71.
+    "DeckUuid" text,
     "Keys" integer,
     "Turn" integer,
     "Wins" integer,
@@ -54,3 +59,14 @@ CREATE INDEX "IX_GamePlayers_PlayerId"
     ON public."GamePlayers" USING btree
     ("PlayerId" ASC NULLS LAST)
     TABLESPACE pg_default;
+-- Index: IX_GamePlayers_DeckUuid
+
+-- DROP INDEX public."IX_GamePlayers_DeckUuid";
+
+-- Partial: null for alliance and standalone decks, which have no Master Vault
+-- uuid, and nothing looks a null one up.
+CREATE INDEX "IX_GamePlayers_DeckUuid"
+    ON public."GamePlayers" USING btree
+    ("DeckUuid" COLLATE pg_catalog."default" ASC NULLS LAST)
+    TABLESPACE pg_default
+    WHERE "DeckUuid" IS NOT NULL;

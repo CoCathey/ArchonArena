@@ -47,19 +47,25 @@ const OWNER_COUNT_SQL = `(SELECT COUNT(DISTINCT x."UserId") FROM "Decks" x WHERE
  * worth seeing and they are different numbers, so the deck page shows them side
  * by side rather than picking one.
  *
+ * Matched on the uuid the GAME recorded rather than through a live "Decks" row:
+ * an owner who has since deleted their copy still played those games, and the
+ * pooled record is the one number that should not care whose collection the
+ * deck is currently in. Falls back to the row join for a deck with no uuid -
+ * alliance and standalone decks - which have no durable identity to match on.
+ *
  * A game with no winner (abandoned, still running) counts as neither.
  */
+const globalRecord = (outcome) =>
+    '(SELECT COUNT(*) FROM "Games" g ' +
+    'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+    'WHERE CASE WHEN d."Uuid" IS NULL ' +
+    'THEN gp."DeckId" IN (SELECT x."Id" FROM "Decks" x WHERE x."Name" = d."Name") ' +
+    'ELSE gp."DeckUuid" = d."Uuid" END ' +
+    `AND ${outcome})`;
+
 const GLOBAL_RECORD_SQL = {
-    wins:
-        '(SELECT COUNT(*) FROM "Games" g ' +
-        'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
-        `JOIN "Decks" x ON x."Id" = gp."DeckId" AND ${sameDeckAs('x')} ` +
-        'WHERE g."WinnerId" = gp."PlayerId")',
-    losses:
-        '(SELECT COUNT(*) FROM "Games" g ' +
-        'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
-        `JOIN "Decks" x ON x."Id" = gp."DeckId" AND ${sameDeckAs('x')} ` +
-        'WHERE g."WinnerId" IS NOT NULL AND g."WinnerId" != gp."PlayerId")'
+    wins: globalRecord('g."WinnerId" = gp."PlayerId"'),
+    losses: globalRecord('g."WinnerId" IS NOT NULL AND g."WinnerId" != gp."PlayerId"')
 };
 
 const allianceRestrictedRules = {
@@ -1371,6 +1377,29 @@ class DeckService {
                         5
                     )}`,
                     accoladeParams
+                );
+            }
+
+            // ARCHON: a deck you delete and import again is the same deck, and
+            // its games should say so.
+            //
+            // "GamePlayers"."DeckId" is ON DELETE SET NULL, so deleting a deck
+            // does not archive its record - it cuts every game loose, and the
+            // wins and losses disappear from the deck page, the matchup tables
+            // and Archon Intelligence alike. Re-importing did not undo that,
+            // because the import writes a NEW row with a new id and the games
+            // still pointed at nothing.
+            //
+            // The uuid recorded on the game (migration 71) says which deck was
+            // actually played, so the games can be pointed back at the row that
+            // now represents it. Scoped to this user's own orphans: another
+            // owner's games belong to their copy, and a row that still has a
+            // "DeckId" is not orphaned and must not be moved.
+            if (user && deck.uuid) {
+                await db.query(
+                    'UPDATE "GamePlayers" SET "DeckId" = $1 ' +
+                        'WHERE "PlayerId" = $2 AND "DeckId" IS NULL AND "DeckUuid" = $3',
+                    [deck.id, user.id, deck.uuid]
                 );
             }
 

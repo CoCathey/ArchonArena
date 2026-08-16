@@ -59,9 +59,17 @@ class GameService {
                     //
                     // This is the form update() has always used; create() was
                     // simply missing the second condition.
-                    'INSERT INTO "GamePlayers" ("GameId", "PlayerId", "DeckId") VALUES ' +
+                    //
+                    // "DeckUuid" is recorded alongside the row id because the
+                    // id is a link into a mutable collection and the uuid is
+                    // the deck itself. "DeckId" is ON DELETE SET NULL, so
+                    // deleting a deck used to erase its games from every stat
+                    // that counted them; the uuid survives that and re-links
+                    // them when the deck is imported again.
+                    'INSERT INTO "GamePlayers" ("GameId", "PlayerId", "DeckId", "DeckUuid") VALUES ' +
                         '($1, (SELECT "Id" FROM "Users" WHERE "Username" = $2), ' +
-                        '(SELECT "Id" FROM "Decks" WHERE "Identity" = $3 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $2)))',
+                        '(SELECT "Id" FROM "Decks" WHERE "Identity" = $3 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $2)), ' +
+                        '(SELECT "Uuid" FROM "Decks" WHERE "Identity" = $3 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $2)))',
                     [gameId, player.name, player.deck]
                 );
             } catch (err) {
@@ -111,6 +119,11 @@ class GameService {
                 await this.db.query(
                     'UPDATE "GamePlayers" SET "Keys" = $1, ' +
                         '"DeckId" = (SELECT "Id" FROM "Decks" WHERE "Identity" = $5 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $4)), ' +
+                        // COALESCE for the same reason as "WentFirst": if the
+                        // deck row has gone by the time the game is saved, keep
+                        // whatever create() recorded rather than blanking the
+                        // only durable link the game has to its deck.
+                        '"DeckUuid" = COALESCE((SELECT "Uuid" FROM "Decks" WHERE "Identity" = $5 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $4)), "GamePlayers"."DeckUuid"), ' +
                         // ARCHON (N12): turn order, for the going-first split in
                         // Archon Intelligence. COALESCE keeps a replayed or
                         // partial save from overwriting a value already

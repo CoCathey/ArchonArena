@@ -326,3 +326,57 @@ describe('GameService match history filters', function () {
         expect(params).toEqual(['alice']);
     });
 });
+
+describe('GameService deck recording', function () {
+    let db;
+    let service;
+
+    beforeEach(function () {
+        db = {
+            query: vi.fn(async (sql) => (/INSERT INTO "Games"/.test(sql) ? [{ Id: 99 }] : []))
+        };
+        service = new GameService(db);
+    });
+
+    const sqlFor = (pattern) =>
+        db.query.mock.calls.map((call) => call[0]).find((sql) => pattern.test(sql));
+
+    /*
+     * ARCHON: a game's record of which deck was played must outlive the deck
+     * row. "GamePlayers"."DeckId" is ON DELETE SET NULL, so deleting a deck did
+     * not archive its games - it erased them from every stat that counted them,
+     * and re-importing the deck could not undo it, because nothing on the game
+     * said which deck it had been.
+     */
+    it('records the deck uuid alongside the row id when a game starts', async function () {
+        await service.create({
+            gameId: 'game-1',
+            gameFormat: 'normal',
+            startedAt: new Date(),
+            players: [{ name: 'alice', deck: 'Test Deck' }]
+        });
+
+        const insert = sqlFor(/INSERT INTO "GamePlayers"/);
+
+        expect(insert).toContain('"DeckUuid"');
+        expect(insert).toContain('SELECT "Uuid" FROM "Decks"');
+        // Still scoped to the owner: "Decks" is unique on ("Identity","UserId"),
+        // so an unscoped subquery returns a row per owner and the insert errors.
+        expect(insert).toContain('"UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $2)');
+    });
+
+    it('keeps the recorded uuid if the deck is gone by the time the game is saved', async function () {
+        await service.update({
+            gameId: 'game-1',
+            finishedAt: new Date(),
+            players: [{ name: 'alice', deck: 'Test Deck', turn: 5, keys: {} }]
+        });
+
+        const update = sqlFor(/UPDATE "GamePlayers" SET "Keys"/);
+
+        // Without the COALESCE the save would blank the only durable link the
+        // game has to its deck.
+        expect(update).toContain('"DeckUuid" = COALESCE(');
+        expect(update).toContain('"GamePlayers"."DeckUuid"');
+    });
+});
