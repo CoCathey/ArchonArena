@@ -1,4 +1,6 @@
 import { useAuthStore } from '../stores/authStore';
+import { canShowPurchaseLinks } from '../membership/storefront';
+import { withoutPurchaseInfo } from '../membership/catalogPolicy';
 import { useSettingsStore } from '../stores/settingsStore';
 import type {
     AercBreakdown,
@@ -23,6 +25,7 @@ import type {
     PatreonLinkStartResult,
     PatreonStatusResult,
     PlayerIntelligenceResult,
+    ReplayIntelligenceResult,
     TournamentLabResult
 } from './types';
 
@@ -523,12 +526,23 @@ export async function fetchGameRating(gameId: string) {
  * The tier catalogue: what each tier includes, what it costs, and where it can
  * be bought. Public, because it is a price list.
  *
- * Note what the app does with `checkoutUrl` and `priceUsd` is a platform
- * decision, not a data one — see membership/storefront.ts. The catalogue is
- * fetched the same way everywhere; iOS simply does not render the money.
+ * ## The money is stripped here, not just hidden in the UI
+ *
+ * On a platform where purchase links are not allowed — iOS, under App Store
+ * Review Guideline 3.1.1 — the price and the checkout URL are removed from the
+ * payload before any screen sees them. The screens also guard on
+ * `canShowPurchaseLinks()`, but a guard is something a future edit has to
+ * remember; an absent field is something it cannot get wrong. A `$` cannot be
+ * rendered from a price that is not there.
+ *
+ * `includes`, `adds` and the capability copy all survive: describing what
+ * membership gives you is not a call to action, and 3.1.3(b) is exactly the
+ * provision that lets a multiplatform service do it.
  */
-export async function fetchMembershipCatalog() {
-    return rawFetch<MembershipCatalogResult>('/api/membership/catalog');
+export async function fetchMembershipCatalog(): Promise<MembershipCatalogResult> {
+    const catalog = await rawFetch<MembershipCatalogResult>('/api/membership/catalog');
+
+    return canShowPurchaseLinks() ? catalog : withoutPurchaseInfo(catalog);
 }
 
 /** The signed-in account's own tier and capability list. */
@@ -594,6 +608,19 @@ export async function fetchMetaIntelligence(days = 30, sets: number[] = []) {
     const query = sets.length ? `&sets=${sets.join(',')}` : '';
 
     return apiFetch<MetaIntelligenceResult>(`/api/intelligence/meta?days=${days}${query}`);
+}
+
+/**
+ * ARCHON (N12): Replay Intelligence — the houses you actually call.
+ *
+ * Deliberately takes no set filter, unlike everything else on the Intelligence
+ * screen. A recording is a game, not the deck row the set filter is built from,
+ * so the server could not honour a narrowing here; and each request parses that
+ * many stored JSON documents, which is not work to repeat on a phone every time
+ * somebody taps a set chip.
+ */
+export async function fetchReplayIntelligence(limit = 25) {
+    return apiFetch<ReplayIntelligenceResult>(`/api/intelligence/replays?limit=${limit}`);
 }
 
 /** Compare up to four of your own decks. No decks selected still returns candidates. */

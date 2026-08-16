@@ -419,7 +419,12 @@ export interface MembershipTier {
     id: string;
     name: string;
     rank: number;
-    priceUsd: number;
+    /**
+     * Absent where purchase links are not allowed — the client strips it, so a
+     * price cannot be rendered from a field that is not there. See
+     * fetchMembershipCatalog.
+     */
+    priceUsd?: number;
     tagline?: string;
     recommended?: boolean;
     /** Free-tier lines, listed in words rather than as capabilities. */
@@ -516,6 +521,43 @@ export interface SetRow {
     winRate: number | null;
     /** Share of the sample this set is; sums to 100% since a deck has one set. */
     share?: number | null;
+}
+
+/**
+ * One house in the replay breakdown.
+ *
+ * Not a `HouseRow`: this is counted per TURN CALLED, read out of recorded board
+ * states, where `HouseRow` counts games played with a deck that contains the
+ * house. They answer different questions and must not be rendered by the same
+ * component as though they were the same number.
+ */
+export interface ReplayHouseRow {
+    house: string;
+    /** Turns on which this player called this house. */
+    turns?: number;
+    /** Games in which they called it at least once. */
+    games: number;
+    wins?: number;
+    winRate: number | null;
+    /** Share of all turns they called, across the sample. */
+    share?: number | null;
+}
+
+/** ARCHON (N12): what a player's recorded games say about how they play. */
+export interface ReplayIntelligenceResult extends ApiResponse {
+    /** False with a `reason` when there is nothing to read yet. */
+    available?: boolean;
+    reason?: string;
+    /** Recordings actually analysed, and those that could not be. */
+    games?: number;
+    skipped?: number;
+    wins?: number;
+    amberPerTurn?: number | null;
+    turnsPerGame?: number | null;
+    firstKeyRound?: number | null;
+    decisiveRound?: number | null;
+    byHouse?: ReplayHouseRow[];
+    vsHouse?: ReplayHouseRow[];
 }
 
 export interface PlayerIntelligenceResult extends ApiResponse {

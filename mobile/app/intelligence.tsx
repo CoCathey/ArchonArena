@@ -4,13 +4,15 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'r
 import {
     fetchDeckIntelligence,
     fetchMetaIntelligence,
-    fetchPlayerIntelligence
+    fetchPlayerIntelligence,
+    fetchReplayIntelligence
 } from '../src/api/client';
 import type {
     DeckIntelligenceResult,
     DeckRanking,
     MetaIntelligenceResult,
-    PlayerIntelligenceResult
+    PlayerIntelligenceResult,
+    ReplayIntelligenceResult
 } from '../src/api/types';
 import { CAPABILITIES } from '../src/membership/capabilities';
 import SetFilter from '../src/membership/SetFilter';
@@ -29,8 +31,15 @@ import {
     Stat,
     StatGrid
 } from '../src/membership/widgets';
+import {
+    opposingHouseBars,
+    replayHeadline,
+    replayHouseBars
+} from '../src/membership/replayIntelligence';
 import { useAuthStore } from '../src/stores/authStore';
 import { colors, radius, spacing } from '../src/theme';
+import BarList from '../src/ui/BarList';
+import HouseIcon from '../src/ui/HouseIcon';
 import { Card, ErrorBanner } from '../src/ui/primitives';
 
 /**
@@ -202,8 +211,11 @@ export default function IntelligenceScreen() {
     const unlocked = hasAnyCapability(user, PLAYER_SECTIONS);
     const canMeta = hasCapability(user, CAPABILITIES.META_ANALYTICS);
 
+    const canReplays = hasCapability(user, CAPABILITIES.ADVANCED_REPLAYS);
+
     const [player, setPlayer] = useState<PlayerIntelligenceResult | undefined>();
     const [meta, setMeta] = useState<MetaIntelligenceResult | undefined>();
+    const [replays, setReplays] = useState<ReplayIntelligenceResult | undefined>();
     const [sets, setSets] = useState<number[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | undefined>();
@@ -233,11 +245,47 @@ export default function IntelligenceScreen() {
         }
     }, [canMeta, sets, unlocked]);
 
+    /**
+     * ARCHON (N12): Replay Intelligence loads on its own, NOT inside `load`.
+     *
+     * Everything else here re-reads when the set filter changes. This one
+     * cannot be narrowed by set — a recording is a game, not the deck row the
+     * filter is built from — and each request has the server parse 25 stored
+     * JSON documents. Folding it into `load` would repeat all of that on every
+     * tap of a set chip, for an answer that never changes: a slow request and a
+     * chunk of somebody's data allowance, twice over, for nothing.
+     */
+    const loadReplays = useCallback(async () => {
+        if (!canReplays) {
+            return;
+        }
+
+        try {
+            setReplays(await fetchReplayIntelligence(25));
+        } catch {
+            // Reported in the panel rather than in the screen's error banner,
+            // which belongs to the filtered payload the rest of the page is
+            // built on. Said explicitly, because falling through to the empty
+            // state would tell someone with a hundred recorded games that they
+            // have none — the one reading a failed request must not produce.
+            setReplays({
+                success: false,
+                available: false,
+                reason: 'Could not load your replay analysis. Pull down to try again.'
+            });
+        }
+    }, [canReplays]);
+
     useEffect(() => {
         load();
     }, [load]);
 
+    useEffect(() => {
+        loadReplays();
+    }, [loadReplays]);
+
     const vs = player?.vsExpectation;
+    const headline = replayHeadline(replays);
     const rankings = player?.rankings ?? [];
     const history = player?.ratingHistory ?? [];
 
@@ -246,7 +294,14 @@ export default function IntelligenceScreen() {
             style={{ flex: 1, backgroundColor: colors.bg }}
             contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: 48 }}
             refreshControl={
-                <RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.brand} />
+                <RefreshControl
+                    refreshing={loading}
+                    onRefresh={() => {
+                        load();
+                        loadReplays();
+                    }}
+                    tintColor={colors.brand}
+                />
             }
         >
             <ErrorBanner message={error} />
@@ -444,13 +499,113 @@ export default function IntelligenceScreen() {
                                 <HouseBar key={row.house} row={row} />
                             ))}
                             <Muted>
-                                Measured across decks that contain each house. Which house you chose
-                                on a given turn is not recorded outside replays, so this is not a
-                                per-turn figure.
+                                Measured across decks that contain each house — not the house you
+                                called on a given turn, which is recorded only inside replays.
+                                Replay Intelligence, below, is the per-turn figure.
                             </Muted>
                         </View>
                     ) : (
                         <Muted>No games recorded yet.</Muted>
+                    )}
+                </PremiumLock>
+            </Card>
+
+            {/* ---- Replay Intelligence --------------------------------- */}
+            {/* ARCHON (N12): the only panel here whose numbers come out of
+                recorded games rather than a column, and the only place on the
+                site that knows which house a player actually called. Every
+                other house figure on this screen counts decks CONTAINING a
+                house, which is a different and weaker claim.
+
+                It reads well on a phone precisely because it is a list of
+                houses with one number each — the web page's five-column row
+                folds down to a bar, a percentage and a sub-line, and the house
+                icons make it scan faster here than it does there. */}
+            <Card>
+                <Text style={styles.panelTitle}>Replay Intelligence</Text>
+                <PremiumLock
+                    capabilities={[CAPABILITIES.ADVANCED_REPLAYS]}
+                    pitch='See which house you actually call each turn, and how you do when you call it.'
+                >
+                    {replays?.available ? (
+                        <View style={{ gap: spacing.md }}>
+                            {headline ? (
+                                <Text style={styles.headline}>
+                                    You call{' '}
+                                    <Text style={styles.headlineHouse}>{headline.houseName}</Text>{' '}
+                                    more than any other house
+                                    {headline.winRate === null
+                                        ? '.'
+                                        : `, and win ${pct(headline.winRate)} of the games you call it in.`}
+                                </Text>
+                            ) : null}
+
+                            <StatGrid>
+                                <Stat
+                                    hint={`${replays.wins ?? 0} won`}
+                                    label='Games read'
+                                    value={replays.games ?? 0}
+                                />
+                                <Stat
+                                    hint='turns that gained any'
+                                    label='Amber per turn'
+                                    value={num(replays.amberPerTurn)}
+                                />
+                                <Stat
+                                    hint='average turn'
+                                    label='First key'
+                                    value={num(replays.firstKeyRound)}
+                                />
+                                <Stat
+                                    hint='your turns'
+                                    label='Game length'
+                                    value={num(replays.turnsPerGame)}
+                                />
+                            </StatGrid>
+
+                            <View>
+                                <SectionLabel>Houses you call</SectionLabel>
+                                <BarList
+                                    emptyText='No houses recorded yet.'
+                                    items={replayHouseBars(replays.byHouse).map((item) => ({
+                                        ...item,
+                                        icon: <HouseIcon house={item.key} size={15} />
+                                    }))}
+                                    marker={50}
+                                />
+                                <Muted>
+                                    Counted per turn, from recorded board states. The win rate is
+                                    over the games you called it in at least once; the line marks
+                                    even.
+                                </Muted>
+                            </View>
+
+                            {(replays.vsHouse ?? []).length ? (
+                                <View>
+                                    <SectionLabel>What the other side called</SectionLabel>
+                                    <BarList
+                                        items={opposingHouseBars(replays.vsHouse).map((item) => ({
+                                            ...item,
+                                            icon: <HouseIcon house={item.key} size={15} />
+                                        }))}
+                                        marker={50}
+                                    />
+                                </View>
+                            ) : null}
+
+                            <Muted>
+                                Read from your last {replays.games ?? 0} recorded games, and not
+                                narrowed by the set filter — a recording is a game, not a deck.
+                                {(replays.skipped ?? 0) > 0
+                                    ? ` ${replays.skipped} more were recorded before board states were captured and could not be read.`
+                                    : ''}
+                            </Muted>
+                        </View>
+                    ) : (
+                        <Muted>
+                            {replays?.reason ??
+                                'No recorded games yet — finish one and it is read here.'}
+                        </Muted>
                     )}
                 </PremiumLock>
             </Card>
@@ -529,6 +684,15 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontWeight: '700',
         marginBottom: spacing.sm
+    },
+    headline: {
+        color: colors.text,
+        fontSize: 14,
+        lineHeight: 20
+    },
+    headlineHouse: {
+        color: colors.brand,
+        fontWeight: '700'
     },
     chipRow: {
         flexDirection: 'row',
