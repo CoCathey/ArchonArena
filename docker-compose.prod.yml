@@ -123,9 +123,28 @@ services:
             - PATREON_TIER_IDS=${PATREON_TIER_IDS:-}
         command: ['node', '.']
 
+    # Game nodes. Two of them, because a game cannot be moved between nodes:
+    # replacing a node without ending anyone's game means draining it first and
+    # placing new games on its sibling meanwhile, which needs a sibling. Add
+    # node-2, node-3, ... the same way (SERVER, the Caddy route, and nothing
+    # else — the lobby discovers nodes over Redis).
+    #
+    # Deploy them with deploy/rolling-deploy.sh, never with a bare
+    # `up -d`: Compose would replace both at once and every game in progress
+    # would go down with them.
     node-0:
         image: archonarena
         restart: unless-stopped
+        # A drain waits up to 90 minutes for games in progress to finish. Docker's
+        # default grace is 10 SECONDS, after which it SIGKILLs — so without this
+        # the graceful shutdown in server/gamenode/healthserver.js was decoration
+        # and every restart killed live games anyway.
+        #
+        # The flip side: `docker compose down` and `stop` now wait for the drain
+        # too, so a node with a game on it can take that long to stop. That is the
+        # point, but when you genuinely need it down now, say so:
+        # `docker compose ... stop -t 30 node-0` (ends its games).
+        stop_grace_period: 95m
         expose:
             - '9500'
         depends_on:
@@ -140,6 +159,30 @@ services:
             - SECRET=${SECRET:?set in .env.production}
             - VERSION=${VERSION:-}
             - SENTRY_DSN=${SENTRY_DSN:-}
+            # Optional per-node game cap; unset means unlimited. See
+            # config/default.json5.
+            - MAX_GAMES=${MAX_GAMES:-}
+        command: ['node', 'server/gamenode']
+
+    node-1:
+        image: archonarena
+        restart: unless-stopped
+        stop_grace_period: 95m
+        expose:
+            - '9500'
+        depends_on:
+            - redis
+            - lobby
+        environment:
+            - NODE_ENV=production
+            - NODE_CONFIG_ENV=production
+            - SERVER=node-1
+            - PORT=9500
+            - REDIS_URL=redis://redis:6379
+            - SECRET=${SECRET:?set in .env.production}
+            - VERSION=${VERSION:-}
+            - SENTRY_DSN=${SENTRY_DSN:-}
+            - MAX_GAMES=${MAX_GAMES:-}
         command: ['node', 'server/gamenode']
 
     postgres:

@@ -300,11 +300,18 @@
         host: 'localhost',
         socketioPort: 9500
 
+        // The most games this node will hold before the lobby places new ones
+        // elsewhere. Deliberately unset: unset means unlimited, which is the
+        // behaviour every deployment has today, and the per-node ceiling has not
+        // been load tested yet (ROADMAP N10). Set it - here or via MAX_GAMES -
+        // once that number is known, and add a node before you reach it: a game
+        // refused by a full fleet is "No game nodes available", not a queue.
+        // maxGames: 40,
+
         /*
          * Other game node configurations used, but not specified, include:
          *  - keyPath
          *  - certPath
-         *  - maxGames
          */
     }
 }

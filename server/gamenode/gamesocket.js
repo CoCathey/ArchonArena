@@ -1,10 +1,40 @@
 const EventEmitter = require('events');
-const { spawnSync } = require('child_process');
 
 const config = require('config');
 const logger = require('../log.js');
 const RedisClientFactory = require('../services/RedisClientFactory');
 const { detectBinary } = require('../util');
+
+/**
+ * How many games this node will hold before the lobby places elsewhere.
+ *
+ * ARCHON: this used to read `config.maxGames` at the top level, while
+ * config/default.json5 documents the setting under `gameNode`. Anyone following
+ * the config file therefore set a key nothing read, and the value here was
+ * always undefined - which the router's `numGames >= maxGames` treats as false
+ * for any number, so the cap silently did not exist.
+ *
+ * Read from the section first, fall back to the old top-level key so a
+ * deployment that happened to set it there is unaffected, and leave it undefined
+ * when neither is set. The router reads undefined as unlimited, which is the
+ * behaviour every deployment has today - this fixes which key is honoured, not
+ * what an unconfigured node does.
+ */
+const resolveMaxGames = () => {
+    for (const key of ['gameNode.maxGames', 'maxGames']) {
+        if (!config.has(key)) {
+            continue;
+        }
+
+        const value = Number(config.get(key));
+
+        if (Number.isFinite(value) && value > 0) {
+            return value;
+        }
+    }
+
+    return undefined;
+};
 
 class GameSocket extends EventEmitter {
     /**
@@ -21,6 +51,7 @@ class GameSocket extends EventEmitter {
         this.protocol = protocol;
         this.version = version;
         this.isDraining = false;
+        this.maxGames = resolveMaxGames();
 
         this.nodeName = process.env.SERVER || configService.getValueForSection('gameNode', 'name');
 
@@ -99,7 +130,7 @@ class GameSocket extends EventEmitter {
 
     onGameSync(games) {
         const helloData = {
-            maxGames: this.isDraining ? 0 : config.maxGames,
+            maxGames: this.isDraining ? 0 : this.maxGames,
             version: this.version,
             port:
                 process.env.NODE_ENV === 'production'
@@ -164,11 +195,34 @@ class GameSocket extends EventEmitter {
                 this.emit('onCloseGame', message.arg.gameId);
                 break;
             case 'RESTART':
-                logger.error('Got told to restart, executing pm2 restart..');
-                spawnSync('pm2', ['restart', this.nodeName]);
+                // ARCHON: this used to `spawnSync('pm2', ['restart', ...])`,
+                // inherited from an upstream deployment that ran under pm2.
+                // Nothing installs pm2 here, so the admin panel's Restart button
+                // spawned a command that did not exist and reported nothing -
+                // the one control an operator would reach for during an incident
+                // was silently inert.
+                //
+                // Restart now means: stop taking new games, wait for the ones in
+                // progress to end, then exit and let the container's restart
+                // policy bring the node back. Nobody's game dies for a restart,
+                // and the node shows as `draining` in the admin table
+                // immediately, so the click has visible feedback.
+                //
+                // The exit is the restart, so this depends on something being
+                // there to relaunch the process - `restart: unless-stopped`
+                // under Compose, the kubelet under the Helm chart. A node run by
+                // hand with no supervisor stays down instead; the admin's
+                // Disable toggle is the non-terminal control for that case.
+                logger.info('Restart requested by the lobby - draining before exit');
+                this.emit('onRestartRequested');
                 break;
             case 'LOBBYHELLO':
                 this.emit('onGameSync', this.onGameSync.bind(this));
+                // Announced separately from the sync, which also fires on our own
+                // startup and whenever the drain state changes. This one means
+                // specifically "the lobby has just come up", which is the only
+                // moment a result it never received can be re-delivered.
+                this.emit('onLobbyReconnected');
                 break;
         }
     }
