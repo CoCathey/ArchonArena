@@ -20,6 +20,7 @@ import {
 } from '../src/net/gameSocket';
 import { successFeedback, tapFeedback, warnFeedback } from '../src/haptics';
 import { useAuthStore } from '../src/stores/authStore';
+import { ReportPlayerSheet } from '../src/safety/ReportPlayerSheet';
 import { useGameStore } from '../src/stores/gameStore';
 import { useLobbyStore } from '../src/stores/lobbyStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
@@ -92,6 +93,7 @@ export default function GameScreen() {
     const rootState = useGameStore((state) => state.rootState);
     const status = useGameStore((state) => state.status);
     const username = useAuthStore((state) => state.user?.username);
+    const [reporting, setReporting] = useState(false);
     const handByHouse = useSettingsStore((state) => state.groupHandByHouse);
     const hideHandSetting = useSettingsStore((state) => state.hideHandOnOpponentTurn);
     const setHideHandSetting = useSettingsStore((state) => state.setHideHandOnOpponentTurn);
@@ -237,6 +239,20 @@ export default function GameScreen() {
                 text: rootState?.manualMode ? 'Disable manual mode' : 'Enable manual mode',
                 onPress: () => sendGameMessage('toggleManualMode')
             },
+            // ARCHON: Guideline 1.2 wants reporting reachable where the
+            // user-generated content is, and in this app that is the in-game
+            // chat above all - it is the one screen two strangers share for
+            // half an hour. It was reportable from the game LOBBY and nowhere
+            // after that, and this screen has no back gesture and no header
+            // back button, so conceding was the only way out of a conversation.
+            ...(opponent?.name
+                ? [
+                      {
+                          text: `Report or block ${opponent.name}`,
+                          onPress: () => setReporting(true)
+                      }
+                  ]
+                : []),
             { text: 'Concede', style: 'destructive', onPress: concede },
             { text: 'Leave game', style: 'destructive', onPress: leave },
             { text: 'Close', style: 'cancel' }
@@ -666,7 +682,19 @@ export default function GameScreen() {
                         onClose={() => setLogOpen(false)}
                         onSend={(text) => sendGameMessage('chat', text)}
                         onCardPress={onLogCardPress}
+                        onReport={opponent?.name ? () => setReporting(true) : undefined}
+                        opponentName={opponent?.name}
                     />
+
+                    {/* Reachable from the chat sheet itself and from the game
+                        menu - Guideline 1.2 asks for it where the content is. */}
+                    {opponent?.name ? (
+                        <ReportPlayerSheet
+                            onClose={() => setReporting(false)}
+                            username={opponent.name}
+                            visible={reporting}
+                        />
+                    ) : null}
                 </DragDropProvider>
             </SafeAreaView>
 

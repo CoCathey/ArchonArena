@@ -24,6 +24,7 @@ const tournamentEvents = require('./services/tournament/tournamentEvents');
 // ARCHON: Quick Match matchmaking queue (Amber-based pairing)
 const MatchmakingService = require('./services/matchmaking/MatchmakingService');
 const { UNCHAINED_EXPANSION_ID } = require('./services/DeckService');
+const { filterText } = require('./services/moderation/contentFilter');
 const RatingService = require('./services/rating/RatingService');
 const User = require('./models/User');
 const { sortBy } = require('./Array');
@@ -1716,7 +1717,9 @@ class Lobby {
         }
 
         let chatMessage = {
-            message: message.substring(0, Math.min(512, message.length)),
+            // Guideline 1.2: filtered at the point of posting, like the game
+            // and pending-table surfaces. See services/moderation/contentFilter.
+            message: filterText(message.substring(0, Math.min(512, message.length))),
             time: new Date()
         };
         let newMessage = await this.messageService.addMessage(chatMessage, socket.user);

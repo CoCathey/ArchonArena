@@ -25,6 +25,12 @@ export default function LogSheet(props: {
     visible: boolean;
     messages: ChatMessage[];
     onClose: () => void;
+    /**
+     * Open the report/block sheet for the opponent. Guideline 1.2 wants
+     * reporting reachable where the content is, and this sheet IS the content.
+     */
+    onReport?: () => void;
+    opponentName?: string;
     onSend: (text: string) => void;
     onCardPress: (card: CardSummary) => void;
 }) {
@@ -100,9 +106,23 @@ export default function LogSheet(props: {
                             </Pressable>
                             <View style={styles.header}>
                                 <Text style={styles.title}>Game log</Text>
-                                <Pressable onPress={props.onClose} hitSlop={12}>
-                                    <Text style={styles.closeText}>Swipe down ⌄</Text>
-                                </Pressable>
+                                <View style={styles.headerActions}>
+                                    {props.onReport ? (
+                                        <Pressable hitSlop={12} onPress={props.onReport}>
+                                            <Text
+                                                accessibilityLabel={`Report or block ${
+                                                    props.opponentName ?? 'your opponent'
+                                                }`}
+                                                style={styles.reportText}
+                                            >
+                                                Report
+                                            </Text>
+                                        </Pressable>
+                                    ) : null}
+                                    <Pressable onPress={props.onClose} hitSlop={12}>
+                                        <Text style={styles.closeText}>Swipe down ⌄</Text>
+                                    </Pressable>
+                                </View>
                             </View>
                         </View>
                         <FlatList
@@ -169,6 +189,16 @@ const styles = StyleSheet.create({
         height: 4,
         borderRadius: 2,
         backgroundColor: colors.borderLight
+    },
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.md
+    },
+    reportText: {
+        color: colors.textFaint,
+        fontSize: 12,
+        textDecorationLine: 'underline'
     },
     header: {
         flexDirection: 'row',

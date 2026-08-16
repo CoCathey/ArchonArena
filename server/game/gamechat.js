@@ -1,3 +1,4 @@
+const { filterText } = require('../services/moderation/contentFilter');
 const { randomUUID } = require('node:crypto');
 
 const Card = require('./Card.js');
@@ -19,7 +20,11 @@ class GameChat {
                 role: player.user && player.user.role,
                 avatar: player.user && player.user.avatar
             },
-            message.substring(0, Math.min(512, message.length))
+            // ARCHON: Guideline 1.2 asks a UGC app to filter objectionable
+            // material at the point it is POSTED, not only to accept a report
+            // about it afterwards. Masked rather than blocked - see
+            // services/moderation/contentFilter.
+            filterText(message.substring(0, Math.min(512, message.length)))
         ];
         let formattedMessage = this.formatMessage(format, args);
 

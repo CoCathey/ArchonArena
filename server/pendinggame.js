@@ -1,3 +1,4 @@
+const { filterText } = require('./services/moderation/contentFilter');
 const { randomUUID } = require('node:crypto');
 const _ = require('underscore');
 const crypto = require('crypto');
@@ -282,9 +283,20 @@ class PendingGame {
             return;
         }
 
+        // ARCHON: "Mute spectators" was honoured in the GAME (game.js chat)
+        // and not at the table, so the toggle the owner set when creating the
+        // game silently did nothing until the first card was dealt - which is
+        // exactly the window where somebody waiting for an opponent is most
+        // exposed to a stranger who wandered in to watch.
+        if (this.muteSpectators && !this.players[playerName]) {
+            return;
+        }
+
         player.argType = 'player';
 
-        this.addMessage('{0} {1}', player, message);
+        // Guideline 1.2: filtered where it is posted, like every other chat
+        // surface. See services/moderation/contentFilter.
+        this.addMessage('{0} {1}', player, filterText(message));
     }
 
     selectDeck(playerName, deck) {
