@@ -130,6 +130,14 @@ describe('account deletion', function () {
         expect(deletedFrom()).toContain('PushTokens');
     });
 
+    it('removes the chosen cosmetics', async function () {
+        // A tombstone wearing somebody's old banner and accent colour is not
+        // anonymous.
+        await service.anonymizeUser({ id: 42 });
+
+        expect(deletedFrom()).toContain('ProfileCosmetics');
+    });
+
     it('removes notifications, which name other people', async function () {
         await service.anonymizeUser({ id: 42 });
 

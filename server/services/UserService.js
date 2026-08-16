@@ -815,6 +815,13 @@ class UserService extends EventEmitter {
                 user.id
             ]);
 
+            // Their chosen banner, accent, frame and title. Cosmetic, but it
+            // is a choice they made about how they appear, and a tombstone
+            // wearing somebody's old colours is not anonymous.
+            await db.queryTran(client, 'DELETE FROM "ProfileCosmetics" WHERE "UserId" = $1', [
+                user.id
+            ]);
+
             // A deleted player should leave everyone's friends list rather than
             // sit in it as `deleted-user-N`, and the edge says who they knew.
             await db.queryTran(
