@@ -196,6 +196,38 @@ const Application = () => {
         );
     }
 
+    /**
+     * ARCHON: `?embed=1` renders the page with no site chrome.
+     *
+     * The phone apps have to link out to the privacy policy and the terms -
+     * Guideline 5.1.1(i) requires the policy to be reachable from inside the
+     * app, and 1.2 wants published contact information. Those links are legal
+     * documents and are entirely allowed.
+     *
+     * The DESTINATION was not. Every route renders the sidebar, and the sidebar
+     * carries a deliberately highlighted "Archon+" item; two taps from an iOS
+     * privacy-policy link sat a price list and a Patreon checkout button. The
+     * app goes to great lengths to keep money out of the iOS build - the
+     * catalogue is stripped of prices before any screen sees it - and a link it
+     * is REQUIRED to ship walked straight around all of it.
+     *
+     * So the legal pages are served bare. Nothing is hidden from anyone: the
+     * same pages are one click from the sidebar for a browser visitor. This
+     * only stops a document the app must link to from doubling as a shop
+     * window.
+     */
+    const embedded = new URLSearchParams(location.search).get('embed') === '1';
+
+    if (embedded) {
+        return (
+            <div className='bg' ref={bgRef}>
+                <div className='wrapper'>
+                    <div className='mx-auto max-w-4xl p-4'>{component}</div>
+                </div>
+            </div>
+        );
+    }
+
     // ARCHON: chess.com-style sidebar everywhere except the in-game screen,
     // where the slim top bar keeps its game controls and the board keeps
     // its full width.

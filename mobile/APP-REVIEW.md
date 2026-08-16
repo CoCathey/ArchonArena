@@ -141,6 +141,28 @@ with other players (a finished game belongs to both of them). It needs a
 decision about what is erased versus anonymised before it is written, so it is
 called out here rather than guessed at.
 
+## Still open, and not fixable in code
+
+**Intellectual property (5.2.1 / 5.2.5) — the most likely rejection.** Card
+faces stream from `archonarena.com/img/cards/`, and `server/scripts/fetchdata/
+KeyforgeImageSource.js` shows those are downloaded copies of Master Vault art
+re-served from our host. The card back, house sigils, key and Æmber icons are
+bundled in the IPA. A reviewer reaches card art from the Decks tab without
+playing a game, and meets the trademark in the login tagline before that. The
+attribution now appears pre-auth on the login screen, which is the most that
+code can do — 5.2.1 asks for a licence, not a disclaimer. Expect the App Store
+name, subtitle and keywords to need scrubbing of "KeyForge" too.
+
+**A solo reviewer cannot reach a game.** There is no AI, practice or solo mode,
+so the core feature needs a second human. Supply two demo accounts and say so in
+the review notes, or accept that this is what the first rejection will be about.
+
+**iPad.** `app.json` declares `supportsTablet: true` and the layout is a
+portrait-locked single column. Either fix the layout or set it false.
+
+**Age rating.** The questionnaire has to reflect unfiltered user-to-user chat,
+now that a content filter exists but is a denylist rather than a classifier.
+
 ## If Apple objects anyway
 
 Reviewers differ, and the most common objection to this shape is to the

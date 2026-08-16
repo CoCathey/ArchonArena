@@ -69,3 +69,47 @@ export function upgradePromptFor(platform: string): string {
         ? 'Archon+ members get this. See what each tier includes.'
         : 'Archon+ members get this. Already a member? Connect your Patreon account to unlock it here.';
 }
+
+/**
+ * ARCHON: may this platform carry an event with a buy-in?
+ *
+ * Guideline 5.3.1 requires a contest in an app to be sponsored by the DEVELOPER
+ * of the app, with its official rules presented in the app and a statement that
+ * Apple is not a sponsor. Archon Arena's paid events are none of those: any
+ * signed-in player can create one, the buy-in can reach $10,000 in any of
+ * fifteen currencies, and the platform never touches the money - it records
+ * what the organiser announced. 5.3.2 compounds it by requiring the developer
+ * to certify the contest is legal in every jurisdiction offered, which the
+ * site's Terms explicitly decline on the organiser's behalf.
+ *
+ * That is structural rather than cosmetic: hiding a price badge does not cure
+ * it, because the events themselves are the third-party contests. So where the
+ * rules cannot carry them, they are not a feature.
+ *
+ * Deliberately the same switch the tier prices use. A platform permitted to
+ * show a price is one whose rules permit this shape too, and two independent
+ * switches would eventually disagree - with the drifted one being the one
+ * nobody was testing.
+ */
+export function allowsPaidEvents(platform: string): boolean {
+    return allowsPurchaseLinks(platform);
+}
+
+/** Does this event carry a buy-in? */
+export function hasEntryFee(event?: { entryFeeCents?: number | null } | null): boolean {
+    return !!event && typeof event.entryFeeCents === 'number' && event.entryFeeCents > 0;
+}
+
+/**
+ * Should this event be hidden from the list on this platform?
+ *
+ * Hidden rather than shown-and-disabled: a greyed-out row reading "not
+ * available" is still an advertisement for a paid contest, which is the thing
+ * 5.3.1 objects to.
+ */
+export function hidesEvent(
+    event: { entryFeeCents?: number | null },
+    platform: string
+): boolean {
+    return hasEntryFee(event) && !allowsPaidEvents(platform);
+}

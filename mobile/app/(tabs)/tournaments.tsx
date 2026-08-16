@@ -25,6 +25,7 @@ import {
 import { useAuthStore } from '../../src/stores/authStore';
 import { colors, radius, spacing } from '../../src/theme';
 import { Button, EmptyState, ErrorBanner } from '../../src/ui/primitives';
+import { shouldHideEvent } from '../../src/membership/paidEvents';
 
 const FILTERS = [
     { key: 'open', label: 'Open' },
@@ -214,7 +215,13 @@ export default function TournamentsScreen() {
                 ) : null}
             </View>
 
-            {events.map((event) => (
+            {/* ARCHON: Guideline 5.3.1 requires a contest in an app to be
+                sponsored by the DEVELOPER, with rules in the app. These are
+                third-party events created by any player, so where the store
+                rules do not carry that shape they are not a feature at all -
+                hidden rather than greyed out, because a disabled row is still
+                an advertisement for a paid contest. See membership/paidEvents. */}
+            {events.filter((event) => !shouldHideEvent(event)).map((event) => (
                 <TournamentRow key={event.id} event={event} />
             ))}
 

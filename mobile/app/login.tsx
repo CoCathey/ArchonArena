@@ -64,6 +64,17 @@ export default function LoginScreen() {
                     <View style={styles.header}>
                         <Text style={styles.logo}>ARCHON ARENA</Text>
                         <Text style={styles.tagline}>Play KeyForge anywhere</Text>
+                        {/* ARCHON: the trademark attribution belongs on the
+                            first screen, not at the foot of the fourth tab
+                            behind the sign-in wall. A reviewer meets the
+                            KeyForge name here, in the tagline directly above,
+                            and meets the card art in the first game; the
+                            disclaimer has to be where they already are. */}
+                        <Text style={styles.disclaimer}>
+                            A fan-run, open-source platform. KeyForge is a trademark of Fantasy
+                            Flight Games / Ghost Galaxy. Not affiliated with, endorsed by or
+                            sponsored by them.
+                        </Text>
                     </View>
 
                     <ErrorBanner message={error} />
@@ -122,6 +133,14 @@ const styles = StyleSheet.create({
         fontSize: 30,
         fontWeight: '900',
         letterSpacing: 4
+    },
+    disclaimer: {
+        color: colors.textFaint,
+        fontSize: 10,
+        lineHeight: 14,
+        textAlign: 'center',
+        marginTop: 10,
+        paddingHorizontal: 8
     },
     tagline: {
         color: colors.textDim,

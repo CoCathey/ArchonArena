@@ -35,6 +35,7 @@ import { localTime, relativeTime, statusLabel, tournamentFormatLabel } from '../
 import { useAuthStore } from '../../src/stores/authStore';
 import { colors, radius, spacing } from '../../src/theme';
 import { Button, Card, EmptyState, ErrorBanner, TextField } from '../../src/ui/primitives';
+import { canJoinPaidEvents, hasEntryFee } from '../../src/membership/paidEvents';
 
 const SECTIONS = [
     { key: 'info', label: 'Info' },
@@ -240,17 +241,23 @@ export default function TournamentDetailScreen() {
                                 autoCapitalize='characters'
                             />
                         ) : null}
-                        <Button
-                            title='Register'
-                            loading={busy === 'register'}
-                            onPress={() =>
-                                run('register', () =>
-                                    registerForTournament(tournament.id, {
-                                        joinCode: joinCode.trim() || undefined
-                                    })
-                                )
-                            }
-                        />
+                        {hasEntryFee(tournament) && !canJoinPaidEvents() ? (
+                            <Text style={styles.paidNotice}>
+                                This event has an entry fee and cannot be joined from the app.
+                            </Text>
+                        ) : (
+                            <Button
+                                title='Register'
+                                loading={busy === 'register'}
+                                onPress={() =>
+                                    run('register', () =>
+                                        registerForTournament(tournament.id, {
+                                            joinCode: joinCode.trim() || undefined
+                                        })
+                                    )
+                                }
+                            />
+                        )}
                     </Card>
                 ) : null}
 
@@ -469,13 +476,18 @@ export default function TournamentDetailScreen() {
                                     : null
                             }
                         />
+                        {/* ARCHON: the buy-in is only ever rendered where the
+                            store rules carry paid third-party events at all
+                            (Guideline 5.3.1) - and the mode goes with it, since
+                            "25.00 USD" with no indication that the event is
+                            played in person reads very differently. */}
                         <Row
                             label='Entry'
                             value={
-                                tournament.entryFeeCents
+                                canJoinPaidEvents() && tournament.entryFeeCents
                                     ? `${(tournament.entryFeeCents / 100).toFixed(2)} ${
                                           tournament.prizeCurrency ?? 'USD'
-                                      }`
+                                      }${tournament.mode === 'irl' ? ' · in person' : ''}`
                                     : null
                             }
                         />
@@ -658,6 +670,11 @@ export default function TournamentDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+    paidNotice: {
+        color: colors.textDim,
+        fontSize: 12,
+        lineHeight: 17
+    },
     container: { flex: 1, backgroundColor: colors.bg },
     name: { color: colors.text, fontSize: 20, fontWeight: '800' },
     subtitle: {

@@ -14,7 +14,13 @@ import {
     parseCallbackUrl,
     RETURN_URL
 } from '../src/membership/patreonCallback';
-import { allowsPurchaseLinks, upgradePromptFor } from '../src/membership/storePolicy';
+import {
+    allowsPaidEvents,
+    allowsPurchaseLinks,
+    hasEntryFee,
+    hidesEvent,
+    upgradePromptFor
+} from '../src/membership/storePolicy';
 import { withoutPurchaseInfo } from '../src/membership/catalogPolicy';
 import type { UserDetails } from '../src/api/types';
 
@@ -238,5 +244,44 @@ describe('patreon callback', () => {
 
         expect(callback.code).toBe('a/b+c');
         expect(callback.state).toBe('m.x=y');
+    });
+});
+
+/**
+ * Guideline 5.3.1 requires a contest in an app to be sponsored by the DEVELOPER,
+ * with its rules in the app and a statement that Apple is not involved. Archon
+ * Arena's paid events are third-party contests created by any signed-in player,
+ * for up to $10,000 in fifteen currencies, and the site's own Terms decline the
+ * legality certification 5.3.2 asks for. That is structural: hiding a price
+ * badge does not cure it, because the events themselves are the contests.
+ */
+describe('paid events', () => {
+    it('are not shown on iOS', () => {
+        expect(allowsPaidEvents('ios')).toBe(false);
+        expect(hidesEvent({ entryFeeCents: 2500 }, 'ios')).toBe(true);
+    });
+
+    it('never hides a free event, on any platform', () => {
+        // The overwhelming majority, and everything the app was built for.
+        for (const event of [{ entryFeeCents: 0 }, { entryFeeCents: null }, {}]) {
+            for (const platform of ['ios', 'android', 'web']) {
+                expect(hidesEvent(event, platform)).toBe(false);
+            }
+        }
+    });
+
+    it('recognises a buy-in only when there is one', () => {
+        expect(hasEntryFee({ entryFeeCents: 1 })).toBe(true);
+        expect(hasEntryFee({ entryFeeCents: 0 })).toBe(false);
+        expect(hasEntryFee({ entryFeeCents: null })).toBe(false);
+        expect(hasEntryFee(undefined)).toBe(false);
+    });
+
+    it('follows the same platform switch as the tier prices', () => {
+        // Two independent switches would eventually disagree, and the one that
+        // drifted would be the one nobody was testing.
+        for (const platform of ['ios', 'android', 'web', 'visionos']) {
+            expect(allowsPaidEvents(platform)).toBe(allowsPurchaseLinks(platform));
+        }
     });
 });
