@@ -101,6 +101,9 @@ services:
             # Escape hatch: set false to run without email, accepting that
             # unverified addresses can play. Anything else leaves it on.
             - REQUIRE_ACTIVATION=${REQUIRE_ACTIVATION:-}
+            # Off unless set: two people owning one deck is allowed here. Set
+            # true to get keyteki's Used/Popular/Notorious labels back.
+            - FLAG_SHARED_DECKS=${FLAG_SHARED_DECKS:-}
             - OIDC_ENABLED=${OIDC_ENABLED:-}
             - OIDC_ISSUER=${OIDC_ISSUER:-}
             - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}

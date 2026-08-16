@@ -16,7 +16,7 @@ import DiscardImage from '../../assets/img/enhancements/discardui.png';
 import DrawImage from '../../assets/img/enhancements/drawui.png';
 import PowerImage from '../../assets/img/enhancements/powerui.png';
 
-const DeckSummary = ({ deck }) => {
+const DeckSummary = ({ deck, globalWins, globalLosses, globalWinRate }) => {
     const { t, i18n } = useTranslation();
     const [triggerUpdateAccoladeShown] = useUpdateAccoladeShownMutation();
     const user = useSelector((state) => state.account.user);
@@ -157,6 +157,27 @@ const DeckSummary = ({ deck }) => {
 
     const totalGames = parseInt(deck.wins || 0) + parseInt(deck.losses || 0);
 
+    // ARCHON: the same deck in everyone's hands, when the detail endpoint has
+    // answered. A deck can sit in several collections - two people owning one
+    // physical deck, a second account, a friend importing it to read it - and
+    // "how do I do with this deck" and "how does this deck do" are then
+    // different questions. Undefined until the detail request lands, and
+    // omitted entirely when this account is the only owner, where the two
+    // columns would be the same numbers twice.
+    const globalTotal = parseInt(globalWins || 0) + parseInt(globalLosses || 0);
+    const showGlobal =
+        globalWins !== undefined &&
+        (parseInt(globalWins || 0) !== parseInt(deck.wins || 0) ||
+            parseInt(globalLosses || 0) !== parseInt(deck.losses || 0));
+
+    const statRow = (label, mine, everyone) => (
+        <>
+            <span className='text-muted'>{label}</span>
+            <span className='font-bold text-foreground'>{mine}</span>
+            {showGlobal && <span className='font-bold text-foreground/70'>{everyone}</span>}
+        </>
+    );
+
     const hasMissingCards = deck.cards.some(
         (c) => !c.isNonDeck && (!c.card?.name || !c.card?.house)
     );
@@ -172,22 +193,42 @@ const DeckSummary = ({ deck }) => {
                     />
                 </div>
                 <div className='min-w-56 flex-1'>
-                    <div className='grid max-w-72 grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-lg'>
-                        <span className='text-muted'>{t('Wins')}</span>
-                        <span className='font-bold text-foreground'>{deck.wins}</span>
-                        <span className='text-muted'>{t('Losses')}</span>
-                        <span className='font-bold text-foreground'>{deck.losses}</span>
-                        <span className='text-muted'>{t('Total')}</span>
-                        <span className='font-bold text-foreground'>{totalGames}</span>
-                        <span className='text-muted'>{t('Win Rate')}</span>
-                        <span className='font-bold text-foreground'>
-                            {deck.winRate?.toFixed(2)}%
-                        </span>
+                    <div
+                        className={`grid max-w-72 gap-x-4 gap-y-1 text-lg ${
+                            showGlobal ? 'grid-cols-[1fr_auto_auto]' : 'grid-cols-[1fr_auto]'
+                        }`}
+                    >
+                        {showGlobal && (
+                            <>
+                                <span />
+                                <span
+                                    className='text-xs uppercase tracking-wide text-muted'
+                                    title={t('Games you have played with this deck')}
+                                >
+                                    {t('You')}
+                                </span>
+                                <span
+                                    className='text-xs uppercase tracking-wide text-muted'
+                                    title={t('Every game played with this deck, by any owner')}
+                                >
+                                    {t('All owners')}
+                                </span>
+                            </>
+                        )}
+                        {statRow(t('Wins'), deck.wins, globalWins)}
+                        {statRow(t('Losses'), deck.losses, globalLosses)}
+                        {statRow(t('Total'), totalGames, globalTotal)}
+                        {statRow(
+                            t('Win Rate'),
+                            `${(deck.winRate ?? 0).toFixed(2)}%`,
+                            `${(globalWinRate ?? 0).toFixed(2)}%`
+                        )}
                         {/* ARCHON: SAS from Decks of KeyForge when available */}
                         {deck.sasRating != null && (
                             <>
                                 <span className='text-muted'>{t('SAS')}</span>
                                 <span className='font-bold text-foreground'>{deck.sasRating}</span>
+                                {showGlobal && <span />}
                             </>
                         )}
                     </div>

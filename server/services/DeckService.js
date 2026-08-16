@@ -16,6 +16,52 @@ const BonusOrder = Constants.Houses.concat(['amber', 'capture', 'damage', 'draw'
  */
 const UNCHAINED_EXPANSION_ID = 601;
 
+/**
+ * ARCHON: "the same deck", for questions asked of every copy of it at once.
+ *
+ * A deck's identity is its Master Vault uuid, not its name: KeyForge builds
+ * names from a finite word list, so two unrelated decks can and do share one.
+ * Rows imported before uuids were recorded have nothing better, so they fall
+ * back to matching on name - the old behaviour, for exactly the rows that
+ * cannot do better.
+ *
+ * `d` is the outer deck row; `x` is the alias of the table being matched.
+ */
+const sameDeckAs = (alias) =>
+    `CASE WHEN d."Uuid" IS NULL THEN ${alias}."Name" = d."Name" ELSE ${alias}."Uuid" = d."Uuid" END`;
+
+/**
+ * How many PEOPLE hold this deck - the number behind the inherited
+ * Used / Popular / Notorious labels. It was COUNT(*) over rows sharing a name,
+ * which counts name collisions between unrelated decks as shared ownership.
+ */
+const OWNER_COUNT_SQL = `(SELECT COUNT(DISTINCT x."UserId") FROM "Decks" x WHERE ${sameDeckAs(
+    'x'
+)})`;
+
+/**
+ * ARCHON: the record of this deck in EVERYONE's hands, not just its owner's.
+ *
+ * The per-owner counts answer "how do I do with this deck"; these answer "how
+ * does this deck do", pooled across every account that owns a copy. Both are
+ * worth seeing and they are different numbers, so the deck page shows them side
+ * by side rather than picking one.
+ *
+ * A game with no winner (abandoned, still running) counts as neither.
+ */
+const GLOBAL_RECORD_SQL = {
+    wins:
+        '(SELECT COUNT(*) FROM "Games" g ' +
+        'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+        `JOIN "Decks" x ON x."Id" = gp."DeckId" AND ${sameDeckAs('x')} ` +
+        'WHERE g."WinnerId" = gp."PlayerId")',
+    losses:
+        '(SELECT COUNT(*) FROM "Games" g ' +
+        'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
+        `JOIN "Decks" x ON x."Id" = gp."DeckId" AND ${sameDeckAs('x')} ` +
+        'WHERE g."WinnerId" IS NOT NULL AND g."WinnerId" != gp."PlayerId")'
+};
+
 const allianceRestrictedRules = {
     befuddle: { expansions: [600] },
     ghostform: { expansions: [452, 600] },
@@ -189,10 +235,20 @@ class DeckService {
                 // WinRate is derived in an outer select, the same way
                 // findForUser does it, so the two endpoints agree. Without it
                 // mapDeck's `winRate` was undefined here and only here.
-                'SELECT *, CASE WHEN "WinCount" + "LoseCount" = 0 THEN 0 ELSE (CAST("WinCount" AS FLOAT) / ("WinCount" + "LoseCount")) * 100 END AS "WinRate" FROM ( ' +
-                    'SELECT d.*, u."Username", e."ExpansionId" as "Expansion", (SELECT COUNT(*) FROM "Decks" WHERE "Name" = d."Name") AS "DeckCount", ' +
+                //
+                // The Global* counts are the same deck in everyone's hands -
+                // this is the only query that carries them, because the deck
+                // page is the only place that shows them and they cost a join
+                // per row.
+                'SELECT *, ' +
+                    'CASE WHEN "WinCount" + "LoseCount" = 0 THEN 0 ELSE (CAST("WinCount" AS FLOAT) / ("WinCount" + "LoseCount")) * 100 END AS "WinRate", ' +
+                    'CASE WHEN "GlobalWinCount" + "GlobalLoseCount" = 0 THEN 0 ELSE (CAST("GlobalWinCount" AS FLOAT) / ("GlobalWinCount" + "GlobalLoseCount")) * 100 END AS "GlobalWinRate" ' +
+                    'FROM ( ' +
+                    `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = d."UserId" AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "WinCount", ' +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != d."UserId" AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "LoseCount" ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != d."UserId" AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "LoseCount", ' +
+                    `${GLOBAL_RECORD_SQL.wins} AS "GlobalWinCount", ` +
+                    `${GLOBAL_RECORD_SQL.losses} AS "GlobalLoseCount" ` +
                     'FROM "Decks" d ' +
                     'JOIN "Users" u ON u."Id" = "UserId" ' +
                     'JOIN "Expansions" e on e."Id" = d."ExpansionId" ' +
@@ -631,7 +687,7 @@ class DeckService {
                     // ARCHON: "DeckCount" quoted. Unquoted, Postgres folds the
                     // alias to `deckcount`, so mapDeck's `deck.DeckCount` was
                     // undefined and every deck's usage level computed as 0.
-                    'SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", (SELECT COUNT(*) FROM "Decks" WHERE "Name" = d."Name") AS "DeckCount", ' +
+                    `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     // ARCHON: SAS joined HERE rather than attached to the page
@@ -1411,19 +1467,58 @@ class DeckService {
         }
     }
 
+    /**
+     * ARCHON: the Used / Popular / Notorious level for a deck, in one place.
+     *
+     * It was inlined in the lobby and again in GET /api/decks, which is how the
+     * two could disagree, and neither honoured a policy switch because there
+     * was none. Sharing a deck is allowed here unless an operator says
+     * otherwise, so this returns 0 - "nothing to say about who owns it" -
+     * unless lobby.flagSharedDecks is on.
+     */
+    usageLevelFor(deck) {
+        if (!this.configService.getValueForSection('lobby', 'flagSharedDecks')) {
+            return 0;
+        }
+
+        const owners = deck && deck.usageCount;
+        let level = 0;
+
+        if (owners > this.configService.getValueForSection('lobby', 'lowerDeckThreshold')) {
+            level = 1;
+        }
+
+        if (owners > this.configService.getValueForSection('lobby', 'middleDeckThreshold')) {
+            level = 2;
+        }
+
+        if (owners > this.configService.getValueForSection('lobby', 'upperDeckThreshold')) {
+            level = 3;
+        }
+
+        return level;
+    }
+
     async getFlaggedUnverifiedDecksForUser(user) {
         let retDecks = [];
         let decks;
 
+        // Nothing is flagged when sharing is allowed, and asking the database
+        // for rows we would then have to ignore is just a slower way to
+        // return nothing.
+        if (!this.configService.getValueForSection('lobby', 'flagSharedDecks')) {
+            return retDecks;
+        }
+
         try {
             decks = await db.query(
-                'SELECT d.*, u."Username", e."ExpansionId" as "Expansion", (SELECT COUNT(*) FROM "Decks" WHERE "Name" = d."Name") AS "DeckCount", ' +
+                `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     'FROM "Decks" d ' +
                     'JOIN "Users" u ON u."Id" = "UserId" ' +
                     'JOIN "Expansions" e on e."Id" = d."ExpansionId" ' +
-                    'WHERE u."Id" = $1 AND d."Verified" = False AND (SELECT COUNT(*) FROM "Decks" WHERE "Name" = d."Name") > $2',
+                    `WHERE u."Id" = $1 AND d."Verified" = False AND ${OWNER_COUNT_SQL} > $2`,
                 [user.id, this.configService.getValueForSection('lobby', 'lowerDeckThreshold')]
             );
         } catch (err) {
@@ -1861,6 +1956,12 @@ class DeckService {
             verified: deck.Verified,
             wins: deck.WinCount,
             winRate: deck.WinRate,
+            // ARCHON: the same deck in everyone's hands. Only getById selects
+            // these, so they are undefined - not zero - on every other path,
+            // and the UI can tell "nobody has played it" from "not asked for".
+            globalWins: deck.GlobalWinCount,
+            globalLosses: deck.GlobalLoseCount,
+            globalWinRate: deck.GlobalWinRate,
             // Present when the row came from a query that joins DeckSas.
             // attachStats fills this in for the paths that do not.
             sasRating: deck.SasRating != null ? deck.SasRating : undefined

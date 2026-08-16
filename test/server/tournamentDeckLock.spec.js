@@ -80,7 +80,10 @@ describe('tournament deck lock', function () {
         sent = [];
         deckService = {
             getById: vi.fn().mockImplementation(async (id) => dbDeck(id)),
-            getStandaloneDeckById: vi.fn().mockImplementation(async (id) => dbDeck(id))
+            getStandaloneDeckById: vi.fn().mockImplementation(async (id) => dbDeck(id)),
+            // Sharing a deck is allowed, so the real one answers 0 unless an
+            // operator turns lobby.flagSharedDecks on.
+            usageLevelFor: vi.fn().mockReturnValue(0)
         };
 
         lobby = {

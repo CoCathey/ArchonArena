@@ -88,6 +88,16 @@
         // then appear in the browser console instead of breaking the page.
         cspMode: 'enforce',
         hmacSecret: 'somethingevenmoresecret',
+        // ARCHON: keyteki brands a deck that more than one account owns as
+        // Used / Popular / Notorious, on the theory that a deck in several
+        // collections is a deck being passed around. ArchonArena does not
+        // treat that as misconduct: two people who both own a physical deck,
+        // a player with a second account, and a friend importing your deck to
+        // look at it are all ordinary, and none of them is something the deck's
+        // owner can undo. Off by default; set FLAG_SHARED_DECKS=true to get the
+        // inherited behaviour back, and the thresholds below are the counts of
+        // distinct owners at which each label then appears.
+        flagSharedDecks: false,
         lowerDeckThreshold: 1,
         middleDeckThreshold: 2,
         upperDeckThreshold: 3
