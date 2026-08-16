@@ -71,6 +71,17 @@ export interface PromptButton {
     [key: string]: unknown;
 }
 
+/**
+ * A pile the current prompt is drawing its candidates from, as sent by the
+ * game node (server/game/gamesteps/selectcardprompt.js getPromptedPiles).
+ * `controller` is stated from the prompted player's point of view, so
+ * `'opponent'` means the other player's copy of that pile.
+ */
+export interface PromptedPile {
+    location: string;
+    controller: 'self' | 'opponent' | 'any';
+}
+
 export interface PromptControl {
     type: string;
     /** Short summary of the card whose effect is being resolved. */
@@ -130,7 +141,7 @@ export interface PlayerState {
     promptTitle?: string | { text?: string; values?: Record<string, unknown> };
     buttons?: PromptButton[];
     controls?: PromptControl[];
-    promptedPiles?: string[];
+    promptedPiles?: PromptedPile[];
     [key: string]: unknown;
 }
 

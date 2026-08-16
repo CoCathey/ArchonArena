@@ -40,6 +40,22 @@ describe('Abyssal Sight', function () {
             expect(this.gormOfOmm.location).toBe('discard');
         });
 
+        it("should name the opponent's hand as the pile it is asking about", function () {
+            // Clients that draw a hand as a face-down pile rather than a row of
+            // cards (the phone app) have this to go on, and nothing else, when
+            // working out where the prompt wants to be answered from.
+            expect(this.player1.currentPrompt().promptedPiles).toEqual([]);
+
+            this.player1.play(this.abyssalSight);
+            this.player1.clickCard(this.kaupe);
+            expect(this.player1.currentPrompt().promptedPiles).toEqual([
+                { location: 'hand', controller: 'opponent' }
+            ]);
+
+            this.player1.clickCard(this.gormOfOmm);
+            expect(this.player1.currentPrompt().promptedPiles).toEqual([]);
+        });
+
         it("should not look at the opponent's hand without a friendly creature", function () {
             this.player1.fightWith(this.kaupe, this.almsmaster);
             this.player1.play(this.abyssalSight);

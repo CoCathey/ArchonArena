@@ -4,7 +4,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, spacing } from '../theme';
 import HouseIcon from '../ui/HouseIcon';
 import { DropZone, useDragDrop, type DropZoneName } from './DragDrop';
-import type { PlayerState } from './types';
+import { isPilePrompted } from './promptedPiles';
+import type { PlayerState, PromptedPile } from './types';
 
 const KEY_IMAGES: Record<string, { forged: number; unforged: number }> = {
     red: {
@@ -26,6 +27,8 @@ function PileChip(props: {
     count: number;
     onPress?: () => void;
     dropZone?: DropZoneName;
+    /** The current prompt is asking for a card out of this pile. */
+    prompted?: boolean;
 }) {
     const interactive = !!props.onPress;
     const chip = (
@@ -33,13 +36,24 @@ function PileChip(props: {
             onPress={props.onPress}
             disabled={!interactive}
             hitSlop={8}
+            accessibilityRole={interactive ? 'button' : undefined}
+            accessibilityLabel={
+                interactive
+                    ? `${props.label}, ${props.count} card${props.count === 1 ? '' : 's'}${
+                          props.prompted ? ', choose a card from here' : ''
+                      }`
+                    : undefined
+            }
             style={({ pressed }) => [
                 styles.pileChip,
                 interactive && styles.pileChipInteractive,
+                props.prompted && styles.pileChipPrompted,
                 pressed && { opacity: 0.6 }
             ]}
         >
-            <Text style={styles.pileChipLabel}>{props.label}</Text>
+            <Text style={[styles.pileChipLabel, props.prompted && styles.pileChipLabelPrompted]}>
+                {props.label}
+            </Text>
             <Text style={styles.pileChipCount}>{props.count}</Text>
         </Pressable>
     );
@@ -56,6 +70,12 @@ export default function PlayerHud(props: {
     isMe?: boolean;
     active?: boolean;
     onPilePress?: (pile: 'discard' | 'archives' | 'purged' | 'hand' | 'deck') => void;
+    /**
+     * Piles the current prompt is drawing from, as sent to the prompted player.
+     * Always that player's own list, whichever HUD is being drawn — `isMe`
+     * decides which side of each entry applies here.
+     */
+    promptedPiles?: PromptedPile[];
 }) {
     const { player } = props;
     const stats = player.stats;
@@ -68,6 +88,8 @@ export default function PlayerHud(props: {
     const showPurged =
         (player.cardPiles?.purged?.length ?? 0) > 0 ||
         (dropZonesActive && !!dragContext?.dragging && dragContext.manualMode);
+    const prompted = (location: string) =>
+        isPilePrompted(props.promptedPiles, location, !!props.isMe);
 
     return (
         <View style={[styles.container, props.active && styles.activeContainer]}>
@@ -114,7 +136,16 @@ export default function PlayerHud(props: {
             </View>
 
             <View style={styles.pileRow}>
-                <PileChip label='Hand' count={player.cardPiles?.hand?.length ?? 0} />
+                {/* The opponent's hand opens like any other pile — face down
+                    normally, and readable exactly when the engine has revealed
+                    it (Abyssal Sight and friends). Mine stays a plain count,
+                    because the hand strip along the bottom already is it. */}
+                <PileChip
+                    label='Hand'
+                    count={player.cardPiles?.hand?.length ?? 0}
+                    onPress={props.isMe ? undefined : () => props.onPilePress?.('hand')}
+                    prompted={prompted('hand')}
+                />
                 <PileChip
                     label='Deck'
                     count={player.numDeckCards ?? 0}
@@ -125,12 +156,14 @@ export default function PlayerHud(props: {
                     count={player.cardPiles?.discard?.length ?? 0}
                     onPress={() => props.onPilePress?.('discard')}
                     dropZone={dropZonesActive ? 'discard' : undefined}
+                    prompted={prompted('discard')}
                 />
                 <PileChip
                     label='Archive'
                     count={player.cardPiles?.archives?.length ?? 0}
                     onPress={() => props.onPilePress?.('archives')}
                     dropZone={dropZonesActive ? 'archives' : undefined}
+                    prompted={prompted('archives')}
                 />
                 {showPurged ? (
                     <PileChip
@@ -138,6 +171,7 @@ export default function PlayerHud(props: {
                         count={player.cardPiles?.purged?.length ?? 0}
                         onPress={() => props.onPilePress?.('purged')}
                         dropZone={dropZonesActive ? 'purged' : undefined}
+                        prompted={prompted('purged')}
                     />
                 ) : null}
             </View>
@@ -232,16 +266,30 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 5
     },
-    // Tappable piles (discard/archives/purged) read as buttons; Hand/Deck are
-    // just counts.
+    // Tappable piles (the opponent's hand, discard/archives/purged) read as
+    // buttons; my own Hand and both Decks are just counts.
     pileChipInteractive: {
         backgroundColor: colors.surfaceHover,
         borderColor: colors.borderLight
+    },
+    // The pile the prompt wants a card from, in the same blue a selectable
+    // card is outlined in — so "choose a card" has somewhere to point. The
+    // padding gives back the pixel the thicker border takes, so the row of
+    // chips doesn't jump every time a prompt comes and goes.
+    pileChipPrompted: {
+        borderColor: colors.selectable,
+        borderWidth: 2,
+        backgroundColor: 'rgba(79, 142, 247, 0.18)',
+        paddingHorizontal: 9,
+        paddingVertical: 4
     },
     pileChipLabel: {
         color: colors.textFaint,
         fontSize: 10,
         fontWeight: '600'
+    },
+    pileChipLabelPrompted: {
+        color: colors.text
     },
     pileChipCount: {
         color: colors.text,

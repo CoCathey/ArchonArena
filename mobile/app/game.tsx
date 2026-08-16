@@ -34,6 +34,7 @@ import { DragDropProvider, DropZone, type DropZoneName } from '../src/game/DragD
 import { useVerticalSwipe } from '../src/game/gestures';
 import { groupHandByHouse } from '../src/game/handOrder';
 import { isHandHidden } from '../src/game/handVisibility';
+import { isOpponentHandPrompted, isPilePrompted } from '../src/game/promptedPiles';
 import { hasProphecies } from '../src/game/prophecies';
 import { ProphecySheet, ProphecyStrip } from '../src/game/ProphecyView';
 import { CardMenuSheet, CardZoomOverlay, PileViewer } from '../src/game/GameModals';
@@ -147,6 +148,34 @@ export default function GameScreen() {
             router.replace('/(tabs)');
         }
     }, [cleared]);
+
+    // ARCHON: the prompt may be asking for a card out of a pile, and on a phone
+    // a pile is a chip with a count on it. The opponent's hand is the sharp
+    // case — "look at your opponent's hand and choose a card" (Abyssal Sight,
+    // Brain Drain, Imperial Traitor) used to leave the prompt on screen with
+    // nothing on the board able to answer it — so that one opens itself.
+    const opponentHandPrompted = isOpponentHandPrompted(me);
+    useEffect(() => {
+        if (opponentHandPrompted) {
+            setPileView({ player: 'opponent', pile: 'hand' });
+        }
+    }, [opponentHandPrompted]);
+
+    // Is the prompt asking for a card out of the pile currently open? Keeps a
+    // multi-card prompt from having to reopen it after every pick, and takes
+    // the sheet away once the prompt is answered — the engine's reveal ends
+    // with the prompt, so all that is left behind is a grid of card backs.
+    const pileViewPrompted =
+        !!pileView && isPilePrompted(me?.promptedPiles, pileView.pile, pileView.player === 'me');
+    const openedForPrompt = useRef(false);
+    useEffect(() => {
+        if (pileViewPrompted) {
+            openedForPrompt.current = true;
+        } else if (openedForPrompt.current) {
+            openedForPrompt.current = false;
+            setPileView(undefined);
+        }
+    }, [pileViewPrompted]);
 
     // A peek lasts until the turn comes back round, so the setting behaves the
     // same way every opponent turn rather than quietly staying off after the
@@ -469,6 +498,7 @@ export default function GameScreen() {
                             player={opponent}
                             active={!!opponent.activePlayer}
                             onPilePress={(pile) => setPileView({ player: 'opponent', pile })}
+                            promptedPiles={me?.promptedPiles}
                         />
                     ) : null}
                     {showProphecies && opponent ? (
@@ -588,6 +618,7 @@ export default function GameScreen() {
                         isMe={!isSpectator}
                         active={!!perspective.activePlayer}
                         onPilePress={(pile) => setPileView({ player: 'me', pile })}
+                        promptedPiles={me?.promptedPiles}
                     />
 
                     {/* Hand */}
@@ -723,7 +754,12 @@ export default function GameScreen() {
                             ? undefined
                             : (card) => {
                                   sendGameMessage('cardClicked', card.uuid);
-                                  setPileView(undefined);
+                                  // A prompt that wants more than one card out
+                                  // of here keeps the pile up; the effect above
+                                  // closes it when the prompt is done with it.
+                                  if (!pileViewPrompted) {
+                                      setPileView(undefined);
+                                  }
                               }
                     }
                 />
