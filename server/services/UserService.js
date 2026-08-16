@@ -857,6 +857,29 @@ class UserService extends EventEmitter {
             logger.warn('Failed to lookup membership for user', err);
             user.membership = undefined;
         }
+
+        // ARCHON (N12): the account's cosmetic choices, loaded next to the
+        // membership because the two are only meaningful together - whether a
+        // stored choice is honoured is decided against the entitlements the row
+        // above resolves to, so a lapsed member's nameplate stops rendering
+        // without anything being rewritten.
+        //
+        // Same best-effort contract: a missing table or a failed query leaves
+        // the account looking like every other account, which is exactly what
+        // the free tier looks like.
+        try {
+            const cosmetics = await db.query(
+                'SELECT "Slot", "Choice" FROM "MembershipCosmetics" WHERE "UserId" = $1',
+                [user.id]
+            );
+
+            user.cosmetics = Object.fromEntries(
+                (cosmetics || []).map((row) => [row.Slot, row.Choice])
+            );
+        } catch (err) {
+            logger.warn('Failed to lookup cosmetics for user', err);
+            user.cosmetics = {};
+        }
     }
 
     getUserFromDbUser(dbUser) {

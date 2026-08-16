@@ -42,7 +42,9 @@ const SharedReplay = () => {
         );
     }
 
-    return <ReplayViewer replay={data.replay} />;
+    // The token travels on, so a signed-in member with replay analysis can read
+    // a game someone sent them without also needing its game id.
+    return <ReplayViewer replay={data.replay} shareToken={token} />;
 };
 
 SharedReplay.displayName = 'SharedReplay';

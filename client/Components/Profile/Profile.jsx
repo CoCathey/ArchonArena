@@ -10,6 +10,10 @@ import ProfileBackground from './ProfileBackground';
 import KeyforgeGameSettings from './KeyforgeGameSettings';
 // ARCHON (N2): per-category notification delivery preferences
 import NotificationPreferences from './NotificationPreferences';
+// ARCHON (N12): Vault Master - the preview programme, and the cosmetics other
+// people actually see.
+import PreviewProgram from './PreviewProgram';
+import MembershipCosmetics from './MembershipCosmetics';
 import ProfileCardSize from './ProfileCardSize';
 import { Constants } from '../../constants';
 // ARCHON (N12): drives whether the Integrations tab is offered at all
@@ -88,7 +92,11 @@ const ProfileSection = Object.freeze({
     Appearance: 'appearance',
     Gameplay: 'gameplay',
     // ARCHON (N2): per-category notification opt-out.
-    Notifications: 'notifications'
+    Notifications: 'notifications',
+    // ARCHON (N12): unfinished features a membership can switch on. Its own
+    // section rather than a block inside Appearance: a preview is not a look,
+    // and the capability copy points people here by name.
+    Previews: 'previews'
 });
 
 /**
@@ -276,7 +284,12 @@ const Profile = ({ onSubmit, isLoading }) => {
                                             : []),
                                         [ProfileSection.Appearance, t('Appearance')],
                                         [ProfileSection.Gameplay, t('Gameplay')],
-                                        [ProfileSection.Notifications, t('Notifications')]
+                                        [ProfileSection.Notifications, t('Notifications')],
+                                        // Always offered, including to accounts
+                                        // with no previews: the panel explains
+                                        // what the programme is, which is how
+                                        // somebody finds out it exists at all.
+                                        [ProfileSection.Previews, t('Previews')]
                                     ].map(([sectionKey, label]) => (
                                         <HeroButton
                                             key={sectionKey}
@@ -307,6 +320,8 @@ const Profile = ({ onSubmit, isLoading }) => {
                                             ? t('Gameplay')
                                             : activeSection === ProfileSection.Notifications
                                             ? t('Notifications')
+                                            : activeSection === ProfileSection.Previews
+                                            ? t('Previews')
                                             : t('Settings')}
                                     </h2>
                                 </header>
@@ -346,6 +361,17 @@ const Profile = ({ onSubmit, isLoading }) => {
                                                     }
                                                     onCardSizeSelected={(name) => setCardSize(name)}
                                                 />
+                                                {/* ARCHON (N12): saves on
+                                                    selection, not through the
+                                                    form's Save button - it is
+                                                    not part of the profile
+                                                    form. Placed last because
+                                                    everything above it is a
+                                                    private setting and this is
+                                                    the one other people see. */}
+                                                <div className='border-t border-border/60 pt-3'>
+                                                    <MembershipCosmetics />
+                                                </div>
                                             </div>
                                         )}
                                         {activeSection === ProfileSection.Gameplay && (
@@ -359,6 +385,11 @@ const Profile = ({ onSubmit, isLoading }) => {
                                             is not part of the profile form. */}
                                         {activeSection === ProfileSection.Notifications && (
                                             <NotificationPreferences />
+                                        )}
+                                        {/* ARCHON (N12): same contract - each
+                                            switch saves as it is flicked. */}
+                                        {activeSection === ProfileSection.Previews && (
+                                            <PreviewProgram />
                                         )}
                                     </div>
                                 </div>

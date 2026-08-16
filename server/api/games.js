@@ -3,11 +3,15 @@ const passport = require('passport');
 const GameService = require('../services/GameService.js');
 const RatingService = require('../services/rating/RatingService.js');
 const ConfigService = require('../services/ConfigService.js');
+const ReplayAnalysisService = require('../services/membership/ReplayAnalysisService.js');
+const { requireCapability } = require('./requireCapability');
+const { CAPABILITIES } = require('../services/membership/capabilities');
 const { wrapAsync } = require('../util.js');
 const { rateLimit } = require('./rateLimit');
 
 let gameService = new GameService();
 let ratingService = new RatingService(new ConfigService());
+let replayAnalysis = new ReplayAnalysisService();
 
 // Minting share links is cheap but writes a row and hands out a credential;
 // there is no legitimate high-frequency use.
@@ -25,6 +29,7 @@ const shareLimit = rateLimit({
 module.exports.init = function (server, options = {}) {
     gameService = options.gameService || gameService;
     ratingService = options.ratingService || ratingService;
+    replayAnalysis = options.replayAnalysis || replayAnalysis;
 
     server.get(
         '/api/games',
@@ -122,6 +127,67 @@ module.exports.init = function (server, options = {}) {
 
             // Sharing stays a participant's call even when an admin is reading.
             res.send({ success: true, replay: replay, canShare: isParticipant });
+        })
+    );
+
+    // ARCHON (N12): replay analysis - the Archon tier's `advanced_replays`.
+    //
+    // Same ownership rule as the replay itself, and then the capability on top:
+    // stepping through a replay is free for everyone, reading it back as
+    // numbers is what membership buys. The gate is here rather than only in the
+    // UI, so a locked account calling the endpoint directly gets a 403 with the
+    // capability named and no analysis computed.
+    server.get(
+        '/api/games/:gameId/replay/analysis',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.ADVANCED_REPLAYS),
+        wrapAsync(async function (req, res) {
+            const isParticipant = await gameService.isGameParticipant(
+                req.params.gameId,
+                req.user.id
+            );
+
+            if (!isParticipant && !req.user.permissions?.isAdmin) {
+                return res.status(403).send({
+                    success: false,
+                    reason: 'not-your-game',
+                    message: 'You can only analyse replays of your own games.'
+                });
+            }
+
+            const replay = await gameService.getReplay(req.params.gameId);
+
+            if (!replay) {
+                const reason = await gameService.describeMissingReplay(req.params.gameId);
+
+                return res
+                    .status(404)
+                    .send({ success: false, reason, message: 'Replay not found' });
+            }
+
+            res.send({ success: true, analysis: replayAnalysis.analyse(replay) });
+        })
+    );
+
+    // ARCHON (N12): analysis of a replay someone shared with you.
+    //
+    // The replay behind a share link is public - that is the point of a link -
+    // but the analysis is not, so this needs a signed-in account holding the
+    // capability. Without it, a member sent a game to look at would have to ask
+    // the player to send them the game id as well before the tool they pay for
+    // would work on it.
+    server.get(
+        '/api/replays/shared/:token/analysis',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.ADVANCED_REPLAYS),
+        wrapAsync(async function (req, res) {
+            const replay = await gameService.getReplayByShareToken(req.params.token);
+
+            if (!replay) {
+                return res.status(404).send({ success: false, message: 'Replay not found' });
+            }
+
+            res.send({ success: true, analysis: replayAnalysis.analyse(replay) });
         })
     );
 

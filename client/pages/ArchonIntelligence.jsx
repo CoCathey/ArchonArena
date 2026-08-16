@@ -13,7 +13,8 @@ import {
     useGetAercIntelligenceQuery,
     useGetDeckIntelligenceQuery,
     useGetPlayerIntelligenceQuery,
-    useGetMetaIntelligenceQuery
+    useGetMetaIntelligenceQuery,
+    useGetReplayIntelligenceQuery
 } from '../redux/api';
 
 /**
@@ -535,6 +536,348 @@ const DeckIntelligence = ({ decks, t }) => {
 
 DeckIntelligence.propTypes = { decks: PropTypes.array, t: PropTypes.func };
 
+/**
+ * ARCHON (N12): Replay Intelligence.
+ *
+ * The one panel on this page whose numbers come from recorded games rather than
+ * from a column, and the only place on the site that can answer which house a
+ * player actually calls. Every other house figure here is measured across decks
+ * CONTAINING a house, because which house was called on a turn is recorded
+ * nowhere else - the caveat under "your record by house" says exactly that, and
+ * this is the panel that lifts it.
+ */
+const ReplayIntelligence = ({ insights, t }) => {
+    if (!insights) {
+        return <div className='p-3 text-sm text-muted'>{t('Loading…')}</div>;
+    }
+
+    if (!insights.available) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {insights.reason ||
+                    t('No recorded games yet — finish one and it is analysed here.')}
+            </div>
+        );
+    }
+
+    return (
+        <div className='space-y-3 p-1'>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                <Stat
+                    label={t('Games analysed')}
+                    value={insights.games}
+                    hint={t('{{wins}} won', { wins: insights.wins })}
+                />
+                <Stat
+                    label={t('Amber per turn')}
+                    value={num(insights.amberPerTurn)}
+                    hint={t('turns that gained any')}
+                />
+                <Stat
+                    label={t('First key')}
+                    value={num(insights.firstKeyRound)}
+                    hint={t('average turn')}
+                />
+                <Stat
+                    label={t('Game length')}
+                    value={num(insights.turnsPerGame)}
+                    hint={t('your turns')}
+                />
+            </div>
+
+            <div>
+                <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
+                    {t('Houses you call, and how you do when you call them')}
+                </div>
+                <div className='space-y-1.5'>
+                    {insights.byHouse.map((row) => (
+                        <div className='flex items-center gap-2 text-xs' key={row.house}>
+                            <div className='w-28 shrink-0 truncate text-foreground'>
+                                {t(row.house)}
+                            </div>
+                            <div className='h-2 flex-1 overflow-hidden rounded bg-surface-secondary'>
+                                <div
+                                    className={
+                                        row.winRate >= 0.5
+                                            ? 'h-full bg-emerald-500/70'
+                                            : 'h-full bg-red-500/70'
+                                    }
+                                    style={{ width: `${Math.round((row.winRate ?? 0) * 100)}%` }}
+                                />
+                            </div>
+                            <div className='w-10 shrink-0 text-right text-foreground'>
+                                {pct(row.winRate)}
+                            </div>
+                            <div
+                                className='w-20 shrink-0 text-right text-muted'
+                                title={t('turns called')}
+                            >
+                                {t('{{count}} turns', { count: row.turns })}
+                            </div>
+                            <div
+                                className='w-12 shrink-0 text-right text-muted'
+                                title={t('share of your turns')}
+                            >
+                                {pct(row.share)}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                <p className='m-0 pt-1 text-[11px] text-muted'>
+                    {t(
+                        'Counted per turn, from recorded board states — this is the house you ' +
+                            'actually called, not the houses your deck contains. The win rate is ' +
+                            'over the games in which you called it at least once.'
+                    )}
+                </p>
+            </div>
+
+            {insights.vsHouse.length > 0 && (
+                <div>
+                    <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
+                        {t('What the other side called')}
+                    </div>
+                    <div className='flex flex-wrap gap-1.5 text-xs'>
+                        {insights.vsHouse.map((row) => (
+                            <span
+                                className='rounded bg-surface-secondary/60 px-1.5 py-0.5'
+                                key={row.house}
+                            >
+                                <span className='text-foreground'>{t(row.house)}</span>{' '}
+                                <span className='text-muted'>
+                                    {pct(row.winRate)} ({row.games})
+                                </span>
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {insights.skipped > 0 && (
+                <p className='m-0 text-[11px] text-muted'>
+                    {t(
+                        '{{count}} of your recorded games are from before board states were ' +
+                            'captured and could not be read.',
+                        { count: insights.skipped }
+                    )}
+                </p>
+            )}
+        </div>
+    );
+};
+
+ReplayIntelligence.propTypes = { insights: PropTypes.object, t: PropTypes.func };
+
+/**
+ * ARCHON (N12): a panel whose contents arrived through the preview programme.
+ *
+ * Labelled, always, and with the stage said out loud. A beta panel that looks
+ * identical to a finished one is how a work in progress gets read as a promise -
+ * and the whole reason the tier can honestly sell "beta features" is that the
+ * player knows which ones they are and can switch them off.
+ */
+const PreviewPanel = ({ title, stage, children, t }) => (
+    <Panel
+        type='default'
+        compactHeader
+        title={
+            <span className='inline-flex items-center gap-2'>
+                {title}
+                <span className='rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300'>
+                    {stage}
+                </span>
+            </span>
+        }
+    >
+        {children}
+        <p className='m-0 mt-2 text-[11px] text-muted'>
+            {t('A preview. Turn it off in Profile → Previews.')}
+        </p>
+    </Panel>
+);
+
+PreviewPanel.propTypes = {
+    children: PropTypes.node,
+    stage: PropTypes.node,
+    t: PropTypes.func,
+    title: PropTypes.node
+};
+
+/** The performance dashboard with a time axis - preview `performance-trend`. */
+const PerformanceTrend = ({ trend, t }) => {
+    if (!trend?.available) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {trend?.reason || t('No rated games in this window yet.')}
+            </div>
+        );
+    }
+
+    // The widest bar in the set defines the scale, so a player with a handful of
+    // games gets a readable chart rather than five invisible slivers.
+    const peak = Math.max(...trend.points.map((point) => Math.abs(point.vsExpectation || 0)), 1);
+
+    return (
+        <div className='space-y-1.5'>
+            {trend.points.map((point) => {
+                const value = point.vsExpectation || 0;
+                const ahead = value >= 0;
+
+                return (
+                    <div className='flex items-center gap-2 text-xs' key={point.month}>
+                        <span className='w-20 shrink-0 text-muted'>
+                            {new Date(point.month).toLocaleDateString(undefined, {
+                                month: 'short',
+                                year: '2-digit'
+                            })}
+                        </span>
+                        {/* A centre line, so above and below expectation read as
+                            opposite directions rather than as two lengths. */}
+                        <span className='relative h-3 flex-1 rounded bg-surface-secondary/60'>
+                            <span
+                                className={`absolute top-0 h-3 ${
+                                    ahead ? 'left-1/2 bg-emerald-500/70' : 'bg-red-500/70'
+                                }`}
+                                style={
+                                    ahead
+                                        ? { width: `${(Math.abs(value) / peak) * 50}%` }
+                                        : {
+                                              right: '50%',
+                                              width: `${(Math.abs(value) / peak) * 50}%`
+                                          }
+                                }
+                            />
+                        </span>
+                        <span
+                            className={`w-16 shrink-0 text-right ${
+                                ahead ? 'text-emerald-300' : 'text-red-300'
+                            }`}
+                        >
+                            {ahead ? '+' : ''}
+                            {num(value)}
+                        </span>
+                        <span className='w-14 shrink-0 text-right text-muted'>
+                            {t('{{count}}g', { count: point.games })}
+                        </span>
+                    </div>
+                );
+            })}
+            <p className='m-0 text-xs text-muted'>
+                {t(
+                    'Wins above or below what your rating predicted, by month. Months with no ' +
+                        'rated games are left out rather than drawn as zero.'
+                )}
+            </p>
+        </div>
+    );
+};
+
+PerformanceTrend.propTypes = { t: PropTypes.func, trend: PropTypes.object };
+
+/** Recent results and streaks - preview `form-and-streaks`. */
+const FormAndStreaks = ({ form, t }) => {
+    if (!form?.available) {
+        return (
+            <div className='p-3 text-sm text-muted'>{form?.reason || t('No rated games yet.')}</div>
+        );
+    }
+
+    return (
+        <div className='space-y-3'>
+            <div className='flex flex-wrap gap-1'>
+                {form.recent.map((result, index) => (
+                    <span
+                        className={`flex h-6 w-6 items-center justify-center rounded text-[11px] font-semibold ${
+                            result.won
+                                ? 'bg-emerald-500/20 text-emerald-300'
+                                : 'bg-red-500/20 text-red-300'
+                        }`}
+                        key={index}
+                        title={new Date(result.at).toLocaleString()}
+                    >
+                        {result.won ? t('W') : t('L')}
+                    </span>
+                ))}
+            </div>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                <Stat
+                    label={t('Last {{count}}', { count: form.games })}
+                    value={`${form.wins}-${form.losses}`}
+                />
+                <Stat label={t('Win rate')} value={pct(form.winRate)} />
+                <Stat
+                    label={t('Current streak')}
+                    tone={form.currentStreak.kind === 'win' ? 'good' : 'bad'}
+                    value={`${form.currentStreak.length}${
+                        form.currentStreak.kind === 'win' ? t('W') : t('L')
+                    }`}
+                />
+                <Stat label={t('Best win streak')} value={form.bestWinStreak} />
+            </div>
+            <p className='m-0 text-xs text-muted'>
+                {form.streakWindowTruncated
+                    ? t('Streaks measured over your last {{count}} rated games.', {
+                          count: form.streakWindow
+                      })
+                    : t('Streaks measured over all {{count}} of your rated games.', {
+                          count: form.streakWindow
+                      })}
+            </p>
+        </div>
+    );
+};
+
+FormAndStreaks.propTypes = { form: PropTypes.object, t: PropTypes.func };
+
+/** Going first vs going second - preview `turn-order-insights`. */
+const TurnOrder = ({ turnOrder, t }) => {
+    if (!turnOrder?.available) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {turnOrder?.reason || t('Turn order is not recorded for these games.')}
+            </div>
+        );
+    }
+
+    return (
+        <div className='space-y-2'>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+                <Stat
+                    label={t('Going first')}
+                    value={pct(turnOrder.first.winRate)}
+                    hint={t('{{count}} games', { count: turnOrder.first.games })}
+                />
+                <Stat
+                    label={t('Going second')}
+                    value={pct(turnOrder.second.winRate)}
+                    hint={t('{{count}} games', { count: turnOrder.second.games })}
+                />
+                <Stat
+                    label={t('Difference')}
+                    tone={turnOrder.edge >= 0 ? 'good' : 'bad'}
+                    value={
+                        turnOrder.edge === null
+                            ? '—'
+                            : `${turnOrder.edge >= 0 ? '+' : ''}${pct(turnOrder.edge)}`
+                    }
+                    hint={t('first minus second')}
+                />
+            </div>
+            {turnOrder.gamesWithoutData > 0 && (
+                <p className='m-0 text-xs text-muted'>
+                    {t(
+                        '{{count}} older games are left out: turn order was not recorded before it ' +
+                            'was added to the engine.',
+                        { count: turnOrder.gamesWithoutData }
+                    )}
+                </p>
+            )}
+        </div>
+    );
+};
+
+TurnOrder.propTypes = { t: PropTypes.func, turnOrder: PropTypes.object };
+
 const ArchonIntelligence = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -547,8 +890,17 @@ const ArchonIntelligence = () => {
         CAPABILITIES.PERSONAL_DECK_RANKINGS,
         CAPABILITIES.MATCHUP_ANALYTICS
     ];
-    const unlocked = playerSections.some((capability) => hasCapability(user, capability));
+    // ARCHON (N12): the preview capabilities count too. A tier that reached the
+    // programme but none of the tier sections would otherwise never request the
+    // payload, and its preview panels would silently never appear.
+    const unlocked = [
+        ...playerSections,
+        CAPABILITIES.EXPERIMENTAL_FEATURES,
+        CAPABILITIES.BETA_FEATURES,
+        CAPABILITIES.EARLY_ACCESS
+    ].some((capability) => hasCapability(user, capability));
     const canMeta = hasCapability(user, CAPABILITIES.META_ANALYTICS);
+    const canReplays = hasCapability(user, CAPABILITIES.ADVANCED_REPLAYS);
     const canAerc = hasCapability(user, CAPABILITIES.AERC_ANALYTICS);
     // Empty means every set, which is what both the control and the server
     // already take it to mean.
@@ -568,6 +920,12 @@ const ArchonIntelligence = () => {
         { days: 30, sets },
         { skip: !user || !canMeta }
     );
+    // Not set-filtered: a recording carries the game, not the deck row the set
+    // filter is built from, and reading 25 JSON documents per filter change is
+    // not a cost worth paying for a narrowing this panel cannot honour.
+    const { data: replays } = useGetReplayIntelligenceQuery(25, {
+        skip: !user || !canReplays
+    });
     // Only fetched when the AERC lens is actually showing: it is the most
     // expensive query on the page and nobody is reading it in SAS mode.
     const { data: aerc, isFetching: aercLoading } = useGetAercIntelligenceQuery(
@@ -595,6 +953,10 @@ const ArchonIntelligence = () => {
 
     const vs = player?.vsExpectation;
     const rankings = player?.rankings || [];
+    // Which sections came through the preview programme. Named by the server so
+    // the page never has to guess whether a missing section is locked, empty, or
+    // simply not switched on.
+    const previews = player?.previews || [];
     const filtered = sets.length > 0;
     // Said once, under the filter, rather than repeated on every panel.
     const scopeNote = filtered
@@ -918,6 +1280,31 @@ const ArchonIntelligence = () => {
                 </PremiumLock>
             </Panel>
 
+            {/* ---- Preview programme ------------------------------------
+                No PremiumLock: these are not locked panels with an upgrade
+                prompt behind them, they are sections that either arrived in the
+                payload or did not. The server decides, from the account's tier
+                and its own switches, and an account without them sees nothing
+                here at all rather than a teaser for a thing that is not
+                finished. */}
+            {previews.includes('vsExpectationTrend') && (
+                <PreviewPanel stage={t('Beta')} t={t} title={t('Performance trend')}>
+                    <PerformanceTrend t={t} trend={player?.vsExpectationTrend} />
+                </PreviewPanel>
+            )}
+
+            {previews.includes('form') && (
+                <PreviewPanel stage={t('Experimental')} t={t} title={t('Form and streaks')}>
+                    <FormAndStreaks form={player?.form} t={t} />
+                </PreviewPanel>
+            )}
+
+            {previews.includes('byTurnOrder') && (
+                <PreviewPanel stage={t('Early access')} t={t} title={t('Turn order')}>
+                    <TurnOrder t={t} turnOrder={player?.byTurnOrder} />
+                </PreviewPanel>
+            )}
+
             {/* ---- Elo history (Supporter) ------------------------------ */}
             <Panel type='default' compactHeader title={t('Your rating history')}>
                 <PremiumLock
@@ -1060,13 +1447,34 @@ const ArchonIntelligence = () => {
                         )}
                         <p className='m-0 pt-1 text-[11px] text-muted'>
                             {t(
-                                'Measured across decks that CONTAIN each house. Which house you chose ' +
-                                    'on a given turn is not recorded outside replays, so this is not a ' +
-                                    'per-turn figure.'
+                                'Measured across decks that CONTAIN each house — not the house you ' +
+                                    'called on a given turn, which is recorded only inside replays. ' +
+                                    'Replay Intelligence, below, is the per-turn figure.'
                             )}
                         </p>
                     </div>
                 </PremiumLock>
+            </Panel>
+
+            {/* ---- Replay Intelligence ---------------------------------- */}
+            <Panel
+                type='default'
+                compactHeader
+                title={t('Replay Intelligence — the house you actually call')}
+            >
+                <PremiumLock
+                    capability={CAPABILITIES.ADVANCED_REPLAYS}
+                    preview={<SamplePanel />}
+                    minHeight={200}
+                >
+                    <ReplayIntelligence insights={replays} t={t} />
+                </PremiumLock>
+                <p className='m-0 px-1 pt-2 text-[11px] text-muted'>
+                    {t(
+                        'Read from your last 25 recorded games. Any finished game also carries its ' +
+                            'own turn-by-turn analysis — open it from Game History.'
+                    )}
+                </p>
             </Panel>
 
             {/* ---- Meta Intelligence ------------------------------------ */}
