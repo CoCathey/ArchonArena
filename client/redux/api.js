@@ -272,6 +272,23 @@ export const api = createApi({
             query: () => '/membership/me',
             providesTags: [TAG_TYPES.MEMBERSHIP]
         }),
+        // ARCHON (N12): the preview programme. Returns only previews this
+        // account's tier can reach, including ones whose window has not opened
+        // yet - "you get this on the 14th" is what a head start looks like.
+        getMembershipPreviews: builder.query({
+            query: () => '/membership/previews',
+            providesTags: [{ type: TAG_TYPES.MEMBERSHIP, id: 'PREVIEWS' }]
+        }),
+        setMembershipPreview: builder.mutation({
+            query: (body) => ({ url: '/membership/previews', method: 'POST', body }),
+            // Also invalidates intelligence: a preview switch changes which
+            // sections that payload contains, and leaving the old one cached
+            // would make the switch look broken until a reload.
+            invalidatesTags: [
+                { type: TAG_TYPES.MEMBERSHIP, id: 'PREVIEWS' },
+                TAG_TYPES.INTELLIGENCE
+            ]
+        }),
         getAdminMemberships: builder.query({
             query: () => '/admin/memberships',
             providesTags: [TAG_TYPES.MEMBERSHIP]
@@ -302,6 +319,22 @@ export const api = createApi({
 
                 return `/intelligence/meta?days=${days}${setsParam(sets, '&')}`;
             },
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
+        // ARCHON (N12): Replay Intelligence - what a player's recorded games
+        // say about how they play. Archon+ only, enforced at the endpoint.
+        getReplayIntelligence: builder.query({
+            query: (limit = 25) => `/intelligence/replays?limit=${limit}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
+        // ARCHON: the same record read in AERC terms. One request draws the
+        // whole panel - the bands, the findings and the meta profile all share
+        // the trait and the set filter, and splitting them would make the
+        // panels disagree while they arrived.
+        getAercIntelligence: builder.query({
+            query: ({ trait = 'amberControl', sets = [], days = 30 } = {}) =>
+                `/intelligence/aerc?trait=${encodeURIComponent(trait)}&days=${days}` +
+                setsParam(sets, '&'),
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
         getTournamentLab: builder.query({
@@ -403,6 +436,24 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.BIO]
         }),
+        // ARCHON (N12): profile cosmetics. One GET for the editor - the whole
+        // catalogue with each option marked locked or not, plus this account's
+        // current selection - so the page needs no second request to know what
+        // it may offer.
+        getCosmetics: builder.query({
+            query: () => '/account/cosmetics',
+            providesTags: [TAG_TYPES.COSMETICS]
+        }),
+        setCosmetics: builder.mutation({
+            query: (cosmetics) => ({
+                url: '/account/cosmetics',
+                method: 'PUT',
+                body: { cosmetics }
+            }),
+            // The bio limit rises with the same capability, and the public
+            // profile is what the editor is previewing.
+            invalidatesTags: [TAG_TYPES.COSMETICS, TAG_TYPES.USER]
+        }),
         getLeaderboard: builder.query({
             query: (params) => ({
                 url: '/ratings/leaderboard',
@@ -478,6 +529,25 @@ export const api = createApi({
         getTournamentHistory: builder.query({
             query: (username) => `/tournaments/history/${encodeURIComponent(username)}`,
             providesTags: [TAG_TYPES.TOURNAMENTS]
+        }),
+        /**
+         * ARCHON (N12): pull an event's data down as CSV (ORGANIZER_TOOLS).
+         *
+         * A mutation rather than a query because it is an action with a side
+         * effect on the user's machine, not cacheable data - and caching a file
+         * somebody asked to download is exactly the wrong behaviour.
+         *
+         * `responseHandler: 'text'` because the response is a CSV body, not
+         * JSON. Without it RTK Query would try to parse it and hand back a
+         * parse error for a request that succeeded.
+         */
+        exportTournament: builder.mutation({
+            query: ({ id, dataset }) => ({
+                url: `/tournaments/${id}/export`,
+                method: 'GET',
+                params: { dataset },
+                responseHandler: 'text'
+            })
         }),
         // ARCHON (N14): the caller's open matches across every event they are
         // in - what an async player needs and no single event page can answer.
@@ -1076,6 +1146,15 @@ export const api = createApi({
         getSharedReplay: builder.query({
             query: (token) => `/replays/shared/${encodeURIComponent(token)}`
         }),
+        // ARCHON (N12): the analysis of one game. Archon+ only, and your own
+        // game (or one shared with you) - both enforced at the endpoint.
+        getGameReplayAnalysis: builder.query({
+            query: (gameId) => `/games/${encodeURIComponent(gameId)}/replay/analysis`,
+            providesTags: (result, error, gameId) => [{ type: TAG_TYPES.GAMES, id: gameId }]
+        }),
+        getSharedReplayAnalysis: builder.query({
+            query: (token) => `/replays/shared/${encodeURIComponent(token)}/analysis`
+        }),
         shareReplay: builder.mutation({
             query: (gameId) => ({
                 url: `/games/${encodeURIComponent(gameId)}/share`,
@@ -1147,9 +1226,13 @@ export const {
     useGetMyMembershipQuery,
     useGetAdminMembershipsQuery,
     useGrantMembershipMutation,
+    // ARCHON (N12): Vault Master - the preview programme and cosmetics
+    useGetMembershipPreviewsQuery,
+    useSetMembershipPreviewMutation,
     useGetDeckIntelligenceQuery,
     useGetPlayerIntelligenceQuery,
     useGetMetaIntelligenceQuery,
+    useGetAercIntelligenceQuery,
     useGetTournamentLabQuery,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,
@@ -1164,6 +1247,9 @@ export const {
     useSetLocationMutation,
     useGetBioQuery,
     useSetBioMutation,
+    // ARCHON (N12): profile cosmetics.
+    useGetCosmeticsQuery,
+    useSetCosmeticsMutation,
     useGetSiteContentQuery,
     useAdminSetRatingMutation,
     useAdminResetRatingsMutation,
@@ -1187,6 +1273,7 @@ export const {
     useCreateTournamentMutation,
     useTournamentActionMutation,
     useGetTournamentHistoryQuery,
+    useExportTournamentMutation,
     useGetMyTournamentMatchesQuery,
     useSubmitBugReportMutation,
     useGetBugReportsQuery,
@@ -1279,6 +1366,9 @@ export const {
     useGetGameFiltersQuery,
     useGetGameReplayQuery,
     useGetSharedReplayQuery,
+    useGetGameReplayAnalysisQuery,
+    useGetSharedReplayAnalysisQuery,
+    useGetReplayIntelligenceQuery,
     useShareReplayMutation,
     useUnshareReplayMutation,
     useGetNotificationsQuery,

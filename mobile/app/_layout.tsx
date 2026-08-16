@@ -159,6 +159,23 @@ export default function RootLayout() {
                     name='deck/[id]'
                     options={{ title: 'Deck', headerBackTitle: 'Back' }}
                 />
+                {/* ARCHON (N12): Archon+ and the tools it unlocks. Stack
+                    screens rather than tabs — six tabs is already the most a
+                    phone reads comfortably, and these are places you go to
+                    rather than places you live. Reached from Profile and from
+                    the locked panels on Stats. */}
+                <Stack.Screen
+                    name='membership'
+                    options={{ title: 'Archon+', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='intelligence'
+                    options={{ title: 'Archon Intelligence', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='tournament-lab'
+                    options={{ title: 'Tournament Lab', headerBackTitle: 'Back' }}
+                />
                 <Stack.Screen
                     name='game'
                     options={{ headerShown: false, gestureEnabled: false }}

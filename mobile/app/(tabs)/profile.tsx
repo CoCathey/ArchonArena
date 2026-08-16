@@ -16,7 +16,10 @@ import { unregisterPush } from '../../src/push';
 import { closeGameSocket } from '../../src/net/gameSocket';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
-import { colors, spacing } from '../../src/theme';
+import { TIER_COLORS } from '../../src/membership/capabilities';
+import { currentTier, currentTierName, isAdmin, isMember } from '../../src/membership/entitlements';
+import { colors, radius, spacing } from '../../src/theme';
+import FriendsSection from '../../src/friends/FriendsSection';
 import { Button, Card, ErrorBanner } from '../../src/ui/primitives';
 
 function SettingRow(props: {
@@ -45,6 +48,15 @@ export default function ProfileScreen() {
     const user = useAuthStore((state) => state.user);
     const groupHandByHouse = useSettingsStore((state) => state.groupHandByHouse);
     const setGroupHandByHouse = useSettingsStore((state) => state.setGroupHandByHouse);
+    const hideHandOnOpponentTurn = useSettingsStore((state) => state.hideHandOnOpponentTurn);
+    const setHideHandOnOpponentTurn = useSettingsStore(
+        (state) => state.setHideHandOnOpponentTurn
+    );
+
+    const tier = currentTier(user);
+    const tierName = currentTierName(user) ?? 'Free';
+    const admin = isAdmin(user);
+    const member = isMember(user);
 
     const [busy, setBusy] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -208,6 +220,57 @@ export default function ProfileScreen() {
                 {notice ? <Text style={styles.notice}>{notice}</Text> : null}
             </Card>
 
+            {/* ARCHON (N12): Archon+ status and the way in. High on the screen
+                because "which tier am I on, and where do I manage it" is the
+                one line a member opens Profile for — the same mistake the web
+                membership page made by putting it at the bottom. */}
+            <Card style={{ marginBottom: spacing.md }}>
+                <View style={styles.membershipRow}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.sectionTitle}>Archon+</Text>
+                        <View style={styles.membershipStatus}>
+                            <View
+                                style={[
+                                    styles.tierPill,
+                                    { borderColor: TIER_COLORS[tier] ?? colors.border }
+                                ]}
+                            >
+                                <Text
+                                    style={[
+                                        styles.tierPillText,
+                                        { color: TIER_COLORS[tier] ?? colors.textDim }
+                                    ]}
+                                >
+                                    {admin ? `${tierName} · admin` : tierName}
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+                    <Button
+                        small
+                        variant='secondary'
+                        title={member ? 'Manage' : 'What you get'}
+                        onPress={() => router.push('/membership')}
+                    />
+                </View>
+
+                <View style={styles.linkRow}>
+                    <Pressable onPress={() => router.push('/intelligence')} style={styles.linkItem}>
+                        <Text style={styles.linkText}>Archon Intelligence</Text>
+                        <Text style={styles.linkHint}>
+                            Is this deck good, are you good with it, and how does it fare?
+                        </Text>
+                    </Pressable>
+                    <Pressable
+                        onPress={() => router.push('/tournament-lab')}
+                        style={styles.linkItem}
+                    >
+                        <Text style={styles.linkText}>Tournament Lab</Text>
+                        <Text style={styles.linkHint}>Which of your decks should you bring?</Text>
+                    </Pressable>
+                </View>
+            </Card>
+
             <Card style={{ marginBottom: spacing.md }}>
                 <Text style={styles.sectionTitle}>Game</Text>
                 <SettingRow
@@ -215,6 +278,12 @@ export default function ProfileScreen() {
                     hint='Sorts your hand into house order instead of draw order.'
                     value={groupHandByHouse}
                     onChange={setGroupHandByHouse}
+                />
+                <SettingRow
+                    label="Hide my hand on the opponent's turn"
+                    hint='Stands the hand down while they play, so the board and log have the screen. Tap it to look, and it comes back on its own whenever the game asks you something.'
+                    value={hideHandOnOpponentTurn}
+                    onChange={setHideHandOnOpponentTurn}
                 />
             </Card>
 
@@ -250,7 +319,20 @@ export default function ProfileScreen() {
                 </Card>
             ) : null}
 
-            <Button title='Sign out' variant='danger' onPress={signOut} loading={busy} />
+            {/* ARCHON: friends live here now rather than in a tab of their own.
+                Below the account settings and above sign-out, because it is the
+                part of this screen you come back to - the settings above it are
+                set once. */}
+            <Text style={styles.friendsHeading}>Friends</Text>
+            <FriendsSection />
+
+            <Button
+                title='Sign out'
+                variant='danger'
+                onPress={signOut}
+                loading={busy}
+                style={{ marginTop: spacing.md }}
+            />
 
             <Text style={styles.footer}>
                 Archon Arena mobile · KeyForge is a trademark of Fantasy Flight Games / Ghost
@@ -264,6 +346,54 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: colors.bg
+    },
+    friendsHeading: {
+        color: colors.text,
+        fontSize: 17,
+        fontWeight: '800',
+        marginBottom: spacing.sm,
+        marginTop: spacing.xs
+    },
+    membershipRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.md
+    },
+    membershipStatus: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm
+    },
+    tierPill: {
+        alignSelf: 'flex-start',
+        borderWidth: 1,
+        borderRadius: radius.pill,
+        paddingHorizontal: spacing.md,
+        paddingVertical: 2
+    },
+    tierPillText: {
+        fontSize: 12,
+        fontWeight: '700'
+    },
+    linkRow: {
+        marginTop: spacing.md,
+        borderTopWidth: 1,
+        borderTopColor: colors.border,
+        paddingTop: spacing.sm,
+        gap: spacing.sm
+    },
+    linkItem: {
+        paddingVertical: 4
+    },
+    linkText: {
+        color: colors.accent,
+        fontSize: 14,
+        fontWeight: '600'
+    },
+    linkHint: {
+        color: colors.textFaint,
+        fontSize: 11,
+        marginTop: 1
     },
     identityRow: {
         flexDirection: 'row',

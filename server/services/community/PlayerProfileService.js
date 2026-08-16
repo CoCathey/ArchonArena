@@ -19,12 +19,15 @@
 const logger = require('../../log');
 const { publicBadge, permissionsFromRoleNames } = require('../membership/publicBadge');
 const { membershipFromDbRow } = require('../membership/mapRow');
-
-const BIO_MAX_LENGTH = 280;
+const { resolveEntitlements } = require('../membership/entitlements');
+// ARCHON (N12): profile cosmetics - what profile_cosmetics actually buys.
+const { resolveCosmetics, bioMaxLength } = require('../membership/cosmetics');
+const ProfileCosmeticsService = require('./ProfileCosmeticsService');
 
 class PlayerProfileService {
-    constructor(db = require('../../db')) {
+    constructor(db = require('../../db'), cosmeticsService = new ProfileCosmeticsService(db)) {
         this.db = db;
+        this.cosmeticsService = cosmeticsService;
     }
 
     /**
@@ -50,11 +53,12 @@ class PlayerProfileService {
             return null;
         }
 
-        const [clubs, recentGames, badge] = await Promise.all([
+        const [clubs, recentGames, identity] = await Promise.all([
             this.getClubs(user.Id),
             this.getRecentGames(user.Id),
-            this.getBadge(user.Id)
+            this.getIdentity(user.Id)
         ]);
+        const badge = identity.badge;
 
         return {
             username: user.Username,
@@ -66,6 +70,9 @@ class PlayerProfileService {
             role: badge.role,
             tier: badge.tier,
             tierName: badge.tierName,
+            // ARCHON (N12): already filtered against what this account may
+            // currently use, so a lapsed pledge renders a plain profile.
+            cosmetics: identity.cosmetics,
             clubs,
             recentGames
         };
@@ -87,6 +94,53 @@ class PlayerProfileService {
      * @returns {Promise<{role: string, tier: string, tierName: string|null}>}
      */
     async getBadge(userId) {
+        const { permissions, membership } = await this.loadMembershipState(userId);
+
+        return publicBadge({ permissions, membership });
+    }
+
+    /**
+     * ARCHON (N12): the badge AND the cosmetics, from one load.
+     *
+     * Both answers come out of the same two rows - roles and membership - so
+     * asking for them separately would double the queries on the one page that
+     * always wants both.
+     *
+     * ## Why cosmetics resolve differently from the badge
+     *
+     * `publicBadge` deliberately strips the admin override: an admin resolves
+     * to the highest tier internally, and rendering that publicly would label
+     * every administrator a paying Vault Master, which is a claim about money.
+     *
+     * Cosmetics make no claim about money - an accent colour says nothing about
+     * anybody's billing - so they resolve against the account's real
+     * entitlements, admin override included. Doing it the other way round
+     * produces the genuinely confusing outcome: an admin picks a frame in an
+     * editor that offers it to them, saves successfully, and then cannot find
+     * it on their own profile.
+     *
+     * @returns {Promise<{badge: object, cosmetics: object}>}
+     */
+    async getIdentity(userId) {
+        const { permissions, membership } = await this.loadMembershipState(userId);
+        const entitlements = resolveEntitlements({ user: { permissions }, membership });
+        const stored = await this.cosmeticsService.get(userId);
+
+        return {
+            badge: publicBadge({ permissions, membership }),
+            cosmetics: resolveCosmetics(stored, entitlements.capabilities)
+        };
+    }
+
+    /**
+     * Roles and membership for one account, as the permissions shape the
+     * membership code reads.
+     *
+     * Both lookups are best-effort: a profile that renders without a badge is
+     * fine, one that 500s is not, and the Memberships migration may not have
+     * run on this deployment.
+     */
+    async loadMembershipState(userId) {
         let roleNames = [];
         let membership;
 
@@ -99,8 +153,6 @@ class PlayerProfileService {
 
             roleNames = (rows || []).map((row) => row.Name);
         } catch (err) {
-            // A profile that renders without a badge is fine; one that 500s is
-            // not. Same reasoning as the membership lookup below.
             logger.warn('Failed to look up roles for player profile', err);
         }
 
@@ -111,14 +163,13 @@ class PlayerProfileService {
 
             membership = membershipFromDbRow(rows && rows[0]);
         } catch (err) {
-            // The Memberships migration may not have run yet.
             logger.warn('Failed to look up membership for player profile', err);
         }
 
-        return publicBadge({
+        return {
             permissions: permissionsFromRoleNames(roleNames),
             membership: membership || null
-        });
+        };
     }
 
     /** @deprecated use getBadge - kept so the role alone is still one call. */
@@ -133,8 +184,16 @@ class PlayerProfileService {
         return (rows && rows[0] && rows[0].Bio) || null;
     }
 
-    async setBio(userId, bio) {
-        const normalizedBio = bio ? String(bio).trim().slice(0, BIO_MAX_LENGTH) || null : null;
+    /**
+     * @param {number} userId
+     * @param {string|null} bio
+     * @param {string[]} [capabilities] the author's entitlements. A member gets
+     *        a longer bio (profile_cosmetics); omitted means the free limit,
+     *        which is what every caller predating memberships wants.
+     */
+    async setBio(userId, bio, capabilities = []) {
+        const limit = bioMaxLength(capabilities);
+        const normalizedBio = bio ? String(bio).trim().slice(0, limit) || null : null;
 
         await this.db.query('UPDATE "Users" SET "Bio" = $1 WHERE "Id" = $2', [
             normalizedBio,

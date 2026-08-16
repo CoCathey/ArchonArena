@@ -75,7 +75,7 @@ const ProfileMenu = ({ menu, mobile = false, user }) => {
             <Dropdown.Trigger>
                 <span className={triggerClass}>
                     <span className='inline-flex h-full items-center gap-1.5 leading-none'>
-                        <Avatar imgPath={user.avatar} />
+                        <Avatar cosmetics={user.cosmetics} imgPath={user.avatar} />
                         <span className='inline-flex items-center leading-none'>
                             {user.username}
                         </span>

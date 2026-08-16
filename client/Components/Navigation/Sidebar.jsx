@@ -225,7 +225,7 @@ const Sidebar = ({ appName, user }) => {
                 className='flex w-full items-center gap-1 rounded-md px-2 py-2 text-left text-sm font-semibold text-foreground transition hover:bg-surface-secondary/70'
                 onClick={() => setProfileOpen((open) => !open)}
             >
-                <Avatar imgPath={user.avatar} />
+                <Avatar cosmetics={user.cosmetics} imgPath={user.avatar} />
                 <span className='truncate'>{user.username}</span>
             </button>
         </div>

@@ -10,7 +10,11 @@ import ProfileBackground from './ProfileBackground';
 import KeyforgeGameSettings from './KeyforgeGameSettings';
 // ARCHON (N2): per-category notification delivery preferences
 import NotificationPreferences from './NotificationPreferences';
+// ARCHON (N12): Vault Master - the preview programme.
+import PreviewProgram from './PreviewProgram';
 import ProfileCardSize from './ProfileCardSize';
+// ARCHON (N12): what profile_cosmetics / enhanced_cosmetics buy.
+import ProfileCosmetics from './ProfileCosmetics';
 import { Constants } from '../../constants';
 // ARCHON (N12): drives whether the Integrations tab is offered at all
 import { useGetOidcStatusQuery, useGetPatreonStatusQuery } from '../../redux/api';
@@ -88,7 +92,11 @@ const ProfileSection = Object.freeze({
     Appearance: 'appearance',
     Gameplay: 'gameplay',
     // ARCHON (N2): per-category notification opt-out.
-    Notifications: 'notifications'
+    Notifications: 'notifications',
+    // ARCHON (N12): unfinished features a membership can switch on. Its own
+    // section rather than a block inside Appearance: a preview is not a look,
+    // and the capability copy points people here by name.
+    Previews: 'previews'
 });
 
 /**
@@ -276,7 +284,12 @@ const Profile = ({ onSubmit, isLoading }) => {
                                             : []),
                                         [ProfileSection.Appearance, t('Appearance')],
                                         [ProfileSection.Gameplay, t('Gameplay')],
-                                        [ProfileSection.Notifications, t('Notifications')]
+                                        [ProfileSection.Notifications, t('Notifications')],
+                                        // Always offered, including to accounts
+                                        // with no previews: the panel explains
+                                        // what the programme is, which is how
+                                        // somebody finds out it exists at all.
+                                        [ProfileSection.Previews, t('Previews')]
                                     ].map(([sectionKey, label]) => (
                                         <HeroButton
                                             key={sectionKey}
@@ -307,6 +320,8 @@ const Profile = ({ onSubmit, isLoading }) => {
                                             ? t('Gameplay')
                                             : activeSection === ProfileSection.Notifications
                                             ? t('Notifications')
+                                            : activeSection === ProfileSection.Previews
+                                            ? t('Previews')
                                             : t('Settings')}
                                     </h2>
                                 </header>
@@ -346,6 +361,22 @@ const Profile = ({ onSubmit, isLoading }) => {
                                                     }
                                                     onCardSizeSelected={(name) => setCardSize(name)}
                                                 />
+                                                {/* ARCHON (N12): profile cosmetics. Saves
+                                                    through its own endpoint
+                                                    rather than the form's Save
+                                                    button - the two are
+                                                    validated against different
+                                                    things, and a swatch should
+                                                    not be able to fail because
+                                                    an email address is
+                                                    invalid. Placed last because
+                                                    everything above it is a
+                                                    private setting and this is
+                                                    the part other people
+                                                    see. */}
+                                                <div className='border-t border-border/60 pt-3'>
+                                                    <ProfileCosmetics />
+                                                </div>
                                             </div>
                                         )}
                                         {activeSection === ProfileSection.Gameplay && (
@@ -359,6 +390,11 @@ const Profile = ({ onSubmit, isLoading }) => {
                                             is not part of the profile form. */}
                                         {activeSection === ProfileSection.Notifications && (
                                             <NotificationPreferences />
+                                        )}
+                                        {/* ARCHON (N12): same contract - each
+                                            switch saves as it is flicked. */}
+                                        {activeSection === ProfileSection.Previews && (
+                                            <PreviewProgram />
                                         )}
                                     </div>
                                 </div>

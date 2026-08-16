@@ -3,6 +3,9 @@ const Settings = require('../settings');
 // the admin override lives there and nowhere else.
 const { resolveEntitlements } = require('../services/membership/entitlements');
 const { publicBadge } = require('../services/membership/publicBadge');
+// ARCHON (N12): profile cosmetics ride along with the user so a lobby seat
+// shows them without a second lookup per player.
+const { publicCosmetics: cosmeticsFor } = require('../services/membership/cosmetics');
 
 class User {
     constructor(userData) {
@@ -109,7 +112,12 @@ class User {
     get publicBadge() {
         return publicBadge({
             permissions: this.userData.permissions || {},
-            membership: this.userData.membership
+            membership: this.userData.membership,
+            // ARCHON (N12): the cosmetic slots this account has chosen. Filtered
+            // against the same entitlements the tier comes from inside
+            // publicBadge, so a lapsed membership stops rendering its nameplate
+            // on exactly the day it stops unlocking features.
+            cosmetics: this.userData.cosmetics
         });
     }
 
@@ -192,7 +200,12 @@ class User {
                 expiresAt: entitlements.expiresAt,
                 source: entitlements.source
             },
-            capabilities: entitlements.capabilities
+            capabilities: entitlements.capabilities,
+            // ARCHON (N12): what this account has chosen to look like, filtered
+            // to what it may still use. Sent with the user so the profile panel
+            // and the player's own name render their choice immediately rather
+            // than after a second request.
+            cosmetics: cosmeticsFor(this.userData.cosmetics, entitlements)
         };
     }
 
@@ -248,7 +261,14 @@ class User {
             // ARCHON (N12): the tier, so a lobby seat can show which one
             // without a second lookup. Name only - never expiry or provider.
             tier: badge.tier,
-            tierName: badge.tierName
+            tierName: badge.tierName,
+            // Carried for the same reason as the tier: a seat that already
+            // has the tier skips the badge lookup entirely, so without this a
+            // member's frame and name effect would appear everywhere except
+            // the lobby. Already absent when nothing is set - publicBadge omits
+            // it - which matters on a message sent to every client on every
+            // lobby update.
+            cosmetics: badge.cosmetics
         };
     }
 

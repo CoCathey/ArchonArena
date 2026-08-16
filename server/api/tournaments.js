@@ -3,6 +3,10 @@ const passport = require('passport');
 const TournamentService = require('../services/tournament/TournamentService');
 const { wrapAsync } = require('../util.js');
 const { rateLimit } = require('./rateLimit');
+// ARCHON (N12): organiser exports, behind the Vault Master capability.
+const { requireCapability } = require('./requireCapability');
+const { CAPABILITIES } = require('../services/membership/capabilities');
+const { buildExport, toCsv, DATASET_IDS } = require('../services/tournament/organizerExport');
 
 // ARCHON (N7): finishing a team event rates the team ladder.
 const TeamRatingService = require('../services/rating/TeamRatingService');
@@ -105,6 +109,70 @@ module.exports.init = function (server) {
         '/api/tournaments/:id',
         optionalAuth(async (req, res, user) => {
             res.send(await tournamentService.getDetail(parseInt(req.params.id, 10), user));
+        })
+    );
+
+    /**
+     * ARCHON (N12): take the event away as a spreadsheet.
+     *
+     * Two gates, and they are not the same gate:
+     *
+     *   - `requireCapability(ORGANIZER_TOOLS)` - is this a membership that
+     *     includes organiser tooling at all;
+     *   - `canManage` on the event itself - is this THEIR event.
+     *
+     * Neither implies the other, and dropping either one would be a real hole:
+     * without the first the tier is being given away, and without the second a
+     * Vault Master could export the entry list, decklists and payment status of
+     * somebody else's private tournament. `canManage` comes back from getDetail
+     * rather than being re-derived here, so the answer is the same one the page
+     * itself uses.
+     *
+     * Declared before the `/:id/...` POST actions purely for readability; Express
+     * matches on method and full path, so order does not matter here.
+     */
+    server.get(
+        '/api/tournaments/:id/export',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.ORGANIZER_TOOLS),
+        wrapAsync(async (req, res) => {
+            const dataset = String(req.query.dataset || 'standings');
+
+            if (!DATASET_IDS.includes(dataset)) {
+                return res.status(400).send({
+                    success: false,
+                    message: `Unknown dataset. Choose one of: ${DATASET_IDS.join(', ')}.`
+                });
+            }
+
+            const detail = await tournamentService.getDetail(parseInt(req.params.id, 10), req.user);
+
+            if (!detail.success) {
+                return res.status(404).send(detail);
+            }
+
+            if (!detail.tournament.canManage) {
+                return res.status(403).send({
+                    success: false,
+                    message: 'Only the organiser and staff of an event can export it.'
+                });
+            }
+
+            const built = buildExport(detail, dataset);
+
+            // JSON when asked for, so an organiser scripting against this does
+            // not have to parse back out of CSV.
+            if (String(req.query.format || 'csv').toLowerCase() === 'json') {
+                return res.send({ success: true, ...built });
+            }
+
+            res.set('Content-Type', 'text/csv; charset=utf-8');
+            // The filename an organiser sees in their downloads folder. Built
+            // from the event name in organizerExport, and stripped there to
+            // characters that cannot break out of this header.
+            res.set('Content-Disposition', `attachment; filename="${built.filename}"`);
+
+            res.send(toCsv(built));
         })
     );
 

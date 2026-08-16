@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { router } from 'expo-router';
 import {
     ActivityIndicator,
     FlatList,
@@ -26,7 +27,7 @@ import type {
 import DeckStatsSection from '../../src/stats/DeckStatsSection';
 import MetaSection from '../../src/stats/MetaSection';
 import { useAuthStore } from '../../src/stores/authStore';
-import { colors, spacing } from '../../src/theme';
+import { colors, radius, spacing } from '../../src/theme';
 import BarList, { type BarItem } from '../../src/ui/BarList';
 import HouseIcon from '../../src/ui/HouseIcon';
 import { Button, Card, EmptyState, ErrorBanner, TextField } from '../../src/ui/primitives';
@@ -311,6 +312,34 @@ function MyStatsSection(props: { username?: string }) {
             ) : null}
 
             <ErrorBanner message={error} />
+
+            {/* ARCHON (N12): the way through to the premium analysis, on the
+                screen people already come to for numbers. Shown only on your
+                own stats — Archon Intelligence reads your own games, and
+                offering it while looking at someone else would promise
+                something it deliberately will not do. */}
+            {viewingSelf ? (
+                <View style={styles.intelRow}>
+                    <Pressable
+                        onPress={() => router.push('/intelligence')}
+                        style={styles.intelCard}
+                    >
+                        <Text style={styles.intelTitle}>Archon Intelligence</Text>
+                        <Text style={styles.intelHint}>
+                            Rating history, your decks ranked, matchups and the meta.
+                        </Text>
+                    </Pressable>
+                    <Pressable
+                        onPress={() => router.push('/tournament-lab')}
+                        style={styles.intelCard}
+                    >
+                        <Text style={styles.intelTitle}>Tournament Lab</Text>
+                        <Text style={styles.intelHint}>
+                            Compare your decks before you pick one for an event.
+                        </Text>
+                    </Pressable>
+                </View>
+            ) : null}
 
             {notFound && !loading ? (
                 <EmptyState
@@ -715,6 +744,30 @@ const styles = StyleSheet.create({
         color: colors.textDim,
         fontSize: 12,
         marginTop: 4
+    },
+    intelRow: {
+        flexDirection: 'row',
+        gap: spacing.sm,
+        marginBottom: spacing.sm
+    },
+    intelCard: {
+        flex: 1,
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderRadius: radius.md,
+        backgroundColor: colors.bgElevated,
+        padding: spacing.md
+    },
+    intelTitle: {
+        color: colors.brand,
+        fontSize: 13,
+        fontWeight: '700'
+    },
+    intelHint: {
+        color: colors.textFaint,
+        fontSize: 11,
+        lineHeight: 15,
+        marginTop: 2
     },
     sectionTitle: {
         color: colors.text,

@@ -100,15 +100,6 @@ export default function TabsLayout() {
                 }}
             />
             <Tabs.Screen
-                name='friends'
-                options={{
-                    title: 'Friends',
-                    tabBarIcon: ({ color }) => <TabIcon glyph='♟' color={color} />,
-                    tabBarBadge: incoming > 0 ? incoming : undefined,
-                    tabBarBadgeStyle: { backgroundColor: colors.brand, color: '#161006' }
-                }}
-            />
-            <Tabs.Screen
                 name='stats'
                 options={{
                     title: 'Stats',
@@ -119,7 +110,14 @@ export default function TabsLayout() {
                 name='profile'
                 options={{
                     title: 'Profile',
-                    tabBarIcon: ({ color }) => <TabIcon glyph='◈' color={color} />
+                    tabBarIcon: ({ color }) => <TabIcon glyph='◈' color={color} />,
+                    // ARCHON: friends moved in here from their own tab, and the
+                    // pending-request badge came with them - it is the only
+                    // thing in that section that is time-sensitive, and without
+                    // it a request would sit unseen behind a tab nobody opens
+                    // unless they went looking.
+                    tabBarBadge: incoming > 0 ? incoming : undefined,
+                    tabBarBadgeStyle: { backgroundColor: colors.brand, color: '#161006' }
                 }}
             />
         </Tabs>

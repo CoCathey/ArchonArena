@@ -367,17 +367,20 @@ const About = () => {
                                         term: t('Archon'),
                                         description: t(
                                             'Archon Intelligence and the Tournament Lab: matchup ' +
-                                                'analysis, personal deck rankings, deck comparison and ' +
-                                                'meta analytics.'
+                                                'analysis, personal deck rankings, deck comparison, ' +
+                                                'meta analytics, and AERC analysis — your record read ' +
+                                                'by what decks are actually good at rather than by one ' +
+                                                'score.'
                                         )
                                     },
                                     {
                                         term: t('Vault Master'),
                                         description: t(
-                                            'Everything above. Its own features — organiser tools, ' +
-                                                'early access, experimental builds — are on the roadmap ' +
-                                                'rather than built, so it is a way to support the site ' +
-                                                'rather than a way to get more of it today.'
+                                            'Everything above, plus the preview programme — ' +
+                                                'experimental and beta tools as they are built, and ' +
+                                                'every preview on the day it opens — nameplate and ' +
+                                                'badge cosmetics other players can see, and ' +
+                                                'spreadsheet exports for the events you run.'
                                         )
                                     }
                                 ]}

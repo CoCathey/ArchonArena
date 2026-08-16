@@ -1005,9 +1005,18 @@ tiers, and perks that cannot touch competitive fairness.
 -   Owner: create the Patreon campaign and tiers; set `PATREON_CLIENT_ID`,
     `PATREON_CLIENT_SECRET` and `PATREON_CAMPAIGN_ID`, then link your own account to verify the
     round trip against the live campaign.
--   Define supporter perks — cosmetic and convenience only: custom backgrounds and card backs,
-    avatar frames, a supporter badge, longer replay retention, larger deck-import batches.
-    **(admin-config)** which tier unlocks which perk.
+-   [x] **Profile customisation** — the first cosmetic perks to actually exist, and what
+        `profile_cosmetics` (Supporter) and `enhanced_cosmetics` (Vault Master) were already being
+        sold as. Five slots: accent colour, profile banner, avatar frame, title and name effect,
+        plus a longer bio. The catalogue and its per-option tier gating live in one file
+        (`server/services/membership/cosmetics.js`); the client maps ids to pixels and never
+        decides who may use what. A lapsed pledge stops rendering the same day the badge does,
+        without deleting the selection — resubscribing restores it. Shipping enhanced cosmetics
+        also makes Vault Master purchasable for the first time: `isTierPurchasable` had correctly
+        refused to sell a tier whose every capability was unbuilt. See
+        [docs/design/profile-cosmetics.md](docs/design/profile-cosmetics.md).
+-   Remaining supporter perks — cosmetic and convenience only: custom card backs, longer replay
+    retention, larger deck-import batches. **(admin-config)** which tier unlocks which perk.
 -   A "Support Archon Arena" page saying plainly where the money goes, with an opt-in supporter
     list.
 
@@ -1743,6 +1752,44 @@ much stronger deck pays less.
 -   [x] **Share links for replays** (public, no auth, revocable, per-replay token) (**N1**).
 -   [x] **Match history filters** by deck, opponent, format and result, applied in SQL before
         the row limit (**N1**).
+-   [x] **Replays were being recorded and then thrown away.** A board frame carried full card
+        summaries — around 1.1 KB per card, most of it a ten-language locale block and
+        interaction state a recording can never use — so a mid-game frame came to 27 KB and a
+        capped recording to 16 MB, eight times `replay.maxCaptureKb`. Every normal-length
+        game's replay was refused at the point of storage, leaving one warn line in the node's
+        log and a site where no replay ever loaded. Frames now reference a card table written
+        once per recording (~1.1 KB per frame, ~0.5 MB for a whole game). `deploy/healthcheck.sh`
+        already FAILed on "0 replays for N finished games"; this is what it was reporting.
+-   [x] **Capture is driven by the engine, not by the socket layer** — `Game.continue()`
+        records, rather than only `GameServer.sendGameState`, so anything that advances a game
+        records one and the capture is testable end to end. The winning position is captured
+        explicitly in `recordWinner`: without it a replay ended on the board as it stood
+        _before_ the deciding key was forged.
+-   [x] **A long game is thinned, not truncated** — at the frame cap the recording is halved
+        and capture continues, instead of stopping dead and leaving the half of the game that
+        decided it with no board at all.
+-   [x] **Replay viewer fixes**: forged keys rendered as `[object Object]` (the engine's key
+        map printed straight into the text), board cards collapsed to slivers (`CardImage`
+        renders `h-full w-full` into a box with no size), and the board shown before the first
+        recorded frame was one from later in the game.
+-   [x] **Turn navigation, playback and card zoom** in the viewer: one jump button per turn
+        labelled with the house that was called, play/pause with speed, arrow-key stepping.
+-   [x] **Replay Intelligence on the phone** — the aggregate half is on the Expo app's
+        Intelligence screen, where a list of houses with one number each reads better than it
+        does on the web: the five-column row folds to a bar, a percentage and a sub-line, with
+        the house icons the app already has. It loads outside the screen's `load()` because it
+        is the one panel the set filter cannot narrow, and re-parsing 25 stored recordings on
+        every tap of a set chip is a phone's latency and data allowance spent on an answer that
+        never changes. The per-game turn-by-turn analysis is deliberately NOT there: the app
+        has no replay viewer to hang it on, and a six-column turn table is the wrong thing at
+        390 points wide.
+-   [x] **Replay analysis** (**N12**, Archon tier `advanced_replays`): every turn with the
+        house called on it, amber per turn, the key race, and the point after which the winner
+        was never headed. Read from recorded board state only — never parsed out of the
+        localised message log — and surfaced both on a game's replay and, aggregated over a
+        player's last 25 recordings, as Replay Intelligence on Archon Intelligence. It answers
+        the one question no other table on the site can: which house you actually call, and how
+        you do when you call it.
 -   [ ] Two bots playing each other continuously, watchable by anyone — permanent content for the
         Watch hub and a continuous engine soak test → **F9**.
 

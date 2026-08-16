@@ -76,6 +76,58 @@ describe('patreon api', function () {
             ).toBe(false);
         });
 
+        /**
+         * ARCHON (N12): the phone app has no cookie jar.
+         *
+         * It authenticates with a bearer token and completes the link from a
+         * fresh process after a system-browser hop, so the signed state travels
+         * in the request body instead of in a cookie. These assert that the
+         * body path is the SAME verification and not a weaker second one - the
+         * token is still pinned to the account, still signed, still expiring.
+         */
+        it('accepts a state token the app carried in the body', function () {
+            const token = stateCookie({ state: 'm.abc', linkUserId: 7 });
+
+            expect(
+                verifyLinkState({
+                    stateToken: token,
+                    providedState: 'm.abc',
+                    userId: 7,
+                    secret: SECRET
+                })
+            ).toBe(true);
+        });
+
+        it('rejects an app token redeemed under a different account', function () {
+            // The attack the pinning exists for: a code obtained under one
+            // account must not be redeemable under another.
+            const token = stateCookie({ state: 'm.abc', linkUserId: 7 });
+
+            expect(
+                verifyLinkState({
+                    stateToken: token,
+                    providedState: 'm.abc',
+                    userId: 99,
+                    secret: SECRET
+                })
+            ).toBe(false);
+        });
+
+        it('rejects an app token the client forged for itself', function () {
+            // A phone holds this token in memory, so it is worth being explicit
+            // that holding one is not the same as being able to make one.
+            const token = stateCookie({ state: 'm.abc', linkUserId: 7 }, { secret: 'forged' });
+
+            expect(
+                verifyLinkState({
+                    stateToken: token,
+                    providedState: 'm.abc',
+                    userId: 7,
+                    secret: SECRET
+                })
+            ).toBe(false);
+        });
+
         it('rejects a callback with no cookie or no state at all', function () {
             const token = stateCookie({ state: 'abc', linkUserId: 7 });
 

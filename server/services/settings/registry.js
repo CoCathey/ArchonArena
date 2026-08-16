@@ -547,11 +547,12 @@ const REGISTRY = {
             rated: {
                 type: 'boolean',
                 label: 'In-person games move Amber',
-                // Off by default on purpose. Turning this on is a real
-                // decision about the ladder - the platform did not witness
-                // these games - and it should be made deliberately rather
-                // than discovered after the fact.
-                default: false
+                // ARCHON: on by default, like every other kind of game here.
+                // A committed paper game already needed two independent
+                // reports that agree, inside the window, with both decks
+                // attached - see InPersonGameService. Turn it off to run a
+                // ladder that only counts games played on the platform.
+                default: true
             },
             reportWindowDays: {
                 type: 'number',

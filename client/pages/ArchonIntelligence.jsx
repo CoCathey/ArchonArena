@@ -10,9 +10,11 @@ import PremiumLock from '../Components/Membership/PremiumLock';
 import SetFilter from '../Components/Site/SetFilter';
 import { CAPABILITIES, hasCapability } from '../membership';
 import {
+    useGetAercIntelligenceQuery,
     useGetDeckIntelligenceQuery,
     useGetPlayerIntelligenceQuery,
-    useGetMetaIntelligenceQuery
+    useGetMetaIntelligenceQuery,
+    useGetReplayIntelligenceQuery
 } from '../redux/api';
 
 /**
@@ -132,6 +134,131 @@ const SetRow = ({ row, t, showShare = true }) => (
 );
 
 SetRow.propTypes = { row: PropTypes.object, showShare: PropTypes.bool, t: PropTypes.func };
+
+/**
+ * ARCHON: the AERC view.
+ *
+ * SAS answers "is this deck strong", which a player can already see. AERC is
+ * what that number is made of, and answers the question they actually have:
+ * which KIND of deck suits them, and which kind beats them.
+ *
+ * The bands are cut at the site-wide quartiles of each trait, so "high creature
+ * control" means the same thing for everyone. The range each band covers is
+ * printed under its name rather than left to the label, because "High" on its
+ * own is a word, not a number.
+ */
+const bandRange = (band, t) => {
+    if (band.from === null && band.to === null) {
+        return '';
+    }
+
+    if (band.from === null) {
+        return t('under {{to}}', { to: num(band.to) });
+    }
+
+    if (band.to === null) {
+        return t('{{from}}+', { from: num(band.from) });
+    }
+
+    return `${num(band.from)}–${num(band.to)}`;
+};
+
+/** One trait's four bands, as a row of cells. */
+const BandStrip = ({ bands, t }) => (
+    <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+        {bands.map((band) => (
+            <div
+                className={[
+                    'rounded border px-3 py-2',
+                    band.games === 0
+                        ? 'border-border/40 bg-surface-secondary/30'
+                        : band.confident
+                        ? 'border-border/70 bg-surface-secondary/60'
+                        : 'border-amber-500/40 bg-amber-500/5'
+                ].join(' ')}
+                key={band.band}
+            >
+                <div className='text-[11px] uppercase tracking-wide text-muted'>
+                    {t(band.band)}{' '}
+                    <span className='normal-case text-muted/70'>{bandRange(band, t)}</span>
+                </div>
+                <div
+                    className={[
+                        'text-lg font-semibold',
+                        band.games === 0
+                            ? 'text-muted'
+                            : band.winRate >= 0.5
+                            ? 'text-emerald-300'
+                            : 'text-red-300'
+                    ].join(' ')}
+                >
+                    {band.games === 0 ? '—' : pct(band.winRate)}
+                </div>
+                <div className='text-[11px] text-muted'>
+                    {band.games === 0
+                        ? t('no games')
+                        : t('{{wins}}–{{losses}} in {{games}}', {
+                              games: band.games,
+                              losses: band.losses,
+                              wins: band.wins
+                          })}
+                </div>
+                {band.games > 0 && !band.confident && (
+                    <div className='text-[11px] text-amber-300'>{t('too few to lean on')}</div>
+                )}
+            </div>
+        ))}
+    </div>
+);
+
+BandStrip.propTypes = { bands: PropTypes.array, t: PropTypes.func };
+
+/**
+ * The headline findings, as sentences.
+ *
+ * Nine traits times four bands times two sides is a lot of numbers, and the two
+ * that matter are not the ones a reader will happen to look at. The server
+ * ranks them by the gap between two bands that BOTH clear the sample
+ * threshold - which is what stops the headline being a 100% record over two
+ * games.
+ */
+const Findings = ({ findings, t }) => (
+    <div className='space-y-1.5'>
+        {findings.map((finding, index) => (
+            <div
+                className='rounded border border-border/70 bg-surface-secondary/50 px-3 py-2 text-sm'
+                key={index}
+            >
+                {finding.side === 'opponent'
+                    ? t(
+                          'Against {{label}} you win {{best}} in the {{bestBand}} band and {{worst}} in the {{worstBand}} band.',
+                          {
+                              best: pct(finding.best.winRate),
+                              bestBand: t(finding.best.band).toLowerCase(),
+                              label: finding.label,
+                              worst: pct(finding.worst.winRate),
+                              worstBand: t(finding.worst.band).toLowerCase()
+                          }
+                      )
+                    : t(
+                          'With your own {{label}} you win {{best}} in the {{bestBand}} band and {{worst}} in the {{worstBand}} band.',
+                          {
+                              best: pct(finding.best.winRate),
+                              bestBand: t(finding.best.band).toLowerCase(),
+                              label: finding.label,
+                              worst: pct(finding.worst.winRate),
+                              worstBand: t(finding.worst.band).toLowerCase()
+                          }
+                      )}{' '}
+                <span className='text-muted'>
+                    {t('({{games}} games)', { games: finding.games })}
+                </span>
+            </div>
+        ))}
+    </div>
+);
+
+Findings.propTypes = { findings: PropTypes.array, t: PropTypes.func };
 
 /** Blurred sample used behind the lock, so the page demonstrates its own value. */
 const SamplePanel = () => (
@@ -409,6 +536,348 @@ const DeckIntelligence = ({ decks, t }) => {
 
 DeckIntelligence.propTypes = { decks: PropTypes.array, t: PropTypes.func };
 
+/**
+ * ARCHON (N12): Replay Intelligence.
+ *
+ * The one panel on this page whose numbers come from recorded games rather than
+ * from a column, and the only place on the site that can answer which house a
+ * player actually calls. Every other house figure here is measured across decks
+ * CONTAINING a house, because which house was called on a turn is recorded
+ * nowhere else - the caveat under "your record by house" says exactly that, and
+ * this is the panel that lifts it.
+ */
+const ReplayIntelligence = ({ insights, t }) => {
+    if (!insights) {
+        return <div className='p-3 text-sm text-muted'>{t('Loading…')}</div>;
+    }
+
+    if (!insights.available) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {insights.reason ||
+                    t('No recorded games yet — finish one and it is analysed here.')}
+            </div>
+        );
+    }
+
+    return (
+        <div className='space-y-3 p-1'>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                <Stat
+                    label={t('Games analysed')}
+                    value={insights.games}
+                    hint={t('{{wins}} won', { wins: insights.wins })}
+                />
+                <Stat
+                    label={t('Amber per turn')}
+                    value={num(insights.amberPerTurn)}
+                    hint={t('turns that gained any')}
+                />
+                <Stat
+                    label={t('First key')}
+                    value={num(insights.firstKeyRound)}
+                    hint={t('average turn')}
+                />
+                <Stat
+                    label={t('Game length')}
+                    value={num(insights.turnsPerGame)}
+                    hint={t('your turns')}
+                />
+            </div>
+
+            <div>
+                <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
+                    {t('Houses you call, and how you do when you call them')}
+                </div>
+                <div className='space-y-1.5'>
+                    {insights.byHouse.map((row) => (
+                        <div className='flex items-center gap-2 text-xs' key={row.house}>
+                            <div className='w-28 shrink-0 truncate text-foreground'>
+                                {t(row.house)}
+                            </div>
+                            <div className='h-2 flex-1 overflow-hidden rounded bg-surface-secondary'>
+                                <div
+                                    className={
+                                        row.winRate >= 0.5
+                                            ? 'h-full bg-emerald-500/70'
+                                            : 'h-full bg-red-500/70'
+                                    }
+                                    style={{ width: `${Math.round((row.winRate ?? 0) * 100)}%` }}
+                                />
+                            </div>
+                            <div className='w-10 shrink-0 text-right text-foreground'>
+                                {pct(row.winRate)}
+                            </div>
+                            <div
+                                className='w-20 shrink-0 text-right text-muted'
+                                title={t('turns called')}
+                            >
+                                {t('{{count}} turns', { count: row.turns })}
+                            </div>
+                            <div
+                                className='w-12 shrink-0 text-right text-muted'
+                                title={t('share of your turns')}
+                            >
+                                {pct(row.share)}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                <p className='m-0 pt-1 text-[11px] text-muted'>
+                    {t(
+                        'Counted per turn, from recorded board states — this is the house you ' +
+                            'actually called, not the houses your deck contains. The win rate is ' +
+                            'over the games in which you called it at least once.'
+                    )}
+                </p>
+            </div>
+
+            {insights.vsHouse.length > 0 && (
+                <div>
+                    <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
+                        {t('What the other side called')}
+                    </div>
+                    <div className='flex flex-wrap gap-1.5 text-xs'>
+                        {insights.vsHouse.map((row) => (
+                            <span
+                                className='rounded bg-surface-secondary/60 px-1.5 py-0.5'
+                                key={row.house}
+                            >
+                                <span className='text-foreground'>{t(row.house)}</span>{' '}
+                                <span className='text-muted'>
+                                    {pct(row.winRate)} ({row.games})
+                                </span>
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {insights.skipped > 0 && (
+                <p className='m-0 text-[11px] text-muted'>
+                    {t(
+                        '{{count}} of your recorded games are from before board states were ' +
+                            'captured and could not be read.',
+                        { count: insights.skipped }
+                    )}
+                </p>
+            )}
+        </div>
+    );
+};
+
+ReplayIntelligence.propTypes = { insights: PropTypes.object, t: PropTypes.func };
+
+/**
+ * ARCHON (N12): a panel whose contents arrived through the preview programme.
+ *
+ * Labelled, always, and with the stage said out loud. A beta panel that looks
+ * identical to a finished one is how a work in progress gets read as a promise -
+ * and the whole reason the tier can honestly sell "beta features" is that the
+ * player knows which ones they are and can switch them off.
+ */
+const PreviewPanel = ({ title, stage, children, t }) => (
+    <Panel
+        type='default'
+        compactHeader
+        title={
+            <span className='inline-flex items-center gap-2'>
+                {title}
+                <span className='rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300'>
+                    {stage}
+                </span>
+            </span>
+        }
+    >
+        {children}
+        <p className='m-0 mt-2 text-[11px] text-muted'>
+            {t('A preview. Turn it off in Profile → Previews.')}
+        </p>
+    </Panel>
+);
+
+PreviewPanel.propTypes = {
+    children: PropTypes.node,
+    stage: PropTypes.node,
+    t: PropTypes.func,
+    title: PropTypes.node
+};
+
+/** The performance dashboard with a time axis - preview `performance-trend`. */
+const PerformanceTrend = ({ trend, t }) => {
+    if (!trend?.available) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {trend?.reason || t('No rated games in this window yet.')}
+            </div>
+        );
+    }
+
+    // The widest bar in the set defines the scale, so a player with a handful of
+    // games gets a readable chart rather than five invisible slivers.
+    const peak = Math.max(...trend.points.map((point) => Math.abs(point.vsExpectation || 0)), 1);
+
+    return (
+        <div className='space-y-1.5'>
+            {trend.points.map((point) => {
+                const value = point.vsExpectation || 0;
+                const ahead = value >= 0;
+
+                return (
+                    <div className='flex items-center gap-2 text-xs' key={point.month}>
+                        <span className='w-20 shrink-0 text-muted'>
+                            {new Date(point.month).toLocaleDateString(undefined, {
+                                month: 'short',
+                                year: '2-digit'
+                            })}
+                        </span>
+                        {/* A centre line, so above and below expectation read as
+                            opposite directions rather than as two lengths. */}
+                        <span className='relative h-3 flex-1 rounded bg-surface-secondary/60'>
+                            <span
+                                className={`absolute top-0 h-3 ${
+                                    ahead ? 'left-1/2 bg-emerald-500/70' : 'bg-red-500/70'
+                                }`}
+                                style={
+                                    ahead
+                                        ? { width: `${(Math.abs(value) / peak) * 50}%` }
+                                        : {
+                                              right: '50%',
+                                              width: `${(Math.abs(value) / peak) * 50}%`
+                                          }
+                                }
+                            />
+                        </span>
+                        <span
+                            className={`w-16 shrink-0 text-right ${
+                                ahead ? 'text-emerald-300' : 'text-red-300'
+                            }`}
+                        >
+                            {ahead ? '+' : ''}
+                            {num(value)}
+                        </span>
+                        <span className='w-14 shrink-0 text-right text-muted'>
+                            {t('{{count}}g', { count: point.games })}
+                        </span>
+                    </div>
+                );
+            })}
+            <p className='m-0 text-xs text-muted'>
+                {t(
+                    'Wins above or below what your rating predicted, by month. Months with no ' +
+                        'rated games are left out rather than drawn as zero.'
+                )}
+            </p>
+        </div>
+    );
+};
+
+PerformanceTrend.propTypes = { t: PropTypes.func, trend: PropTypes.object };
+
+/** Recent results and streaks - preview `form-and-streaks`. */
+const FormAndStreaks = ({ form, t }) => {
+    if (!form?.available) {
+        return (
+            <div className='p-3 text-sm text-muted'>{form?.reason || t('No rated games yet.')}</div>
+        );
+    }
+
+    return (
+        <div className='space-y-3'>
+            <div className='flex flex-wrap gap-1'>
+                {form.recent.map((result, index) => (
+                    <span
+                        className={`flex h-6 w-6 items-center justify-center rounded text-[11px] font-semibold ${
+                            result.won
+                                ? 'bg-emerald-500/20 text-emerald-300'
+                                : 'bg-red-500/20 text-red-300'
+                        }`}
+                        key={index}
+                        title={new Date(result.at).toLocaleString()}
+                    >
+                        {result.won ? t('W') : t('L')}
+                    </span>
+                ))}
+            </div>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                <Stat
+                    label={t('Last {{count}}', { count: form.games })}
+                    value={`${form.wins}-${form.losses}`}
+                />
+                <Stat label={t('Win rate')} value={pct(form.winRate)} />
+                <Stat
+                    label={t('Current streak')}
+                    tone={form.currentStreak.kind === 'win' ? 'good' : 'bad'}
+                    value={`${form.currentStreak.length}${
+                        form.currentStreak.kind === 'win' ? t('W') : t('L')
+                    }`}
+                />
+                <Stat label={t('Best win streak')} value={form.bestWinStreak} />
+            </div>
+            <p className='m-0 text-xs text-muted'>
+                {form.streakWindowTruncated
+                    ? t('Streaks measured over your last {{count}} rated games.', {
+                          count: form.streakWindow
+                      })
+                    : t('Streaks measured over all {{count}} of your rated games.', {
+                          count: form.streakWindow
+                      })}
+            </p>
+        </div>
+    );
+};
+
+FormAndStreaks.propTypes = { form: PropTypes.object, t: PropTypes.func };
+
+/** Going first vs going second - preview `turn-order-insights`. */
+const TurnOrder = ({ turnOrder, t }) => {
+    if (!turnOrder?.available) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {turnOrder?.reason || t('Turn order is not recorded for these games.')}
+            </div>
+        );
+    }
+
+    return (
+        <div className='space-y-2'>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+                <Stat
+                    label={t('Going first')}
+                    value={pct(turnOrder.first.winRate)}
+                    hint={t('{{count}} games', { count: turnOrder.first.games })}
+                />
+                <Stat
+                    label={t('Going second')}
+                    value={pct(turnOrder.second.winRate)}
+                    hint={t('{{count}} games', { count: turnOrder.second.games })}
+                />
+                <Stat
+                    label={t('Difference')}
+                    tone={turnOrder.edge >= 0 ? 'good' : 'bad'}
+                    value={
+                        turnOrder.edge === null
+                            ? '—'
+                            : `${turnOrder.edge >= 0 ? '+' : ''}${pct(turnOrder.edge)}`
+                    }
+                    hint={t('first minus second')}
+                />
+            </div>
+            {turnOrder.gamesWithoutData > 0 && (
+                <p className='m-0 text-xs text-muted'>
+                    {t(
+                        '{{count}} older games are left out: turn order was not recorded before it ' +
+                            'was added to the engine.',
+                        { count: turnOrder.gamesWithoutData }
+                    )}
+                </p>
+            )}
+        </div>
+    );
+};
+
+TurnOrder.propTypes = { t: PropTypes.func, turnOrder: PropTypes.object };
+
 const ArchonIntelligence = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -421,11 +890,26 @@ const ArchonIntelligence = () => {
         CAPABILITIES.PERSONAL_DECK_RANKINGS,
         CAPABILITIES.MATCHUP_ANALYTICS
     ];
-    const unlocked = playerSections.some((capability) => hasCapability(user, capability));
+    // ARCHON (N12): the preview capabilities count too. A tier that reached the
+    // programme but none of the tier sections would otherwise never request the
+    // payload, and its preview panels would silently never appear.
+    const unlocked = [
+        ...playerSections,
+        CAPABILITIES.EXPERIMENTAL_FEATURES,
+        CAPABILITIES.BETA_FEATURES,
+        CAPABILITIES.EARLY_ACCESS
+    ].some((capability) => hasCapability(user, capability));
     const canMeta = hasCapability(user, CAPABILITIES.META_ANALYTICS);
+    const canReplays = hasCapability(user, CAPABILITIES.ADVANCED_REPLAYS);
+    const canAerc = hasCapability(user, CAPABILITIES.AERC_ANALYTICS);
     // Empty means every set, which is what both the control and the server
     // already take it to mean.
     const [sets, setSets] = useState([]);
+    // SAS is the default view because it is the number every player already
+    // knows. AERC is the deeper read, and switching is one click rather than a
+    // different page - the whole value is in comparing the two.
+    const [lens, setLens] = useState('sas');
+    const [trait, setTrait] = useState('amberControl');
 
     // Skipped entirely when locked: a 403 round trip per panel teaches nobody
     // anything, and the locked state is rendered from the catalogue copy.
@@ -435,6 +919,18 @@ const ArchonIntelligence = () => {
     const { data: meta } = useGetMetaIntelligenceQuery(
         { days: 30, sets },
         { skip: !user || !canMeta }
+    );
+    // Not set-filtered: a recording carries the game, not the deck row the set
+    // filter is built from, and reading 25 JSON documents per filter change is
+    // not a cost worth paying for a narrowing this panel cannot honour.
+    const { data: replays } = useGetReplayIntelligenceQuery(25, {
+        skip: !user || !canReplays
+    });
+    // Only fetched when the AERC lens is actually showing: it is the most
+    // expensive query on the page and nobody is reading it in SAS mode.
+    const { data: aerc, isFetching: aercLoading } = useGetAercIntelligenceQuery(
+        { days: 30, sets, trait },
+        { skip: !user || !canAerc || lens !== 'aerc' }
     );
 
     if (!user) {
@@ -457,6 +953,10 @@ const ArchonIntelligence = () => {
 
     const vs = player?.vsExpectation;
     const rankings = player?.rankings || [];
+    // Which sections came through the preview programme. Named by the server so
+    // the page never has to guess whether a missing section is locked, empty, or
+    // simply not switched on.
+    const previews = player?.previews || [];
     const filtered = sets.length > 0;
     // Said once, under the filter, rather than repeated on every panel.
     const scopeNote = filtered
@@ -477,6 +977,264 @@ const ArchonIntelligence = () => {
             <Panel type='default' compactHeader title={t('Set')}>
                 <SetFilter hint={scopeNote} selected={sets} t={t} onChange={setSets} />
             </Panel>
+
+            {/* ---- SAS / AERC lens -------------------------------------- */}
+            <Panel type='default' compactHeader title={t('Read this as')}>
+                <div className='space-y-2'>
+                    <div className='flex flex-wrap items-center gap-1.5'>
+                        {[
+                            ['sas', t('SAS'), t('One number for how strong a deck is')],
+                            [
+                                'aerc',
+                                t('AERC'),
+                                t('What that number is made of, and which kinds beat you')
+                            ]
+                        ].map(([value, label, hint]) => (
+                            <button
+                                className={[
+                                    'rounded-full border px-3 py-1 text-xs transition',
+                                    lens === value
+                                        ? 'border-accent/60 bg-accent/15 text-accent'
+                                        : 'border-border/70 bg-surface-secondary/60 text-foreground hover:border-border'
+                                ].join(' ')}
+                                key={value}
+                                onClick={() => setLens(value)}
+                                title={hint}
+                                type='button'
+                            >
+                                {label}
+                            </button>
+                        ))}
+                        {!canAerc && (
+                            <span className='ml-1 text-[11px] text-muted'>
+                                {t('AERC analysis is part of Archon+.')}
+                            </span>
+                        )}
+                    </div>
+                    <p className='m-0 text-[11px] text-muted'>
+                        {lens === 'aerc'
+                            ? t(
+                                  'AERC splits a deck into what it is actually good at. Bands are cut ' +
+                                      'at the site-wide quartiles of each trait, so “high” means the ' +
+                                      'same thing for everyone.'
+                              )
+                            : t(
+                                  'SAS is a single score for deck power. Switch to AERC to see which ' +
+                                      'kinds of deck you play well and which kinds beat you.'
+                              )}
+                    </p>
+                </div>
+            </Panel>
+
+            {lens === 'aerc' && (
+                <Panel type='default' compactHeader title={t('AERC')}>
+                    <PremiumLock
+                        capability={CAPABILITIES.AERC_ANALYTICS}
+                        preview={<SamplePanel />}
+                        minHeight={260}
+                    >
+                        <div className='space-y-4 p-1'>
+                            {/* The answer first, then the evidence. */}
+                            {!!aerc?.findings?.length && (
+                                <div className='space-y-1.5'>
+                                    <div className='text-[11px] uppercase tracking-wide text-muted'>
+                                        {t('What stands out')}
+                                    </div>
+                                    <Findings findings={aerc.findings} t={t} />
+                                    <p className='m-0 text-[11px] text-muted'>
+                                        {t(
+                                            'Ranked by the size of the gap, counting only bands with ' +
+                                                'enough games behind them to mean something. These are ' +
+                                                'records, not causes — deck power and who you happened ' +
+                                                'to play ride along with any of them.'
+                                        )}
+                                    </p>
+                                </div>
+                            )}
+
+                            <div className='flex flex-wrap items-center gap-1.5'>
+                                {(aerc?.traits || []).map((entry) => (
+                                    <button
+                                        className={[
+                                            'rounded-full border px-2.5 py-1 text-xs transition',
+                                            trait === entry.key
+                                                ? 'border-accent/60 bg-accent/15 text-accent'
+                                                : 'border-border/70 bg-surface-secondary/60 text-foreground hover:border-border'
+                                        ].join(' ')}
+                                        key={entry.key}
+                                        onClick={() => setTrait(entry.key)}
+                                        type='button'
+                                    >
+                                        {entry.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {aercLoading && (
+                                <div className='text-sm text-muted'>{t('Loading…')}</div>
+                            )}
+
+                            {aerc?.opponent && (
+                                <div className='space-y-1.5'>
+                                    <div className='text-[11px] uppercase tracking-wide text-muted'>
+                                        {t('Your record against their {{label}}', {
+                                            label: (
+                                                aerc.traits.find(
+                                                    (entry) => entry.key === aerc.trait
+                                                ) || {}
+                                            ).label
+                                        })}
+                                    </div>
+                                    <BandStrip bands={aerc.opponent.bands} t={t} />
+                                </div>
+                            )}
+
+                            {aerc?.own && (
+                                <div className='space-y-1.5'>
+                                    <div className='text-[11px] uppercase tracking-wide text-muted'>
+                                        {t('Your record with your own {{label}}', {
+                                            label: (
+                                                aerc.traits.find(
+                                                    (entry) => entry.key === aerc.trait
+                                                ) || {}
+                                            ).label
+                                        })}
+                                    </div>
+                                    <BandStrip bands={aerc.own.bands} t={t} />
+                                </div>
+                            )}
+
+                            {/* What to bring against each kind of deck. */}
+                            {!!aerc?.houses?.bands?.some((band) => band.houses.length > 0) && (
+                                <div className='space-y-1.5'>
+                                    <div className='text-[11px] uppercase tracking-wide text-muted'>
+                                        {t('What has worked for you against each')}
+                                    </div>
+                                    <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
+                                        {aerc.houses.bands.map((band) => (
+                                            <div
+                                                className='rounded border border-border/70 bg-surface-secondary/50 px-3 py-2'
+                                                key={band.band}
+                                            >
+                                                <div className='mb-1 text-[11px] uppercase tracking-wide text-muted'>
+                                                    {t('vs {{band}}', { band: t(band.band) })}
+                                                </div>
+                                                {band.houses.length ? (
+                                                    band.houses.slice(0, 4).map((house) => (
+                                                        <div
+                                                            className='flex items-center justify-between text-xs'
+                                                            key={house.house}
+                                                        >
+                                                            <span className='truncate text-foreground'>
+                                                                {house.houseName}
+                                                            </span>
+                                                            <span className='ml-2 shrink-0 text-muted'>
+                                                                {pct(house.winRate)} · {house.games}
+                                                                g
+                                                            </span>
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className='text-xs text-muted'>
+                                                        {t('not enough games')}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p className='m-0 text-[11px] text-muted'>
+                                        {t(
+                                            'Houses your decks CONTAINED, so each game counts for three ' +
+                                                'of them. Which house you actually played on a turn is ' +
+                                                'not recorded outside replays.'
+                                        )}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* The field, in the same terms - so two formats
+                                can be held against each other. */}
+                            {aerc?.meta?.available && (
+                                <div className='space-y-1.5'>
+                                    <div className='text-[11px] uppercase tracking-wide text-muted'>
+                                        {filtered
+                                            ? t('The field in these sets, over 30 days')
+                                            : t('The whole field, over 30 days')}
+                                    </div>
+                                    <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5'>
+                                        {aerc.meta.traits.map((entry) => (
+                                            <Stat
+                                                key={entry.key}
+                                                label={entry.label}
+                                                value={num(entry.median)}
+                                                hint={t('median · mean {{mean}}', {
+                                                    mean: num(entry.mean)
+                                                })}
+                                            />
+                                        ))}
+                                    </div>
+                                    <p className='m-0 text-[11px] text-muted'>
+                                        {t(
+                                            'Across {{decks}} decks brought to games. Narrow the set ' +
+                                                'filter above to compare one format against another.',
+                                            { decks: aerc.meta.decks }
+                                        )}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Cards, with the caveat that makes them honest. */}
+                            {!!aerc?.cards?.length && (
+                                <div className='space-y-1.5'>
+                                    <div className='text-[11px] uppercase tracking-wide text-muted'>
+                                        {t('Cards in your winning decks')}
+                                    </div>
+                                    <div className='overflow-x-auto'>
+                                        <table className='w-full min-w-[360px] text-sm'>
+                                            <tbody>
+                                                {aerc.cards.slice(0, 15).map((card) => (
+                                                    <tr
+                                                        className='border-b border-border/40'
+                                                        key={card.cardId}
+                                                    >
+                                                        <td className='py-1 pr-2 text-foreground'>
+                                                            {card.card}
+                                                        </td>
+                                                        <td className='py-1 pr-2 text-right text-muted'>
+                                                            {card.wins}–{card.losses}
+                                                        </td>
+                                                        <td className='py-1 text-right text-foreground'>
+                                                            {pct(card.winRate)}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <p className='m-0 text-[11px] text-muted'>
+                                        {t(
+                                            'Your record with decks that CONTAINED each card — not with ' +
+                                                'the card being played, which is not recorded. A card ' +
+                                                'that sat in your hand all game still counts, so read ' +
+                                                'this as which of your decks win, described by their ' +
+                                                'contents.'
+                                        )}
+                                    </p>
+                                </div>
+                            )}
+
+                            {!aercLoading && !aerc?.findings?.length && !aerc?.own && (
+                                <div className='text-sm text-muted'>
+                                    {t(
+                                        'Not enough rated games with decks Decks of KeyForge has scored ' +
+                                            'yet. This fills in as you play.'
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </PremiumLock>
+                </Panel>
+            )}
 
             {/* ---- Player Intelligence ---------------------------------- */}
             <Panel type='default' compactHeader title={t('Player Intelligence')}>
@@ -521,6 +1279,31 @@ const ArchonIntelligence = () => {
                     )}
                 </PremiumLock>
             </Panel>
+
+            {/* ---- Preview programme ------------------------------------
+                No PremiumLock: these are not locked panels with an upgrade
+                prompt behind them, they are sections that either arrived in the
+                payload or did not. The server decides, from the account's tier
+                and its own switches, and an account without them sees nothing
+                here at all rather than a teaser for a thing that is not
+                finished. */}
+            {previews.includes('vsExpectationTrend') && (
+                <PreviewPanel stage={t('Beta')} t={t} title={t('Performance trend')}>
+                    <PerformanceTrend t={t} trend={player?.vsExpectationTrend} />
+                </PreviewPanel>
+            )}
+
+            {previews.includes('form') && (
+                <PreviewPanel stage={t('Experimental')} t={t} title={t('Form and streaks')}>
+                    <FormAndStreaks form={player?.form} t={t} />
+                </PreviewPanel>
+            )}
+
+            {previews.includes('byTurnOrder') && (
+                <PreviewPanel stage={t('Early access')} t={t} title={t('Turn order')}>
+                    <TurnOrder t={t} turnOrder={player?.byTurnOrder} />
+                </PreviewPanel>
+            )}
 
             {/* ---- Elo history (Supporter) ------------------------------ */}
             <Panel type='default' compactHeader title={t('Your rating history')}>
@@ -664,13 +1447,34 @@ const ArchonIntelligence = () => {
                         )}
                         <p className='m-0 pt-1 text-[11px] text-muted'>
                             {t(
-                                'Measured across decks that CONTAIN each house. Which house you chose ' +
-                                    'on a given turn is not recorded outside replays, so this is not a ' +
-                                    'per-turn figure.'
+                                'Measured across decks that CONTAIN each house — not the house you ' +
+                                    'called on a given turn, which is recorded only inside replays. ' +
+                                    'Replay Intelligence, below, is the per-turn figure.'
                             )}
                         </p>
                     </div>
                 </PremiumLock>
+            </Panel>
+
+            {/* ---- Replay Intelligence ---------------------------------- */}
+            <Panel
+                type='default'
+                compactHeader
+                title={t('Replay Intelligence — the house you actually call')}
+            >
+                <PremiumLock
+                    capability={CAPABILITIES.ADVANCED_REPLAYS}
+                    preview={<SamplePanel />}
+                    minHeight={200}
+                >
+                    <ReplayIntelligence insights={replays} t={t} />
+                </PremiumLock>
+                <p className='m-0 px-1 pt-2 text-[11px] text-muted'>
+                    {t(
+                        'Read from your last 25 recorded games. Any finished game also carries its ' +
+                            'own turn-by-turn analysis — open it from Game History.'
+                    )}
+                </p>
             </Panel>
 
             {/* ---- Meta Intelligence ------------------------------------ */}

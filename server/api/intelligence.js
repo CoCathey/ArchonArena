@@ -3,12 +3,25 @@ const passport = require('passport');
 const { wrapAsync } = require('../util.js');
 const ArchonIntelligenceService = require('../services/membership/ArchonIntelligenceService');
 const TournamentLabService = require('../services/membership/TournamentLabService');
-const { requireCapability, requireAnyCapability, sectionsFor } = require('./requireCapability');
+const ReplayAnalysisService = require('../services/membership/ReplayAnalysisService');
+const AercAnalyticsService = require('../services/membership/AercAnalyticsService');
+const {
+    requireCapability,
+    requireAnyCapability,
+    sectionsFor,
+    entitlementsForRequest
+} = require('./requireCapability');
 const { CAPABILITIES } = require('../services/membership/capabilities');
+const { can } = require('../services/membership/entitlements');
 const { parseSets } = require('../services/membership/setFilter');
+const MemberPreferencesService = require('../services/membership/MemberPreferencesService');
+const { canUsePreview } = require('../services/membership/previews');
 
 const intelligence = new ArchonIntelligenceService();
 const tournamentLab = new TournamentLabService(undefined, intelligence);
+const preferences = new MemberPreferencesService();
+const replayAnalysis = new ReplayAnalysisService();
+const aerc = new AercAnalyticsService();
 
 /**
  * ARCHON (N12): Archon Intelligence and the Tournament Lab.
@@ -86,13 +99,55 @@ module.exports.init = function (server) {
         bySet: CAPABILITIES.MATCHUP_ANALYTICS
     };
 
+    /**
+     * ARCHON (N12): sections that are not part of any tier yet, because they are
+     * in the preview programme.
+     *
+     * Gated on the preview rather than on a capability: a preview's audience is
+     * "the tier its stage admits, that has switched it on", which no single
+     * capability expresses. When one graduates, its entry moves to
+     * PLAYER_SECTIONS above and the line here is deleted - the shape of that
+     * move is the whole reason the two lists are separate.
+     */
+    const PREVIEW_SECTIONS = {
+        vsExpectationTrend: 'performance-trend',
+        form: 'form-and-streaks',
+        byTurnOrder: 'turn-order-insights'
+    };
+
     server.get(
         '/api/intelligence/player',
         passport.authenticate('jwt', { session: false }),
-        requireAnyCapability(Object.values(PLAYER_SECTIONS)),
+        // The preview capabilities are admitted too: a tier that holds only
+        // those would otherwise be refused at the door and never reach the
+        // sections it does have.
+        requireAnyCapability([
+            ...Object.values(PLAYER_SECTIONS),
+            CAPABILITIES.EXPERIMENTAL_FEATURES,
+            CAPABILITIES.BETA_FEATURES,
+            CAPABILITIES.EARLY_ACCESS
+        ]),
         wrapAsync(async (req, res) => {
             const sets = parseSets(req.query.sets);
             const { allowed, locked } = sectionsFor(req, PLAYER_SECTIONS);
+
+            // One read for the account's switches, then a pure decision per
+            // section - rather than a query per preview. Skipped entirely for a
+            // tier that reaches no preview stage, which is most accounts: their
+            // switches cannot change the answer, so reading them is a query
+            // spent on nothing.
+            const entitlements = entitlementsForRequest(req);
+            const reachesPreviews = [
+                CAPABILITIES.EXPERIMENTAL_FEATURES,
+                CAPABILITIES.BETA_FEATURES,
+                CAPABILITIES.EARLY_ACCESS
+            ].some((capability) => can(entitlements, capability));
+            const choices = reachesPreviews ? await preferences.getPreviewChoices(req.user.id) : {};
+            const previews = reachesPreviews
+                ? Object.entries(PREVIEW_SECTIONS)
+                      .filter(([, previewId]) => canUsePreview(entitlements, choices, previewId))
+                      .map(([section]) => section)
+                : [];
 
             const producers = {
                 // Not set-filtered, deliberately: a rating is one number across
@@ -106,18 +161,32 @@ module.exports.init = function (server) {
                 // the filter is chosen FROM, so narrowing it to the current
                 // selection would collapse it to one row and hide the
                 // comparison that makes the filter worth setting.
-                bySet: () => intelligence.playerBySet(req.user.id)
+                bySet: () => intelligence.playerBySet(req.user.id),
+                // ---- preview sections ----
+                vsExpectationTrend: () =>
+                    intelligence.playerVsExpectationTrend(req.user.id, { sets }),
+                // Not set-filtered, for the same reason the rating series is
+                // not: a run of results is a run of games in the order they
+                // happened, and dropping some of them from the middle would
+                // draw a streak that never occurred.
+                form: () => intelligence.playerForm(req.user.id),
+                byTurnOrder: () => intelligence.playerByTurnOrder(req.user.id, { sets })
             };
 
-            const results = await Promise.all(allowed.map((section) => producers[section]()));
+            const sections = [...allowed, ...previews];
+            const results = await Promise.all(sections.map((section) => producers[section]()));
             const payload = Object.fromEntries(
-                allowed.map((section, index) => [section, results[index]])
+                sections.map((section, index) => [section, results[index]])
             );
 
             // `locked` tells the client which panels to render as upgrade
             // prompts rather than as missing. `sets` echoes the filter back so
             // the client can tell "no filter" from "filter returned nothing".
-            res.send({ success: true, sets, ...payload, locked });
+            // `previews` names the sections that arrived through the preview
+            // programme, so the client can label them as such - an unlabelled
+            // beta panel is how a work in progress gets read as a finished
+            // promise.
+            res.send({ success: true, sets, ...payload, locked, previews });
         })
     );
 
@@ -139,6 +208,85 @@ module.exports.init = function (server) {
             // `sets` echoes the filter, `bySet` is the breakdown - the same
             // pairing the player route uses.
             res.send({ success: true, days, sets, houses, summary, bySet });
+        })
+    );
+
+    /**
+     * ARCHON (N12): Replay Intelligence - the cross-game half of replay
+     * analysis, and the one place on the site that can answer "which house do I
+     * actually call, and how do I do when I call it".
+     *
+     * That question has no other source. As `ArchonIntelligenceService` says in
+     * its own header, the house a player chose on a given turn exists nowhere
+     * in a queryable column - only inside recorded board states - so every
+     * house figure elsewhere on the page is measured across decks CONTAINING a
+     * house rather than across turns that played it. This is the real one.
+     *
+     * Bounded by recordings parsed rather than by a date range: the work is
+     * proportional to how many are read, and each one is a JSON document.
+     */
+    server.get(
+        '/api/intelligence/replays',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.ADVANCED_REPLAYS),
+        wrapAsync(async (req, res) => {
+            const insights = await replayAnalysis.playerInsights(req.user.id, {
+                limit: req.query.limit
+            });
+
+            res.send({ success: true, ...insights });
+        })
+    );
+
+    /**
+     * ARCHON: the same record, read in AERC terms instead of SAS.
+     *
+     * One request rather than one per panel: every panel here shares the
+     * band cut points and the same filter, and firing nine requests to draw one
+     * screen would be slower and would make the panels disagree while they
+     * arrived.
+     *
+     * `trait` picks the trait the per-band panels are computed for - the
+     * headline findings walk all of them regardless, because the whole point is
+     * to tell a player which trait to look at.
+     */
+    server.get(
+        '/api/intelligence/aerc',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.AERC_ANALYTICS),
+        wrapAsync(async (req, res) => {
+            const requested = String(req.query.trait || '');
+            // Guarded rather than trusted: the trait name is interpolated into
+            // SQL as a JSON key, so an unknown one must never reach the query.
+            const trait = AercAnalyticsService.isTrait(requested)
+                ? requested
+                : AercAnalyticsService.traits[0].key;
+            const sets = parseSets(req.query.sets);
+            const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+
+            const [own, opponent, houses, findings, meta, cards] = await Promise.all([
+                aerc.byOwnTrait(req.user.id, trait, { sets }),
+                aerc.byOpponentTrait(req.user.id, trait, { sets }),
+                aerc.housesVsOpponentTrait(req.user.id, trait, { sets }),
+                aerc.findings(req.user.id, { sets }),
+                aerc.metaTraitProfile({ days, sets }),
+                aerc.byCard(req.user.id, { sets })
+            ]);
+
+            res.send({
+                success: true,
+                trait,
+                sets,
+                days,
+                traits: AercAnalyticsService.traits,
+                minConfidentGames: AercAnalyticsService.MIN_CONFIDENT_GAMES,
+                own,
+                opponent,
+                houses,
+                findings,
+                meta,
+                cards
+            });
         })
     );
 

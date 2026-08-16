@@ -160,7 +160,7 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                             key={player.name}
                         >
                             <div className='flex min-w-0 items-center gap-2'>
-                                <Avatar imgPath={player.avatar} />
+                                <Avatar cosmetics={player.cosmetics} imgPath={player.avatar} />
                                 {/* ARCHON (N12): was `${role}-role`, a keyteki
                                     class name nothing defines, so a supporter
                                     in a game lobby looked like anyone else. */}

@@ -7,6 +7,12 @@ const TeamService = require('../services/community/TeamService');
 const MemberDirectoryService = require('../services/community/MemberDirectoryService');
 const StoreService = require('../services/community/StoreService');
 const PlayerProfileService = require('../services/community/PlayerProfileService');
+// ARCHON (N12): profile customisation, sold as profile_cosmetics /
+// enhanced_cosmetics.
+const ProfileCosmeticsService = require('../services/community/ProfileCosmeticsService');
+const { cosmeticsCatalog, bioMaxLength } = require('../services/membership/cosmetics');
+const { CAPABILITIES } = require('../services/membership/capabilities');
+const { requireCapability, entitlementsForRequest } = require('./requireCapability');
 const { wrapAsync } = require('../util.js');
 const { rateLimit } = require('./rateLimit');
 
@@ -59,8 +65,17 @@ const teamService = new TeamService(require('../db'), notificationService);
 const memberDirectory = new MemberDirectoryService();
 const storeService = new StoreService();
 const playerProfileService = new PlayerProfileService();
+const profileCosmeticsService = new ProfileCosmeticsService();
 
 const jwt = passport.authenticate('jwt', { session: false });
+
+/**
+ * ARCHON (N12): the caller's own capabilities.
+ *
+ * Read from the request rather than passed in from the body, so what a client
+ * claims about its membership never decides what it may save.
+ */
+const capabilitiesFor = (req) => (entitlementsForRequest(req) || {}).capabilities || [];
 
 /**
  * ARCHON: community features (Phase 9): friends, member directory, clubs.
@@ -91,7 +106,7 @@ module.exports.init = function (server) {
         wrapAsync(async (req, res) => {
             const bio = await playerProfileService.getBio(req.user.id);
 
-            res.send({ success: true, bio });
+            res.send({ success: true, bio, maxLength: bioMaxLength(capabilitiesFor(req)) });
         })
     );
 
@@ -99,7 +114,57 @@ module.exports.init = function (server) {
         '/api/account/bio',
         jwt,
         wrapAsync(async (req, res) => {
-            const result = await playerProfileService.setBio(req.user.id, req.body.bio);
+            // ARCHON (N12): members write a longer bio (profile_cosmetics).
+            // The limit is applied from the caller's own entitlements rather
+            // than from anything the client sends.
+            const capabilities = capabilitiesFor(req);
+            const result = await playerProfileService.setBio(
+                req.user.id,
+                req.body.bio,
+                capabilities
+            );
+
+            res.send({ ...result, maxLength: bioMaxLength(capabilities) });
+        })
+    );
+
+    // ----- Profile cosmetics (N12): what profile_cosmetics and
+    // enhanced_cosmetics actually buy.
+    //
+    // GET is open to any signed-in account on purpose. A free player is shown
+    // the whole catalogue with the locked options marked, because "you could
+    // have this" is the only thing on the page that earns an upgrade - a
+    // picker that silently has fewer swatches teaches them nothing.
+    server.get(
+        '/api/account/cosmetics',
+        jwt,
+        wrapAsync(async (req, res) => {
+            const capabilities = capabilitiesFor(req);
+
+            res.send({
+                success: true,
+                cosmetics: await profileCosmeticsService.get(req.user.id),
+                catalog: cosmeticsCatalog(capabilities),
+                bioMaxLength: bioMaxLength(capabilities)
+            });
+        })
+    );
+
+    // PUT is gated: every option above the defaults costs something, so an
+    // account with no cosmetics capability has nothing it could legitimately
+    // save. Individual options are checked again inside `save`, because
+    // holding the Supporter capability does not make a Vault Master option
+    // yours.
+    server.put(
+        '/api/account/cosmetics',
+        jwt,
+        requireCapability(CAPABILITIES.PROFILE_COSMETICS),
+        wrapAsync(async (req, res) => {
+            const result = await profileCosmeticsService.save(
+                req.user.id,
+                req.body && req.body.cosmetics ? req.body.cosmetics : req.body,
+                capabilitiesFor(req)
+            );
 
             res.send(result);
         })

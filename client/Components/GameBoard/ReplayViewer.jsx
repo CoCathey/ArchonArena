@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PropTypes from 'prop-types';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton } from '@heroui/react';
 import moment from 'moment';
@@ -6,10 +7,14 @@ import moment from 'moment';
 import Panel from '../Site/Panel';
 import Messages from './Messages';
 import ReplayBoard from './ReplayBoard';
-import { findKeyForges } from '../../replayMarkers';
+import CardZoom from './CardZoom';
+import ReplayAnalysis from './ReplayAnalysis';
+import { findKeyForges, findTurns } from '../../replayMarkers';
+import { boardAtStep } from '../../replayFormat';
 import { useShareReplayMutation, useUnshareReplayMutation } from '../../redux/api';
 
-const noop = () => {};
+/** How fast autoplay steps through the log, in log entries per second. */
+const SPEEDS = [1, 2, 4, 8];
 
 /**
  * ARCHON: the replay viewer.
@@ -19,22 +24,40 @@ const noop = () => {};
  * different from the real thing would be a second implementation to keep in
  * step, and the recording is spectator-safe either way.
  *
+ * ## Moving through a game
+ *
+ * Three ways, because a 300-entry log is not something anyone wants to step
+ * through one entry at a time:
+ *
+ *   - turn jumps, one button per turn, labelled with the house that was chosen
+ *   - forge jumps, the moments that always matter in KeyForge
+ *   - play/pause, for watching it unfold
+ *
+ * Arrow keys step, space plays and pauses, so the common case needs no mouse.
+ *
  * @param {object} props
  * @param {object} props.replay   the recording
  * @param {string} [props.gameId] the game, when the viewer may offer sharing
  * @param {boolean} [props.canShare] whether the viewer played in this game
+ * @param {string} [props.shareToken] the token this replay was reached by, when
+ *   it was reached by a share link - the analysis is fetched by it
  */
-const ReplayViewer = ({ replay, gameId, canShare = false }) => {
+const ReplayViewer = ({ replay, gameId, canShare = false, shareToken: viaShareToken }) => {
     const { t } = useTranslation();
     const messages = useMemo(() => replay?.messages || [], [replay]);
     const snapshots = useMemo(() => replay?.snapshots || [], [replay]);
     const players = useMemo(() => replay?.players || [], [replay]);
+    const cards = useMemo(() => replay?.cards || [], [replay]);
     const total = messages.length;
 
     const [step, setStep] = useState(0);
     const [perspective, setPerspective] = useState(null);
     const [shareToken, setShareToken] = useState(replay?.shareToken || null);
     const [copied, setCopied] = useState(false);
+    const [playing, setPlaying] = useState(false);
+    const [speed, setSpeed] = useState(2);
+    const [zoom, setZoom] = useState(null);
+    const logRef = useRef(null);
 
     const [shareReplay, { isLoading: isSharing }] = useShareReplayMutation();
     const [unshareReplay, { isLoading: isUnsharing }] = useUnshareReplayMutation();
@@ -48,18 +71,83 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
         setShareToken(replay?.shareToken || null);
     }, [replay?.shareToken]);
 
-    // The key forges, read off the recorded key counts (see replayMarkers).
+    // The key forges and the turn boundaries, read off the recorded board
+    // frames (see replayMarkers).
     const forges = useMemo(() => findKeyForges(snapshots), [snapshots]);
+    const turns = useMemo(() => findTurns(snapshots), [snapshots]);
 
-    const clamp = (value) => Math.max(0, Math.min(total, value));
+    const clamp = useCallback((value) => Math.max(0, Math.min(total, value)), [total]);
+
+    // Autoplay. Stops of its own accord at the end rather than sitting there
+    // pretending to still be playing.
+    useEffect(() => {
+        if (!playing || total === 0) {
+            return undefined;
+        }
+
+        if (step >= total) {
+            setPlaying(false);
+
+            return undefined;
+        }
+
+        const timer = setTimeout(
+            () => setStep((current) => Math.min(total, current + 1)),
+            1000 / speed
+        );
+
+        return () => clearTimeout(timer);
+    }, [playing, speed, step, total]);
+
+    // Arrow keys step, space plays and pauses. Ignored while the reader is
+    // typing into something, so this cannot hijack a form field.
+    useEffect(() => {
+        const onKeyDown = (event) => {
+            const tag = event.target?.tagName;
+
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable) {
+                return;
+            }
+
+            if (event.key === 'ArrowLeft') {
+                setPlaying(false);
+                setStep((current) => clamp(current - 1));
+            } else if (event.key === 'ArrowRight') {
+                setPlaying(false);
+                setStep((current) => clamp(current + 1));
+            } else if (event.key === ' ') {
+                event.preventDefault();
+                setPlaying((current) => !current);
+            } else {
+                return;
+            }
+        };
+
+        window.addEventListener('keydown', onKeyDown);
+
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [clamp]);
+
+    // Follow the log as it advances, so autoplay does not scroll away from the
+    // entry it is adding.
+    useEffect(() => {
+        const node = logRef.current;
+
+        if (node) {
+            node.scrollTop = node.scrollHeight;
+        }
+    }, [step]);
+
     const shown = messages.slice(0, step);
-    // The board as it stood at this point: the last snapshot recorded at or
-    // before the current log position. Older recordings (version 1) have no
-    // snapshots at all, and the viewer degrades to the log alone.
-    const currentBoard = snapshots.reduce(
-        (best, snapshot) => (snapshot.messageIndex <= step ? snapshot : best),
-        snapshots[0]
-    )?.board;
+    // The board as it stood at this point: the last frame recorded at or before
+    // the current log position. Version 1 recordings have no frames at all, and
+    // the viewer degrades to the log alone.
+    const currentBoard = boardAtStep(snapshots, step);
+
+    const jumpTo = (messageIndex) => {
+        setPlaying(false);
+        setStep(clamp(messageIndex));
+    };
 
     const finished = replay?.finishedAt ? moment(replay.finishedAt).format('YYYY-MM-DD HH:mm') : '';
     const shareUrl = shareToken ? `${window.location.origin}/replay/shared/${shareToken}` : null;
@@ -92,8 +180,13 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
         }
     };
 
+    const onCardMouseOver = useCallback((card) => setZoom(card), []);
+    const onCardMouseOut = useCallback(() => setZoom(null), []);
+
     return (
         <div className='mx-auto w-full max-w-3xl space-y-3'>
+            {zoom && <CardZoom card={zoom} />}
+
             <Panel title={t('Replay')} titleAlign='center'>
                 <div className='flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-foreground'>
                     <span className='font-semibold'>
@@ -109,6 +202,22 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
                     ) : null}
                     {finished ? <span className='text-muted'>{finished}</span> : null}
                 </div>
+
+                {/* Each player's deck, which is the other half of "what was
+                    this game" and is in the recording already. */}
+                {players.some((player) => player.deckName || player.houses) && (
+                    <div className='mt-2 grid gap-1 text-xs text-muted sm:grid-cols-2'>
+                        {players.map((player) => (
+                            <div key={player.name}>
+                                <span className='text-foreground'>{player.name}</span>
+                                {player.deckName ? ` — ${player.deckName}` : ''}
+                                {player.houses?.length
+                                    ? ` (${player.houses.map((house) => t(house)).join(', ')})`
+                                    : ''}
+                            </div>
+                        ))}
+                    </div>
+                )}
 
                 {canShare && gameId && (
                     <div className='mt-3 border-t border-border/55 pt-3'>
@@ -156,7 +265,7 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
                         size='sm'
                         variant='tertiary'
                         isDisabled={step <= 1}
-                        onPress={() => setStep(1)}
+                        onPress={() => jumpTo(1)}
                     >
                         ⏮
                     </HeroButton>
@@ -164,15 +273,31 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
                         size='sm'
                         variant='tertiary'
                         isDisabled={step <= 1}
-                        onPress={() => setStep(clamp(step - 1))}
+                        onPress={() => jumpTo(step - 1)}
                     >
                         ◀ {t('Prev')}
                     </HeroButton>
                     <HeroButton
                         size='sm'
+                        variant={playing ? 'primary' : 'tertiary'}
+                        isDisabled={total === 0}
+                        onPress={() => {
+                            // Replaying from the end means replaying from the
+                            // start, which is what pressing play there means.
+                            if (step >= total) {
+                                setStep(1);
+                            }
+
+                            setPlaying(!playing);
+                        }}
+                    >
+                        {playing ? `⏸ ${t('Pause')}` : `▶ ${t('Play')}`}
+                    </HeroButton>
+                    <HeroButton
+                        size='sm'
                         variant='tertiary'
                         isDisabled={step >= total}
-                        onPress={() => setStep(clamp(step + 1))}
+                        onPress={() => jumpTo(step + 1)}
                     >
                         {t('Next')} ▶
                     </HeroButton>
@@ -180,16 +305,26 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
                         size='sm'
                         variant='tertiary'
                         isDisabled={step >= total}
-                        onPress={() => setStep(total)}
+                        onPress={() => jumpTo(total)}
                     >
                         ⏭
+                    </HeroButton>
+                    <HeroButton
+                        size='sm'
+                        variant='tertiary'
+                        onPress={() =>
+                            setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])
+                        }
+                        title={t('Playback speed')}
+                    >
+                        {t('{{speed}}×', { speed })}
                     </HeroButton>
                     <input
                         type='range'
                         min={total > 0 ? 1 : 0}
                         max={total}
                         value={step}
-                        onChange={(event) => setStep(clamp(parseInt(event.target.value, 10)))}
+                        onChange={(event) => jumpTo(parseInt(event.target.value, 10))}
                         className='min-w-[140px] flex-1'
                         aria-label={t('Replay position')}
                     />
@@ -197,6 +332,47 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
                         {t('Step {{step}} / {{total}}', { step, total })}
                     </span>
                 </div>
+
+                {/* ARCHON: jump by turn. A KeyForge game is a sequence of turns
+                    and this is how anyone describes a game to someone else -
+                    "on my fourth turn" - so it is the navigation the log
+                    always needed. The house is on the button because which
+                    house was called is the decision the turn is about. */}
+                {turns.length > 0 && (
+                    <div className='mb-3'>
+                        <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
+                            {t('Turns')}
+                        </div>
+                        <div className='flex max-h-24 flex-wrap gap-1 overflow-y-auto'>
+                            {turns.map((turn, index) => {
+                                const next = turns[index + 1];
+                                const isCurrent =
+                                    step >= turn.messageIndex &&
+                                    (!next || step < next.messageIndex);
+
+                                return (
+                                    <button
+                                        key={`${turn.round}-${turn.player}-${index}`}
+                                        type='button'
+                                        className={`rounded border px-1.5 py-0.5 text-[0.7rem] ${
+                                            isCurrent
+                                                ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
+                                                : 'border-border/55 text-muted hover:text-foreground'
+                                        }`}
+                                        onClick={() => jumpTo(turn.messageIndex)}
+                                        title={t('{{player}}, turn {{round}}', {
+                                            player: turn.player,
+                                            round: turn.round
+                                        })}
+                                    >
+                                        {turn.round}. {turn.player}
+                                        {turn.house ? ` · ${t(turn.house)}` : ''}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 {/* ARCHON (N1): jump straight to the forges - the only moments
                     in KeyForge that always matter, and the reason scrubbing a
@@ -211,7 +387,7 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
                                 key={`${forge.player}-${forge.messageIndex}-${index}`}
                                 size='sm'
                                 variant='tertiary'
-                                onPress={() => setStep(clamp(forge.messageIndex))}
+                                onPress={() => jumpTo(forge.messageIndex)}
                             >
                                 {t('{{player}} key {{keys}}', {
                                     player: forge.player,
@@ -222,22 +398,37 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
                     </div>
                 )}
 
-                <div className='max-h-[45vh] overflow-y-auto rounded-md border border-border/55 bg-surface-secondary/35 px-3 py-2 text-sm'>
+                <div
+                    ref={logRef}
+                    className='max-h-[45vh] overflow-y-auto rounded-md border border-border/55 bg-surface-secondary/35 px-3 py-2 text-sm'
+                >
                     {total === 0 ? (
                         <p className='text-muted'>{t('This replay has no recorded log.')}</p>
                     ) : (
-                        <Messages messages={shown} onCardMouseOver={noop} onCardMouseOut={noop} />
+                        <Messages
+                            messages={shown}
+                            onCardMouseOver={onCardMouseOver}
+                            onCardMouseOut={onCardMouseOut}
+                        />
                     )}
                 </div>
             </Panel>
 
             {snapshots.length > 0 && (
                 <Panel title={t('Board')} titleAlign='center'>
-                    {replay?.truncated && (
+                    {replay?.thinned && (
                         <p className='mb-2 text-xs text-amber-300'>
                             {t(
-                                'This game ran long enough that board recording stopped part-way; later positions are not available.'
+                                'This game ran long enough that the board is recorded at reduced ' +
+                                    'resolution: the log is complete, but some positions between ' +
+                                    'entries were not kept.'
                             )}
+                        </p>
+                    )}
+
+                    {replay?.truncated && (
+                        <p className='mb-2 text-xs text-amber-300'>
+                            {t('Part of the board recording for this game could not be captured.')}
                         </p>
                     )}
 
@@ -266,11 +457,28 @@ const ReplayViewer = ({ replay, gameId, canShare = false }) => {
                         </div>
                     )}
 
-                    <ReplayBoard board={currentBoard} perspective={perspective} />
+                    <ReplayBoard
+                        board={currentBoard}
+                        cards={cards}
+                        perspective={perspective}
+                        onCardMouseOver={onCardMouseOver}
+                        onCardMouseOut={onCardMouseOut}
+                    />
                 </Panel>
             )}
+
+            {/* ARCHON (N12): the analysis, for Archon+. Locked rather than
+                hidden - the panel explains what it would tell you. */}
+            <ReplayAnalysis gameId={gameId} shareToken={viaShareToken} onJump={jumpTo} />
         </div>
     );
+};
+
+ReplayViewer.propTypes = {
+    canShare: PropTypes.bool,
+    gameId: PropTypes.string,
+    replay: PropTypes.object,
+    shareToken: PropTypes.string
 };
 
 ReplayViewer.displayName = 'ReplayViewer';

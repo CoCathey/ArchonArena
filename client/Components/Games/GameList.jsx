@@ -301,7 +301,10 @@ const GameList = ({ gameFilter = {}, games = [], onJoinOrWatchClick }) => {
                                                         key={`${game.id}-${player.name}`}
                                                         className='flex min-h-11 items-center gap-2 rounded-md border border-border/45 bg-surface-secondary/55 px-2 py-1.5 text-foreground'
                                                     >
-                                                        <Avatar imgPath={player.avatar} />
+                                                        <Avatar
+                                                            cosmetics={player.cosmetics}
+                                                            imgPath={player.avatar}
+                                                        />
                                                         <span className='username'>
                                                             <PlayerName
                                                                 className='hover:text-amber-300'

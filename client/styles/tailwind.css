@@ -572,6 +572,20 @@ pre {
     line-height: 14px;
 }
 
+/* ARCHON (N12): profile cosmetics. Both are dropped under
+   prefers-reduced-motion where the classes that use them are defined. */
+@keyframes cosmetic-shimmer {
+    to {
+        background-position: -200% center;
+    }
+}
+
+@keyframes cosmetic-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 @keyframes glowing {
     from {
         background-color: #749a02;
@@ -2281,6 +2295,100 @@ span.stat-digit {
 @layer components {
     .blocklist td {
         vertical-align: middle !important;
+    }
+
+    /* ARCHON (N12): profile cosmetics.
+       ------------------------------------------------------------------
+       Every class here reads --cosmetic-accent, set inline from the colour
+       the server resolved for that player (see client/cosmetics.js). The
+       fallback is the site amber, so a name still renders if the variable
+       never arrives. Nothing here is generated from player input: the id
+       chooses the class, the class is written down below. */
+
+    .cosmetic-name {
+        --cosmetic-accent: #f5c451;
+    }
+
+    /* Restrained on purpose - a leaderboard row is 28px tall and already
+       carries a rank, an avatar, a rating and a record. */
+    .cosmetic-name-glow {
+        text-shadow: 0 0 6px color-mix(in srgb, var(--cosmetic-accent) 65%, transparent);
+    }
+
+    .cosmetic-name-gradient,
+    .cosmetic-name-shimmer {
+        background-image: linear-gradient(
+            100deg,
+            var(--cosmetic-accent) 0%,
+            color-mix(in srgb, var(--cosmetic-accent) 25%, #ffffff) 50%,
+            var(--cosmetic-accent) 100%
+        );
+        background-clip: text;
+        -webkit-background-clip: text;
+        color: transparent;
+    }
+
+    .cosmetic-name-shimmer {
+        background-size: 200% auto;
+        animation: cosmetic-shimmer 4s linear infinite;
+    }
+
+    /* A frame is a 2px ring drawn as a padded background behind the avatar,
+       so all six share one structure and only the fill changes. */
+    .cosmetic-frame {
+        --cosmetic-accent: #f5c451;
+        @apply relative inline-flex shrink-0 rounded-full p-[2px];
+    }
+
+    .cosmetic-frame > * {
+        @apply relative z-10;
+    }
+
+    .cosmetic-frame-brass {
+        background: linear-gradient(140deg, #a97142, #e0b571 45%, #7a4f2a);
+    }
+    .cosmetic-frame-aember {
+        background: linear-gradient(140deg, #f5c451, #fff3c4 45%, #c98f1d);
+    }
+    .cosmetic-frame-shadow {
+        background: linear-gradient(140deg, #4b5563, #cbd5e1 45%, #334155);
+    }
+    .cosmetic-frame-verdant {
+        background: linear-gradient(140deg, #15803d, #86efac 45%, #14532d);
+    }
+    .cosmetic-frame-crimson {
+        background: linear-gradient(140deg, #9f1239, #fb7185 45%, #7f1d1d);
+    }
+
+    /* The accent-following one. The gradient spins on a pseudo-element rather
+       than on the frame itself, so the avatar inside it stays still. */
+    .cosmetic-frame-prismatic {
+        @apply overflow-hidden;
+        background: var(--cosmetic-accent);
+    }
+
+    .cosmetic-frame-prismatic::before {
+        content: '';
+        position: absolute;
+        inset: -50%;
+        background: conic-gradient(
+            from 0deg,
+            var(--cosmetic-accent),
+            #ffffff,
+            var(--cosmetic-accent),
+            color-mix(in srgb, var(--cosmetic-accent) 40%, #7dd3fc),
+            var(--cosmetic-accent)
+        );
+        animation: cosmetic-spin 6s linear infinite;
+    }
+
+    /* Honoured here rather than in JS so it holds for any page that renders a
+       cosmetic without going through client/cosmetics.js. */
+    @media (prefers-reduced-motion: reduce) {
+        .cosmetic-name-shimmer,
+        .cosmetic-frame-prismatic::before {
+            animation: none;
+        }
     }
 
     .role-admin {

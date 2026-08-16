@@ -659,6 +659,13 @@ class Game extends EventEmitter {
         this.finishedAt = new Date();
         this.winReason = reason;
 
+        // ARCHON: the winning position, captured before the recording is handed
+        // over. Every other snapshot is taken while the game is still running,
+        // so without this one a replay ends on the board as it stood before the
+        // deciding key was forged - the last frame never showed the win, and
+        // the forge markers were always one short of the three keys.
+        this.recordBoardSnapshot({ final: true });
+
         this.router.gameWon(this, reason, winner);
 
         this.queueStep(new GameWonPrompt(this, winner));
@@ -1734,6 +1741,18 @@ class Game extends EventEmitter {
 
     continue() {
         this.pipeline.continue();
+
+        // ARCHON: record the board here, where the engine itself settles,
+        // rather than only from the game node's broadcast.
+        //
+        // Capture used to hang entirely off `GameServer.sendGameState`, which
+        // made the recording a property of socket traffic: anything that
+        // advanced the game without a broadcast left a hole, and nothing that
+        // drives the engine directly - the scenario runner, the test harness -
+        // recorded at all, so no test could ever prove a real game produces a
+        // usable replay. The node still calls it too; the call self-throttles
+        // to log advances, so recording from both is one snapshot, not two.
+        this.recordBoardSnapshot();
     }
 
     /*
@@ -1789,6 +1808,131 @@ class Game extends EventEmitter {
     }
 
     /**
+     * ARCHON: the drawable identity of a card - the part that does not change
+     * while the game runs, and the only part the replay viewer needs to put a
+     * picture on the board.
+     *
+     * Everything the live client uses to make a card interactive (its menu,
+     * whether it can be played, selection state, the ten-language locale block)
+     * is dropped. A recording is read, not played.
+     *
+     * @param {object} summary a card summary from `Card.getSummary`
+     */
+    static replayCardIdentity(summary) {
+        const identity = {
+            id: summary.id,
+            name: summary.name,
+            image: summary.image,
+            number: summary.number,
+            house: summary.printedHouse,
+            type: summary.type
+        };
+
+        // The printed numbers the card renderer draws on the card face. Printed
+        // values do not change, so they belong here rather than in every frame;
+        // power under an effect is recorded per frame instead.
+        if (summary.powerPrinted) {
+            identity.power = summary.powerPrinted;
+        }
+
+        if (summary.armorPrinted) {
+            identity.armor = summary.armorPrinted;
+        }
+
+        if (summary.cardPrintedAmber) {
+            identity.amber = summary.cardPrintedAmber;
+        }
+
+        // Only when true/present: an absent key costs nothing, a `false` costs
+        // its name in every snapshot that mentions the card.
+        if (summary.facedown) {
+            identity.facedown = true;
+            identity.cardback = summary.cardback;
+        }
+
+        if (summary.maverick) {
+            identity.maverick = summary.maverick;
+        }
+
+        if (summary.anomaly) {
+            identity.anomaly = summary.anomaly;
+        }
+
+        if (Array.isArray(summary.enhancements) && summary.enhancements.length > 0) {
+            identity.enhancements = summary.enhancements;
+        }
+
+        return identity;
+    }
+
+    /**
+     * The index of a card identity in the recording's card table, adding it if
+     * this is the first time it has been seen.
+     *
+     * Keyed by the identity itself rather than by the card's uuid, so a card
+     * whose identity changes mid-game (a token creature, anything under
+     * `copyCard`) gets a second entry and the snapshots either side of the
+     * change each point at the right one.
+     */
+    indexReplayCard(summary) {
+        if (!this.replayCards) {
+            this.replayCards = [];
+            this.replayCardKeys = new Map();
+        }
+
+        const identity = Game.replayCardIdentity(summary);
+        const key = JSON.stringify(identity);
+        const existing = this.replayCardKeys.get(key);
+
+        if (existing !== undefined) {
+            return existing;
+        }
+
+        const index = this.replayCards.length;
+
+        this.replayCards.push(identity);
+        this.replayCardKeys.set(key, index);
+
+        return index;
+    }
+
+    /**
+     * A card in play, as a snapshot records it: a reference into the card table
+     * plus only the state that actually changes.
+     */
+    replayCardInPlay(summary) {
+        const card = { card: this.indexReplayCard(summary), uuid: summary.uuid };
+
+        if (summary.exhausted) {
+            card.exhausted = true;
+        }
+
+        if (summary.stunned) {
+            card.stunned = true;
+        }
+
+        if (summary.taunt) {
+            card.taunt = true;
+        }
+
+        // Power under effects, and only when it differs from the printed value
+        // the card table already carries.
+        if (summary.modifiedPower != null && summary.modifiedPower !== summary.powerPrinted) {
+            card.power = summary.modifiedPower;
+        }
+
+        if (summary.tokens && Object.keys(summary.tokens).length > 0) {
+            card.tokens = summary.tokens;
+        }
+
+        if (Array.isArray(summary.childCards) && summary.childCards.length > 0) {
+            card.upgrades = summary.childCards.map((child) => this.replayCardInPlay(child));
+        }
+
+        return card;
+    }
+
+    /**
      * ARCHON: a compact, spectator-safe picture of the board right now, for the
      * replay viewer.
      *
@@ -1797,10 +1941,25 @@ class Game extends EventEmitter {
      * which would be duplicated into every snapshot. This is only what is
      * required to draw the board.
      *
-     * Every card list is rendered from an AnonymousSpectator's perspective, so
-     * hidden information (hands, deck order) is redacted by the same code path
-     * that protects live spectators - a replay can never reveal more than
-     * watching the game would have.
+     * ## Why the piles are references rather than card summaries
+     *
+     * They used to be full `getSummary` output, which is what the live client
+     * receives - around 1.1 KB per card, most of it a ten-language locale block
+     * and interaction state a recording can never use. A mid-game snapshot came
+     * to 27 KB, and a game that hit the snapshot cap produced a 16 MB
+     * recording: eight times the 2 MB store limit, so `saveReplay` skipped it.
+     * Every replay of a normal-length game was being thrown away at the point
+     * of storage, which is why "replays don't work" - the capture worked, the
+     * store refused it, and the only trace was one warn line in the node's log.
+     *
+     * Static piles are therefore arrays of indices into the recording's card
+     * table, and cards in play carry a reference plus only their live state.
+     * The same board draws from roughly a tenth of the bytes.
+     *
+     * Every card list is still rendered from an AnonymousSpectator's
+     * perspective, so hidden information (hands, deck order, archived cards) is
+     * redacted by the same code path that protects live spectators - a replay
+     * can never reveal more than watching the game would have.
      */
     getBoardSnapshot() {
         const spectator = new AnonymousSpectator();
@@ -1809,20 +1968,33 @@ class Game extends EventEmitter {
             round: this.round,
             phase: this.currentPhase,
             activePlayer: this.activePlayer ? this.activePlayer.name : undefined,
-            players: this.getPlayers().map((player) => ({
-                name: player.name,
-                activeHouse: player.activeHouse,
-                houses: player.houses,
-                stats: player.getStats(),
-                numDeckCards: player.deck.length,
-                numHandCards: player.hand.length,
-                cardPiles: {
-                    cardsInPlay: player.getSummaryForCardList(player.cardsInPlay, spectator),
-                    discard: player.getSummaryForCardList(player.discard, spectator),
-                    purged: player.getSummaryForCardList(player.purged, spectator),
-                    archives: player.getSummaryForCardList(player.archives, spectator)
-                }
-            }))
+            players: this.getPlayers().map((player) => {
+                const pile = (cards) =>
+                    player
+                        .getSummaryForCardList(cards, spectator)
+                        .map((card) => this.indexReplayCard(card));
+
+                return {
+                    name: player.name,
+                    activeHouse: player.activeHouse,
+                    houses: player.houses,
+                    stats: player.getStats(),
+                    // ARCHON: the player's own turn counter, so analysis can
+                    // talk about "your fourth turn" rather than about the
+                    // shared round number, which advances once for both.
+                    turn: player.turn,
+                    numDeckCards: player.deck.length,
+                    numHandCards: player.hand.length,
+                    cardPiles: {
+                        cardsInPlay: player
+                            .getSummaryForCardList(player.cardsInPlay, spectator)
+                            .map((card) => this.replayCardInPlay(card)),
+                        discard: pile(player.discard),
+                        purged: pile(player.purged),
+                        archives: pile(player.archives)
+                    }
+                };
+            })
         };
     }
 
@@ -1832,17 +2004,31 @@ class Game extends EventEmitter {
      * at any point in the play-by-play.
      *
      * Only records when the log has actually advanced - the game state is
-     * broadcast far more often than anything visible changes - and stops at a
-     * hard cap, flagging that it did rather than silently truncating.
+     * broadcast far more often than anything visible changes.
+     *
+     * At the cap the recording is HALVED rather than cut off. Stopping dead
+     * meant a long game had a board for its opening and nothing at all for the
+     * half that decided it, which is the half anyone opens a replay to see.
+     * Dropping every other frame instead costs resolution evenly across the
+     * whole game and keeps recording to the end; `thinned` says it happened.
+     *
+     * `final` is for the one snapshot that has to be taken after the game is
+     * over: the winning position. Without it a recording stops at the board as
+     * it stood BEFORE the last key was forged, so the viewer's last frame never
+     * shows the win and the forge markers are always one short. It bypasses the
+     * finished guard for that single frame.
+     *
+     * @param {{final?: boolean}} [options]
      */
-    recordBoardSnapshot() {
-        if (!this.started || this.finishedAt) {
+    recordBoardSnapshot({ final = false } = {}) {
+        if (!this.started || (this.finishedAt && !final)) {
             return;
         }
 
         if (!this.replaySnapshots) {
             this.replaySnapshots = [];
             this.replayTruncated = false;
+            this.replayThinned = false;
         }
 
         const messageIndex = this.gameChat ? this.gameChat.messages.length : 0;
@@ -1853,9 +2039,12 @@ class Game extends EventEmitter {
         }
 
         if (this.replaySnapshots.length >= Game.MAX_REPLAY_SNAPSHOTS) {
-            this.replayTruncated = true;
-
-            return;
+            // Keep the even-indexed frames, which keeps the first; the newest
+            // is about to be pushed on the end.
+            this.replaySnapshots = this.replaySnapshots.filter(
+                (snapshot, index) => index % 2 === 0
+            );
+            this.replayThinned = true;
         }
 
         try {
@@ -1876,20 +2065,47 @@ class Game extends EventEmitter {
      */
     getReplay() {
         return {
-            version: 2,
+            // v3 adds the final winning snapshot, each player's deck name,
+            // houses and end state, and who went first. A v2 recording is still
+            // readable - the viewer and the analysis both treat everything
+            // added here as optional.
+            version: 3,
             gameId: this.id,
             gameFormat: this.gameFormat,
             startedAt: this.startedAt,
             finishedAt: this.finishedAt,
             winner: this.winner ? this.winner.name : undefined,
             winReason: this.winReason,
+            // ARCHON: who took the first turn. Turn order decides a great deal
+            // in KeyForge and it is the first thing anyone asks of a finished
+            // game, so it travels with the recording rather than having to be
+            // joined back to GamePlayers.
+            firstPlayer: this.firstPlayer ? this.firstPlayer.name : undefined,
+            rounds: this.round,
             players: this.getPlayers().map((player) => ({
                 name: player.name,
-                deck: player.deckData ? player.deckData.identity : undefined
+                deck: player.deckData ? player.deckData.identity : undefined,
+                // The name is what a reader recognises; the identity is what
+                // joins back to a Decks row. Both, because a shared replay is
+                // rendered standalone with no database behind it.
+                deckName: player.deckData ? player.deckData.name : undefined,
+                expansion: player.deckData ? player.deckData.expansion : undefined,
+                houses: player.houses,
+                keys: player.keys,
+                amber: player.amber,
+                chains: player.chains,
+                turns: player.turn
             })),
             messages: this.gameChat ? this.gameChat.messages : [],
+            // The card table the snapshots' piles index into. Written once for
+            // the whole recording rather than repeated in every frame.
+            cards: this.replayCards || [],
             snapshots: this.replaySnapshots || [],
-            truncated: !!this.replayTruncated
+            truncated: !!this.replayTruncated,
+            // The game outran the snapshot budget and the board is recorded at
+            // half resolution (or a quarter, and so on). The log is complete
+            // either way; only the board frames between entries are missing.
+            thinned: !!this.replayThinned
         };
     }
 

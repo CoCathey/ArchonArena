@@ -24,8 +24,14 @@ import { amountFromCents, centsFromAmount } from '../Components/Tournaments/priz
 // ARCHON: the picker offers what the event will accept - see the module.
 import { buildTournamentDeckFilter } from '../Components/Tournaments/tournamentDeckFilter';
 import { Constants } from '../constants';
-import { useGetEventDetailQuery, useTournamentActionMutation } from '../redux/api';
+import {
+    useGetEventDetailQuery,
+    useTournamentActionMutation,
+    useExportTournamentMutation
+} from '../redux/api';
 import { serverMessage, serverPayload } from '../redux/apiError';
+// ARCHON (N12): organiser exports are a membership capability.
+import { CAPABILITIES, hasCapability } from '../membership';
 
 const formatNames = {
     swiss: 'Swiss',
@@ -49,6 +55,71 @@ const Badge = ({ children, tone = 'default', title }) => (
     </span>
 );
 Badge.displayName = 'TournamentBadge';
+
+/**
+ * ARCHON (N12): take the event away as a spreadsheet - the first thing behind
+ * ORGANIZER_TOOLS.
+ *
+ * The download is assembled here rather than being a plain link, because the
+ * export endpoint is JWT-authed and an <a href> carries no Authorization
+ * header. So: fetch the CSV through the same authenticated client as everything
+ * else, wrap it in a Blob, and click a link at it. The object URL is revoked
+ * immediately afterwards - the browser has already read it by then, and leaving
+ * it alive pins the whole file in memory for the life of the tab.
+ */
+const EventExports = ({ tournamentId, t }) => {
+    const [exportTournament, { isLoading }] = useExportTournamentMutation();
+
+    const download = async (dataset) => {
+        let csv;
+
+        try {
+            csv = await exportTournament({ id: tournamentId, dataset }).unwrap();
+        } catch (err) {
+            toast.danger(serverMessage(err, t('Could not export that')));
+
+            return;
+        }
+
+        // The BOM is not decoration: without it Excel reads a UTF-8 CSV as the
+        // local codepage, and every player with a non-ASCII name is mangled in
+        // the file their organiser is about to publish.
+        const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+
+        link.href = url;
+        link.download = `tournament-${tournamentId}-${dataset}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    };
+
+    return (
+        <div className='flex flex-wrap items-center gap-2 text-xs'>
+            <span className='text-muted'>{t('Export')}:</span>
+            {[
+                ['standings', t('Standings')],
+                ['pairings', t('Pairings')],
+                ['players', t('Entry list')]
+            ].map(([dataset, label]) => (
+                <button
+                    className='text-muted underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50'
+                    disabled={isLoading}
+                    key={dataset}
+                    type='button'
+                    onClick={() => download(dataset)}
+                >
+                    {label}
+                </button>
+            ))}
+            <span className='text-muted'>{t('(CSV)')}</span>
+        </div>
+    );
+};
+
+EventExports.displayName = 'EventExports';
 
 /**
  * ARCHON: tournament page (Phase 7): registration with join codes and
@@ -904,6 +975,17 @@ const TournamentDetail = () => {
                                     {t('Add')}
                                 </HeroButton>
                             </div>
+                        )}
+
+                        {/* ARCHON (N12): ORGANIZER_TOOLS. Rendered only for
+                            memberships that include it - not shown-and-locked -
+                            because the rest of this block is an organiser's
+                            working controls, and an upsell wedged between "add
+                            judge" and "post announcement" is an advert in a
+                            workspace. The membership page is where the tier is
+                            sold. */}
+                        {hasCapability(user, CAPABILITIES.ORGANIZER_TOOLS) && (
+                            <EventExports tournamentId={tournament.id} t={t} />
                         )}
                     </div>
                 )}

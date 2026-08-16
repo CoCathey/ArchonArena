@@ -11,7 +11,7 @@ import {
     View
 } from 'react-native';
 import { createTournament } from '../../src/api/tournaments';
-import { GAME_FORMATS } from '../../src/game/gameFormats';
+import { EVENT_GAME_FORMATS } from '../../src/game/gameFormats';
 import { useAuthStore } from '../../src/stores/authStore';
 import { colors, radius, spacing } from '../../src/theme';
 import { Button, ErrorBanner, TextField } from '../../src/ui/primitives';
@@ -90,7 +90,10 @@ export default function NewTournamentScreen() {
     const [name, setName] = useState(`${username ?? 'My'}'s event`);
     const [description, setDescription] = useState('');
     const [format, setFormat] = useState<(typeof FORMATS)[number]['key']>('swiss');
-    const [gameFormat, setGameFormat] = useState('normal');
+    // 'archon', not 'normal': events and the lobby name standard play
+    // differently, and the server's event whitelist has never accepted the
+    // lobby's word for it.
+    const [gameFormat, setGameFormat] = useState('archon');
     const [pacing, setPacing] = useState<(typeof PACING)[number]['key']>('live');
     const [roundCount, setRoundCount] = useState('4');
     const [bestOf, setBestOf] = useState('1');
@@ -195,7 +198,7 @@ export default function NewTournamentScreen() {
 
                 <Text style={styles.sectionLabel}>Game mode</Text>
                 <Choice
-                    options={GAME_FORMATS.map((entry) => ({
+                    options={EVENT_GAME_FORMATS.map((entry) => ({
                         key: entry.name,
                         label: entry.label
                     }))}

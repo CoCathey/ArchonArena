@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import { useTranslation } from 'react-i18next';
 
 import { TIERS } from '../../membership';
+import { keyFinishClass } from '../../cosmetics';
 
 /**
  * ARCHON (N12): the mark shown next to a player's name.
@@ -78,15 +79,21 @@ KeyGlyph.propTypes = {
  * @param {object} props
  * @param {string} [props.tier] tier id; anything not a paid tier renders nothing
  * @param {string} [props.tierName] display name, used for the tooltip
+ * @param {object} [props.cosmetics] chosen cosmetics; only the key finish is read
  * @param {boolean} [props.withLabel] also show the tier name in words
  */
-const PlayerBadge = ({ tier, tierName, withLabel = false }) => {
+const PlayerBadge = ({ tier, tierName, cosmetics, withLabel = false }) => {
     const { t } = useTranslation();
     const style = TIER_STYLE[tier];
 
     if (!style) {
         return null;
     }
+
+    // ARCHON (N12): the chosen finish is applied ON TOP of the tier's colour and
+    // shape, never instead of them - the key still has to say which tier at a
+    // glance, which is the entire reason it is a key and not a sticker.
+    const finish = keyFinishClass(cosmetics);
 
     const label = tierName || tier;
     // Said in full for a screen reader, because a key glyph on its own says
@@ -95,7 +102,7 @@ const PlayerBadge = ({ tier, tierName, withLabel = false }) => {
 
     return (
         <span
-            className={`inline-flex items-center gap-1 ${style.className}`}
+            className={`inline-flex items-center gap-1 ${style.className} ${finish}`.trim()}
             title={description}
             aria-label={description}
             role='img'
@@ -109,6 +116,7 @@ const PlayerBadge = ({ tier, tierName, withLabel = false }) => {
 PlayerBadge.displayName = 'PlayerBadge';
 
 PlayerBadge.propTypes = {
+    cosmetics: PropTypes.object,
     tier: PropTypes.string,
     tierName: PropTypes.string,
     withLabel: PropTypes.bool

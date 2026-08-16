@@ -4,6 +4,9 @@ const EventEmitter = require('events');
 
 const logger = require('../log');
 const { membershipFromDbRow } = require('./membership/mapRow');
+// ARCHON (N12): profile cosmetics, loaded with the user so a lobby seat can
+// render them without a lookup per player.
+const { cosmeticsFromDbRow } = require('./community/ProfileCosmeticsService');
 const User = require('../models/User');
 const db = require('../db');
 const { expand } = require('../Array');
@@ -856,6 +859,29 @@ class UserService extends EventEmitter {
         } catch (err) {
             logger.warn('Failed to lookup membership for user', err);
             user.membership = undefined;
+        }
+
+        // ARCHON (N12): the account's cosmetic choices, loaded next to the
+        // membership because the two are only meaningful together - whether a
+        // stored choice is honoured is decided against the entitlements the row
+        // above resolves to, so a lapsed member's frame stops rendering without
+        // anything being rewritten. Loading it here also keeps
+        // User.getShortSummary synchronous, which matters because it runs for
+        // every player in every lobby broadcast.
+        //
+        // Same best-effort contract: a missing table or a failed query leaves
+        // the account looking like every other account, which is exactly what
+        // the free tier looks like.
+        try {
+            const cosmetics = await db.query(
+                'SELECT * FROM "ProfileCosmetics" WHERE "UserId" = $1',
+                [user.id]
+            );
+
+            user.cosmetics = cosmeticsFromDbRow(cosmetics && cosmetics[0]);
+        } catch (err) {
+            logger.warn('Failed to lookup profile cosmetics for user', err);
+            user.cosmetics = undefined;
         }
     }
 

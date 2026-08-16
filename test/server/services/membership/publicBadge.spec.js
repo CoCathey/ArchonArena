@@ -165,4 +165,92 @@ describe('BadgeService', function () {
 
         await expect(new BadgeService(db).getBadges(['alice'])).resolves.toEqual({});
     });
+
+    /**
+     * ARCHON (N12): the name effect travels with the badge, so every list that
+     * renders a name gets one without its own query.
+     */
+    describe('cosmetics', function () {
+        const patron = (overrides) => ({
+            Username: 'patron',
+            Roles: [],
+            Tier: TIER_IDS.SUPPORTER,
+            Status: 'active',
+            ...overrides
+        });
+
+        it('carries the name effect and the colour it is drawn in', async function () {
+            const badges = await service([
+                patron({ Accent: 'logos', NameEffect: 'glow' })
+            ]).getBadges(['patron']);
+
+            expect(badges.patron.cosmetics.nameEffect).toBe('glow');
+            expect(badges.patron.cosmetics.accentHex).toMatch(/^#[0-9a-f]{6}$/i);
+        });
+
+        it('sends nothing for an effect the account may no longer use', async function () {
+            const badges = await service([
+                patron({ Status: 'former_patron', Accent: 'logos', NameEffect: 'glow' })
+            ]).getBadges(['patron']);
+
+            expect(badges.patron).toBeUndefined();
+        });
+
+        it('carries the key finish, the slot folded in from the parallel build', async function () {
+            const badges = await service([
+                patron({ Tier: TIER_IDS.VAULT_MASTER, BadgeFinish: 'radiant' })
+            ]).getBadges(['patron']);
+
+            expect(badges.patron.cosmetics.badgeFinish).toBe('radiant');
+        });
+
+        it('shows an admin the cosmetics they chose, but still not a tier', async function () {
+            // publicBadge strips the admin override before deciding the tier,
+            // because that is a claim about money. A frame is not, and an admin
+            // who cannot see the one they picked would file a bug.
+            const badges = await service([
+                { Username: 'boss', Roles: ['Admin'], Tier: null, Status: null, Frame: 'prismatic' }
+            ]).getBadges(['boss']);
+
+            expect(badges.boss.tier).toBe(TIER_IDS.FREE);
+            expect(badges.boss.role).toBe('admin');
+            expect(badges.boss.cosmetics.frame).toBe('prismatic');
+        });
+
+        it('sends nothing when only an accent is set', async function () {
+            // An accent alone colours nothing in a list, and this payload is
+            // one row per name on every page that shows names.
+            const badges = await service([patron({ Accent: 'logos' })]).getBadges(['patron']);
+
+            expect(badges.patron.cosmetics).toBeUndefined();
+        });
+
+        it('still returns badges when the cosmetics table is missing', async function () {
+            // Losing every badge on the site because a decoration table has
+            // not been migrated is a far worse outcome than losing the
+            // decoration, so the join is dropped and the query retried.
+            let calls = 0;
+            const db = {
+                query: vi.fn(async (sql) => {
+                    calls += 1;
+
+                    if (sql.includes('ProfileCosmetics')) {
+                        throw new Error('relation "ProfileCosmetics" does not exist');
+                    }
+
+                    return [patron()];
+                })
+            };
+            const badgeService = new BadgeService(db);
+            const badges = await badgeService.getBadges(['patron']);
+
+            expect(badges.patron.tier).toBe(TIER_IDS.SUPPORTER);
+            expect(calls).toBe(2);
+
+            // And it stops asking, so one deployment without the table costs
+            // one failed query rather than one per page.
+            await badgeService.getBadges(['patron']);
+            expect(calls).toBe(3);
+        });
+    });
 });

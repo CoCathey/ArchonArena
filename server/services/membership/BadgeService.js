@@ -38,13 +38,71 @@ const BADGE_ROLE_NAMES = [
 class BadgeService {
     constructor(db = require('../../db')) {
         this.db = db;
+        // Flipped off permanently for this process the first time the
+        // cosmetics join fails, so a deployment without that table pays for
+        // one failed query rather than one per page.
+        this.withCosmetics = true;
     }
 
     /**
-     * @param {string[]} usernames
-     * @returns {Promise<Object<string, {role: string, tier: string, tierName: string|null}>>}
-     *          keyed by lowercased username; players with nothing to show are omitted
+     * Roles, membership and (optionally) cosmetics for a batch of names, in one
+     * round trip.
+     *
+     * The role aggregate is filtered to the handful that produce a badge, so
+     * this never drags a user's whole permission set onto a public endpoint.
      */
+    async query(withCosmetics, wanted) {
+        // Only the slots that can be drawn beside a name - see PUBLIC_SLOTS
+        // in cosmetics.js. A banner has nowhere to go in a list.
+        const cosmeticColumns = withCosmetics
+            ? ', pc."Accent", pc."Frame", pc."NameEffect", pc."BadgeFinish"'
+            : '';
+        const cosmeticJoin = withCosmetics
+            ? 'LEFT JOIN "ProfileCosmetics" pc ON pc."UserId" = u."Id" '
+            : '';
+        const cosmeticGroup = cosmeticColumns;
+
+        return this.db.query(
+            'SELECT u."Username", ' +
+                '  COALESCE(array_agg(r."Name") FILTER (WHERE r."Name" IS NOT NULL), ' +
+                '    \'{}\') AS "Roles", ' +
+                '  m."Tier", m."Status", m."ExpiresAt", m."GrantedTier", m."GrantedUntil"' +
+                cosmeticColumns +
+                ' FROM "Users" u ' +
+                'LEFT JOIN "UserRoles" ur ON ur."UserId" = u."Id" ' +
+                'LEFT JOIN "Roles" r ON r."Id" = ur."RoleId" AND r."Name" = ANY($2) ' +
+                'LEFT JOIN "Memberships" m ON m."UserId" = u."Id" ' +
+                cosmeticJoin +
+                'WHERE lower(u."Username") = ANY($1) ' +
+                '  AND u."Disabled" IS NOT TRUE AND u."Verified" IS TRUE ' +
+                'GROUP BY u."Username", m."Tier", m."Status", m."ExpiresAt", ' +
+                '  m."GrantedTier", m."GrantedUntil"' +
+                cosmeticGroup,
+            [wanted, BADGE_ROLE_NAMES]
+        );
+    }
+
+    /**
+     * The stored cosmetic choices on a row, in the shape the catalogue reads.
+     *
+     * Deliberately NOT resolved here: `publicBadge` resolves them against the
+     * same entitlements it derives the tier from, so there is one place that
+     * decides when a lapsed pledge stops rendering rather than two that can
+     * disagree.
+     */
+    storedCosmetics(row) {
+        if (!this.withCosmetics) {
+            return null;
+        }
+
+        return {
+            accent: row.Accent,
+            frame: row.Frame,
+            nameEffect: row.NameEffect,
+            badgeFinish: row.BadgeFinish
+        };
+    }
+
     async getBadges(usernames) {
         const wanted = [
             ...new Set(
@@ -61,25 +119,7 @@ class BadgeService {
         let rows;
 
         try {
-            rows = await this.db.query(
-                'SELECT u."Username", ' +
-                    // Roles and membership in one round trip. The role
-                    // aggregate is filtered to the handful that produce a
-                    // badge, so this never drags a user's whole permission set
-                    // onto a public endpoint.
-                    '  COALESCE(array_agg(r."Name") FILTER (WHERE r."Name" IS NOT NULL), ' +
-                    '    \'{}\') AS "Roles", ' +
-                    '  m."Tier", m."Status", m."ExpiresAt", m."GrantedTier", m."GrantedUntil" ' +
-                    'FROM "Users" u ' +
-                    'LEFT JOIN "UserRoles" ur ON ur."UserId" = u."Id" ' +
-                    'LEFT JOIN "Roles" r ON r."Id" = ur."RoleId" AND r."Name" = ANY($2) ' +
-                    'LEFT JOIN "Memberships" m ON m."UserId" = u."Id" ' +
-                    'WHERE lower(u."Username") = ANY($1) ' +
-                    '  AND u."Disabled" IS NOT TRUE AND u."Verified" IS TRUE ' +
-                    'GROUP BY u."Username", m."Tier", m."Status", m."ExpiresAt", ' +
-                    '  m."GrantedTier", m."GrantedUntil"',
-                [wanted, BADGE_ROLE_NAMES]
-            );
+            rows = await this.query(this.withCosmetics, wanted);
         } catch (err) {
             // A page of names with no badges is a page that still works. This
             // endpoint is decoration; it must never be the reason a roster
@@ -87,24 +127,48 @@ class BadgeService {
             // deployment that has not run the migration.
             logger.warn('Failed to look up player badges', err);
 
-            return {};
+            if (!this.withCosmetics) {
+                return {};
+            }
+
+            // ARCHON (N12): cosmetics are the newest join here, so on a
+            // deployment that has not run that migration they are the likely
+            // cause - and losing every badge on the site because a decoration
+            // table is missing is a far worse outcome than losing the
+            // decoration. Retry without them, once, and stop asking.
+            this.withCosmetics = false;
+
+            try {
+                rows = await this.query(false, wanted);
+            } catch (retryErr) {
+                logger.warn('Failed to look up player badges without cosmetics', retryErr);
+
+                return {};
+            }
         }
 
         const badges = {};
 
         for (const row of rows || []) {
+            const permissions = permissionsFromRoleNames(row.Roles);
+            const membership = membershipFromDbRow({
+                Tier: row.Tier,
+                Status: row.Status,
+                ExpiresAt: row.ExpiresAt,
+                GrantedTier: row.GrantedTier,
+                GrantedUntil: row.GrantedUntil
+            });
+            // ARCHON (N12): cosmetics ride along with the badge, so every list
+            // that renders a name gets them without a second lookup. publicBadge
+            // resolves them against what the account may currently use, which
+            // is what stops a shimmer on the day the pledge does.
             const badge = publicBadge({
-                permissions: permissionsFromRoleNames(row.Roles),
-                membership: membershipFromDbRow({
-                    Tier: row.Tier,
-                    Status: row.Status,
-                    ExpiresAt: row.ExpiresAt,
-                    GrantedTier: row.GrantedTier,
-                    GrantedUntil: row.GrantedUntil
-                })
+                permissions,
+                membership,
+                cosmetics: this.storedCosmetics(row)
             });
 
-            if (badge.role === 'user' && badge.tier === TIER_IDS.FREE) {
+            if (badge.role === 'user' && badge.tier === TIER_IDS.FREE && !badge.cosmetics) {
                 continue;
             }
 

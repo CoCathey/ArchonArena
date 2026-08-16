@@ -1,5 +1,6 @@
 const { resolveEntitlements } = require('./entitlements');
 const { TIER_IDS } = require('./tiers');
+const { publicCosmetics } = require('./cosmetics');
 
 /**
  * ARCHON (N12): what other people may see about someone's membership.
@@ -40,16 +41,23 @@ const ROLE_BY_PRIORITY = [
  * @property {string} role     admin | winner | previouswinner | contributor | supporter | user
  * @property {string} tier     the tier id, 'free' when there is nothing to show
  * @property {string|null} tierName its display name, or null at free
+ * @property {object} [cosmetics] chosen cosmetic slots the account may still use
  */
 
 /**
  * @param {object} params
  * @param {object} [params.permissions] mapped permissions (UserService.mapPermissions shape)
  * @param {object} [params.membership] the Memberships row, already camelCased
+ * @param {object} [params.cosmetics] the account's stored cosmetic choices
  * @param {Date} [params.now]
  * @returns {PublicBadge}
  */
-function publicBadge({ permissions = {}, membership = null, now = new Date() } = {}) {
+function publicBadge({
+    permissions = {},
+    membership = null,
+    cosmetics = null,
+    now = new Date()
+} = {}) {
     // eslint-disable-next-line no-unused-vars
     const { isAdmin, ...withoutAdmin } = permissions || {};
     const entitlements = resolveEntitlements({
@@ -73,10 +81,29 @@ function publicBadge({ permissions = {}, membership = null, now = new Date() } =
         role = 'supporter';
     }
 
+    // Resolved against live entitlements, which is what makes a cosmetic stop
+    // the day the membership that bought it lapses, without anybody sweeping
+    // the table. The stored choice survives; only its visibility ends.
+    //
+    // Note these are NOT the admin-stripped entitlements the tier came from.
+    // The tier is a claim about money and must not be asserted for an admin who
+    // does not pay; a frame or a key finish asserts nothing of the kind, and
+    // resolving it without the override produces the genuinely confusing
+    // outcome instead - an admin picks a finish in an editor that offers it,
+    // saves successfully, and then cannot find it next to their own name. Same
+    // rule the profile page follows (PlayerProfileService.getIdentity).
+    const visible = publicCosmetics(
+        cosmetics,
+        resolveEntitlements({ user: { permissions }, membership, now })
+    );
+
     return {
         role,
         tier: paid ? entitlements.tierId : TIER_IDS.FREE,
-        tierName: paid ? entitlements.tierName : null
+        tierName: paid ? entitlements.tierName : null,
+        // Omitted entirely rather than sent as an empty object: this rides on a
+        // batched public lookup that already drops accounts with nothing to say.
+        ...(visible ? { cosmetics: visible } : {})
     };
 }
 
