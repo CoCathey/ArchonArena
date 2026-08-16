@@ -41,17 +41,7 @@ const NodeAdmin = () => {
     const columns = useMemo(
         () => [
             { accessorKey: 'name', header: 'Node Name' },
-            {
-                accessorKey: 'numGames',
-                header: 'Num Games',
-                // `!= null` rather than a truthiness test: a draining node
-                // advertises maxGames 0, and that is precisely the node whose
-                // "3" needs to read "3 / 0" - it is full and refusing games.
-                cell: ({ row }) =>
-                    row.original.maxGames != null
-                        ? `${row.original.numGames} / ${row.original.maxGames}`
-                        : row.original.numGames
-            },
+            { accessorKey: 'numGames', header: 'Num Games' },
             { accessorKey: 'status', header: 'Status' },
             { accessorKey: 'version', header: 'Version' },
             {
@@ -65,20 +55,12 @@ const NodeAdmin = () => {
                             variant='tertiary'
                             onClick={(event) => onToggleNodeClick(row.original, event)}
                         >
-                            {/* Labelled from the flag this button flips, not
-                                from the status: a draining or disconnected node
-                                is not disabled, and "Enable" described neither
-                                its state nor what the click would do. */}
-                            {row.original.disabled ? 'Enable' : 'Disable'}
+                            {row.original.status === 'active' ? 'Disable' : 'Enable'}
                         </Button>
                         <Button
                             type='button'
                             size='sm'
                             variant='tertiary'
-                            isDisabled={
-                                row.original.draining || row.original.status === 'disconnected'
-                            }
-                            title='Stops taking new games, waits for the games in progress to finish, then restarts'
                             onClick={(event) => onRestartNodeClick(row.original, event)}
                         >
                             Restart

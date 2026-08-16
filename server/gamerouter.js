@@ -80,7 +80,7 @@ class GameRouter extends EventEmitter {
         let returnedWorker;
         for (const worker of Object.values(this.workers)) {
             if (
-                this.isWorkerFull(worker) ||
+                worker.numGames >= worker.maxGames ||
                 worker.disabled ||
                 worker.disconnected ||
                 worker.draining
@@ -96,28 +96,6 @@ class GameRouter extends EventEmitter {
         return returnedWorker;
     }
 
-    /**
-     * Whether a worker is at capacity.
-     *
-     * ARCHON: an unset maxGames means unlimited, and says so. This was written
-     * as `worker.numGames >= worker.maxGames`, which reaches the same conclusion
-     * for the wrong reason - any comparison against undefined is false, so the
-     * node looked infinitely large because the check was broken rather than
-     * because a cap was deliberately not configured. A draining node reports
-     * maxGames: 0, which is finite and therefore still enforced.
-     *
-     * @param {{ numGames: number, maxGames?: number }} worker
-     */
-    isWorkerFull(worker) {
-        const maxGames = Number(worker.maxGames);
-
-        if (!Number.isFinite(maxGames)) {
-            return false;
-        }
-
-        return worker.numGames >= maxGames;
-    }
-
     getNodeStatus() {
         return Object.values(this.workers).map((worker) => {
             return {
@@ -131,14 +109,7 @@ class GameRouter extends EventEmitter {
                     ? 'draining'
                     : 'active',
                 version: worker.version,
-                draining: worker.draining || false,
-                // Reported separately from `status` so the admin table can label
-                // its toggle from the flag the toggle actually flips. A draining
-                // node is not disabled, and offering "Enable" for it - which is
-                // what deriving the label from `status` did - describes neither
-                // the current state nor what the button would do.
-                disabled: worker.disabled || false,
-                maxGames: Number.isFinite(Number(worker.maxGames)) ? Number(worker.maxGames) : null
+                draining: worker.draining || false
             };
         });
     }
@@ -273,19 +244,6 @@ class GameRouter extends EventEmitter {
                 this.workers[identity] = {
                     identity: identity,
                     numGames: 0,
-                    // ARCHON: `disabled` belongs to the lobby, not the node, so
-                    // it has to survive a HELLO. The node reports what it knows
-                    // about itself (version, capacity, draining, its games) and
-                    // that record used to replace the worker wholesale, silently
-                    // taking an admin's Disable with it.
-                    //
-                    // A HELLO is no longer a rare event: every lobby restart
-                    // broadcasts LOBBYHELLO and every node answers, and a node
-                    // sends one whenever its drain state changes. So a rolling
-                    // deploy - which restarts the lobby - would have quietly put
-                    // every disabled node back into rotation, with the admin
-                    // table showing "Disable" again as if nobody had touched it.
-                    disabled: !!(worker && worker.disabled),
                     ...message.arg
                 };
                 worker = this.workers[identity];

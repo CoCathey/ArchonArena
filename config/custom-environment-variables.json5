@@ -91,7 +91,6 @@
     gameNode: {
         name: 'SERVER',
         host: 'HOST',
-        socketioPort: 'PORT',
-        maxGames: 'MAX_GAMES'
+        socketioPort: 'PORT'
     }
 }
