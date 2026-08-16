@@ -1,4 +1,6 @@
 import { useAuthStore } from '../stores/authStore';
+import { canShowPurchaseLinks } from '../membership/storefront';
+import { withoutPurchaseInfo } from '../membership/catalogPolicy';
 import { useSettingsStore } from '../stores/settingsStore';
 import type {
     AercBreakdown,
@@ -524,12 +526,23 @@ export async function fetchGameRating(gameId: string) {
  * The tier catalogue: what each tier includes, what it costs, and where it can
  * be bought. Public, because it is a price list.
  *
- * Note what the app does with `checkoutUrl` and `priceUsd` is a platform
- * decision, not a data one — see membership/storefront.ts. The catalogue is
- * fetched the same way everywhere; iOS simply does not render the money.
+ * ## The money is stripped here, not just hidden in the UI
+ *
+ * On a platform where purchase links are not allowed — iOS, under App Store
+ * Review Guideline 3.1.1 — the price and the checkout URL are removed from the
+ * payload before any screen sees them. The screens also guard on
+ * `canShowPurchaseLinks()`, but a guard is something a future edit has to
+ * remember; an absent field is something it cannot get wrong. A `$` cannot be
+ * rendered from a price that is not there.
+ *
+ * `includes`, `adds` and the capability copy all survive: describing what
+ * membership gives you is not a call to action, and 3.1.3(b) is exactly the
+ * provision that lets a multiplatform service do it.
  */
-export async function fetchMembershipCatalog() {
-    return rawFetch<MembershipCatalogResult>('/api/membership/catalog');
+export async function fetchMembershipCatalog(): Promise<MembershipCatalogResult> {
+    const catalog = await rawFetch<MembershipCatalogResult>('/api/membership/catalog');
+
+    return canShowPurchaseLinks() ? catalog : withoutPurchaseInfo(catalog);
 }
 
 /** The signed-in account's own tier and capability list. */

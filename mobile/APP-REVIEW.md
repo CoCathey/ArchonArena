@@ -23,6 +23,20 @@ those tests fail, the iOS build is no longer submittable.
 
 ---
 
+## The money is not in the build, not merely hidden
+
+The screens guard every money surface on `canShowPurchaseLinks()`, but a guard
+is something a future edit has to remember. So the client also strips
+`priceUsd` and `checkoutUrl` out of the tier catalogue before any screen sees
+it (`src/membership/catalogPolicy.ts`), and both fields are optional in the
+type — a screen that forgets the guard cannot compile a price block, and a `$`
+cannot be rendered from a number that is not there.
+
+`test/membership.test.ts` asserts this against a real catalogue payload: no
+price, no checkout URL, no `patreon.com` and no `$` anywhere in the JSON an iOS
+build receives — while the tier names, taglines and benefit copy all survive,
+which is what 3.1.3(b) permits.
+
 ## Why iOS has no prices and no purchase links
 
 **Guideline 3.1.1 (In-App Purchase)** forbids "buttons, external links, or other
@@ -112,6 +126,20 @@ than Apple's, so the Android build shows the full tier list with prices and
 Patreon links. If Play review ever objects, set `android: false` in
 `PURCHASE_LINKS_BY_PLATFORM` (`src/membership/storePolicy.ts`) and rebuild —
 every screen already handles that case, because iOS forced them to.
+
+## Known blocker, unrelated to membership: account deletion
+
+**Guideline 5.1.1(v)** requires that an app which lets people create an account
+also lets them delete it, initiated from inside the app. This app has a register
+screen, and there is no account deletion anywhere — not in the app, not on the
+website, and not in the API. That is one of the most common automatic
+rejections, and it will bite regardless of anything on this page.
+
+It is a real piece of work rather than a screen: an account owns decks, games,
+ratings, tournament entries and a membership, and some of that data is shared
+with other players (a finished game belongs to both of them). It needs a
+decision about what is erased versus anonymised before it is written, so it is
+called out here rather than guessed at.
 
 ## If Apple objects anyway
 
