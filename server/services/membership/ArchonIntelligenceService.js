@@ -617,6 +617,253 @@ class ArchonIntelligenceService {
     }
 
     /**
+     * ARCHON (N12): the same comparison as `playerVsExpectation`, with a time
+     * axis - the preview programme's `performance-trend`.
+     *
+     * The lifetime figure answers "am I better than my rating says". It cannot
+     * answer "am I getting better", which is the question people actually have,
+     * because one number over three years of games hides every run of form
+     * inside it. Bucketing by month is the smallest honest way to show the
+     * shape: months with no rated games are simply absent rather than plotted
+     * as zero, since "did not play" is not "performed at zero".
+     *
+     * @param {number} userId
+     * @param {{months?: number, sets?: number[]}} [options]
+     */
+    async playerVsExpectationTrend(userId, { months = 12, sets = [] } = {}) {
+        // Bounded so a hand-edited query string cannot ask for a scan of every
+        // month that has ever existed.
+        const window = Math.min(Math.max(Number(months) || 12, 1), 36);
+        const params = [userId, window];
+
+        const wanted = parseSets(sets);
+        let setFilter = '';
+
+        if (wanted.length) {
+            params.push(wanted);
+            setFilter =
+                ' AND EXISTS (SELECT 1 FROM "GamePlayers" gp ' +
+                '  JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
+                '  JOIN "Expansions" xset ON xset."Id" = d."ExpansionId" ' +
+                '  WHERE gp."GameId" = rh."GameId" AND gp."PlayerId" = rh."UserId" ' +
+                `  AND xset."ExpansionId" = ANY($${params.length}))`;
+        }
+
+        const rows = await this.safeQuery(
+            'SELECT date_trunc(\'month\', rh."CreatedAt") AS "month", ' +
+                '  COUNT(*)::int AS "games", ' +
+                '  COUNT(*) FILTER (WHERE rh."Won")::int AS "wins", ' +
+                '  SUM(rh."Expected")::float AS "expectedWins" ' +
+                'FROM "RatingHistory" rh ' +
+                'WHERE rh."UserId" = $1 ' +
+                "  AND rh.\"CreatedAt\" >= date_trunc('month', now() AT TIME ZONE 'utc') " +
+                `    - (($2 - 1) || ' months')::interval${setFilter} ` +
+                'GROUP BY 1 ORDER BY 1',
+            params,
+            'playerVsExpectationTrend'
+        );
+
+        if (!rows) {
+            return UNAVAILABLE('The trend is not available.');
+        }
+
+        if (!rows.length) {
+            return UNAVAILABLE('No rated games in this window yet.');
+        }
+
+        return {
+            available: true,
+            months: window,
+            points: rows.map((row) => ({
+                month: row.month,
+                games: row.games,
+                wins: row.wins,
+                expectedWins: row.expectedWins,
+                vsExpectation: row.expectedWins === null ? null : row.wins - row.expectedWins,
+                winRate: row.games ? row.wins / row.games : null,
+                expectedWinRate: row.expectedWins === null ? null : row.expectedWins / row.games
+            }))
+        };
+    }
+
+    /**
+     * ARCHON (N12): recent form and streaks - the preview programme's
+     * `form-and-streaks`.
+     *
+     * Read from RatingHistory rather than Games because a rated result is the
+     * one a player recognises as "a game I played": it excludes unrated and
+     * unfinished games without a second predicate, and it is the same source
+     * the rest of Player Intelligence uses, so this panel cannot disagree with
+     * the one above it.
+     *
+     * The best streak is computed over the same bounded window as the run, and
+     * says so - claiming an all-time best from a truncated read would be a
+     * number that quietly changes meaning as somebody plays more.
+     *
+     * @param {number} userId
+     * @param {{limit?: number, window?: number}} [options]
+     */
+    async playerForm(userId, { limit = 20, window = 200 } = {}) {
+        const recent = Math.min(Math.max(Number(limit) || 20, 1), 50);
+        const scanned = Math.min(Math.max(Number(window) || 200, recent), 500);
+
+        const rows = await this.safeQuery(
+            'SELECT rh."Won", rh."CreatedAt" FROM "RatingHistory" rh ' +
+                'WHERE rh."UserId" = $1 ORDER BY rh."Id" DESC LIMIT $2',
+            [userId, scanned],
+            'playerForm'
+        );
+
+        if (!rows) {
+            return UNAVAILABLE('Form is not available.');
+        }
+
+        if (!rows.length) {
+            return UNAVAILABLE('No rated games yet.');
+        }
+
+        // Newest first, which is the order the run is read in.
+        const results = rows.map((row) => ({ won: !!row.Won, at: row.CreatedAt }));
+
+        // The current streak runs back from the most recent game and is of
+        // whatever kind that game was - a losing streak is as much a fact about
+        // form as a winning one, and hiding it would make the panel a
+        // congratulation rather than a measurement.
+        let current = 0;
+
+        for (const result of results) {
+            if (result.won !== results[0].won) {
+                break;
+            }
+
+            current += 1;
+        }
+
+        let bestWin = 0;
+        let bestLoss = 0;
+        let runKind = null;
+        let run = 0;
+
+        for (const result of results) {
+            if (result.won === runKind) {
+                run += 1;
+            } else {
+                runKind = result.won;
+                run = 1;
+            }
+
+            if (runKind) {
+                bestWin = Math.max(bestWin, run);
+            } else {
+                bestLoss = Math.max(bestLoss, run);
+            }
+        }
+
+        const window20 = results.slice(0, recent);
+        const wins = window20.filter((result) => result.won).length;
+
+        return {
+            available: true,
+            // Oldest first, so the client can draw it left to right without
+            // reversing an array it did not build.
+            recent: [...window20].reverse(),
+            games: window20.length,
+            wins,
+            losses: window20.length - wins,
+            winRate: window20.length ? wins / window20.length : null,
+            currentStreak: { kind: results[0].won ? 'win' : 'loss', length: current },
+            bestWinStreak: bestWin,
+            worstLossStreak: bestLoss,
+            // What "best" was measured over, so the number is not read as
+            // all-time when it is not.
+            streakWindow: results.length,
+            streakWindowTruncated: results.length >= scanned
+        };
+    }
+
+    /**
+     * ARCHON (N12): does this player win more going first - the preview
+     * programme's `turn-order-insights`.
+     *
+     * The per-deck counterpart of `deckByTurnOrder`, and it carries the same
+     * caveat: WentFirst was only added in migration 62, so games played before
+     * it are null and excluded rather than guessed at. That exclusion is
+     * reported (`gamesWithoutData`) instead of being folded into the totals,
+     * because a turn-order split computed over a partly-unrecorded history is
+     * exactly the kind of number a player would act on and should not.
+     *
+     * @param {number} userId
+     * @param {{sets?: number[]}} [options]
+     */
+    async playerByTurnOrder(userId, { sets = [] } = {}) {
+        const params = [userId];
+        const wanted = parseSets(sets);
+        // The deck join is only paid for when a set filter is actually asked
+        // for; without one this is a two-table aggregate.
+        const deckJoin = wanted.length ? ' JOIN "Decks" d ON d."Id" = gp."DeckId"' : '';
+        const setFilter = setPredicate(wanted, params, 'd');
+
+        const rows = await this.safeQuery(
+            'SELECT gp."WentFirst" AS "wentFirst", ' +
+                '  COUNT(*)::int AS "games", ' +
+                '  COUNT(*) FILTER (WHERE g."WinnerId" = gp."PlayerId")::int AS "wins" ' +
+                'FROM "GamePlayers" gp ' +
+                'JOIN "Games" g ON g."Id" = gp."GameId"' +
+                `${deckJoin} ` +
+                `WHERE gp."PlayerId" = $1 AND ${DECIDED}${setFilter} ` +
+                'GROUP BY gp."WentFirst"',
+            params,
+            'playerByTurnOrder'
+        );
+
+        if (!rows) {
+            return UNAVAILABLE('Turn order is not available.');
+        }
+
+        const known = rows.filter((row) => row.wentFirst !== null);
+        const unknown = rows.find((row) => row.wentFirst === null);
+
+        if (!known.length) {
+            return {
+                ...UNAVAILABLE(
+                    'Turn order was not recorded for these games. It is recorded from now on.'
+                ),
+                gamesWithoutData: unknown ? unknown.games : 0
+            };
+        }
+
+        const forOrder = (wentFirst) => {
+            const row = known.find((candidate) => candidate.wentFirst === wentFirst);
+
+            if (!row) {
+                return { games: 0, wins: 0, winRate: null };
+            }
+
+            return {
+                games: row.games,
+                wins: row.wins,
+                winRate: row.games ? row.wins / row.games : null
+            };
+        };
+
+        const first = forOrder(true);
+        const second = forOrder(false);
+
+        return {
+            available: true,
+            first,
+            second,
+            // The headline: the gap, or null when one side has no games and a
+            // difference would be a comparison with nothing.
+            edge:
+                first.winRate === null || second.winRate === null
+                    ? null
+                    : first.winRate - second.winRate,
+            gamesWithoutData: unknown ? unknown.games : 0
+        };
+    }
+
+    /**
      * Win rate with decks containing each house.
      *
      * Deliberately NOT called "strongest house": which house a player actually

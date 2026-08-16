@@ -272,6 +272,36 @@ export const api = createApi({
             query: () => '/membership/me',
             providesTags: [TAG_TYPES.MEMBERSHIP]
         }),
+        // ARCHON (N12): the preview programme. Returns only previews this
+        // account's tier can reach, including ones whose window has not opened
+        // yet - "you get this on the 14th" is what a head start looks like.
+        getMembershipPreviews: builder.query({
+            query: () => '/membership/previews',
+            providesTags: [{ type: TAG_TYPES.MEMBERSHIP, id: 'PREVIEWS' }]
+        }),
+        setMembershipPreview: builder.mutation({
+            query: (body) => ({ url: '/membership/previews', method: 'POST', body }),
+            // Also invalidates intelligence: a preview switch changes which
+            // sections that payload contains, and leaving the old one cached
+            // would make the switch look broken until a reload.
+            invalidatesTags: [
+                { type: TAG_TYPES.MEMBERSHIP, id: 'PREVIEWS' },
+                TAG_TYPES.INTELLIGENCE
+            ]
+        }),
+        // The cosmetics catalogue and this account's choices, in one read.
+        getMembershipCosmetics: builder.query({
+            query: () => '/membership/cosmetics',
+            providesTags: [{ type: TAG_TYPES.MEMBERSHIP, id: 'COSMETICS' }]
+        }),
+        setMembershipCosmetics: builder.mutation({
+            query: (choices) => ({
+                url: '/membership/cosmetics',
+                method: 'POST',
+                body: { choices }
+            }),
+            invalidatesTags: [{ type: TAG_TYPES.MEMBERSHIP, id: 'COSMETICS' }]
+        }),
         getAdminMemberships: builder.query({
             query: () => '/admin/memberships',
             providesTags: [TAG_TYPES.MEMBERSHIP]
@@ -494,6 +524,25 @@ export const api = createApi({
         getTournamentHistory: builder.query({
             query: (username) => `/tournaments/history/${encodeURIComponent(username)}`,
             providesTags: [TAG_TYPES.TOURNAMENTS]
+        }),
+        /**
+         * ARCHON (N12): pull an event's data down as CSV (ORGANIZER_TOOLS).
+         *
+         * A mutation rather than a query because it is an action with a side
+         * effect on the user's machine, not cacheable data - and caching a file
+         * somebody asked to download is exactly the wrong behaviour.
+         *
+         * `responseHandler: 'text'` because the response is a CSV body, not
+         * JSON. Without it RTK Query would try to parse it and hand back a
+         * parse error for a request that succeeded.
+         */
+        exportTournament: builder.mutation({
+            query: ({ id, dataset }) => ({
+                url: `/tournaments/${id}/export`,
+                method: 'GET',
+                params: { dataset },
+                responseHandler: 'text'
+            })
         }),
         // ARCHON (N14): the caller's open matches across every event they are
         // in - what an async player needs and no single event page can answer.
@@ -1172,6 +1221,11 @@ export const {
     useGetMyMembershipQuery,
     useGetAdminMembershipsQuery,
     useGrantMembershipMutation,
+    // ARCHON (N12): Vault Master - the preview programme and cosmetics
+    useGetMembershipPreviewsQuery,
+    useSetMembershipPreviewMutation,
+    useGetMembershipCosmeticsQuery,
+    useSetMembershipCosmeticsMutation,
     useGetDeckIntelligenceQuery,
     useGetPlayerIntelligenceQuery,
     useGetMetaIntelligenceQuery,
@@ -1213,6 +1267,7 @@ export const {
     useCreateTournamentMutation,
     useTournamentActionMutation,
     useGetTournamentHistoryQuery,
+    useExportTournamentMutation,
     useGetMyTournamentMatchesQuery,
     useSubmitBugReportMutation,
     useGetBugReportsQuery,

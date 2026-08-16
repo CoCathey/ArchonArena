@@ -1,5 +1,6 @@
 const { resolveEntitlements } = require('./entitlements');
 const { TIER_IDS } = require('./tiers');
+const { publicCosmetics } = require('./cosmetics');
 
 /**
  * ARCHON (N12): what other people may see about someone's membership.
@@ -40,16 +41,23 @@ const ROLE_BY_PRIORITY = [
  * @property {string} role     admin | winner | previouswinner | contributor | supporter | user
  * @property {string} tier     the tier id, 'free' when there is nothing to show
  * @property {string|null} tierName its display name, or null at free
+ * @property {object} [cosmetics] chosen cosmetic slots the account may still use
  */
 
 /**
  * @param {object} params
  * @param {object} [params.permissions] mapped permissions (UserService.mapPermissions shape)
  * @param {object} [params.membership] the Memberships row, already camelCased
+ * @param {object} [params.cosmetics] the account's stored cosmetic choices
  * @param {Date} [params.now]
  * @returns {PublicBadge}
  */
-function publicBadge({ permissions = {}, membership = null, now = new Date() } = {}) {
+function publicBadge({
+    permissions = {},
+    membership = null,
+    cosmetics = null,
+    now = new Date()
+} = {}) {
     // eslint-disable-next-line no-unused-vars
     const { isAdmin, ...withoutAdmin } = permissions || {};
     const entitlements = resolveEntitlements({
@@ -73,10 +81,21 @@ function publicBadge({ permissions = {}, membership = null, now = new Date() } =
         role = 'supporter';
     }
 
+    // Resolved against the SAME entitlements the tier came from, admin override
+    // and all - which is what makes a cosmetic stop the day the membership that
+    // bought it lapses, without anybody sweeping the table. The stored choice
+    // survives; only its visibility ends. An admin is deliberately not granted
+    // cosmetics here for the same reason they are not granted a tier: this is
+    // what the public sees, and it must not assert something about money.
+    const visible = publicCosmetics(cosmetics, entitlements);
+
     return {
         role,
         tier: paid ? entitlements.tierId : TIER_IDS.FREE,
-        tierName: paid ? entitlements.tierName : null
+        tierName: paid ? entitlements.tierName : null,
+        // Omitted entirely rather than sent as an empty object: this rides on a
+        // batched public lookup that already drops accounts with nothing to say.
+        ...(visible ? { cosmetics: visible } : {})
     };
 }
 
