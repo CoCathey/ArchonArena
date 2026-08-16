@@ -44,8 +44,11 @@ const NodeAdmin = () => {
             {
                 accessorKey: 'numGames',
                 header: 'Num Games',
+                // `!= null` rather than a truthiness test: a draining node
+                // advertises maxGames 0, and that is precisely the node whose
+                // "3" needs to read "3 / 0" - it is full and refusing games.
                 cell: ({ row }) =>
-                    row.original.maxGames
+                    row.original.maxGames != null
                         ? `${row.original.numGames} / ${row.original.maxGames}`
                         : row.original.numGames
             },

@@ -47,8 +47,12 @@ class HealthServer {
         // Matched by stop_grace_period in docker-compose.prod.yml and by
         // terminationGracePeriodSeconds in the Helm chart - if the orchestrator's
         // patience is shorter than this the drain is decoration.
-        this.drainTimeoutMs = opts.drainTimeoutMs || 90 * 60 * 1000;
-        this.drainPollMs = opts.drainPollMs || 10 * 1000;
+        // `!== undefined` for the same reason as `port` above: 0 is a meaningful
+        // value here ("do not wait at all"), and `||` would silently turn it
+        // into an hour and a half.
+        this.drainTimeoutMs =
+            opts.drainTimeoutMs !== undefined ? opts.drainTimeoutMs : 90 * 60 * 1000;
+        this.drainPollMs = opts.drainPollMs !== undefined ? opts.drainPollMs : 10 * 1000;
         this.exit = opts.exit || ((code) => process.exit(code));
 
         // Quiesced: the lobby has been told to stop placing games here.
@@ -193,39 +197,57 @@ class HealthServer {
 
     start() {
         this.server = http.createServer((req, res) => {
-            const url = (req.url || '').split('?')[0];
-            const method = (req.method || 'GET').toUpperCase();
+            // Every route runs inside this guard. The control routes are not
+            // passive reads: quiesce() and resume() publish a HELLO, which
+            // summarises every game on the node and hands it to Redis. A
+            // synchronous throw anywhere in that chain would leave the
+            // http.createServer callback as an uncaughtException and kill a
+            // process holding live games - the exact opposite of what an
+            // endpoint called "drain" is for.
+            try {
+                this.route(req, res);
+            } catch (err) {
+                logger.error('Health server request failed', err);
 
-            if (url === '/health/alive') {
-                this.handleAlive(res);
-            } else if (url === '/health/ready') {
-                this.handleReady(res);
-            } else if (url === '/health/games') {
-                this.handleGames(res);
-            } else if (url === '/health/status') {
-                this.handleStatus(res);
-            } else if (url === '/health/drain') {
-                // POST-only: draining a node is a state change, and a GET route
-                // that stands a node down is one crawler or misconfigured
-                // uptime check away from taking games off a live server.
-                this.requirePost(method, res, () => {
-                    this.quiesce();
-                    this.handleStatus(res);
-                });
-            } else if (url === '/health/resume') {
-                this.requirePost(method, res, () => {
-                    this.resume();
-                    this.handleStatus(res);
-                });
-            } else {
-                res.writeHead(404, { 'Content-Type': 'text/plain' });
-                res.end('Not Found');
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'internal error' }));
             }
         });
 
         this.server.listen(this.port, () => {
             logger.info(`Health check server listening on port ${this.port}`);
         });
+    }
+
+    route(req, res) {
+        const url = (req.url || '').split('?')[0];
+        const method = (req.method || 'GET').toUpperCase();
+
+        if (url === '/health/alive') {
+            this.handleAlive(res);
+        } else if (url === '/health/ready') {
+            this.handleReady(res);
+        } else if (url === '/health/games') {
+            this.handleGames(res);
+        } else if (url === '/health/status') {
+            this.handleStatus(res);
+        } else if (url === '/health/drain') {
+            // POST-only: draining a node is a state change, and a GET route
+            // that stands a node down is one crawler or misconfigured
+            // uptime check away from taking games off a live server.
+            this.requirePost(method, res, () => {
+                this.quiesce();
+                this.handleStatus(res);
+            });
+        } else if (url === '/health/resume') {
+            this.requirePost(method, res, () => {
+                this.resume();
+                this.handleStatus(res);
+            });
+        } else {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Not Found');
+        }
     }
 
     requirePost(method, res, handler) {
@@ -250,7 +272,22 @@ class HealthServer {
     }
 
     handleReady(res) {
-        const isReady = !this.isDraining;
+        // ARCHON: keyed on `willExit`, NOT on `isDraining`.
+        //
+        // Readiness here gates traffic to the pod, and this pod's traffic is the
+        // socket.io connections of games already being played on it. A quiesced
+        // node is deliberately still serving those for up to 90 minutes, so
+        // reporting it unready pulls it out of its Service (the Helm chart probes
+        // every 5s with failureThreshold 1, and neither Service sets
+        // publishNotReadyAddresses) and cuts off exactly the players the drain
+        // exists to protect.
+        //
+        // Before the control port existed, isDraining was only ever set from the
+        // SIGTERM path, where the pod was already Terminating and out of the
+        // endpoints regardless - so the two conditions were the same thing and
+        // the distinction never mattered. Now that a long-lived node can be
+        // quiesced, only the shutting-down case may report unready.
+        const isReady = !this.willExit;
         const statusCode = isReady ? 200 : 503;
 
         res.writeHead(statusCode, { 'Content-Type': 'application/json' });

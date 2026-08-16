@@ -100,6 +100,77 @@ describe('game node placement', function () {
         });
     });
 
+    /**
+     * `disabled` is the lobby's own state - no node reports it - and a HELLO
+     * used to replace the worker record wholesale, taking it with it.
+     *
+     * That is not a rare event: every lobby restart broadcasts LOBBYHELLO and
+     * every node answers, and a node sends a HELLO whenever its drain state
+     * changes. So a rolling deploy - which restarts the lobby - would have put
+     * every admin-disabled node back into rotation, with the admin table showing
+     * "Disable" again as though nobody had ever pressed it.
+     */
+    describe('HELLO', function () {
+        const hello = (router, identity, arg = {}) =>
+            router.onMessage(
+                JSON.stringify({
+                    identity,
+                    command: 'HELLO',
+                    arg: { games: [], version: 'v2', ...arg }
+                }),
+                'nodemessage'
+            );
+
+        const listening = (workers) => {
+            const router = routerWith(workers);
+
+            router.emit = () => {};
+
+            return router;
+        };
+
+        it('keeps a node disabled across a lobby restart', function () {
+            const router = listening({ 'node-0': worker('node-0', { disabled: true }) });
+
+            hello(router, 'node-0');
+
+            expect(router.workers['node-0'].disabled).toBe(true);
+            expect(router.getNextAvailableGameNode()).toBeUndefined();
+        });
+
+        it('leaves an enabled node enabled', function () {
+            const router = listening({ 'node-0': worker('node-0') });
+
+            hello(router, 'node-0');
+
+            expect(router.workers['node-0'].disabled).toBe(false);
+            expect(router.getNextAvailableGameNode().identity).toBe('node-0');
+        });
+
+        it('starts a node it has never seen enabled', function () {
+            const router = listening({});
+
+            hello(router, 'node-9');
+
+            expect(router.workers['node-9'].disabled).toBe(false);
+        });
+
+        // The node owns its own state; only the lobby's flag is preserved.
+        it('takes the node/s word for capacity and drain state', function () {
+            const router = listening({
+                'node-0': worker('node-0', { disabled: true, maxGames: 5, draining: true })
+            });
+
+            hello(router, 'node-0', { maxGames: 40, draining: false });
+
+            expect(router.workers['node-0']).toMatchObject({
+                disabled: true,
+                maxGames: 40,
+                draining: false
+            });
+        });
+    });
+
     describe('status reporting', function () {
         it('reports the flag the admin toggle actually flips', function () {
             const router = routerWith({

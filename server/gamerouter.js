@@ -273,6 +273,19 @@ class GameRouter extends EventEmitter {
                 this.workers[identity] = {
                     identity: identity,
                     numGames: 0,
+                    // ARCHON: `disabled` belongs to the lobby, not the node, so
+                    // it has to survive a HELLO. The node reports what it knows
+                    // about itself (version, capacity, draining, its games) and
+                    // that record used to replace the worker wholesale, silently
+                    // taking an admin's Disable with it.
+                    //
+                    // A HELLO is no longer a rare event: every lobby restart
+                    // broadcasts LOBBYHELLO and every node answers, and a node
+                    // sends one whenever its drain state changes. So a rolling
+                    // deploy - which restarts the lobby - would have quietly put
+                    // every disabled node back into rotation, with the admin
+                    // table showing "Disable" again as if nobody had touched it.
+                    disabled: !!(worker && worker.disabled),
                     ...message.arg
                 };
                 worker = this.workers[identity];

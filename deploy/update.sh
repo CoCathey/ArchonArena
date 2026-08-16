@@ -64,8 +64,24 @@ else
 fi
 
 # --- build and restart -------------------------------------------------------
-step "Building and restarting"
-$DC up -d --build || die "Build or start failed."
+# Delegated to the rolling deploy, which replaces the lobby and then each game
+# node in turn, draining each one first.
+#
+# This step used to be `$DC up -d --build`, and that is now actively wrong in two
+# ways. It recreates every container at once, so every game in progress dies -
+# which was always true, but there was no alternative before. And since the game
+# nodes were given a 95-minute stop_grace_period (so their drain can actually
+# finish rather than being SIGKILLed after 10 seconds), the same command now
+# blocks for up to 90 minutes with the whole fleet standing down and players
+# unable to start a game, with no output explaining why.
+#
+# --skip-migrations because this script runs them itself below, with the ledger
+# guidance that the plain runner does not print.
+step "Building and rolling out"
+# Plain relative path: this script has already cd'd to the repo root above, and
+# `$(dirname "$0")` is relative to the directory it was *invoked* from, which is
+# no longer where we are.
+bash deploy/rolling-deploy.sh --skip-migrations --yes || die "Build or rollout failed."
 
 # --- schema ------------------------------------------------------------------
 # After the containers are up, because it runs inside the lobby.

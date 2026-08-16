@@ -207,6 +207,12 @@ class GameSocket extends EventEmitter {
                 // policy bring the node back. Nobody's game dies for a restart,
                 // and the node shows as `draining` in the admin table
                 // immediately, so the click has visible feedback.
+                //
+                // The exit is the restart, so this depends on something being
+                // there to relaunch the process - `restart: unless-stopped`
+                // under Compose, the kubelet under the Helm chart. A node run by
+                // hand with no supervisor stays down instead; the admin's
+                // Disable toggle is the non-terminal control for that case.
                 logger.info('Restart requested by the lobby - draining before exit');
                 this.emit('onRestartRequested');
                 break;

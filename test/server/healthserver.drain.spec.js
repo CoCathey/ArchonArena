@@ -12,6 +12,27 @@ const HealthServer = require('../../server/gamenode/healthserver.js');
  * would bring it straight back on the old image and it would start taking games
  * again before the deploy could replace it.
  */
+/**
+ * Poll until a condition holds rather than sleeping for a guessed interval.
+ * The drain loop is driven by real timers, and a fixed sleep that is generous on
+ * an idle machine is not generous when the whole suite is running in parallel -
+ * which makes for a test that fails occasionally and tells you nothing when it
+ * does.
+ */
+const waitFor = async (predicate, timeoutMs = 2000) => {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        if (predicate()) {
+            return true;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    return predicate();
+};
+
 const request = (port, method, path) =>
     new Promise((resolve, reject) => {
         const req = http.request({ host: '127.0.0.1', port, method, path }, (res) => {
@@ -44,7 +65,8 @@ describe('game node drain control', function () {
         const server = new HealthServer(gameServer, {
             port: 0,
             drainPollMs: 10,
-            drainTimeoutMs: options.drainTimeoutMs || 60000,
+            // `!== undefined`, not `||` - a test passing 0 means zero.
+            drainTimeoutMs: options.drainTimeoutMs !== undefined ? options.drainTimeoutMs : 60000,
             exit: (code) => exits.push(code)
         });
 
@@ -111,7 +133,14 @@ describe('game node drain control', function () {
             expect(draining).toEqual([true]);
         });
 
-        it('reports not-ready while standing down', async function () {
+        /**
+         * Readiness gates traffic to this node, and this node's traffic is the
+         * socket.io connections of the games it is still playing. Reporting a
+         * quiesced node unready is what pulls it out of its Kubernetes Service
+         * (probed every 5s, failureThreshold 1, no publishNotReadyAddresses) and
+         * disconnects exactly the players the drain exists to protect.
+         */
+        it('stays ready while standing down, because its games still need it', async function () {
             const server = build({ games: { a: {} } });
             const port = await listen(server);
 
@@ -119,7 +148,19 @@ describe('game node drain control', function () {
 
             await request(port, 'POST', '/health/drain');
 
-            expect((await request(port, 'GET', '/health/ready')).status).toBe(503);
+            expect((await request(port, 'GET', '/health/ready')).status).toBe(200);
+        });
+
+        it('reports not-ready once it is actually shutting down', async function () {
+            const server = build({ games: { a: {} } });
+            const port = await listen(server);
+
+            server.startDraining();
+
+            const res = await request(port, 'GET', '/health/ready');
+
+            expect(res.status).toBe(503);
+            expect(JSON.parse(res.body)).toMatchObject({ ready: false, draining: true });
         });
 
         it('is idempotent', async function () {
@@ -169,6 +210,31 @@ describe('game node drain control', function () {
         });
     });
 
+    /**
+     * The control routes are not passive reads: quiesce() publishes a HELLO,
+     * which summarises every game on the node and hands it to Redis. An
+     * exception escaping the request handler would be an uncaughtException and
+     * would kill a process holding live games - from the endpoint whose entire
+     * purpose is to protect them.
+     */
+    describe('when publishing the drain state fails', function () {
+        it('answers 500 instead of taking the node down', async function () {
+            const server = build({ games: { a: {} } });
+
+            server.gameServer.gameSocket.setDraining = () => {
+                throw new Error('redis is gone');
+            };
+
+            const port = await listen(server);
+            const res = await request(port, 'POST', '/health/drain');
+
+            expect(res.status).toBe(500);
+
+            // Still serving: the games on this node are unaffected.
+            expect((await request(port, 'GET', '/health/games')).body).toBe('1');
+        });
+    });
+
     describe('shutdown drain', function () {
         it('exits immediately when there is nothing to wait for', function () {
             const server = build({ games: {} });
@@ -176,6 +242,18 @@ describe('game node drain control', function () {
             server.startDraining();
 
             expect(exits).toEqual([0]);
+        });
+
+        // `||` would read a zero timeout as "unset" and wait 90 minutes, which
+        // is the opposite of what a caller passing 0 asked for.
+        it('honours a zero drain timeout', async function () {
+            const server = build({ games: { a: {} }, drainTimeoutMs: 0 });
+
+            server.startDraining();
+
+            await waitFor(() => exits.length > 0);
+
+            expect(exits).toEqual([1]);
         });
 
         it('waits for games in progress, then exits', async function () {
@@ -187,7 +265,7 @@ describe('game node drain control', function () {
 
             delete games.a;
 
-            await new Promise((resolve) => setTimeout(resolve, 40));
+            await waitFor(() => exits.length > 0);
 
             expect(exits).toEqual([0]);
         });
@@ -197,9 +275,22 @@ describe('game node drain control', function () {
 
             server.startDraining();
 
-            await new Promise((resolve) => setTimeout(resolve, 60));
+            await waitFor(() => exits.length > 0);
 
             expect(exits).toEqual([1]);
+        });
+
+        // The counterpart to the three above: a node with a game and a long
+        // timeout must NOT exit. Without this, an implementation that exited the
+        // moment it was asked to drain would still satisfy every other test here.
+        it('does not exit while a game is still being played', async function () {
+            const server = build({ games: { a: {} }, drainTimeoutMs: 60000 });
+
+            server.startDraining();
+
+            await waitFor(() => exits.length > 0, 60);
+
+            expect(exits).toEqual([]);
         });
     });
 });

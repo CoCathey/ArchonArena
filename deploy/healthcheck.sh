@@ -116,11 +116,18 @@ for svc in $NODES; do
     # A node left standing down after an interrupted deploy looks healthy from
     # every angle except the one that matters: the lobby will not place games on
     # it, and nothing else here would say so.
+    # The `timeout` option only ARMS the socket timer - Node emits "timeout" on
+    # the request and, with no listener, does nothing about it. A node whose
+    # event loop is wedged accepts the connection and never answers, and this
+    # check would hang forever, on the one script an operator runs during an
+    # incident. The listener is what actually aborts it.
     status="$($DC exec -T "$svc" node -e '
 const http = require("http");
-http.get({host:"127.0.0.1",port:9000,path:"/health/status",timeout:4000},(res)=>{
+const req = http.get({host:"127.0.0.1",port:9000,path:"/health/status",timeout:4000},(res)=>{
   let b="";res.on("data",(c)=>b+=c);res.on("end",()=>console.log(b));
-}).on("error",()=>process.exit(1));' 2>/dev/null | tail -1)"
+});
+req.on("error",()=>process.exit(1));
+req.on("timeout",()=>{req.destroy();process.exit(1);});' 2>/dev/null | tail -1)"
 
     case "$status" in
         *'"draining":true'*)

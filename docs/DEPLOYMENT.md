@@ -293,23 +293,36 @@ rather than an error. Verify by diffing against a fresh build if in doubt.
 ## 5. Deploying updates
 
 ```bash
-cd /opt/archonarena
-git pull
+cd /opt/archonarena && bash deploy/update.sh
+```
+
+`update.sh` is still the whole deploy — it pulls, rolls out, and applies migrations with
+the ledger guidance. What changed is its middle step: it now calls `rolling-deploy.sh`
+instead of `docker compose up -d --build`.
+
+**Do not use a bare `docker compose up -d`** for a code change. The lobby and the game
+nodes share one image, so Compose replaces all of them at once and every game in progress
+dies with them — and now that the nodes have a 95-minute `stop_grace_period` so their
+drain can finish, that command also blocks for up to 90 minutes with the whole fleet
+stood down.
+
+To roll out without the pull (an already-checked-out tree, a re-run after a failure):
+
+```bash
 bash deploy/rolling-deploy.sh
 ```
 
-That is the whole deploy. **Do not use a bare `docker compose up -d`** for a code change:
-the lobby and the game nodes share one image, so Compose replaces all of them at once and
-every game in progress dies with them.
-
-What the script does, and why in this order:
+What the rollout does, and why in this order:
 
 1. **Builds the image once.**
 2. **Replaces the lobby.** A few seconds of downtime for the lobby itself — Caddy holds
    incoming requests and retries them (`lb_try_duration`), and socket.io reconnects. Games
    in progress are untouched: players are connected straight to the game nodes, and when
    the lobby comes back it re-syncs the live game list from them.
-3. **Replaces each game node in turn.** A game cannot be moved between nodes, so each node
+3. **Applies database migrations**, inside the lobby container, before any node serves the
+   new code. `--skip-migrations` opts out (that is how `update.sh` calls it, because it
+   runs them itself afterwards).
+4. **Replaces each game node in turn.** A game cannot be moved between nodes, so each node
    is first stood down (it stops being given new games while its current ones play out),
    and only replaced once it is empty. Its siblings carry new games meanwhile.
 
@@ -321,7 +334,7 @@ Useful flags:
 
 ```bash
 bash deploy/rolling-deploy.sh --lobby-only        # config/UI change, nodes untouched
-bash deploy/rolling-deploy.sh --node node-1       # one node
+bash deploy/rolling-deploy.sh --node node-1       # one node (implies --nodes-only)
 bash deploy/rolling-deploy.sh --skip-build        # deploy the image already built
 bash deploy/rolling-deploy.sh --force-after-timeout   # ends games that outlast the drain
 ```
@@ -333,7 +346,15 @@ that needs manual repair.
 
 To stand a node down or bring it back by hand — the admin panel's **Node Admin** page has
 Disable/Enable per node, and **Restart** now drains first and restarts when the node is
-empty rather than killing games. From the host:
+empty rather than killing games.
+
+Note what Restart depends on: the node drains, then **exits**, and the container's
+`restart: unless-stopped` policy is what brings it back. Under Compose or Kubernetes that
+is a restart. A game node started by hand with no supervisor (`node server/gamenode`, or
+under nodemon, which does not relaunch a clean exit) will stay down instead — use the
+Disable toggle there, not Restart.
+
+From the host:
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production \

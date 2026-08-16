@@ -36,7 +36,12 @@ DC="docker compose -f $COMPOSE_FILE --env-file $ENV_FILE"
 
 DRAIN_TIMEOUT=5400 # 90 minutes, matching the node's own drain cap
 POLL_INTERVAL=10
+# How long a forced replacement gives a node to shut down before Docker kills it.
+# Only used by --force-after-timeout, and deliberately short: the operator has
+# already waited out the drain and asked for the games to end.
+FORCE_STOP_TIMEOUT=30
 SKIP_BUILD=0
+SKIP_MIGRATIONS=0
 FORCE_AFTER_TIMEOUT=0
 ASSUME_YES=0
 DO_LOBBY=1
@@ -48,9 +53,12 @@ usage() {
 Usage: bash deploy/rolling-deploy.sh [options]
 
   --skip-build            Deploy the image already built (no docker build)
+  --skip-migrations       Do not run database migrations (deploy/update.sh
+                          runs its own, with better failure guidance)
   --lobby-only            Replace only the lobby
   --nodes-only            Replace only the game nodes
-  --node <name>           Only this node (repeatable, e.g. --node node-1)
+  --node <name>           Only this node (repeatable, e.g. --node node-1).
+                          Implies --nodes-only; the lobby is left alone.
   --drain-timeout <secs>  How long to wait for a node's games (default 5400)
   --force-after-timeout   Replace a node whose games did not finish in time.
                           ENDS THOSE GAMES. Off by default.
@@ -62,11 +70,16 @@ USAGE
 while [ $# -gt 0 ]; do
     case "$1" in
         --skip-build) SKIP_BUILD=1 ;;
+        --skip-migrations) SKIP_MIGRATIONS=1 ;;
         --lobby-only) DO_NODES=0 ;;
         --nodes-only) DO_LOBBY=0 ;;
         --node)
             shift
             ONLY_NODES="$ONLY_NODES $1"
+            # Naming a node means "this node", not "this node and also take the
+            # lobby down for a few seconds". Documented as "one node", so it has
+            # to be one node.
+            DO_LOBBY=0
             ;;
         --drain-timeout)
             shift
@@ -148,7 +161,10 @@ node_req() { # service method path
 }
 
 node_games() { # service -> number of games, or empty if unreachable
-    node_req "$1" GET /health/games | tr -d '[:space:]'
+    # An unreachable node is an answer the callers handle ("unknown", then check
+    # whether the container is still running), not a reason to abandon a deploy
+    # half way through the fleet - so this never propagates a failure status.
+    node_req "$1" GET /health/games 2>/dev/null | tr -d '[:space:]' || true
 }
 
 service_running() { # service
@@ -156,10 +172,18 @@ service_running() { # service
 }
 
 discover_nodes() {
-    $DC config --services 2>/dev/null | grep -E '^node-' | sort
+    # No match is an answer - "this compose file defines no game nodes" - and the
+    # plan below is written to report it. Without `|| true` grep's exit 1 trips
+    # errexit at the assignment and the operator gets no diagnosis at all.
+    $DC config --services 2>/dev/null | grep -E '^node-' | sort || true
 }
 
-DOMAIN="$(grep -E '^DOMAIN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2)"
+# `|| true` on every pipeline whose failure is a legitimate answer. Under
+# `set -euo pipefail` a bare `x="$(grep ... | cut ...)"` inherits grep's exit
+# status when it matches nothing, and errexit kills the script mid-assignment -
+# silently, before the `${DOMAIN:-...}` default on the next line can run. Not
+# setting DOMAIN is legitimate (compose defaults it), so that is a real path.
+DOMAIN="$(grep -E '^DOMAIN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || true)"
 DOMAIN="${DOMAIN:-archonarena.com}"
 
 probe() { # url -> http code
@@ -193,14 +217,19 @@ wait_for_node_ready() { # service seconds
 
 # ---------------------------------------------------------------------------
 
+FLEET="$(discover_nodes)"
+
 if [ -n "$ONLY_NODES" ]; then
     # shellcheck disable=SC2086
     NODES="$(printf '%s\n' $ONLY_NODES)"
 else
-    NODES="$(discover_nodes)"
+    NODES="$FLEET"
 fi
 
-NODE_COUNT="$(printf '%s\n' "$NODES" | grep -c . || true)"
+# Counted from the whole fleet, not from what this run was asked to replace.
+# The warning below is about whether anywhere else can take games while a node
+# stands down, so `--node node-1` on a healthy two-node fleet must not trip it.
+FLEET_COUNT="$(printf '%s\n' "$FLEET" | grep -c . || true)"
 
 step "Plan"
 info "compose:  $COMPOSE_FILE"
@@ -208,9 +237,10 @@ info "domain:   $DOMAIN"
 [ "$DO_LOBBY" = "1" ] && info "lobby:    replace"
 [ "$DO_NODES" = "1" ] && info "nodes:    $(printf '%s' "$NODES" | tr '\n' ' ')"
 info "build:    $([ "$SKIP_BUILD" = "1" ] && echo 'skipped (using current image)' || echo 'yes')"
+info "migrate:  $([ "$SKIP_MIGRATIONS" = "1" ] && echo 'skipped' || echo 'yes')"
 
-if [ "$DO_NODES" = "1" ] && [ "${NODE_COUNT:-0}" -lt 2 ]; then
-    warn "only $NODE_COUNT game node configured."
+if [ "$DO_NODES" = "1" ] && [ "${FLEET_COUNT:-0}" -lt 2 ]; then
+    warn "only $FLEET_COUNT game node configured."
     warn "While it drains, nobody can start a game - the site stays up but Start"
     warn "reports 'No game nodes available' until the replacement is running."
     warn "Add node-1 in $COMPOSE_FILE and deploy/Caddyfile for a gap-free deploy."
@@ -245,6 +275,31 @@ if [ "$DO_LOBBY" = "1" ]; then
         ok "site answering 200"
     else
         die "site did not come back within 120s - check: $DC logs --tail 100 lobby"
+    fi
+fi
+
+# Before the nodes roll, so the schema is current by the time new game code is
+# playing against it - and never skipped by default.
+#
+# The runbook used to end in a build/up sequence with the migration as a separate
+# step underneath it, which is exactly the omission deploy/update.sh was written
+# to prevent: code ahead of its schema does not fail loudly, it fails one feature
+# at a time, and the best-effort paths (rating a finished game) fail silently.
+# A deploy script that stops short of the migration inherits that trap.
+if [ "$SKIP_MIGRATIONS" != "1" ]; then
+    step "Applying database migrations"
+
+    if ! service_running lobby; then
+        warn "lobby is not running - skipping migrations"
+        warn "Run them once it is up: $DC exec lobby npm run migrate"
+    elif $DC exec -T lobby npm run migrate; then
+        ok "schema up to date"
+    else
+        # Not fatal to the nodes already replaced, but the operator has to know
+        # before the rest of the fleet starts serving the new code.
+        warn "migrations failed - the code may be ahead of the schema"
+        warn "See docs/DEPLOYMENT.md section 5, or run: $DC exec lobby npm run migrate -- --status"
+        confirm "Continue replacing game nodes anyway?" || die "aborted after the lobby was replaced"
     fi
 fi
 
@@ -308,6 +363,15 @@ if [ "$DO_NODES" = "1" ]; then
             fi
 
             warn "--force-after-timeout: replacing $node and ending its games"
+
+            # `up -d --force-recreate` on its own would NOT end them. It sends
+            # SIGTERM, which starts a *fresh* 90-minute drain (the POST above
+            # only quiesced, so willExit was still false), and the 95-minute
+            # stop_grace_period means Docker patiently waits it out. The operator
+            # who already waited the full drain and explicitly asked to end the
+            # games would have waited another 90 minutes with the terminal
+            # blocked. An explicit short stop is what actually forces it.
+            $DC stop -t "$FORCE_STOP_TIMEOUT" "$node" || true
         else
             ok "$node has no games left"
         fi

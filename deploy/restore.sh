@@ -256,10 +256,19 @@ elapsed=$(($(date -u +%s) - STARTED_AT))
 printf '\n\033[32mRestored "%s" from %s in %ss.\033[0m\n' "$RESTORE_DB" "$created" "$elapsed"
 
 if [ "$RESTORE_DB" = "$DB_NAME" ]; then
+    # Every node, not just node-0: one left running holds pre-restore state in
+    # memory while the lobby talks to a rebuilt database. And `restart` now
+    # honours the game nodes' 95-minute stop_grace_period, so a node with a game
+    # on it waits for that game rather than bouncing in seconds - hence the short
+    # timeout here. A database was just restored underneath them; the games in
+    # progress are already invalid.
+    nodes="$($DC config --services 2>/dev/null | grep -E '^node-' | sort | tr '\n' ' ' || true)"
+
     cat <<EOF
 
 Next:
-    $DC restart lobby node-0
+    $DC stop -t 30 ${nodes:-node-0}
+    $DC up -d lobby ${nodes:-node-0}
     bash deploy/healthcheck.sh
 EOF
 fi
