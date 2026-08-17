@@ -143,6 +143,27 @@ class Lobby {
             this.sasSweep.unref();
         }
 
+        // ARCHON (N34): the ARI distribution, so a deck's rating can be placed
+        // in the field rather than only stated. Half-hourly, and a snapshot
+        // that misses the last half hour of games is a percentile wrong in its
+        // second decimal - the alternative is scanning every rated deck on the
+        // platform once per deck row of every deck list.
+        this.ariDistributionSweep = setInterval(
+            () => this.runAriDistributionRefresh(),
+            30 * 60 * 1000
+        );
+        if (this.ariDistributionSweep && this.ariDistributionSweep.unref) {
+            this.ariDistributionSweep.unref();
+        }
+
+        // And once shortly after boot, so a fresh deploy is not half an hour of
+        // decks showing a rating with no place in the field. Delayed rather than
+        // immediate: startup has more urgent work than a GROUP BY.
+        this.ariDistributionPrime = setTimeout(() => this.runAriDistributionRefresh(), 30 * 1000);
+        if (this.ariDistributionPrime && this.ariDistributionPrime.unref) {
+            this.ariDistributionPrime.unref();
+        }
+
         // ARCHON: Master Vault catalog crawl. Ticks every minute and consults
         // the configured cadence on each tick, the way decay and replay
         // retention do, because that cadence is an admin setting: the reason an
@@ -349,6 +370,31 @@ class Lobby {
             }
         } catch (err) {
             logger.error('SAS refresh sweep failed', err);
+        }
+    }
+
+    /**
+     * ARCHON (N34): rebuild the ARI distribution snapshot.
+     *
+     * Best effort and quiet: nobody needs a log line every half hour saying the
+     * field still has the number of decks it had before. A failure leaves the
+     * previous snapshot in place, which is stale rather than wrong - percentiles
+     * move slowly, and no snapshot at all means decks show a rating with no
+     * place in the field.
+     */
+    async runAriDistributionRefresh() {
+        // The rating service owns the one AriService; a second instance here
+        // would be a second cache of the same snapshot.
+        const ariService = this.ratingService && this.ratingService.ariService;
+
+        if (!ariService) {
+            return;
+        }
+
+        try {
+            await ariService.refreshDistribution();
+        } catch (err) {
+            logger.error('ARI distribution refresh failed', err);
         }
     }
 

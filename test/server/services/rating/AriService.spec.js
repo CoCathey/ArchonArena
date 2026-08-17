@@ -1,5 +1,9 @@
 const AriService = require('../../../../server/services/rating/AriService');
 const { seedAri, effectiveAri, ARI_MAX } = require('../../../../server/services/rating/AriService');
+const {
+    SEED_DEVIATION,
+    MIN_DEVIATION
+} = require('../../../../server/services/rating/ariConfidence');
 
 // ARI is the deck-strength number the Amber ladder actually spends, so its
 // arithmetic is pinned the way EloCalculator's is: seeds, fallbacks, the
@@ -83,9 +87,14 @@ describe('AriService', function () {
             const winner = rows.find((params) => params[0] === 'w');
             const loser = rows.find((params) => params[0] === 'l');
 
-            // step = (k / sasWeight) * (1 - expected) = 2 * 0.5 = 1
-            expect(winner[1]).toBeCloseTo(71, 5);
-            expect(loser[1]).toBeCloseTo(69, 5);
+            // step = (k / sasWeight) * (1 - expected) = 2 * 0.5 = 1, times the
+            // confidence multiplier. Both decks here have never played, so both
+            // carry the seed deviation and the same 4.8x - the symmetry this
+            // test is about survives (N34).
+            const provisional = SEED_DEVIATION / MIN_DEVIATION;
+
+            expect(winner[1]).toBeCloseTo(70 + provisional, 5);
+            expect(loser[1]).toBeCloseTo(70 - provisional, 5);
         });
 
         it('moves less when the result was expected, more when it was not', async function () {
@@ -110,8 +119,15 @@ describe('AriService', function () {
 
             const upsetWin = upserts().find((params) => params[0] === 'w')[1];
 
-            expect(expectedWin - 70).toBeCloseTo(0.2, 5);
-            expect(upsetWin - 70).toBeCloseTo(1.8, 5);
+            // 0.2 and 1.8 before confidence; the multiplier is the same in
+            // both, so the NINEFOLD ratio - which is what this test is about -
+            // is untouched by N34. To one decimal, because that is the
+            // precision ARI is stored at and 70.96 is written as 71.
+            const provisional = SEED_DEVIATION / MIN_DEVIATION;
+
+            expect(expectedWin - 70).toBeCloseTo(0.2 * provisional, 1);
+            expect(upsetWin - 70).toBeCloseTo(1.8 * provisional, 1);
+            expect(upsetWin - 70).toBeGreaterThan(8 * (expectedWin - 70));
         });
 
         it('measures a sparring game against the decks’ own ARIs when no expectation is given', async function () {
@@ -128,8 +144,9 @@ describe('AriService', function () {
 
             const winner = upserts().find((params) => params[0] === 'w');
 
-            // Equal ARIs -> expected 0.5 -> step = (4/4) * 0.5 = 0.5
-            expect(winner[1]).toBeCloseTo(80.5, 5);
+            // Equal ARIs -> expected 0.5 -> step = (4/4) * 0.5 = 0.5, times
+            // the seed-deviation multiplier for a deck with no games.
+            expect(winner[1]).toBeCloseTo(80 + 0.5 * (SEED_DEVIATION / MIN_DEVIATION), 5);
             // A sparring game increments SimGames, not RatedGames.
             expect(winner[2]).toBe(0);
             expect(winner[3]).toBe(1);

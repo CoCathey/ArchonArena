@@ -21,6 +21,37 @@ import CardBack from './CardBack';
 import DeckSetFilter from './DeckSetFilter';
 
 /**
+ * ARCHON (N34): a deck's ARI as a share of the field, rounded so it reads.
+ *
+ * The percentile stored is "decks at or below this one", so the headline
+ * number - the one a player wants - is its complement. Floored at 0.1 rather
+ * than rounded to 0: the best deck on the platform is in the top something,
+ * and "top 0%" is not a sentence.
+ */
+const topPercent = (place) => {
+    const top = 100 - place.percentile;
+
+    return top < 0.1 ? '0.1' : String(Math.round(top * 10) / 10);
+};
+
+/** What the ARI cell says when you hover it. */
+const ariTitle = (deck, t) => {
+    const base = t(
+        'Archon Rating Index: starts from SAS and AERC, then moves with this deck’s real and ' +
+            'sparring results.'
+    );
+
+    if (!deck.ariPlace) {
+        return base;
+    }
+
+    return `${base} ${t('Rank {{rank}} of {{of}} rated decks.', {
+        rank: deck.ariPlace.rank.toLocaleString(),
+        of: deck.ariPlace.of.toLocaleString()
+    })}`;
+};
+
+/**
  * @typedef DeckListProps
  * @property {Deck} [activeDeck] The currently selected deck
  * @property {boolean} [noFilter] Whether or not to enable filtering
@@ -251,17 +282,27 @@ const DeckList = ({
                 // so it earns the column next to the number it supersedes.
                 accessorKey: 'ari',
                 header: t('ARI'),
+                // ARCHON (N34): the rating with its place in the field under
+                // it. "78" alone is not a ranking - a player has no way to know
+                // whether it is good - and the percentile is the shortest true
+                // answer to the question they are actually asking.
                 cell: ({ row }) =>
                     row.original.ari != null ? (
-                        <span
-                            className='text-center font-bold text-accent'
-                            title={t(
-                                'Archon Rating Index: starts from SAS and AERC, then moves with ' +
-                                    'this deck’s real and sparring results.'
-                            )}
+                        <div
+                            className='text-center leading-tight'
+                            title={ariTitle(row.original, t)}
                         >
-                            {Math.round(row.original.ari)}
-                        </span>
+                            <span className='font-bold text-accent'>
+                                {Math.round(row.original.ari)}
+                            </span>
+                            {row.original.ariPlace && (
+                                <span className='block text-[9px] text-muted'>
+                                    {t('top {{percent}}%', {
+                                        percent: topPercent(row.original.ariPlace)
+                                    })}
+                                </span>
+                            )}
+                        </div>
                     ) : (
                         <span className='text-center text-muted' title={t('ARI not available yet')}>
                             -
