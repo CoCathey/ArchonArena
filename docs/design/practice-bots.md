@@ -63,14 +63,17 @@ server/services/settings/registry.js         the `bots` section (edited on the b
 
 Six properties are worth keeping if this is ever extended.
 
-**One policy, every bot.** The prompt-answering policy was extracted from the
-Champion’s Challenge SimulatedGame into `BotPolicy`, and the lab and all
-thirteen practice bots drive it. It answers from the buttons and selectable cards the
-prompt itself publishes, so it can answer anything the ~2,700 card
-implementations raise, and it plays through `menuButton`/`cardClicked` - the
-same calls a browser click becomes - so it cannot cheat and upstream card
-fixes apply to it automatically. A strength upgrade lands in the lab and at
-the table at once.
+**One policy, every practice bot.** The prompt-answering policy started as
+the Champion's Challenge sparring partner and was extracted into `BotPolicy`,
+which all thirteen bots now drive. The lab has since grown a learned policy
+of its own (N21's `labPolicy`), so the two are siblings rather than one
+shared brain: the practice bots deliberately keep the plain baseline, which
+needs no seed, no decision log and no training diary. What both keep is the
+important part - answering from the buttons and selectable cards the prompt
+itself publishes, so any of the ~2,700 card implementations can be answered,
+and playing through `menuButton`/`cardClicked`, the same calls a browser
+click becomes, so a bot cannot cheat and upstream card fixes apply to it
+automatically.
 
 **Termination has a human witness now.** The lab could abandon a wedged game
 and record nothing; at a real table somebody is sitting across from the bot.

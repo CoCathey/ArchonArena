@@ -1638,8 +1638,8 @@ commit to it, and run the engine as a continuous soak test.
         play / use / reap / fight, key timing). Strength can start crude — never stalling
         matters more. **Built as the Champion’s Challenge sparring partner (N18)** —
         `server/services/championschallenge/SimulatedGame.js`; the showcase reuses it. The
-        policy now lives in `server/services/botplayer/BotPolicy.js`, shared with the Helper
-        Bot.
+        policy was extracted to `server/services/botplayer/BotPolicy.js`, which the practice
+        bots (F9) still play; this lab moved on to a learned policy in **N21**.
 -   [x] **The practice opponents: thirteen bots, one per house** (design:
         `docs/design/practice-bots.md`). The lobby always has an open table hosted by a bot
         from the roster — join it, pick a deck, and the game starts itself. Each bot belongs
