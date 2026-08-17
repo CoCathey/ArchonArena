@@ -508,6 +508,74 @@ const REGISTRY = {
                 min: 2,
                 max: 20,
                 default: 5
+            },
+            // ARCHON (N24): the Gauntlet - members' decks against strangers'
+            // decks, drawn from the Master Vault catalog. Hydrating a pool deck
+            // costs one Master Vault request, once and forever, and only
+            // happens while at least one member has the Gauntlet switched on -
+            // but it is the same outbound budget user-facing deck import
+            // spends, so the operator owns the pacing.
+            gauntletEnabled: {
+                type: 'boolean',
+                label: 'Members may play their decks against the field (the Gauntlet)',
+                default: true
+            },
+            gauntletDecksPerRun: {
+                type: 'number',
+                label: 'Catalog decks hydrated into the pool per sweep',
+                min: 1,
+                max: 50,
+                default: 5
+            },
+            gauntletTargetPoolSize: {
+                type: 'number',
+                label: 'Playable pool size to stop hydrating at',
+                min: 20,
+                max: 20000,
+                default: 400
+            },
+            gauntletRequestDelayMs: {
+                type: 'number',
+                label: 'Pause between Master Vault deck fetches (ms)',
+                min: 0,
+                max: 30000,
+                default: 1500
+            },
+            gauntletRequestTimeoutMs: {
+                type: 'number',
+                label: 'Master Vault deck fetch timeout (ms)',
+                min: 1000,
+                max: 60000,
+                default: 10000
+            },
+            gauntletEnrichPerRun: {
+                type: 'number',
+                label: 'Pool decks sent for SAS/AERC enrichment per sweep',
+                min: 0,
+                max: 25,
+                default: 5
+            },
+            // ARCHON (N24): where the simulated games actually run. Sparring is
+            // solid CPU with nobody waiting on it, so it can be moved off the
+            // lobby onto its own node (npm run challenge). Whoever sweeps holds
+            // a database lease, so switching this is safe at runtime and the two
+            // can never both play.
+            sweepOwner: {
+                type: 'select',
+                label: 'Which node plays the simulated games',
+                options: [
+                    { value: 'lobby', label: 'The lobby (default)' },
+                    { value: 'worker', label: 'A dedicated Challenge worker node' },
+                    { value: 'any', label: 'Whichever node claims the lease first' }
+                ],
+                default: 'lobby'
+            },
+            sweepLeaseSeconds: {
+                type: 'number',
+                label: 'Seconds before a silent sweeper’s lease can be taken over',
+                min: 30,
+                max: 3600,
+                default: 120
             }
         }
     },
@@ -866,6 +934,15 @@ function validateField(descriptor, value, path, errors) {
             errors.push(`${path} must be text`);
         } else if (descriptor.maxLength !== undefined && value.length > descriptor.maxLength) {
             errors.push(`${path} must be at most ${descriptor.maxLength} characters`);
+        }
+    } else if (descriptor.type === 'select') {
+        // One of a fixed list. Validated here rather than trusted from the
+        // dropdown, because the settings API takes JSON from an admin's client
+        // and a value outside the list would reach the code that switches on it.
+        const allowed = (descriptor.options || []).map((option) => option.value);
+
+        if (typeof value !== 'string' || !allowed.includes(value)) {
+            errors.push(`${path} must be one of: ${allowed.join(', ')}`);
         }
     } else if (descriptor.type === 'stringMap') {
         if (typeof value !== 'object' || value === null || Array.isArray(value)) {

@@ -1,5 +1,6 @@
 const ChampionsChallengeService = require('../../../../server/services/championschallenge/ChampionsChallengeService');
 const { MIN_CONFIDENT_GAMES } = require('../../../../server/services/championschallenge/labMath');
+const { PLAYER_ONE } = require('../../../../server/services/championschallenge/SimulatedGame');
 
 // The service against a mocked db, dispatching on SQL substrings the way the
 // catalog and deck-import specs do. What is being pinned:
@@ -327,6 +328,151 @@ describe('ChampionsChallengeService', function () {
             expect(
                 enrolls.some(([, insertParams]) => insertParams[1] === 9 && insertParams[2] === 20)
             ).toBe(true);
+        });
+
+        // ARCHON (N24): the Gauntlet's path through the sweep. The service's own
+        // job here is narrow - decide field-or-mirror, seat the member's deck as
+        // alpha, hand the result to GauntletService - so the collaborator is
+        // stubbed and what is pinned is the wiring.
+        describe('the Gauntlet', function () {
+            const fieldOn = (overrides = {}) => ({
+                enabled: true,
+                fieldSharePct: 100,
+                sets: [],
+                houses: [],
+                strategies: [],
+                minSas: null,
+                maxSas: null,
+                ...overrides
+            });
+
+            const stubGauntlet = (settings, opponent) => {
+                service.gauntletService.settingsFor = vi.fn().mockResolvedValue(settings);
+                service.gauntletService.drawOpponent = vi.fn().mockResolvedValue(opponent);
+                service.gauntletService.recordGame = vi.fn().mockResolvedValue(undefined);
+                service.gauntletService.noteOpponentPlayed = vi.fn().mockResolvedValue(undefined);
+                service.gauntletService.anyoneWantsField = vi.fn().mockResolvedValue(false);
+            };
+
+            const opponentDeck = {
+                uuid: 'stranger-uuid',
+                name: 'Stranger’s Deck',
+                sas: 75,
+                deck: { name: 'Stranger’s Deck', uuid: 'stranger-uuid', houses: ['a', 'b', 'c'] }
+            };
+
+            it('plays a member’s deck against a drawn foreign deck', async function () {
+                sweepAnswers({
+                    enrollments: [{ UserId: USER, DeckId: 1 }],
+                    membership: vaultMasterRow
+                });
+                config.gamesPerSweep = 1;
+                stubGauntlet(fieldOn(), opponentDeck);
+                service.runMatch = vi.fn().mockResolvedValue({
+                    ...fakeResult(1, 0),
+                    // The member's deck holds the alpha seat, which is what
+                    // makes this mean "mine won".
+                    winner: PLAYER_ONE,
+                    winnerDeck: { dbId: 1, uuid: 'u' },
+                    loserDeck: { uuid: 'stranger-uuid' }
+                });
+
+                const result = await service.runSweep();
+
+                expect(result.played).toBe(1);
+
+                const [, decks] = service.runMatch.mock.calls[0];
+
+                expect(service.runMatch.mock.calls[0][1]).toBe(opponentDeck.deck);
+                expect(decks).toBeDefined();
+                expect(service.gauntletService.recordGame).toHaveBeenCalledWith(
+                    expect.objectContaining({ userId: USER, deckId: 1, won: true })
+                );
+                expect(service.gauntletService.noteOpponentPlayed).toHaveBeenCalledWith(
+                    'stranger-uuid'
+                );
+                // A field result is never written to the mirror table.
+                expect(queriesMatching('INSERT INTO "ProvingGroundsGames"')).toHaveLength(0);
+            });
+
+            // A one-deck roster cannot spar with itself; the field gives it games.
+            it('gives a single-deck roster a game', async function () {
+                sweepAnswers({
+                    enrollments: [{ UserId: USER, DeckId: 1 }],
+                    membership: vaultMasterRow
+                });
+                config.gamesPerSweep = 1;
+                stubGauntlet(fieldOn(), opponentDeck);
+                service.runMatch = vi.fn().mockResolvedValue({
+                    ...fakeResult(1, 0),
+                    winner: PLAYER_ONE,
+                    winnerDeck: { dbId: 1, uuid: 'u' },
+                    loserDeck: { uuid: 'stranger-uuid' }
+                });
+
+                expect((await service.runSweep()).played).toBe(1);
+            });
+
+            it('falls back to a mirror game when the pool has no match', async function () {
+                sweepAnswers({
+                    enrollments: [
+                        { UserId: USER, DeckId: 1 },
+                        { UserId: USER, DeckId: 2 }
+                    ],
+                    membership: vaultMasterRow
+                });
+                config.gamesPerSweep = 1;
+                stubGauntlet(fieldOn(), null);
+                service.runMatch = vi.fn().mockResolvedValue(fakeResult(1, 2));
+
+                const result = await service.runSweep();
+
+                expect(result.played).toBe(1);
+                // The member's tick was spent on a mirror game, not on nothing.
+                expect(queriesMatching('INSERT INTO "ProvingGroundsGames"')).toHaveLength(1);
+                expect(service.gauntletService.recordGame).not.toHaveBeenCalled();
+            });
+
+            it('leaves the field alone when the member has not asked for it', async function () {
+                sweepAnswers({
+                    enrollments: [
+                        { UserId: USER, DeckId: 1 },
+                        { UserId: USER, DeckId: 2 }
+                    ],
+                    membership: vaultMasterRow
+                });
+                config.gamesPerSweep = 1;
+                stubGauntlet(fieldOn({ enabled: false }), opponentDeck);
+                service.runMatch = vi.fn().mockResolvedValue(fakeResult(1, 2));
+
+                await service.runSweep();
+
+                expect(service.gauntletService.drawOpponent).not.toHaveBeenCalled();
+            });
+
+            it('counts field games against the same daily budget', async function () {
+                sweepAnswers({
+                    enrollments: [{ UserId: USER, DeckId: 1 }],
+                    membership: vaultMasterRow
+                });
+                config.gamesPerSweep = 1;
+                stubGauntlet(fieldOn(), opponentDeck);
+                service.runMatch = vi.fn();
+
+                // 12 field games today (the cap), no mirror games: the deck rests.
+                const base = db.query.getMockImplementation();
+
+                db.query.mockImplementation(async (sql, params) => {
+                    if (sql.includes('FROM "GauntletGames"') && sql.includes("date_trunc('day'")) {
+                        return [{ DeckId: 1, GamesToday: 12 }];
+                    }
+
+                    return base(sql, params);
+                });
+
+                expect((await service.runSweep()).played).toBe(0);
+                expect(service.runMatch).not.toHaveBeenCalled();
+            });
         });
 
         it('fills several randomizer slots in one call, never the same deck twice', async function () {

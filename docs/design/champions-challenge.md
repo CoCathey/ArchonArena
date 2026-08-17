@@ -144,3 +144,72 @@ slots can be filled at once; asking for more decks than there are free slots
 (or than the collection can supply) fills what fits and reports how many
 landed, because a partial fill is a real answer rather than an error.
 Admin-owned decks skip the daily cap so the operator can flood their own lab.
+
+## The Gauntlet — playing the field (N24)
+
+The mirror lab measures a deck against the company it keeps. A deck that wins
+70% inside a weak collection and one that wins 70% against the world are not
+the same deck, and sparring against your own roster cannot tell them apart.
+The Gauntlet plays a member's decks against decks **nobody here owns**.
+
+**Where the field comes from.** Master Vault publishes one global deck list,
+ordered by registration date, and walking it page by page is how anyone builds
+a complete index — it is what Decks of KeyForge does, and what this site
+already does in `CatalogService` for deck-name search. That catalog stores
+names and uuids only (a search result needs a name; asking for card lists
+would multiply every crawl response by two orders of magnitude), so a catalog
+deck must be **hydrated** before the engine can play it: its cards fetched
+once from Master Vault, parsed by the member-facing importer's own parser, and
+kept forever — a registered deck's contents never change. A deck this server
+cannot simulate is stored as unplayable rather than retried, so it never costs
+a second request. Hydration only runs while at least one member has the
+Gauntlet switched on.
+
+**Never your own, never a friend's.** The draw excludes any pool deck whose
+uuid the member owns, or that an accepted friend owns. A friend's deck is
+precisely the company-it-keeps problem the Gauntlet exists to escape.
+
+**What the member controls.** A share of games (the rest stay mirror games —
+both measurements are useful), sets, houses the opponent must contain, a SAS
+window, and strategies. Sets and houses are exact, from the catalog.
+Strategies are read off the deck's AERC breakdown — `amber` is amber control,
+`aggro` is creature control and effective power, `speed` is expected amber,
+`control` is artifact control and disruption, `efficiency` is draw and cycle —
+which only exists for decks Decks of KeyForge has been asked about. So a
+strategy or SAS filter narrows the pool to enriched decks, and the page says
+how many decks the filters actually reach rather than letting a member wonder
+why every game is still a mirror. The pool is enriched a few decks per sweep,
+most-played first.
+
+**Reported separately, never averaged.** Field results live in their own table
+and appear in their own column. "How do I do against my own decks" and "how do
+I do against the field" are different claims; their average answers neither.
+Field games move ARI at the sim rate like any sparring game, count against the
+same per-deck daily budget, and — because a field game needs only one of the
+member's decks — give a single-deck roster games the mirror lab never could.
+
+## Where the games run (N24)
+
+A simulated game is about half a second of solid CPU and a deep showcase game
+is closer to a minute. Inside the lobby that is CPU taken from the process
+serving chat, matchmaking and the sockets of people playing real games — and
+the lab is the one workload with nobody waiting on it.
+
+So the sweep can be hosted by a node of its own:
+
+```
+npm run challenge        # server/challengeworker
+```
+
+Set `championsChallenge.sweepOwner` to `worker` and the lobby stands down;
+`any` lets whichever process claims the lease play. The right to sweep **is** a
+lease — a single-row table claimed in one atomic statement — because two
+sweepers would quietly play every deck twice its daily budget, invisibly, in
+results nobody can audit. A crashed holder costs one lease period of idleness
+(`sweepLeaseSeconds`, default 120), never a double-played roster; an
+unrecognised `sweepOwner` falls back to the lobby rather than to nobody.
+
+The worker needs **Postgres and nothing else**: the lab reads card data from
+the pack files on disk rather than the Redis-backed `CardService`, talks to no
+game node, and serves no HTTP. It does make outbound requests to Master Vault
+and Decks of KeyForge while the Gauntlet pool is growing.
