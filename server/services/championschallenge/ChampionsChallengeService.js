@@ -2120,6 +2120,96 @@ class ChampionsChallengeService {
     }
 
     /**
+     * ARCHON (N33): which of a member's decks the lab currently calls hidden
+     * gems, for pages that want the badge without the report behind it.
+     *
+     * The same verdict, from the same `isHiddenGem`, over a GROUPED read rather
+     * than the full game list. The deck list is a paginated page a member loads
+     * constantly, and reading twenty thousand game rows to put a badge on eight
+     * of them is not a trade worth making. Grouping by opponent loses nothing
+     * here: the expectation depends only on the opponent's SAS, so N games
+     * against one opponent are N copies of one number.
+     *
+     * Mirror games only, exactly like the report. Gauntlet and Vault Tour games
+     * are measured against decks whose SAS this site did not set the terms for,
+     * and the claim being made - "beats what SAS predicted" - is a claim about
+     * the sparring record.
+     *
+     * Best effort: a badge is not worth failing a deck list over.
+     *
+     * @param {number} userId
+     * @returns {Promise<Set<number>>} deck ids
+     */
+    async hiddenGemsFor(userId) {
+        const gems = new Set();
+
+        try {
+            // Aliased "Played" rather than "Games" so the spec that forbids the
+            // official tables' names anywhere in lab SQL can stay strict.
+            const rows = await this.db.query(
+                'SELECT x."DeckId", x."OpponentDeckId", COUNT(*)::int AS "Played", ' +
+                    'COUNT(*) FILTER (WHERE x."Won")::int AS "Wins" FROM (' +
+                    'SELECT "WinnerDeckId" AS "DeckId", "LoserDeckId" AS "OpponentDeckId", ' +
+                    'true AS "Won" FROM "ProvingGroundsGames" WHERE "UserId" = $1 ' +
+                    'UNION ALL ' +
+                    'SELECT "LoserDeckId", "WinnerDeckId", false ' +
+                    'FROM "ProvingGroundsGames" WHERE "UserId" = $1' +
+                    ') x GROUP BY x."DeckId", x."OpponentDeckId"',
+                [userId]
+            );
+
+            if (!rows || !rows.length) {
+                return gems;
+            }
+
+            const deckIds = [...new Set(rows.flatMap((row) => [row.DeckId, row.OpponentDeckId]))];
+            const sasRows = await this.db.query(
+                'SELECT d."Id", ds."SasRating" FROM "Decks" d ' +
+                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" WHERE d."Id" = ANY($1)',
+                [deckIds]
+            );
+            const sasByDeck = new Map((sasRows || []).map((row) => [row.Id, row.SasRating]));
+            const eloConfig = this.eloConfig();
+            const totals = new Map();
+
+            for (const row of rows) {
+                const total = totals.get(row.DeckId) || {
+                    games: 0,
+                    wins: 0,
+                    expectedSum: 0,
+                    expectedGames: 0
+                };
+                const sas = sasByDeck.get(row.DeckId);
+                const opponentSas = sasByDeck.get(row.OpponentDeckId);
+
+                total.games += row.Played;
+                total.wins += row.Wins;
+
+                if (sas != null && opponentSas != null) {
+                    total.expectedSum += sasExpectedScore(sas, opponentSas, eloConfig) * row.Played;
+                    total.expectedGames += row.Played;
+                }
+
+                totals.set(row.DeckId, total);
+            }
+
+            for (const [deckId, total] of totals) {
+                const expectedWinRate = total.expectedGames
+                    ? total.expectedSum / total.expectedGames
+                    : null;
+
+                if (isHiddenGem({ games: total.games, wins: total.wins, expectedWinRate })) {
+                    gems.add(deckId);
+                }
+            }
+        } catch (err) {
+            logger.error('Challenge: could not read hidden gems', err);
+        }
+
+        return gems;
+    }
+
+    /**
      * One enrolled deck's games folded into the row the page renders.
      * Pure given its arguments; the SQL above is the only IO.
      */

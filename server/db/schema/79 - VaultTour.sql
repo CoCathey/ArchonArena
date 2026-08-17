@@ -28,7 +28,10 @@ CREATE TABLE IF NOT EXISTS public."VaultTourDecks"
     "Expansion" integer NOT NULL,
     -- Comma-separated house codes, as the catalog stores them.
     "Houses" text COLLATE pg_catalog."default",
-    -- The parsed card list, exactly the shape the engine's selectDeck wants.
+    -- The parsed card list as IDS, without the card data itself. The draw
+    -- re-attaches it (masterVault.withCardData); handing these rows straight
+    -- to the engine gets a deck with no cards in it and a walkover, not an
+    -- error, which is exactly what happened the first time.
     "Cards" jsonb,
     -- false when this server cannot simulate the deck: a card it has no data
     -- for, or a house count the engine will not accept. Kept as a row rather

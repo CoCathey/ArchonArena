@@ -1,6 +1,7 @@
 const logger = require('../../log');
 const { cloneCard, getCardIndex } = require('./packCards');
 const { profileDeck } = require('./deckProfile');
+const { withCardData } = require('./masterVault');
 
 /**
  * ARCHON (N24): the Gauntlet - the Champion's Challenge against the field.
@@ -720,6 +721,34 @@ class GauntletService {
             return null;
         }
 
+        const stored = Array.isArray(row.Cards) ? row.Cards : JSON.parse(row.Cards || '[]');
+        // The row holds ids; the engine needs the card data on each entry, and
+        // plays an EMPTY deck when it is absent rather than complaining. See
+        // masterVault.withCardData - this is the one place that difference
+        // decides whether a field game is a game or a walkover.
+        const { cards, missing } = withCardData(stored);
+
+        if (missing.length || !cards.length) {
+            // Checked when it was fetched, so a card that cannot be built now
+            // means the pack index moved underneath the pool. Drop it out of the
+            // pool instead of serving it: the draw takes least-recently-played
+            // first, so an unbuildable deck that stays playable is drawn every
+            // sweep, forever.
+            logger.error(
+                `Gauntlet: ${row.Uuid} can no longer be built ` +
+                    `(${missing.slice(0, 5).join(', ') || 'no cards stored'}) - dropped`
+            );
+            await this.storeUnplayable(
+                row.Uuid,
+                row.Name,
+                row.Expansion,
+                row.Houses,
+                missing.length ? missing : ['no-cards']
+            );
+
+            return null;
+        }
+
         return {
             uuid: row.Uuid,
             name: row.Name,
@@ -731,7 +760,7 @@ class GauntletService {
                 uuid: row.Uuid,
                 expansion: row.Expansion,
                 houses: csvToList(row.Houses),
-                cards: Array.isArray(row.Cards) ? row.Cards : JSON.parse(row.Cards || '[]')
+                cards
             }
         };
     }

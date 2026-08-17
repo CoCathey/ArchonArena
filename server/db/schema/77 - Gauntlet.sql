@@ -23,7 +23,11 @@ CREATE TABLE IF NOT EXISTS public."GauntletDecks"
     "Expansion" integer NOT NULL,
     -- Comma-separated house codes, as DeckCatalog stores them.
     "Houses" text COLLATE pg_catalog."default",
-    -- The parsed card list, exactly the shape the engine's selectDeck wants
+    -- The parsed card list as IDS, without the card data itself: storing the
+    -- cards would multiply the row by two orders of magnitude and freeze them
+    -- at fetch time. The draw re-attaches them from the pack index this build
+    -- ships (masterVault.withCardData), which is NOT optional - the engine
+    -- drops any entry that arrives without its card and plays an empty deck
     -- (id, count, maverick, anomaly, house, enhancements, isNonDeck). Kept as
     -- one document rather than a child table because it is only ever read
     -- whole, by one consumer, to hand straight to the engine.

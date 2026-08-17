@@ -1,5 +1,5 @@
 const logger = require('../../log');
-const { fetchDeck, playableDeck } = require('./masterVault');
+const { fetchDeck, playableDeck, withCardData } = require('./masterVault');
 const { wilsonInterval } = require('./labMath');
 const { DEFAULT_FIELD, DEFAULT_EVENT } = require('./vaultTourField');
 
@@ -558,7 +558,25 @@ class VaultTourService {
             return null;
         }
 
-        const cards = typeof row.Cards === 'string' ? JSON.parse(row.Cards) : row.Cards;
+        const stored = typeof row.Cards === 'string' ? JSON.parse(row.Cards) : row.Cards;
+        // The row holds ids; the engine needs the card data on each entry, and
+        // silently plays an empty deck when it is absent. See withCardData.
+        const { cards, missing } = withCardData(stored);
+
+        if (missing.length || !cards.length) {
+            // This deck was checked when it was fetched, so a card that cannot
+            // be built NOW means the pack index changed underneath it. Take it
+            // out of the field rather than serve it: an unbuildable opponent
+            // that stays playable is drawn first every sweep forever, since the
+            // draw is ordered by least-recently-played.
+            logger.error(
+                `Vault Tour: ${row.Uuid} can no longer be built ` +
+                    `(${missing.slice(0, 5).join(', ') || 'no cards stored'}) - withdrawn`
+            );
+            await this.markUnplayable(row.Uuid, missing.length ? missing : ['no-cards']);
+
+            return null;
+        }
 
         return {
             uuid: row.Uuid,
@@ -573,6 +591,19 @@ class VaultTourService {
                 cards
             }
         };
+    }
+
+    /** Take a deck out of the field, with the reason the panel shows. */
+    async markUnplayable(uuid, missing) {
+        try {
+            await this.db.query(
+                'UPDATE "VaultTourDecks" SET "Playable" = false, "MissingCards" = $2 ' +
+                    'WHERE "Uuid" = $1',
+                [uuid, missing.slice(0, 20).join(',')]
+            );
+        } catch (err) {
+            logger.error('Vault Tour: could not withdraw an unplayable deck', err);
+        }
     }
 
     async noteOpponentPlayed(uuid) {

@@ -5,7 +5,25 @@ const logger = require('../../log');
 // DeckImporterService.kt), so the catalog is built from the registry itself
 // rather than from somebody else's copy of it - and it works on a server that
 // never bought a DoK key.
-const MV_API_URL = 'https://www.keyforgegame.com/api/decks/v2';
+const MV_API_URL = 'https://www.keyforgegame.com/api/decks/v2/';
+
+// Master Vault is a Django service, and Django is strict about the trailing
+// slash: `/api/decks/v2?page=1` is a 404 while `/api/decks/v2/?page=1` is the
+// deck list. This crawl asked without the slash for its whole life and indexed
+// nothing, while single-deck fetches - which are spelled `/<uuid>/?links=cards`
+// and happen to carry one - worked the entire time. That is the kind of fault
+// no amount of retrying finds, so the URL is now resolved rather than assumed:
+// the shapes below are tried in order until one answers with a deck list, and
+// the winner is remembered for the rest of the process.
+//
+// Ordered most to least specific. An operator override (`catalog.mvApiUrl`)
+// always goes first - it is the escape hatch for the day Master Vault moves
+// again and this list is wrong.
+const MV_API_CANDIDATES = [MV_API_URL, 'https://www.keyforgegame.com/api/decks/'];
+
+// Master Vault is somebody else's service and is entitled to know who is
+// asking. An unidentified client is also the first thing an operator blocks.
+const MV_USER_AGENT = 'ArchonArena/1.0 (+https://archonarena.com)';
 
 /**
  * The Master Vault deck catalog: a name -> uuid index of every deck that
@@ -114,37 +132,106 @@ class CatalogService {
     }
 
     /**
+     * The endpoint shapes to try, best first: an operator's override, then the
+     * ones known to have been Master Vault's deck list. A URL without a trailing
+     * slash gets one, because that single character is the difference between a
+     * deck list and a 404 and is not worth an operator's afternoon.
+     */
+    apiCandidates() {
+        const configured = this.getConfig().mvApiUrl;
+        const withSlash = (url) => (url.endsWith('/') ? url : `${url}/`);
+        const candidates = configured ? [withSlash(configured)] : [];
+
+        for (const candidate of MV_API_CANDIDATES) {
+            if (!candidates.includes(candidate)) {
+                candidates.push(candidate);
+            }
+        }
+
+        // Once one has answered, it is the only one worth asking.
+        return this.resolvedApiUrl ? [this.resolvedApiUrl] : candidates;
+    }
+
+    /**
      * One page of Master Vault's global deck list, oldest registration first.
      * Returns { decks: [{ uuid, name, expansion, houses }], rowCount } or
      * { error, status } describing the failure so the caller's circuit breaker
      * can tell a rate limit from a timeout. Never throws.
+     *
+     * A 404 is treated as "wrong address" rather than "no decks" and moves on to
+     * the next candidate; every other status is Master Vault answering, and is
+     * reported as-is. The error carries the URL, because "HTTP 404" on its own
+     * tells an operator nothing they can act on.
      */
     async fetchPage(page) {
+        let last = { error: 'no endpoint to try', status: null };
+
+        for (const baseUrl of this.apiCandidates()) {
+            const attempt = await this.fetchPageFrom(baseUrl, page);
+
+            if (!attempt.error) {
+                if (this.resolvedApiUrl !== baseUrl) {
+                    this.resolvedApiUrl = baseUrl;
+                    logger.info(`Master Vault catalog: reading the deck list from ${baseUrl}`);
+                }
+
+                return attempt;
+            }
+
+            last = attempt;
+
+            // Anything other than "that address is not the deck list" means we
+            // found the service and it said no - a rate limit, a timeout, an
+            // outage. Retrying a different spelling would just be three requests
+            // where one was already answered.
+            if (attempt.status !== 404 && !attempt.wrongAddress) {
+                break;
+            }
+        }
+
+        return last;
+    }
+
+    /** One page from one candidate URL. Never throws. */
+    async fetchPageFrom(baseUrl, page) {
         const config = this.getConfig();
-        const baseUrl = config.mvApiUrl || MV_API_URL;
         const url = `${baseUrl}?page=${page}&page_size=${this.getPageSize()}&ordering=date`;
 
         try {
             const response = await fetch(url, {
                 method: 'GET',
-                // The tail of the list is the whole point of a repeat run, and
-                // a cached copy of the last page is by definition the decks
-                // registered before the ones this run came for.
-                headers: { 'cache-control': 'no-cache' },
+                headers: {
+                    // The tail of the list is the whole point of a repeat run,
+                    // and a cached copy of the last page is by definition the
+                    // decks registered before the ones this run came for.
+                    'cache-control': 'no-cache',
+                    'user-agent': MV_USER_AGENT
+                },
                 signal: AbortSignal.timeout(config.requestTimeoutMs || 15000)
             });
 
             if (!response.ok) {
-                logger.warn(`Master Vault catalog returned ${response.status} for page ${page}`);
+                logger.warn(
+                    `Master Vault catalog returned ${response.status} for page ${page} at ${url}`
+                );
 
-                return { error: `HTTP ${response.status}`, status: response.status };
+                return {
+                    error: `HTTP ${response.status} from ${baseUrl}`,
+                    status: response.status
+                };
             }
 
             const body = await response.json();
             const rows = body && Array.isArray(body.data) ? body.data : null;
 
             if (!rows) {
-                return { error: 'unexpected response shape (expected a data array)', status: null };
+                // A 200 that is not a deck list is the same problem a 404 is:
+                // this is not the address. Say so, so the caller tries the next.
+                return {
+                    error: `unexpected response shape from ${baseUrl} (expected a data array)`,
+                    status: null,
+                    wrongAddress: true
+                };
             }
 
             const decks = rows

@@ -13,7 +13,8 @@ const { REGION_NAMES } = require('../rating/regions');
  * Field types: 'boolean' | 'number' | 'stringArray' | 'numberMap'
  * (object of numeric values, e.g. the key differential multiplier table) |
  * 'stringMap' (object of string values with optional key pattern and
- * allowed-values list) | 'text' (long free text, e.g. Markdown content).
+ * allowed-values list) | 'text' (free text, e.g. Markdown content or a URL) |
+ * 'select' (one of a fixed list of options).
  */
 const REGISTRY = {
     rating: {
@@ -330,6 +331,18 @@ const REGISTRY = {
                 min: 1,
                 max: 1440,
                 default: 15
+            },
+            // The escape hatch for the day Master Vault moves its deck list.
+            // Left blank the crawler tries the addresses it knows and keeps the
+            // one that answers; filled in, this one is tried first. It is a
+            // setting rather than a constant because the alternative - the
+            // crawl indexing nothing until somebody ships a deploy - is what
+            // this whole section is here to avoid.
+            mvApiUrl: {
+                type: 'text',
+                label: 'Master Vault deck list URL (blank = work it out)',
+                maxLength: 300,
+                default: ''
             },
             maxSearchResults: {
                 type: 'number',

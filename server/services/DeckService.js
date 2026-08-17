@@ -874,15 +874,44 @@ class DeckService {
             logger.error('Failed to retrieve decks', err);
         }
 
+        // ARCHON (N33): the lab's hidden-gem verdict, on the deck list.
+        //
+        // A member's decks are looked at here far more often than on the
+        // Champion's Challenge page, and "this one wins more than its rating
+        // says it should" is the most useful thing the lab knows about a deck.
+        // The verdict is ASKED FOR, not recomputed: the threshold and the
+        // confidence rule stay in labMath, where they are tested, and the day
+        // they change this list changes with them. One grouped read per page,
+        // and a failure costs a badge rather than the deck list.
+        const gems = await this.hiddenGemDeckIds(user);
+
         for (let deck of decks) {
             let retDeck = this.mapDeck(deck);
 
             await this.getDeckCardsAndHouses(retDeck);
 
+            retDeck.hiddenGem = gems.has(retDeck.id);
+
             retDecks.push(retDeck);
         }
 
         return retDecks;
+    }
+
+    /**
+     * Deck ids the Champion's Challenge currently calls hidden gems, or an
+     * empty set when there is no lab to ask. Injected rather than required at
+     * the top so DeckService keeps no hard dependency on the lab: this is a
+     * badge, and a site running without the Challenge still lists decks.
+     */
+    async hiddenGemDeckIds(user) {
+        const lab = this.championsChallengeService;
+
+        if (!user || !lab || typeof lab.hiddenGemsFor !== 'function') {
+            return new Set();
+        }
+
+        return lab.hiddenGemsFor(user.id);
     }
 
     async getDeckCardsAndHouses(deck, standalone = false) {
