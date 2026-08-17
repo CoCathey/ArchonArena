@@ -11,6 +11,14 @@ const cardService = ServiceFactory.cardService(configService);
 
 const deckService = new DeckService(configService, cardService);
 
+// ARCHON (N33): the lab, for the hidden-gem badge on the deck list. Injected
+// onto the deck service rather than required by it: ChampionsChallengeService
+// constructs DeckService itself, so a require in the other direction is a
+// cycle, and a site with the Challenge switched off must still list decks.
+const ChampionsChallengeService = require('../services/championschallenge/ChampionsChallengeService');
+
+deckService.championsChallengeService = new ChampionsChallengeService(configService);
+
 // ARCHON: Decks of KeyForge SAS enrichment (see docs/design/deck-sas.md)
 const DokService = require('../services/dok/DokService');
 const dokService = new DokService(configService);

@@ -178,7 +178,12 @@ describe('GauntletService', function () {
             expect(drawn.uuid).toBe('deck-uuid');
             expect(drawn.sas).toBe(72);
             expect(drawn.deck.houses).toEqual(['dis', 'logos', 'mars']);
-            expect(drawn.deck.cards).toEqual([{ id: 'anger', count: 1 }]);
+            // ENGINE-ready, which means the card data is attached: the row
+            // stores ids, and the engine silently plays an empty deck when an
+            // entry arrives without its card. See fieldDeckCards.spec.js.
+            expect(drawn.deck.cards).toHaveLength(1);
+            expect(drawn.deck.cards[0].id).toBe('anger');
+            expect(drawn.deck.cards[0].card.id).toBe('anger');
             // A foreign deck has no row in "Decks"; nothing downstream may
             // treat it as if it did.
             expect(drawn.deck.dbId).toBeUndefined();
@@ -191,7 +196,8 @@ describe('GauntletService', function () {
 
             const drawn = await service.drawOpponent(USER, emptyFilters);
 
-            expect(drawn.deck.cards).toEqual([{ id: 'anger', count: 2 }]);
+            expect(drawn.deck.cards[0].count).toBe(2);
+            expect(drawn.deck.cards[0].card.id).toBe('anger');
         });
 
         it('says nothing rather than guessing when the pool has no match', async function () {

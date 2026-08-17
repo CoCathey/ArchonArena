@@ -167,20 +167,41 @@ const DeckList = ({
                 accessorKey: 'name',
                 header: t('Name'),
                 cell: ({ row }) => (
-                    <span
-                        className={`block max-w-full truncate text-[0.8rem] ${
-                            selectedDeck && row.original.id === selectedDeck.id
-                                ? 'text-foreground font-semibold'
-                                : ''
-                        } ${
-                            row.original.status?.basicRules === false
-                                ? 'text-[color:color-mix(in_oklab,var(--brand)_78%,black)] dark:text-[color:var(--brand-strong)]'
-                                : ''
-                        }`}
-                        title={row.original.name}
-                    >
-                        {row.original.name}
-                    </span>
+                    <div className='flex min-w-0 items-center gap-1.5'>
+                        <span
+                            className={`min-w-0 truncate text-[0.8rem] ${
+                                selectedDeck && row.original.id === selectedDeck.id
+                                    ? 'text-foreground font-semibold'
+                                    : ''
+                            } ${
+                                row.original.status?.basicRules === false
+                                    ? 'text-[color:color-mix(in_oklab,var(--brand)_78%,black)] dark:text-[color:var(--brand-strong)]'
+                                    : ''
+                            }`}
+                            title={row.original.name}
+                        >
+                            {row.original.name}
+                        </span>
+                        {/* ARCHON (N33): the lab's verdict where the collection
+                            is actually read. The badge is the same claim the
+                            Champion's Challenge makes - with confidence, this
+                            deck wins more than its SAS predicted - so it uses
+                            the same violet and the same words, and the title
+                            says what it means rather than assuming the player
+                            has seen the lab. Only decks with enough games ever
+                            carry it, so an unenrolled collection shows none. */}
+                        {row.original.hiddenGem && (
+                            <span
+                                className='shrink-0 rounded-full border border-violet-500/40 bg-violet-500/15 px-1.5 text-[9px] font-semibold uppercase tracking-wide text-violet-300'
+                                title={t(
+                                    'Hidden gem: in the Champion’s Challenge this deck wins ' +
+                                        'more than its SAS predicted.'
+                                )}
+                            >
+                                {t('Gem')}
+                            </span>
+                        )}
+                    </div>
                 ),
                 enableColumnFilter: false,
                 meta: { className: 'min-w-0', colWidth: '44%' }

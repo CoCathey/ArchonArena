@@ -113,11 +113,16 @@ describe('CatalogService', function () {
 
             const [url, options] = fetchMock.mock.calls[0];
 
-            expect(url).toBe('https://mv.example/api/decks/v2?page=3&page_size=2&ordering=date');
+            // The trailing slash is added: Master Vault is a Django service
+            // and answers 404 without it, which is exactly how this crawl spent
+            // its whole life indexing nothing.
+            expect(url).toBe('https://mv.example/api/decks/v2/?page=3&page_size=2&ordering=date');
             // The catalog stores no cards, and asking for them would multiply
             // every response by two orders of magnitude.
             expect(url).not.toContain('links=cards');
-            expect(options.headers).toEqual({ 'cache-control': 'no-cache' });
+            expect(options.headers['cache-control']).toBe('no-cache');
+            // Somebody else's service is entitled to know who is asking.
+            expect(options.headers['user-agent']).toContain('ArchonArena');
         });
 
         it('falls back to the real Master Vault endpoint when unconfigured', async function () {
@@ -127,7 +132,7 @@ describe('CatalogService', function () {
             await service.fetchPage(0);
 
             expect(fetchMock.mock.calls[0][0]).toBe(
-                'https://www.keyforgegame.com/api/decks/v2?page=0&page_size=2&ordering=date'
+                'https://www.keyforgegame.com/api/decks/v2/?page=0&page_size=2&ordering=date'
             );
         });
 
@@ -173,7 +178,12 @@ describe('CatalogService', function () {
         it('reports the status so a rate limit can be told from a server error', async function () {
             fetchMock.mockResolvedValue({ ok: false, status: 429 });
 
-            expect(await service.fetchPage(0)).toEqual({ error: 'HTTP 429', status: 429 });
+            const result = await service.fetchPage(0);
+
+            expect(result.status).toBe(429);
+            // The URL is in the message: "HTTP 404" on its own told an operator
+            // nothing they could act on, which cost this crawl a month.
+            expect(result.error).toBe('HTTP 429 from https://mv.example/api/decks/v2/');
         });
 
         it('never throws when the network fails', async function () {
@@ -189,6 +199,80 @@ describe('CatalogService', function () {
             fetchMock.mockResolvedValue({ ok: true, json: async () => ({ decks: [] }) });
 
             expect((await service.fetchPage(0)).error).toContain('unexpected response shape');
+        });
+    });
+
+    // ARCHON (N32): the crawl asked for `/api/decks/v2` - no trailing slash -
+    // for its entire life. Master Vault is Django and answered 404 every time,
+    // so the catalog stayed at zero decks, the Gauntlet pool stayed empty, and
+    // the health panel said "HTTP 404" without saying to what. A URL that lives
+    // on someone else's service is not a constant to be sure about; it is
+    // something to resolve and then report.
+    describe('finding the deck list', function () {
+        const listPage = () => ({ ok: true, json: async () => ({ data: [mvDeck(1)] }) });
+        const notFound = () => ({ ok: false, status: 404 });
+
+        beforeEach(function () {
+            delete config.mvApiUrl;
+        });
+
+        it('moves on to the next address when one 404s', async function () {
+            fetchMock.mockResolvedValueOnce(notFound()).mockResolvedValueOnce(listPage());
+
+            const result = await service.fetchPage(0);
+
+            expect(result.decks).toHaveLength(1);
+            expect(fetchMock.mock.calls[0][0]).toContain('/api/decks/v2/');
+            expect(fetchMock.mock.calls[1][0]).toContain('/api/decks/');
+        });
+
+        it('treats a 200 that is not a deck list as the wrong address too', async function () {
+            fetchMock
+                .mockResolvedValueOnce({ ok: true, json: async () => ({ results: [] }) })
+                .mockResolvedValueOnce(listPage());
+
+            expect((await service.fetchPage(0)).decks).toHaveLength(1);
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+        });
+
+        it('asks the one that answered, and only that one, from then on', async function () {
+            fetchMock.mockResolvedValueOnce(notFound()).mockResolvedValue(listPage());
+
+            await service.fetchPage(0);
+            fetchMock.mockClear();
+            await service.fetchPage(1);
+
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(fetchMock.mock.calls[0][0]).toContain('/api/decks/?page=1');
+        });
+
+        it('does not go shopping when Master Vault answers - it said no, not "not here"', async function () {
+            fetchMock.mockResolvedValue({ ok: false, status: 429 });
+
+            const result = await service.fetchPage(0);
+
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(result.status).toBe(429);
+        });
+
+        it('reports the last failure when nothing answers', async function () {
+            fetchMock.mockResolvedValue(notFound());
+
+            const result = await service.fetchPage(0);
+
+            expect(result.status).toBe(404);
+            expect(result.error).toContain('https://www.keyforgegame.com/api/decks/');
+        });
+
+        it('tries the operator’s override first, slash or no slash', async function () {
+            config.mvApiUrl = 'https://mv.example/somewhere/else';
+            fetchMock.mockResolvedValue(listPage());
+
+            await service.fetchPage(0);
+
+            expect(fetchMock.mock.calls[0][0]).toBe(
+                'https://mv.example/somewhere/else/?page=0&page_size=2&ordering=date'
+            );
         });
     });
 
@@ -379,7 +463,9 @@ describe('CatalogService', function () {
             const [, params] = updatesMatching('"ConsecutiveFailures" = $1')[0];
 
             expect(params[0]).toBe(1);
-            expect(params[1]).toBe('HTTP 429');
+            // Recorded WITH the URL it asked: this is the string the health
+            // panel shows an operator, and a bare status code is not a lead.
+            expect(params[1]).toBe('HTTP 429 from https://mv.example/api/decks/v2/');
             expect(params[2].getTime()).toBeGreaterThanOrEqual(before + 1000);
         });
 

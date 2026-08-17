@@ -109,6 +109,41 @@ function toEngineCards(parsedCards) {
  * A three-house count is the engine's rule, not a preference: a deck with two or
  * four houses is not a game this simulation knows how to start.
  */
+/**
+ * Stored field entries with their card data re-attached, which is what makes
+ * them playable.
+ *
+ * The field tables store card IDS. The engine's deck builder reads `entry.card`
+ * and DROPS any entry that has none (`server/game/deck.js` logs "Corrupt deck"
+ * and returns the entry without one; `prepare` then filters it out), so a stored
+ * deck handed straight to the engine plays as an EMPTY deck. It does not throw
+ * and it does not abandon - it loses, three keys to nothing, every single time.
+ * That is the worst shape a bug can take here, because a rigged result looks
+ * exactly like a result: the matrix filled in at 100% and nothing in any log
+ * said why.
+ *
+ * Re-attached at draw time rather than stored, so the row stays small and the
+ * cards always come from the pack index this build ships rather than a snapshot
+ * taken whenever the deck was first fetched.
+ */
+function withCardData(entries) {
+    const cards = [];
+    const missing = [];
+
+    for (const entry of entries || []) {
+        const card = cloneCard(entry.id);
+
+        if (!card) {
+            missing.push(entry.id);
+            continue;
+        }
+
+        cards.push({ ...entry, card });
+    }
+
+    return { cards, missing };
+}
+
 function playableDeck(parsed) {
     const { cards, missing } = toEngineCards(parsed.cards || []);
     const houses = (parsed.houses || []).filter(Boolean);
@@ -126,4 +161,4 @@ function playableDeck(parsed) {
     return { playable: true, cards, houses, name: parsed.name, expansion: parsed.expansion };
 }
 
-module.exports = { fetchDeck, toEngineCards, playableDeck, MV_DECK_URL };
+module.exports = { fetchDeck, toEngineCards, withCardData, playableDeck, MV_DECK_URL };

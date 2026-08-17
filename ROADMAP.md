@@ -2212,6 +2212,63 @@ and that field cannot be sampled — winning decks are a list, not a distributio
 -   [x] A deck at its twelve for the day rests; an admin's does not.
 -   [x] The seeded field cannot overwrite an operator's corrections.
 
+#### N33 — The three faults a screenshot found _(done)_
+
+**Why:** a member reported a Vault Tour matrix reading 100% in every cell. It was not a
+display bug, and finding out what it was uncovered two more faults of the same family: things
+that were broken in a way that produced a plausible-looking answer instead of an error.
+
+**Tasks**
+
+-   [x] **The field was playing with no cards.** `GauntletDecks.Cards` and `VaultTourDecks.Cards`
+        store card IDS; the engine's deck builder reads `entry.card` and drops any entry without
+        one (`server/game/deck.js` logs "Corrupt deck" and moves on). Both draws handed the stored
+        rows straight to the engine, so every field opponent — Gauntlet and Vault Tour alike —
+        played an empty deck and lost 3–0 in about nine turns. `masterVault.withCardData` attaches
+        the cards at draw time, and a deck that can no longer be built is withdrawn from the field
+        with its reason rather than served: the draw takes least-recently-played first, so an
+        unbuildable deck that stays playable is drawn every sweep forever.
+-   [x] **The simulator refuses a side that cannot play.** A deck that fails to build is now
+        `{completed: false, reason: 'short-deck'}` before the first input. This is the guard that
+        was missing: every existing spec stubbed the engine, so nothing in the suite could tell an
+        empty deck from a bad one, and the matrix rendered the result with a percentage sign after
+        it. The new specs play real games precisely because that is the only kind that could have
+        caught it.
+-   [x] **The Master Vault crawl was asking the wrong address.** `/api/decks/v2` — no trailing
+        slash — against a Django service, which answers 404. It had indexed nothing, ever, so the
+        Gauntlet pool sat at zero while single-deck fetches (spelled `/<uuid>/?links=cards`, and so
+        carrying the slash by accident) worked the whole time. The crawler now resolves its
+        endpoint: candidates tried in order, a 404 or a non-list 200 moves to the next, the winner
+        is remembered, and the failure it reports names the URL. `catalog.mvApiUrl` is a Site
+        Setting for the day the list moves again, and the crawler identifies itself.
+-   [x] **The hidden gem badge on My Decks**, asked for from the lab rather than recomputed — the
+        confidence rule stays in `labMath`, and one grouped read per page replaces reading every
+        game a roster ever played.
+
+**Acceptance criteria**
+
+-   [x] A field deck drawn for a game arrives with its card data, or is not drawn.
+-   [x] A game one side cannot play is abandoned, never scored.
+-   [x] An operator reading "HTTP 404" can see which URL produced it.
+
+**Cleanup, for an operator upgrading past this.** Every field result recorded before this
+change is a win over an empty deck. Nothing distinguishes those rows from honest ones, so
+they cannot be repaired — only discarded:
+
+```sql
+DELETE FROM "VaultTourGames";
+DELETE FROM "GauntletGames";
+UPDATE "VaultTourDecks" SET "GamesPlayed" = 0, "LastPlayedAt" = NULL;
+UPDATE "GauntletDecks" SET "GamesPlayed" = 0, "LastPlayedAt" = NULL;
+```
+
+Vault Tour games never moved ARI, so clearing them costs nothing but the matrix. Gauntlet
+games DID move it, at the sim rate: a server whose pool never hydrated (the crawl fault above
+left many at zero decks) played none of them and needs nothing further, but one that did will
+carry inflated ARI for the decks involved until enough honest games outweigh it. There is no
+targeted undo — `RatingHistory` is the official record and the lab is forbidden from touching
+it, which is exactly the separation that makes this recoverable at all.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

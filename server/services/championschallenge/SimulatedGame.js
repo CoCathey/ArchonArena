@@ -60,6 +60,9 @@ const {
 
 const PLAYER_ONE = 'challenger-alpha';
 const PLAYER_TWO = 'challenger-omega';
+// A KeyForge deck is 36 cards. Anything under this is not a deck that lost, it
+// is a deck that failed to build - see the short-deck guard in runInner.
+const MIN_DECK = 30;
 
 /** Buttons the bot must never press while any alternative exists. */
 const NEVER_PRESS = ['cancel', 'concede'];
@@ -189,6 +192,31 @@ class SimulatedGame {
         const game = this.game || this.buildGame();
 
         this.game = game;
+
+        // ARCHON (N32): refuse a game one side cannot play.
+        //
+        // The engine's deck builder drops any card entry that arrives without
+        // its card data, so a deck assembled from ids alone becomes a legal
+        // game with an EMPTY draw pile. It does not throw. It plays, quickly,
+        // and the side with cards wins three keys to nothing - which is why a
+        // whole field of opponents once sat at exactly 100% with nothing in the
+        // logs to say why. A rigged result is worse than no result, so this is
+        // checked before the first input rather than inferred afterwards.
+        // `allCards`, not `deck`: the draw pile is meant to shrink, and this sim
+        // is also entered mid-game by a fork, where a short pile is the whole
+        // point. What cannot legitimately be short is the deck that was BUILT.
+        const shortSide = game
+            .getPlayers()
+            .find((player) => (player.allCards || []).length < MIN_DECK);
+
+        if (shortSide) {
+            return {
+                completed: false,
+                reason: 'short-deck',
+                shortSide: shortSide.name,
+                deckSize: (shortSide.allCards || []).length
+            };
+        }
 
         const firstPlayerName = game.firstPlayer && game.firstPlayer.name;
         const result = await this.loop(game);
