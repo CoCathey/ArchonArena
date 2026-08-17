@@ -27,7 +27,7 @@ describe('replay misplay review', function () {
         { id: 'mimicry', name: 'Mimicry', type: 'action', house: 'shadows' } // 3
     ];
 
-    // The hand-card table: what the recorded hands index into.
+    // The hand-card table: what the recorded hands and archives index into.
     const handCards = [
         { id: 'anger', name: 'Anger', type: 'action', house: 'brobnar' }, // 0
         { id: 'urchin', name: 'Urchin', type: 'creature', house: 'shadows' }, // 1
@@ -39,7 +39,10 @@ describe('replay misplay review', function () {
             type: 'creature',
             house: 'untamed',
             enhancements: ['brobnar']
-        } // 3
+        }, // 3
+        // Guaranteed amber on the card face.
+        { id: 'pip-heavy', name: 'Pip Heavy', type: 'action', house: 'brobnar', amber: 3 }, // 4
+        { id: 'gateway-to-dis', name: 'Gateway to Dis', type: 'action', house: 'dis' } // 5
     ];
 
     const HOUSES = ['brobnar', 'shadows', 'untamed'];
@@ -59,11 +62,13 @@ describe('replay misplay review', function () {
                 name,
                 activeHouse: state.house,
                 houses: state.houses || HOUSES,
+                ...(state.callable ? { callableHouses: state.callable } : {}),
                 turn: state.turn,
                 stats: {
                     amber: state.amber ?? 0,
                     chains: state.chains ?? 0,
-                    keys: { red: false, blue: false, yellow: false }
+                    ...(state.keyCost != null ? { keyCost: state.keyCost } : {}),
+                    keys: state.keys || { red: false, blue: false, yellow: false }
                 },
                 numHandCards: state.handCount ?? 6,
                 numDeckCards: 20,
@@ -71,7 +76,7 @@ describe('replay misplay review', function () {
                     cardsInPlay: state.creatures || [],
                     discard: [],
                     purged: [],
-                    archives: []
+                    archives: state.archives || []
                 }
             }))
         },
@@ -230,6 +235,171 @@ describe('replay misplay review', function () {
 
             expect(review.moments.filter((entry) => entry.type === 'house-call')).toEqual([]);
         });
+
+        const forgedKeys = (count) => ({
+            red: count >= 1,
+            blue: count >= 2,
+            yellow: count >= 3
+        });
+
+        // ------------------------------------------------------------------
+        // The good reasons a thin call is NOT flagged for.
+        // ------------------------------------------------------------------
+
+        it('never second-guesses a forced or restricted call (v5 callableHouses)', function () {
+            // Control the Weak: brobnar was the only legal call, whatever the
+            // hand looked like.
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: { callable: ['brobnar'] }, bob: {} },
+                        { phase: 'house', hands: { alice: [1, 1, 1, 1], bob: [] } }
+                    ),
+                    frame(22, 2, 'alice', { alice: { house: 'brobnar' }, bob: {} })
+                ])
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'house-call')).toEqual([]);
+        });
+
+        it('does not judge a call made with a stocked archive - those cards are unseen', function () {
+            const snapshots = chooseHouse('brobnar');
+
+            snapshots[0].board.players[0].cardPiles.archives = [0, 3];
+
+            const review = findMisplays(recording(snapshots));
+
+            expect(review.moments.filter((entry) => entry.type === 'house-call')).toEqual([]);
+        });
+
+        it('does not flag a call that forged a key mid-turn', function () {
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: {} },
+                        { phase: 'house', hands: { alice: [1, 1, 1, 1], bob: [] } }
+                    ),
+                    // The key cheat came off: whatever the card count said,
+                    // the call produced a key.
+                    frame(22, 2, 'alice', {
+                        alice: { house: 'brobnar', keys: forgedKeys(1) }
+                    })
+                ])
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'house-call')).toEqual([]);
+        });
+
+        it('does not flag a call that out-earned the fuller house', function () {
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: { amber: 0 } },
+                        { phase: 'house', hands: { alice: [1, 1, 1, 1], bob: [] } }
+                    ),
+                    // Shadows offered 4 cards; the brobnar turn made 4 amber
+                    // anyway (pips, steals - the recording cannot tell, and
+                    // does not need to).
+                    frame(22, 2, 'alice', { alice: { house: 'brobnar', amber: 4 } })
+                ])
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'house-call')).toEqual([]);
+        });
+
+        it('does not flag the turn that denied a check', function () {
+            // Bob sat at forge amber. Alice called her thin house - and on
+            // bob's next turn, no key: whatever she did with it worked.
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: {}, bob: { amber: 6 } },
+                        { phase: 'house', hands: { alice: [1, 1, 1, 1], bob: [] } }
+                    ),
+                    frame(22, 2, 'alice', { alice: { house: 'brobnar' }, bob: { amber: 6 } }),
+                    frame(30, 2, 'bob', { alice: {}, bob: { house: 'untamed', amber: 3 } })
+                ])
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'house-call')).toEqual([]);
+        });
+
+        it('still flags the thin call when the check came in anyway', function () {
+            // Knowledge injected as "these cards do nothing special", so the
+            // generic flag is what this fixture can produce.
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: {}, bob: { amber: 6 } },
+                        { phase: 'house', hands: { alice: [1, 1, 1, 1], bob: [] } }
+                    ),
+                    frame(22, 2, 'alice', { alice: { house: 'brobnar' }, bob: { amber: 6 } }),
+                    // Bob forged regardless: the call neither played cards nor
+                    // stopped the key.
+                    frame(30, 2, 'bob', {
+                        alice: {},
+                        bob: { house: 'untamed', amber: 0, keys: forgedKeys(1) }
+                    })
+                ]),
+                { rolesFor: () => new Set() }
+            );
+
+            const moment = review.moments.find((entry) => entry.type === 'house-call');
+
+            expect(moment).toBeDefined();
+            expect(moment.bestHouse).toBe('shadows');
+        });
+
+        it('upgrades that flag to name the answer when the cards say there was one', function () {
+            // Same game, but the review knows what an Urchin does: the moment
+            // becomes "the steal was in hand", and the generic house-call
+            // moment steps aside for it.
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: {}, bob: { amber: 6 } },
+                        { phase: 'house', hands: { alice: [1, 1, 1, 1], bob: [] } }
+                    ),
+                    frame(22, 2, 'alice', { alice: { house: 'brobnar' }, bob: { amber: 6 } }),
+                    frame(30, 2, 'bob', {
+                        alice: {},
+                        bob: { house: 'untamed', amber: 0, keys: forgedKeys(1) }
+                    })
+                ]),
+                { rolesFor: (id) => new Set(id === 'urchin' ? ['amber-control'] : []) }
+            );
+
+            const answer = review.moments.find((entry) => entry.type === 'answer-held');
+
+            expect(answer).toBeDefined();
+            expect(answer.player).toBe('alice');
+            expect(answer.pressure).toBe('check');
+            expect(answer.card.name).toBe('Urchin');
+            expect(answer.card.house).toBe('shadows');
+            expect(answer.houseWasCalled).toBe(false);
+            // One moment, not two: the specific one replaced the generic one.
+            expect(review.moments.filter((entry) => entry.type === 'house-call')).toEqual([]);
+            // And one Urchin, not four - a card is flagged once per game.
+            expect(review.moments.filter((entry) => entry.type === 'answer-held').length).toBe(1);
+        });
     });
 
     describe('unused creatures', function () {
@@ -304,27 +474,148 @@ describe('replay misplay review', function () {
             expect(review.thinned).toBe(true);
             expect(review.moments.filter((entry) => entry.type === 'unused-creatures')).toEqual([]);
         });
+
+        it('only counts creatures that had the whole turn - not ones that arrived ready', function () {
+            const review = findMisplays(
+                recording([
+                    // The turn opens with one dust pixie on the board...
+                    frame(
+                        8,
+                        2,
+                        'bob',
+                        {
+                            alice: {},
+                            bob: { creatures: [{ card: 2, uuid: 'p1' }] }
+                        },
+                        { phase: 'house' }
+                    ),
+                    // ...and ends its main with three, two of which entered
+                    // ready mid-turn (an effect; they never had a full turn).
+                    frame(14, 2, 'bob', {
+                        alice: {},
+                        bob: {
+                            house: 'untamed',
+                            creatures: [
+                                { card: 2, uuid: 'p1' },
+                                { card: 2, uuid: 'p2' },
+                                { card: 2, uuid: 'p3' }
+                            ]
+                        }
+                    }),
+                    frame(20, 3, 'alice', { alice: {}, bob: {} })
+                ])
+            );
+
+            // One idle creature that had the whole turn is below the threshold.
+            expect(review.moments.filter((entry) => entry.type === 'unused-creatures')).toEqual([]);
+        });
+
+        it('does not flag the winner coasting home from a decided position', function () {
+            // Bob ends the turn with two keys forged and the third paid for:
+            // reaps changed nothing, and the game says so - he won.
+            const review = findMisplays(
+                recording(
+                    [
+                        frame(10, 5, 'bob', {
+                            alice: {},
+                            bob: {
+                                house: 'untamed',
+                                amber: 7,
+                                keyCost: 6,
+                                keys: { red: true, blue: true, yellow: false },
+                                creatures: [
+                                    { card: 2, uuid: 'p1' },
+                                    { card: 2, uuid: 'p2' },
+                                    { card: 2, uuid: 'p3' }
+                                ]
+                            }
+                        }),
+                        frame(20, 6, 'bob', {
+                            alice: {},
+                            bob: { keys: { red: true, blue: true, yellow: true } }
+                        })
+                    ],
+                    { winner: 'bob' }
+                )
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'unused-creatures')).toEqual([]);
+        });
     });
 
     describe('held cards', function () {
         // Alice ends her round-2 main phase still holding two Angers (her
         // called house) in a three-card hand: discarding them was two more
-        // fresh draws.
-        const heldHand = (hands, { chains = 0 } = {}) =>
+        // fresh draws. Her next two turns are recorded too, because the flag
+        // now depends on what became of the hold.
+        const heldHand = (hands, { chains = 0, laterHands } = {}) =>
             recording([
                 frame(30, 2, 'alice', { alice: { house: 'brobnar', chains }, bob: {} }, { hands }),
-                frame(40, 3, 'bob', { alice: {}, bob: {} })
+                frame(40, 2, 'bob', { alice: {}, bob: { house: 'untamed' } }),
+                frame(
+                    50,
+                    3,
+                    'alice',
+                    { alice: { house: 'brobnar', chains }, bob: {} },
+                    { hands: laterHands ? laterHands[0] : hands }
+                ),
+                frame(60, 3, 'bob', { alice: {}, bob: { house: 'untamed' } }),
+                frame(
+                    70,
+                    4,
+                    'alice',
+                    { alice: { house: 'brobnar', chains }, bob: {} },
+                    { hands: laterHands ? laterHands[1] : hands }
+                ),
+                frame(80, 4, 'bob', { alice: {}, bob: { house: 'untamed' } })
             ]);
 
-        it('flags the fresh draws the held cards displaced', function () {
+        it('flags a hold that was still sitting in hand two turns later', function () {
             const review = findMisplays(heldHand({ alice: [0, 0, 2], bob: [] }));
             const moment = review.moments.find((entry) => entry.type === 'held-cards');
 
             expect(moment).toBeDefined();
             expect(moment.player).toBe('alice');
+            expect(moment.round).toBe(2);
             expect(moment.house).toBe('brobnar');
             expect(moment.missedDraws).toBe(2);
             expect(moment.held.map((card) => card.name)).toEqual(['Anger', 'Anger']);
+        });
+
+        // The plan test: a held card that got used was being saved, and the
+        // lost draws were its price, not a mistake.
+        it('does not flag a hold that got played on a later turn', function () {
+            const review = findMisplays(
+                heldHand(
+                    { alice: [0, 0, 2], bob: [] },
+                    // One Anger left the hand on her next turn.
+                    {
+                        laterHands: [
+                            { alice: [0, 2], bob: [] },
+                            { alice: [0, 2], bob: [] }
+                        ]
+                    }
+                )
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'held-cards')).toEqual([]);
+        });
+
+        it('gives a hold the benefit of the doubt when the game ended first', function () {
+            const review = findMisplays(
+                recording([
+                    frame(
+                        30,
+                        2,
+                        'alice',
+                        { alice: { house: 'brobnar' }, bob: {} },
+                        { hands: { alice: [0, 0, 2], bob: [] } }
+                    ),
+                    frame(40, 3, 'bob', { alice: {}, bob: { house: 'untamed' } })
+                ])
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'held-cards')).toEqual([]);
         });
 
         it('does not flag holding cards of the other houses - those were not playable', function () {
@@ -389,6 +680,306 @@ describe('replay misplay review', function () {
             const review = findMisplays(recording(snapshots));
 
             expect(review.moments.filter((entry) => entry.type === 'clogged-hand')).toEqual([]);
+        });
+
+        // A long hold that finally cashes out was assembly, not a clog.
+        const resolvedAfterStreak = (amberEnd) => [
+            ...cloggedTurns(),
+            frame(
+                50,
+                5,
+                'alice',
+                { alice: { turn: 5, amber: 0 } },
+                { phase: 'house', hands: { alice: [2, 2, 2, 2, 0], bob: [] } }
+            ),
+            frame(52, 5, 'alice', { alice: { house: 'untamed', turn: 5, amber: amberEnd } }),
+            frame(55, 5, 'bob', { alice: {}, bob: { house: 'shadows' } })
+        ];
+
+        it('drops the streak when the house finally lands a big turn', function () {
+            const review = findMisplays(recording(resolvedAfterStreak(5)));
+
+            expect(review.moments.filter((entry) => entry.type === 'clogged-hand')).toEqual([]);
+        });
+
+        it('keeps the streak when the long-awaited call bought nothing', function () {
+            const review = findMisplays(recording(resolvedAfterStreak(0)));
+            const moment = review.moments.find((entry) => entry.type === 'clogged-hand');
+
+            expect(moment).toBeDefined();
+            expect(moment.turnsHeld).toBe(3);
+        });
+    });
+
+    describe('what the cards’ own text adds', function () {
+        it('does not count a creature its text forbids from reaping', function () {
+            // Three ready pixies, but the review knows pixies cannot reap.
+            const review = findMisplays(
+                recording([
+                    frame(10, 2, 'bob', {
+                        alice: {},
+                        bob: {
+                            house: 'untamed',
+                            creatures: [
+                                { card: 2, uuid: 'p1' },
+                                { card: 2, uuid: 'p2' },
+                                { card: 2, uuid: 'p3' }
+                            ]
+                        }
+                    }),
+                    frame(20, 3, 'alice', { alice: {}, bob: {} })
+                ]),
+                { rolesFor: (id) => new Set(id === 'dust-pixie' ? ['cannot-reap'] : []) }
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'unused-creatures')).toEqual([]);
+        });
+
+        it('does not flag a hold made of nothing but answers - that is insurance', function () {
+            const review = findMisplays(
+                recording([
+                    frame(
+                        30,
+                        2,
+                        'alice',
+                        { alice: { house: 'brobnar' }, bob: {} },
+                        { hands: { alice: [0, 0, 2], bob: [] } }
+                    ),
+                    frame(40, 2, 'bob', { alice: {}, bob: { house: 'untamed' } }),
+                    frame(
+                        50,
+                        3,
+                        'alice',
+                        { alice: { house: 'brobnar' }, bob: {} },
+                        { hands: { alice: [0, 0, 2], bob: [] } }
+                    ),
+                    frame(60, 3, 'bob', { alice: {}, bob: { house: 'untamed' } }),
+                    frame(
+                        70,
+                        4,
+                        'alice',
+                        { alice: { house: 'brobnar' }, bob: {} },
+                        { hands: { alice: [0, 0, 2], bob: [] } }
+                    )
+                ]),
+                { rolesFor: (id) => new Set(id === 'anger' ? ['board-wipe'] : []) }
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'held-cards')).toEqual([]);
+        });
+
+        it('reads recorded archives into the house-call arithmetic (v6)', function () {
+            // Alice's hand is empty of everything but the board Troll; her
+            // archives hold four Urchins. Calling brobnar acted on 1; a
+            // shadows call would have picked the archives up and played 4.
+            // Before v6 a stocked archive silenced this turn; now it is read.
+            const review = findMisplays(
+                recording([
+                    {
+                        ...frame(
+                            18,
+                            2,
+                            'alice',
+                            {
+                                alice: {
+                                    creatures: [{ card: 0, uuid: 't1' }],
+                                    archives: [0, 0, 0, 0]
+                                },
+                                bob: {}
+                            },
+                            { phase: 'house', hands: { alice: [], bob: [] } }
+                        ),
+                        archives: { alice: [1, 1, 1, 1], bob: [] }
+                    },
+                    frame(22, 2, 'alice', {
+                        alice: { house: 'brobnar', creatures: [{ card: 0, uuid: 't1' }] },
+                        bob: {}
+                    })
+                ])
+            );
+
+            const moment = review.moments.find((entry) => entry.type === 'house-call');
+
+            expect(moment).toBeDefined();
+            expect(moment.potential).toBe(1);
+            expect(moment.bestHouse).toBe('shadows');
+            expect(moment.bestPotential).toBe(4);
+        });
+
+        it('credits guaranteed pips: one heavy card can be a fine call', function () {
+            // One brobnar card worth 3 pips against four shadows cards: the
+            // gap is 1, not 3 - reasonable, and not flagged.
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: {} },
+                        { phase: 'house', hands: { alice: [4, 1, 1, 1, 1], bob: [] } }
+                    ),
+                    frame(22, 2, 'alice', { alice: { house: 'brobnar' } })
+                ])
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'house-call')).toEqual([]);
+        });
+
+        it('names the wipe that sat in hand while a wide board landed', function () {
+            const wideBoard = (count, uuidPrefix) =>
+                Array.from({ length: count }, (unused, position) => ({
+                    card: 2,
+                    uuid: `${uuidPrefix}${position}`
+                }));
+            const alice = { houses: ['brobnar', 'shadows', 'dis'] };
+
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: { ...alice }, bob: { creatures: wideBoard(5, 'w') } },
+                        { phase: 'house', hands: { alice: [5, 0], bob: [] } }
+                    ),
+                    frame(22, 2, 'alice', {
+                        alice: { ...alice, house: 'brobnar' },
+                        bob: { creatures: wideBoard(5, 'w') }
+                    }),
+                    frame(30, 2, 'bob', {
+                        alice: { ...alice },
+                        bob: { house: 'untamed', creatures: wideBoard(5, 'w') }
+                    }),
+                    // The board is still five wide when alice's next turn
+                    // opens: the threat landed.
+                    frame(
+                        40,
+                        3,
+                        'alice',
+                        { alice: { ...alice }, bob: { creatures: wideBoard(5, 'w') } },
+                        { phase: 'house', hands: { alice: [5, 0], bob: [] } }
+                    )
+                ]),
+                { rolesFor: (id) => new Set(id === 'gateway-to-dis' ? ['board-wipe'] : []) }
+            );
+
+            const answer = review.moments.find((entry) => entry.type === 'answer-held');
+
+            expect(answer).toBeDefined();
+            expect(answer.pressure).toBe('board');
+            expect(answer.card.name).toBe('Gateway to Dis');
+            expect(answer.card.house).toBe('dis');
+        });
+
+        it('does not blame the wipe for a board that got answered another way', function () {
+            const wideBoard = (count, uuidPrefix) =>
+                Array.from({ length: count }, (unused, position) => ({
+                    card: 2,
+                    uuid: `${uuidPrefix}${position}`
+                }));
+            const alice = { houses: ['brobnar', 'shadows', 'dis'] };
+
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: { ...alice }, bob: { creatures: wideBoard(5, 'w') } },
+                        { phase: 'house', hands: { alice: [5, 0], bob: [] } }
+                    ),
+                    frame(22, 2, 'alice', {
+                        alice: { ...alice, house: 'brobnar' },
+                        bob: { creatures: wideBoard(5, 'w') }
+                    }),
+                    frame(30, 2, 'bob', {
+                        alice: { ...alice },
+                        bob: { house: 'untamed', creatures: wideBoard(5, 'w') }
+                    }),
+                    // Down to one creature by alice's next turn: whatever she
+                    // did instead of the wipe, it worked.
+                    frame(
+                        40,
+                        3,
+                        'alice',
+                        { alice: { ...alice }, bob: { creatures: wideBoard(1, 'w') } },
+                        { phase: 'house', hands: { alice: [5, 0], bob: [] } }
+                    )
+                ]),
+                { rolesFor: (id) => new Set(id === 'gateway-to-dis' ? ['board-wipe'] : []) }
+            );
+
+            expect(review.moments.filter((entry) => entry.type === 'answer-held')).toEqual([]);
+        });
+
+        it('flags the answer whose house WAS called but never got played', function () {
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: {}, bob: { amber: 6 } },
+                        { phase: 'house', hands: { alice: [1, 2, 2], bob: [] } }
+                    ),
+                    // Shadows called, the Urchin still in hand at end of main.
+                    frame(
+                        22,
+                        2,
+                        'alice',
+                        { alice: { house: 'shadows' }, bob: { amber: 6 } },
+                        { hands: { alice: [1, 2, 2], bob: [] } }
+                    ),
+                    frame(30, 2, 'bob', {
+                        alice: {},
+                        bob: {
+                            house: 'untamed',
+                            amber: 0,
+                            keys: { red: true, blue: false, yellow: false }
+                        }
+                    })
+                ]),
+                { rolesFor: (id) => new Set(id === 'urchin' ? ['amber-control'] : []) }
+            );
+
+            const answer = review.moments.find((entry) => entry.type === 'answer-held');
+
+            expect(answer).toBeDefined();
+            expect(answer.houseWasCalled).toBe(true);
+            expect(answer.card.name).toBe('Urchin');
+        });
+
+        it('profiles the deck as the game revealed it - the toolbox', function () {
+            const review = findMisplays(
+                recording([
+                    frame(10, 2, 'alice', { alice: { house: 'brobnar' }, bob: {} }),
+                    {
+                        ...frame(20, 2, 'alice', {
+                            // Two urchins played, a pixie in the discard.
+                            alice: {
+                                house: 'brobnar',
+                                creatures: [
+                                    { card: 1, uuid: 'u1' },
+                                    { card: 1, uuid: 'u2' }
+                                ]
+                            },
+                            bob: {}
+                        }),
+                        hands: { alice: [0, 4], bob: [] },
+                        archives: { alice: [2], bob: [] }
+                    }
+                ]),
+                { rolesFor: (id) => new Set(id === 'urchin' ? ['amber-control'] : []) }
+            );
+
+            const shadows = review.toolbox.alice.houses.shadows;
+            const brobnar = review.toolbox.alice.houses.brobnar;
+
+            expect(shadows.cards).toBe(2);
+            expect(shadows.amberControl).toBe(2);
+            expect(brobnar.cards).toBe(2);
+            expect(brobnar.pips).toBe(3);
+            expect(review.toolbox.bob).toBeDefined();
         });
     });
 

@@ -37,6 +37,10 @@ const { chooseDecision } = require('./labPolicy');
  * never pressed while an alternative exists, the loop stopped on
  * `game.winner` BEFORE the rematch prompt, and turn/interaction caps
  * abandoning the pathological game, which is recorded nowhere.
+ *
+ * Sibling: the Helper Bot a human joins (F9) plays the plain baseline
+ * policy, kept as services/botplayer/BotPolicy - it needs no seed, no log,
+ * and no diary, so it did not follow this file into N21.
  */
 
 const PLAYER_ONE = 'challenger-alpha';

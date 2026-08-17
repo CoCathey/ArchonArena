@@ -168,7 +168,7 @@ const momentText = (moment, t) => {
     switch (moment.type) {
         case 'house-call':
             return t(
-                'Called {{house}} with {{potential}} card(s) to act on — {{bestHouse}} offered {{bestPotential}}.',
+                'Called {{house}} worth {{potential}} in cards, pips and reaps — {{bestHouse}} offered {{bestPotential}}.',
                 {
                     house: t(moment.house),
                     potential: moment.potential,
@@ -176,6 +176,33 @@ const momentText = (moment, t) => {
                     bestPotential: moment.bestPotential
                 }
             );
+        case 'answer-held': {
+            const tool =
+                moment.pressure === 'check'
+                    ? t('{{card}} — a steal or capture', { card: moment.card?.name })
+                    : t('{{card}} — a board wipe', { card: moment.card?.name });
+            const threat =
+                moment.pressure === 'check'
+                    ? t('They forged that key')
+                    : t('Their board stayed wide');
+
+            if (moment.houseWasCalled) {
+                return t('{{threat}} while {{tool}} stayed unplayed in your called house.', {
+                    threat,
+                    tool
+                });
+            }
+
+            return t(
+                '{{threat}} while {{tool}} sat in your {{zone}} — a {{house}} call could have reached it.',
+                {
+                    threat,
+                    tool,
+                    zone: moment.fromArchives ? t('archives') : t('hand'),
+                    house: t(moment.card?.house)
+                }
+            );
+        }
         case 'unused-creatures':
             return t(
                 '{{count}} ready {{house}} creature(s) went unused ({{creatures}}) — a reap each, left on the table.',
@@ -208,6 +235,64 @@ const momentText = (moment, t) => {
             return null;
     }
 };
+
+/**
+ * ARCHON (F3): what the deck showed, house by house - the reading a player
+ * plans house calls with. "As revealed" by this game's zones, not the
+ * decklist: cards that never left the deck are not in it.
+ */
+const Toolbox = ({ toolbox, t }) => {
+    const players = Object.entries(toolbox || {});
+
+    if (players.length === 0) {
+        return null;
+    }
+
+    return (
+        <div className='space-y-2'>
+            {players.map(([name, profile]) => {
+                const houses = Object.entries(profile?.houses || {}).sort(
+                    (a, b) => b[1].cards - a[1].cards
+                );
+
+                if (houses.length === 0) {
+                    return null;
+                }
+
+                return (
+                    <div key={name}>
+                        <div className='text-xs uppercase tracking-wide text-muted'>
+                            {t('What {{player}}’s deck showed', { player: name })}
+                        </div>
+                        <div className='mt-1 flex flex-wrap gap-1.5 text-xs'>
+                            {houses.map(([house, counts]) => (
+                                <span
+                                    key={house}
+                                    className='rounded bg-surface-secondary/60 px-1.5 py-0.5 text-muted'
+                                >
+                                    <span className='text-amber-300'>{t(house)}</span>{' '}
+                                    {t('{{cards}} cards', { cards: counts.cards })}
+                                    {counts.pips > 0 &&
+                                        ` · ${t('{{pips}} pips', { pips: counts.pips })}`}
+                                    {counts.amberControl > 0 &&
+                                        ` · ${t('{{n}} steal/capture', {
+                                            n: counts.amberControl
+                                        })}`}
+                                    {counts.boardWipes > 0 &&
+                                        ` · ${t('{{n}} wipes', { n: counts.boardWipes })}`}
+                                    {counts.keyCheats > 0 &&
+                                        ` · ${t('{{n}} key cheats', { n: counts.keyCheats })}`}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+};
+
+Toolbox.propTypes = { t: PropTypes.func, toolbox: PropTypes.object };
 
 /**
  * The misplay review: the moments worth a second look, each one a jump into
@@ -264,6 +349,8 @@ const Misplays = ({ misplays, onJump, t }) => {
                 </ul>
             )}
 
+            <Toolbox toolbox={misplays.toolbox} t={t} />
+
             {misplays.thinned && (
                 <p className='m-0 text-[11px] text-muted'>
                     {t(
@@ -275,8 +362,14 @@ const Misplays = ({ misplays, onJump, t }) => {
 
             <p className='m-0 text-[11px] text-muted'>
                 {t(
-                    'Read from the recorded board and hands only — card text, restrictions and ' +
-                        'the plan you were on are not in it. These are questions, not verdicts.'
+                    'Read from the recorded board, hands and archives, plus what each card’s ' +
+                        'own text says it does — steals, wipes, key cheats. Conditions, costs ' +
+                        'and the plan you were on are still invisible, so “was in hand” never ' +
+                        'means “would have worked”. Moments with a visible reason are dropped ' +
+                        'automatically: forced or restricted house calls, thin calls that ' +
+                        'forged or denied a check or out-earned the fuller house, holds of pure ' +
+                        'answers, holds that got played within two turns, and long holds that ' +
+                        'cashed out. What remains are still questions, not verdicts.'
                 )}
             </p>
         </div>

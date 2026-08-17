@@ -145,17 +145,30 @@ export function boardAtStep(snapshots, step) {
  * @returns {Object<string, object[]>}
  */
 export function handsAtStep(snapshots, step, handCards) {
-    const hands = snapshotAtStep(snapshots, step)?.hands;
+    return hiddenZoneAtStep(snapshots, step, handCards, 'hands', 'hand');
+}
 
-    if (!hands || typeof hands !== 'object') {
+/**
+ * ARCHON (F3): the recorded archives at a step, drawable - the owner's view
+ * of the pile the board frame only shows facedown. Same serving rules as the
+ * hands: whatever arrives here is safe to draw.
+ */
+export function archivesAtStep(snapshots, step, handCards) {
+    return hiddenZoneAtStep(snapshots, step, handCards, 'archives', 'archives');
+}
+
+function hiddenZoneAtStep(snapshots, step, handCards, zone, location) {
+    const piles = snapshotAtStep(snapshots, step)?.[zone];
+
+    if (!piles || typeof piles !== 'object') {
         return {};
     }
 
     const resolved = {};
 
-    for (const [name, entries] of Object.entries(hands)) {
+    for (const [name, entries] of Object.entries(piles)) {
         if (Array.isArray(entries)) {
-            resolved[name] = hydratePile(entries, handCards, 'hand');
+            resolved[name] = hydratePile(entries, handCards, location);
         }
     }
 

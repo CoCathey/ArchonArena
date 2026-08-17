@@ -125,4 +125,26 @@ describe('replay hand privacy', function () {
 
         expect(bobNames).toEqual(['Urchin', 'Dust Pixie']);
     });
+
+    // ARCHON (F3): v6 records the owner's archives beside the hands - one
+    // side channel, one set of rules, one strip.
+    it('strips and keeps recorded archives under exactly the hand rules', function () {
+        const replay = recording();
+
+        replay.snapshots[0].archives = { alice: [1], bob: [2] };
+
+        const strippedAll = stripReplayHands(replay);
+
+        expect(JSON.stringify(strippedAll.snapshots)).not.toContain('Urchin');
+        expect(strippedAll.snapshots[0].archives).toBeUndefined();
+
+        const aliceOnly = stripReplayHands(replay, ['alice']);
+
+        expect(aliceOnly.snapshots[0].archives.bob).toBeUndefined();
+        expect(
+            aliceOnly.snapshots[0].archives.alice.map((entry) => aliceOnly.handCards[entry].name)
+        ).toEqual(['Urchin']);
+        // The one table serves both zones, rebuilt without bob's cards.
+        expect(JSON.stringify(aliceOnly)).not.toContain('Dust Pixie');
+    });
 });
