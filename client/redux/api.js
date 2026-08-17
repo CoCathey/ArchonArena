@@ -307,6 +307,14 @@ export const api = createApi({
             query: (deckId) => `/intelligence/deck/${deckId}`,
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
+        // ARCHON: several of your decks side by side, computed from your own
+        // games only. The ids travel in the order they were picked, and the
+        // server keeps that order so the columns do not shuffle on arrival.
+        getDeckComparison: builder.query({
+            query: (decks = []) =>
+                `/intelligence/deck-comparison?decks=${encodeURIComponent(decks.join(','))}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
         getPlayerIntelligence: builder.query({
             query: (sets = []) => `/intelligence/player${setsParam(sets)}`,
             providesTags: [TAG_TYPES.INTELLIGENCE]
@@ -1275,6 +1283,7 @@ export const {
     useGetMembershipPreviewsQuery,
     useSetMembershipPreviewMutation,
     useGetDeckIntelligenceQuery,
+    useGetDeckComparisonQuery,
     useGetPlayerIntelligenceQuery,
     useGetMetaIntelligenceQuery,
     useGetAercIntelligenceQuery,

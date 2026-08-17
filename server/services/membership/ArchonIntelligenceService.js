@@ -78,6 +78,17 @@ const {
 /** Only decided games count: unfinished and abandoned games are not results. */
 const DECIDED = 'g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL';
 
+/**
+ * Below this, a compared record is shown but flagged as too thin to lean on.
+ * The same threshold the Tournament Lab uses, because the two comparisons
+ * answer the same "which record can I believe" question and must not disagree
+ * about what a believable record is.
+ */
+const MIN_CONFIDENT_GAMES = 10;
+
+/** Side-by-side columns a comparison serves; the work fans out per deck. */
+const MAX_COMPARED_DECKS = 4;
+
 const UNAVAILABLE = (reason) => ({ available: false, reason });
 
 class ArchonIntelligenceService {
@@ -1057,6 +1068,87 @@ class ArchonIntelligenceService {
 
         return { overview, rating, byOpposingHouse, byOpposingSet, byTurnOrder };
     }
+
+    /**
+     * ARCHON: several decks' intelligence side by side - the `deck_comparison`
+     * promise, delivered on the page whose questions it answers.
+     *
+     * Everything is computed from the requesting player's OWN games, which is
+     * also what makes the columns comparable: "which of these decks serves me
+     * better" is a question about my record with each of them, not about the
+     * decks' global records. It also keeps this inside the same privacy line
+     * as the rest of the page - no route lets one player read another's
+     * per-deck record, and this one is no exception.
+     *
+     * A deck the caller has no decided games with simply drops out rather than
+     * failing the request: there is nothing of theirs to compare, and it is
+     * what makes the id list safe to take straight from a URL - naming
+     * somebody else's deck id yields nothing, not a 403 to probe with.
+     *
+     * @param {number} userId
+     * @param {number[]} deckIds in the order the caller picked them
+     */
+    async deckComparison(userId, deckIds = []) {
+        // Deduplicated, capped, and kept in the order they were asked for -
+        // the caller picked these one by one, and the columns should not
+        // reorder themselves on arrival.
+        const requested = [...new Set((deckIds || []).map(Number).filter(Number.isFinite))].slice(
+            0,
+            MAX_COMPARED_DECKS
+        );
+
+        if (!requested.length) {
+            return { decks: [], minConfidentGames: MIN_CONFIDENT_GAMES };
+        }
+
+        // One query answers both "which of these may this caller compare"
+        // (played, not owned - the same line the Tournament Lab draws) and
+        // "what are they called", so junk ids cost nothing downstream.
+        const rows = await this.safeQuery(
+            'SELECT d."Id" AS "deckId", d."Name" AS "deckName", d."Uuid" AS "uuid", ' +
+                `  ds."SasRating" AS "sas", ${SET_COLUMNS} ` +
+                'FROM "Decks" d' +
+                SET_JOIN('d') +
+                ' LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                'WHERE d."Id" = ANY($1) AND EXISTS (' +
+                '  SELECT 1 FROM "GamePlayers" gp JOIN "Games" g ON g."Id" = gp."GameId" ' +
+                `  WHERE gp."DeckId" = d."Id" AND gp."PlayerId" = $2 AND ${DECIDED})`,
+            [requested, userId],
+            'deckComparison'
+        );
+
+        if (!rows || !rows.length) {
+            return { decks: [], minConfidentGames: MIN_CONFIDENT_GAMES };
+        }
+
+        const byId = new Map(rows.map((row) => [row.deckId, row]));
+
+        const decks = await Promise.all(
+            requested
+                .filter((deckId) => byId.has(deckId))
+                .map(async (deckId) => {
+                    const identity = byId.get(deckId);
+                    const perDeck = await this.deckIntelligence(deckId, { userId });
+
+                    return {
+                        deckId,
+                        deckName: identity.deckName,
+                        uuid: identity.uuid,
+                        sas: identity.sas,
+                        set: asSet(identity),
+                        ...perDeck,
+                        // The one derived number, and it is about the sample
+                        // rather than the deck: a 3-game 100% next to a 40-game
+                        // 58% needs a marker saying which record to believe.
+                        confident: (perDeck.overview.games || 0) >= MIN_CONFIDENT_GAMES
+                    };
+                })
+        );
+
+        return { decks, minConfidentGames: MIN_CONFIDENT_GAMES };
+    }
 }
 
 module.exports = ArchonIntelligenceService;
+module.exports.MIN_CONFIDENT_GAMES = MIN_CONFIDENT_GAMES;
+module.exports.MAX_COMPARED_DECKS = MAX_COMPARED_DECKS;

@@ -75,6 +75,37 @@ module.exports.init = function (server) {
     );
 
     /**
+     * ARCHON: deck comparison, on the Archon Intelligence page.
+     *
+     * The Deep Probe answers "which deck do I bring to THIS event"; this
+     * answers the page's own question - "which of my decks serves me better" -
+     * with no event scoping. It is gated on DECK_COMPARISON, the capability
+     * that promise is sold under, rather than on TOURNAMENT_LAB: both are
+     * Archon today, so nobody's access changes, but the gate sits where the
+     * promise is delivered.
+     *
+     * Everything returned is computed from the caller's own games, and a deck
+     * id they have never played - somebody else's, or junk - drops out of the
+     * comparison rather than 403ing the whole request. The service caps how
+     * many decks one call may compare; extras are ignored, not fanned out.
+     */
+    server.get(
+        '/api/intelligence/deck-comparison',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.DECK_COMPARISON),
+        wrapAsync(async (req, res) => {
+            const deckIds = String(req.query.decks || '')
+                .split(',')
+                .map((id) => parseInt(id, 10))
+                .filter(Number.isFinite);
+
+            const comparison = await intelligence.deckComparison(req.user.id, deckIds);
+
+            res.send({ success: true, ...comparison });
+        })
+    );
+
+    /**
      * ARCHON (N12): this payload spans three tiers, so it is gated per section
      * rather than as a whole.
      *

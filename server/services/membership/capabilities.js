@@ -162,7 +162,7 @@ const CAPABILITY_CATALOG = {
     [CAPABILITIES.DECK_COMPARISON]: {
         label: 'Deck comparison',
         learn: 'Put your decks side by side on record, Elo and matchups.',
-        where: 'Archon+ → Deep Probe'
+        where: 'Archon Intelligence → Compare your decks, and Archon+ → Deep Probe'
     },
     [CAPABILITIES.PERSONAL_DECK_RANKINGS]: {
         label: 'Personal deck rankings',

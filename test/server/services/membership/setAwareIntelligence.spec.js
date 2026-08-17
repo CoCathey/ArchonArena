@@ -353,6 +353,76 @@ describe('set-aware intelligence, against real PostgreSQL', function () {
         });
     });
 
+    describe('deck comparison', function () {
+        it('compares only decks the caller has actually played, in the order asked', async function () {
+            if (skipUnlessPg()) {
+                return;
+            }
+
+            // 20 is Bob's deck and 999 is nobody's. Both drop out rather than
+            // failing the request - and Bob's record stays Bob's.
+            const comparison = await intelligence.deckComparison(ALICE, [12, 20, 10, 999]);
+
+            expect(comparison.decks.map((deck) => deck.deckId)).toEqual([12, 10]);
+        });
+
+        it('reports each deck from the caller own games, with its identity attached', async function () {
+            if (skipUnlessPg()) {
+                return;
+            }
+
+            const comparison = await intelligence.deckComparison(ALICE, [11, 10]);
+            const skies = comparison.decks.find((deck) => deck.deckId === 11);
+
+            expect(skies.deckName).toBe('Deck 11');
+            expect(skies.set).toEqual({ id: 800, code: 'AS', name: 'Æmber Skies' });
+            expect(skies.overview.games).toBe(4);
+            expect(skies.overview.winRate).toBe(0.25);
+
+            const cota = comparison.decks.find((deck) => deck.deckId === 10);
+
+            expect(cota.overview.games).toBe(3);
+            expect(cota.overview.winRate).toBe(1);
+        });
+
+        it('marks every thin record instead of ranking it confidently', async function () {
+            if (skipUnlessPg()) {
+                return;
+            }
+
+            const comparison = await intelligence.deckComparison(ALICE, [10, 11, 12]);
+
+            // Nobody in the seed reaches the threshold, and the comparison
+            // says so per deck rather than presenting a 3-game 100% as a
+            // better record than a 4-game 25%.
+            expect(comparison.minConfidentGames).toBe(10);
+
+            for (const deck of comparison.decks) {
+                expect(deck.confident).toBe(false);
+            }
+        });
+
+        it('deduplicates the request rather than comparing a deck with itself', async function () {
+            if (skipUnlessPg()) {
+                return;
+            }
+
+            const comparison = await intelligence.deckComparison(ALICE, [10, 10, 10]);
+
+            expect(comparison.decks.map((deck) => deck.deckId)).toEqual([10]);
+        });
+
+        it('returns an empty comparison for an empty request', async function () {
+            if (skipUnlessPg()) {
+                return;
+            }
+
+            const comparison = await intelligence.deckComparison(ALICE, []);
+
+            expect(comparison.decks).toEqual([]);
+        });
+    });
+
     describe('the tournament lab', function () {
         it('offers only decks from the sets it was scoped to', async function () {
             if (skipUnlessPg()) {
