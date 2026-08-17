@@ -28,9 +28,57 @@ module.exports.init = function (server) {
         passport.authenticate('jwt', { session: false }),
         requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
         wrapAsync(async (req, res) => {
-            const report = await championsChallenge.getLabReport(req.user.id);
+            const report = await championsChallenge.getLabReport(req.user.id, {
+                isAdmin: !!(req.user.permissions && req.user.permissions.isAdmin)
+            });
 
             res.send({ success: true, ...report });
+        })
+    );
+
+    // ARCHON (N21): the randomizer - fill a roster slot with a random
+    // eligible deck that swaps itself for a fresh one after `games` games.
+    server.post(
+        '/api/champions-challenge/decks/random',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
+        wrapAsync(async (req, res) => {
+            const games = parseInt(req.body && req.body.games, 10);
+
+            if (!Number.isFinite(games) || games < 1 || games > 500) {
+                return res.status(400).send({
+                    success: false,
+                    message: 'Games before the swap must be between 1 and 500.'
+                });
+            }
+
+            const config = championsChallenge.getConfig();
+            const enrolled = await championsChallenge.db.query(
+                'SELECT COUNT(*)::int AS "Count" FROM "ProvingGroundsDecks" WHERE "UserId" = $1',
+                [req.user.id]
+            );
+
+            if (enrolled[0] && enrolled[0].Count >= config.maxEnrolledPerUser) {
+                return res.status(400).send({
+                    success: false,
+                    message:
+                        `All ${config.maxEnrolledPerUser} Champion’s Challenge slots are in ` +
+                        'use. Withdraw a deck to add a random one.'
+                });
+            }
+
+            const deckId = await championsChallenge.enrollRandomDeck(req.user.id, games);
+
+            if (!deckId) {
+                return res.status(400).send({
+                    success: false,
+                    message:
+                        'No eligible deck to draw: every rated, simulatable deck you own is ' +
+                        'already enrolled.'
+                });
+            }
+
+            res.send({ success: true, deckId });
         })
     );
 

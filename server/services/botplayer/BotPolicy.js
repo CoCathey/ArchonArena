@@ -1,11 +1,13 @@
 /**
  * ARCHON: the bot's playing policy - how a computer answers a prompt.
  *
- * Extracted from the Champion’s Challenge SimulatedGame (N18) so the same player
- * can sit anywhere a bot is needed: the lab's background games, and the
- * Helper Bot table a human joins on the game node (the F9 practice opponent).
- * One policy, two hosts - a strength upgrade lands in both at once, and the
- * termination guarantees documented below stay in one place.
+ * Extracted from the Champion’s Challenge SimulatedGame (N18) as the honest,
+ * plain baseline player, and today it is the Helper Bot's brain (the F9
+ * practice opponent a human joins on the game node). The Challenge's own
+ * sparring driver has since grown past it - N21 gave SimulatedGame seeded
+ * determinism, decision logging, and a learned policy - but this class stays
+ * the reference for how ANY prompt gets a safe answer, and its termination
+ * guarantees hold wherever it sits.
  *
  * The policy drives the engine through the ordinary player interface - the
  * same `menuButton`/`cardClicked` calls a browser click becomes - so a bot

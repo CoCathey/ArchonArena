@@ -369,6 +369,16 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
+        // ARCHON (N21): the randomizer - a slot filled with a random eligible
+        // deck that swaps itself for a fresh one after `games` games.
+        enrollRandomChampionsChallengeDeck: builder.mutation({
+            query: (games) => ({
+                url: '/champions-challenge/decks/random',
+                method: 'POST',
+                body: { games }
+            }),
+            invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
+        }),
         withdrawChampionsChallengeDeck: builder.mutation({
             query: (deckId) => ({
                 url: `/champions-challenge/decks/${deckId}`,
@@ -1272,6 +1282,7 @@ export const {
     // ARCHON (N18): the Champion’s Challenge.
     useGetChampionsChallengeQuery,
     useEnrollChampionsChallengeDeckMutation,
+    useEnrollRandomChampionsChallengeDeckMutation,
     useWithdrawChampionsChallengeDeckMutation,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,
