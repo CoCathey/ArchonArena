@@ -1,6 +1,7 @@
 const logger = require('../../log');
 const { emptyModel, trainModel } = require('./labPolicy');
-const { sprt } = require('./labMath');
+const { sprt, wilsonInterval } = require('./labMath');
+const { personaByKey, duelPairKey } = require('./labPersonas');
 
 /**
  * ARCHON (N21): the learning loop's bookkeeping - training diary, candidate
@@ -71,11 +72,12 @@ class BotPolicyService {
      * One sparring game into the diary. Returns how many games the diary
      * holds, which is what the caller's "time to train?" check reads.
      */
-    async recordTrainingGame({ policyVersion, winnerSide, decisions }, keep) {
+    async recordTrainingGame({ policyVersion, winnerSide, decisions, persona = null }, keep) {
         await this.db.query(
-            'INSERT INTO "BotTrainingGames" ("PolicyVersion", "WinnerSide", "Decisions", "CreatedAt") ' +
-                "VALUES ($1, $2, $3, now() AT TIME ZONE 'utc')",
-            [policyVersion || null, winnerSide, JSON.stringify(decisions)]
+            'INSERT INTO "BotTrainingGames" ' +
+                '("PolicyVersion", "WinnerSide", "Decisions", "Persona", "CreatedAt") ' +
+                "VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc')",
+            [policyVersion || null, winnerSide, JSON.stringify(decisions), persona]
         );
 
         // Prune beyond the working set, oldest first. A diary is not an
@@ -262,6 +264,98 @@ class BotPolicyService {
 
             return [];
         }
+    }
+
+    /**
+     * ARCHON (N28): record one persona duel, and read the ladder back.
+     *
+     * The duels exist to answer a question ordinary sparring cannot: is one of
+     * the three pilots simply the worse player? Sparring shares one pilot across
+     * both seats on purpose - that is what keeps a game's result attributable to
+     * the decks - so a persona's strength never appears in it. Here two personas
+     * meet on neutral decks with paired seeds, which is the same instrument the
+     * champion's title fight uses.
+     *
+     * One row per unordered pair, keys sorted, so the record cannot end up split
+     * between "racer vs bruiser" and "bruiser vs racer".
+     *
+     * Best effort: a calibration write must never cost a sweep.
+     */
+    async recordPersonaDuel(winner, loser) {
+        if (!winner || !loser || winner === loser) {
+            return false;
+        }
+
+        const [a, b] = duelPairKey(winner, loser);
+        const winnerIsA = winner === a;
+
+        try {
+            await this.db.query(
+                'INSERT INTO "ChallengePersonaDuels" ' +
+                    '("PersonaA", "PersonaB", "WinsA", "WinsB", "UpdatedAt") ' +
+                    "VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc') " +
+                    'ON CONFLICT ("PersonaA", "PersonaB") DO UPDATE SET ' +
+                    '"WinsA" = "ChallengePersonaDuels"."WinsA" + EXCLUDED."WinsA", ' +
+                    '"WinsB" = "ChallengePersonaDuels"."WinsB" + EXCLUDED."WinsB", ' +
+                    '"UpdatedAt" = EXCLUDED."UpdatedAt"',
+                [a, b, winnerIsA ? 1 : 0, winnerIsA ? 0 : 1]
+            );
+
+            return true;
+        } catch (err) {
+            logger.error('Challenge bot: could not record a persona duel', err);
+
+            return false;
+        }
+    }
+
+    /**
+     * Each persona's record across every pair it has played, with the interval -
+     * because "the Schemer wins 42%" over twelve games is not a finding.
+     *
+     * Never throws; an empty ladder is what "they have not duelled yet" looks
+     * like.
+     */
+    async personaLadder() {
+        let rows;
+
+        try {
+            rows = await this.db.query(
+                'SELECT "PersonaA", "PersonaB", "WinsA", "WinsB" FROM "ChallengePersonaDuels"'
+            );
+        } catch (err) {
+            logger.error('Challenge bot: could not read the persona ladder', err);
+
+            return [];
+        }
+
+        const records = new Map();
+        const note = (key, wins, losses) => {
+            const record = records.get(key) || { persona: key, wins: 0, losses: 0 };
+
+            record.wins += wins;
+            record.losses += losses;
+            records.set(key, record);
+        };
+
+        for (const row of rows || []) {
+            note(row.PersonaA, row.WinsA || 0, row.WinsB || 0);
+            note(row.PersonaB, row.WinsB || 0, row.WinsA || 0);
+        }
+
+        return [...records.values()]
+            .map((record) => {
+                const games = record.wins + record.losses;
+                const persona = personaByKey(record.persona);
+
+                return {
+                    ...record,
+                    label: persona ? persona.label : record.persona,
+                    games,
+                    ...wilsonInterval(record.wins, games)
+                };
+            })
+            .sort((left, right) => right.rate - left.rate || right.games - left.games);
     }
 
     /** The learning loop's public vitals, for the Challenge page. */

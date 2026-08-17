@@ -17,12 +17,20 @@ const { runDeepGame } = require('./DeepGame');
 const {
     MIN_CONFIDENT_GAMES,
     MIN_OPENING_GAMES,
+    MIN_STYLE_GAMES,
     sasExpectedScore,
     isHiddenGem,
     buildFindings,
     wilsonInterval
 } = require('./labMath');
 const { shrink, SHRINK_PRIOR } = require('./labPolicy');
+const {
+    PERSONAS,
+    personaByKey,
+    personaModel,
+    personaFor,
+    personaPairFor
+} = require('./labPersonas');
 
 /** Most candidate decks offered for enrollment at once. */
 const MAX_CANDIDATES = 60;
@@ -90,6 +98,10 @@ class ChampionsChallengeService {
             // field, filtered by set and house.
             dokService: new DokService(configService, db, settingsService)
         });
+        // ARCHON (N28): which persona pair duels next, kept across sweeps so
+        // every pair is measured about equally often rather than the first pair
+        // being measured every time.
+        this.duelCursor = 0;
         // Injectable for tests: specs replace these with stubs rather than
         // playing real games per assertion.
         this.runMatch = runSimulatedGame;
@@ -482,6 +494,11 @@ class ChampionsChallengeService {
         // never quite reaches zero, because a policy that stops exploring
         // entirely can never discover it has grown wrong.
         const temperature = this.explorationTemperature(config, championModel);
+        // ARCHON (N28): three pilots, rotated. Every deck is played by each of
+        // them, so its rating averages over three styles instead of measuring
+        // one bot's blind spots - and the spread across the three says whether
+        // the deck's result depends on the opponent's plan.
+        const styling = this.personaStyling(config, championModel);
 
         // Rosters are visited round-robin in a shuffled order - one game per
         // member per pass - so one member's full queue cannot starve
@@ -556,7 +573,8 @@ class ChampionsChallengeService {
                         championVersion,
                         learning,
                         ariConfig,
-                        eloConfig
+                        eloConfig,
+                        persona: styling.next()
                     });
 
                     if (outcome === 'played') {
@@ -610,6 +628,12 @@ class ChampionsChallengeService {
                 // is the fast bot exploring and logging its decisions.
                 const deepToday = await this.deepGamesToday(userId);
                 const playDeep = learning && deepToday < (config.deepGamesPerDay || 0);
+                // A showcase game is the best play the site can produce, so it
+                // is played by the champion unstyled: a persona is the champion
+                // pulled away from the policy trained to win, and an annotated
+                // exhibition of deliberately stylised play would be a strange
+                // thing to hold up as what the bot can do.
+                const persona = playDeep ? null : styling.next();
                 let result;
 
                 try {
@@ -631,7 +655,13 @@ class ChampionsChallengeService {
                         : await this.runMatch(alpha.deck, omega.deck, {
                               seed: this.newSeed(),
                               maxTurns: config.maxTurnsPerGame,
-                              policy: championModel,
+                              // Both seats share the pilot. That is the point:
+                              // within a game, symmetric piloting keeps the
+                              // result attributable to the DECKS, while across
+                              // games the pilot rotates. Two different pilots in
+                              // one game would put "which bot flew it" into
+                              // every result.
+                              policy: styling.model(persona),
                               // Exploration keeps the diary honest: a bot
                               // that never tries second-best moves can never
                               // learn which ones were actually best.
@@ -657,7 +687,7 @@ class ChampionsChallengeService {
                     continue;
                 }
 
-                await this.recordGame(userId, result);
+                await this.recordGame(userId, result, persona);
 
                 // The diary: this game's decisions, labeled by its outcome.
                 if (learning && result.decisions && result.decisions.length) {
@@ -666,7 +696,8 @@ class ChampionsChallengeService {
                             {
                                 policyVersion: championVersion,
                                 winnerSide: result.winner,
-                                decisions: result.decisions
+                                decisions: result.decisions,
+                                persona: persona ? persona.key : null
                             },
                             config.trainingGamesKept
                         );
@@ -731,6 +762,17 @@ class ChampionsChallengeService {
             }
         }
 
+        // ARCHON (N28): calibrate the pilots against each other, so "one of the
+        // three is just weaker" is a fact an operator can read rather than a
+        // possibility nobody can rule out.
+        if (styling.active) {
+            try {
+                await this.runPersonaDuels(config, championModel);
+            } catch (err) {
+                logger.error('Challenge bot: persona duel failed', err);
+            }
+        }
+
         // ARCHON (N24): grow the field, after the games rather than before -
         // hydration waits on Master Vault, and a member's games should not.
         // Only while somebody actually plays the field: a pool nobody has asked
@@ -771,7 +813,8 @@ class ChampionsChallengeService {
         championVersion,
         learning,
         ariConfig,
-        eloConfig
+        eloConfig,
+        persona = null
     }) {
         const opponent = await this.gauntletService.drawOpponent(userId, settings);
 
@@ -793,7 +836,13 @@ class ChampionsChallengeService {
             result = await this.runMatch(mine.deck, opponent.deck, {
                 seed: this.newSeed(),
                 maxTurns: config.maxTurnsPerGame,
-                policy: championModel,
+                // One pilot, both seats, rotated across games - the same rule the
+                // mirror lab plays by, for the same reason.
+                policy: personaModel(
+                    championModel,
+                    persona,
+                    this.personaStrength(this.getConfig())
+                ),
                 temperature: 0.7,
                 recordDecisions: learning
             });
@@ -818,7 +867,14 @@ class ChampionsChallengeService {
         const won = result.winner === PLAYER_ONE;
 
         try {
-            await this.gauntletService.recordGame({ userId, deckId, opponent, won, result });
+            await this.gauntletService.recordGame({
+                userId,
+                deckId,
+                opponent,
+                won,
+                result,
+                persona: persona ? persona.key : null
+            });
             await this.gauntletService.noteOpponentPlayed(opponent.uuid);
         } catch (err) {
             logger.error('Gauntlet: could not record a field game', err);
@@ -834,7 +890,8 @@ class ChampionsChallengeService {
                     {
                         policyVersion: championVersion,
                         winnerSide: result.winner,
-                        decisions: result.decisions
+                        decisions: result.decisions,
+                        persona: persona ? persona.key : null
                     },
                     config.trainingGamesKept
                 );
@@ -1009,6 +1066,122 @@ class ChampionsChallengeService {
         }
     }
 
+    /** How far a persona pulls the champion away from its own best play. */
+    personaStrength(config) {
+        if (config.personasEnabled === false) {
+            return 0;
+        }
+
+        const strength = Number(config.personaStrength);
+
+        return Number.isFinite(strength) && strength >= 0 ? strength : 1;
+    }
+
+    /**
+     * ARCHON (N28): the sweep's pilot rotation.
+     *
+     * `next()` hands out the personas round-robin - not at random, because with
+     * three pilots and a few dozen games a day per deck a coin leaves one pilot
+     * with half the games of another often enough to matter, and the per-style
+     * records are the point. `model()` dresses the champion in one.
+     *
+     * Returns a rotation of nulls when personas are off or there is no champion
+     * to bias: with no trained brain the bot plays its heuristics, and a
+     * bias-only model would be a fourth kind of player nobody asked for.
+     */
+    personaStyling(config, championModel) {
+        const strength = this.personaStrength(config);
+        const active = !!championModel && strength > 0;
+
+        if (!active) {
+            return { active: false, next: () => null, model: () => championModel };
+        }
+
+        // A random start, so a site whose sweeps all play the same number of
+        // games does not hand every sweep's first game to the same pilot.
+        let cursor = crypto.randomInt(PERSONAS.length);
+
+        return {
+            active: true,
+            next: () => personaFor(cursor++),
+            model: (persona) => personaModel(championModel, persona, strength)
+        };
+    }
+
+    /**
+     * ARCHON (N28): the personas, measured against each other.
+     *
+     * Each persona is the champion pulled away from the policy trained to win, so
+     * each is a slightly weaker player for it - and one pulled too far is simply
+     * a bad player, which would turn a deck's spread across the three from "this
+     * deck's result depends on the opponent's plan" into "this deck punishes bad
+     * play". That difference has to be visible, and ordinary sparring cannot show
+     * it: both seats there share a pilot, by design.
+     *
+     * So the pilots duel. Neutral decks, PAIRED SEEDS - one seed played twice
+     * with the pilots swapped between seats - which is the same instrument the
+     * champion's title fight uses, and for the same reason: what survives a pair
+     * is the difference between the players rather than the decks or the draws.
+     *
+     * Never touches anyone's deck stats, never moves ARI, never trains anything.
+     */
+    async runPersonaDuels(config, championModel) {
+        const strength = this.personaStrength(config);
+        const pairs = Math.max(0, parseInt(config.personaDuelPairsPerSweep, 10) || 0);
+
+        if (!championModel || !strength || !pairs) {
+            return 0;
+        }
+
+        const [deckA, deckB] = this.neutralArenaDecks();
+        let played = 0;
+
+        for (let pair = 0; pair < pairs; pair++) {
+            const [left, right] = personaPairFor(this.duelCursor++);
+            const models = {
+                left: personaModel(championModel, left, strength),
+                right: personaModel(championModel, right, strength)
+            };
+            const seed = this.newSeed();
+            const results = [];
+
+            for (const leftIsAlpha of [true, false]) {
+                const result = await this.runMatch(deckA, deckB, {
+                    seed,
+                    maxTurns: config.maxTurnsPerGame,
+                    policies: leftIsAlpha
+                        ? { alpha: models.left, omega: models.right }
+                        : { alpha: models.right, omega: models.left },
+                    temperature: 0,
+                    recordDecisions: false
+                });
+
+                if (!result || !result.completed) {
+                    // Drop the pair. Half a pair is an unpaired game, which is
+                    // the noise the pairing exists to remove.
+                    return played;
+                }
+
+                const leftWon = leftIsAlpha
+                    ? result.winner === PLAYER_ONE
+                    : result.winner !== PLAYER_ONE;
+
+                results.push(leftWon);
+            }
+
+            for (const leftWon of results) {
+                await this.policyService.recordPersonaDuel(
+                    leftWon ? left.key : right.key,
+                    leftWon ? right.key : left.key
+                );
+            }
+
+            played++;
+        }
+
+        return played;
+    }
+
     /**
      * Two fixed 36-card decks from pack data, for arena games: neutral
      * ground that no member's stats can be polluted by and every candidate
@@ -1170,13 +1343,13 @@ class ChampionsChallengeService {
     }
 
     /** Persist one finished simulated game, deep annotations and all. */
-    async recordGame(userId, result) {
+    async recordGame(userId, result, persona = null) {
         await this.db.query(
             'INSERT INTO "ProvingGroundsGames" ' +
                 '("UserId", "WinnerDeckId", "LoserDeckId", "WinnerKeys", "LoserKeys", "Turns", ' +
                 '"WinnerWentFirst", "WinnerFirstHouse", "LoserFirstHouse", "WinnerHouseCalls", ' +
-                '"LoserHouseCalls", "DurationMs", "Deep", "Annotations", "FinishedAt") ' +
-                'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, ' +
+                '"LoserHouseCalls", "DurationMs", "Deep", "Annotations", "Persona", "FinishedAt") ' +
+                'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ' +
                 "now() AT TIME ZONE 'utc')",
             [
                 userId,
@@ -1192,7 +1365,11 @@ class ChampionsChallengeService {
                 JSON.stringify(result.loserHouseCalls || {}),
                 result.durationMs,
                 !!result.deep,
-                result.annotations ? JSON.stringify(result.annotations) : null
+                result.annotations ? JSON.stringify(result.annotations) : null,
+                // ARCHON (N28): which pilot played it. Part of the result, not a
+                // runtime detail - the per-style records are read off this column,
+                // and a game whose pilot went unrecorded can never be attributed.
+                persona ? persona.key : null
             ]
         );
     }
@@ -1357,6 +1534,20 @@ class ChampionsChallengeService {
             bot,
             matchups,
             strengthCurve,
+            // ARCHON (N28): who has been flying your decks, and how they rank
+            // against each other. The ladder is what makes a deck's spread
+            // readable: three pilots of roughly equal strength disagreeing about
+            // a deck says something about the deck, and one weak pilot says
+            // nothing at all.
+            personas: {
+                minStyleGames: MIN_STYLE_GAMES,
+                roster: PERSONAS.map((persona) => ({
+                    key: persona.key,
+                    label: persona.label,
+                    description: persona.description
+                })),
+                ladder: await this.policyService.personaLadder().catch(() => [])
+            },
             cards: cards ? { ...cards, deckId: topDeck.deckId, deckName: topDeck.name } : null,
             gauntlet: {
                 ...fieldSettings,
@@ -1395,7 +1586,7 @@ class ChampionsChallengeService {
             }
         };
 
-        const [lease, sparring, pool, unplayable, diary, deep] = await Promise.all([
+        const [lease, sparring, pool, unplayable, diary, pilots, deep] = await Promise.all([
             ask('SELECT "Owner", "HeartbeatAt" FROM "ChallengeSweepLease" WHERE "Id" = 1'),
             ask(
                 'SELECT COUNT(*)::int AS "Total", ' +
@@ -1425,6 +1616,14 @@ class ChampionsChallengeService {
                     'GROUP BY "MissingCards" ORDER BY "Decks" DESC LIMIT 5'
             ),
             ask('SELECT COUNT(*)::int AS "Games" FROM "BotTrainingGames"'),
+            // ARCHON (N28): what each pilot has actually played. A persona with a
+            // tenth of the others' games is a rotation that is not rotating, and
+            // an average game length far from the others is a pilot whose bias
+            // has stopped being a style and started being a handicap.
+            ask(
+                'SELECT "Persona", COUNT(*)::int AS "Played", AVG("Turns")::float AS "Turns" ' +
+                    'FROM "ProvingGroundsGames" WHERE "Persona" IS NOT NULL GROUP BY "Persona"'
+            ),
             ask(
                 'SELECT COUNT(*)::int AS "Games", ' +
                     'AVG(jsonb_array_length("Annotations"))::float AS "Annotations" ' +
@@ -1466,6 +1665,25 @@ class ChampionsChallengeService {
                     deep && deep[0] && deep[0].Annotations
                         ? Math.round(deep[0].Annotations * 10) / 10
                         : null
+            },
+            // ARCHON (N28): the three pilots. `pilots` is what they have flown;
+            // `ladder` is how they do against each other, which is the number
+            // that says whether a deck's spread across them means anything.
+            personas: {
+                enabled: this.personaStrength(config) > 0,
+                strength: this.personaStrength(config),
+                duelPairsPerSweep: parseInt(config.personaDuelPairsPerSweep, 10) || 0,
+                pilots: PERSONAS.map((persona) => {
+                    const row = (pilots || []).find((entry) => entry.Persona === persona.key);
+
+                    return {
+                        key: persona.key,
+                        label: persona.label,
+                        games: (row && row.Played) || 0,
+                        avgTurns: row && row.Turns ? Math.round(row.Turns * 10) / 10 : null
+                    };
+                }),
+                ladder: await this.policyService.personaLadder().catch(() => [])
             },
             gauntlet: {
                 enabled: config.gauntletEnabled !== false,
@@ -1644,6 +1862,10 @@ class ChampionsChallengeService {
         let sinceEnrolled = 0;
         const enrolledAt = enrollment.EnrolledAt ? new Date(enrollment.EnrolledAt) : null;
         const openings = new Map();
+        // ARCHON (N28): this deck's record under each of the three pilots. Both
+        // seats of a sparring game share the pilot, so a game counts once for
+        // each deck in it and the styles never have to be untangled.
+        const styles = new Map();
 
         for (const game of games) {
             const won = game.WinnerDeckId === deckId;
@@ -1688,6 +1910,14 @@ class ChampionsChallengeService {
                 openings.set(firstHouse, opening);
             }
 
+            if (game.Persona) {
+                const style = styles.get(game.Persona) || { games: 0, wins: 0 };
+
+                style.games++;
+                style.wins += won ? 1 : 0;
+                styles.set(game.Persona, style);
+            }
+
             if (!lastPlayedAt || game.FinishedAt > lastPlayedAt) {
                 lastPlayedAt = game.FinishedAt;
             }
@@ -1702,6 +1932,32 @@ class ChampionsChallengeService {
         const expectedWinRate = expectedGames ? expectedSum / expectedGames : null;
         const secondGames = total - wentFirstGames;
         const secondWins = wins - wentFirstWins;
+
+        const styleRows = [...styles.entries()]
+            .map(([key, record]) => {
+                const persona = personaByKey(key);
+
+                return {
+                    persona: key,
+                    label: persona ? persona.label : key,
+                    description: persona ? persona.description : null,
+                    games: record.games,
+                    wins: record.wins,
+                    losses: record.games - record.wins,
+                    // The interval, because a per-style record is a third of the
+                    // deck's games and a third of the evidence.
+                    ...wilsonInterval(record.wins, record.games)
+                };
+            })
+            .sort((left, right) => right.rate - left.rate || right.games - left.games);
+        // The spread only means something once each style has enough games to
+        // have a rate worth comparing; below that it is the same noise twice.
+        const comparable = styleRows.filter((style) => style.games >= MIN_STYLE_GAMES);
+        const spread =
+            comparable.length > 1
+                ? Math.round((comparable[0].rate - comparable[comparable.length - 1].rate) * 1000) /
+                  1000
+                : null;
 
         const openingRows = [...openings.entries()]
             .map(([house, record]) => ({
@@ -1742,6 +1998,13 @@ class ChampionsChallengeService {
             secondPlayerWinRate: secondGames >= 5 ? secondWins / secondGames : null,
             openings: openingRows,
             bestOpening,
+            // ARCHON (N28): how the deck did under each pilot, and how far apart
+            // those verdicts are. A wide spread is the interesting case: the
+            // deck's result depends on what the opponent is trying to do, which
+            // one overall win rate cannot say.
+            styles: styleRows,
+            styleSpread: spread,
+            hardestStyle: comparable.length > 1 ? comparable[comparable.length - 1] : null,
             // ARCHON (N21): randomizer slots and their odometers.
             random: !!enrollment.Random,
             randomGamesTarget: enrollment.RandomGamesTarget || null,

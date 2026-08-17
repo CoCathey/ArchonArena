@@ -85,6 +85,11 @@ CREATE TABLE IF NOT EXISTS public."ProvingGroundsGames"
     -- its per-decision annotations.
     "Deep" boolean NOT NULL DEFAULT false,
     "Annotations" jsonb,
+    -- ARCHON (N28): which of the three sparring pilots played this game (both
+    -- seats - a shared pilot is what keeps the result attributable to the decks).
+    -- NULL for a game played before the personas existed, and for showcase games,
+    -- which are played by the champion unstyled. See labPersonas.js.
+    "Persona" text COLLATE pg_catalog."default",
     "FinishedAt" timestamp without time zone NOT NULL,
     CONSTRAINT "PK_ProvingGroundsGames" PRIMARY KEY ("Id"),
     CONSTRAINT "FK_ProvingGroundsGames_Users" FOREIGN KEY ("UserId")

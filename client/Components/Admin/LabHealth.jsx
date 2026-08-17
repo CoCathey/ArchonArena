@@ -152,6 +152,53 @@ const LabHealth = () => {
                                 : t('none')
                         }
                     />
+                    {/* ARCHON (N28): the three pilots. Games each has flown says
+                        whether the rotation is rotating; the ladder says whether
+                        one of them is simply the weaker player, which is the one
+                        thing that would make a deck's style spread misleading. */}
+                    <Row
+                        label={t('Sparring styles')}
+                        tone={health.personas?.enabled ? 'good' : undefined}
+                        value={
+                            health.personas?.enabled
+                                ? t('on at ×{{strength}}', {
+                                      strength: health.personas.strength
+                                  })
+                                : t('off')
+                        }
+                        hint={
+                            health.personas?.enabled
+                                ? t('{{pairs}} calibration pairs/sweep', {
+                                      pairs: health.personas.duelPairsPerSweep
+                                  })
+                                : undefined
+                        }
+                    />
+                    {(health.personas?.pilots || []).map((pilot) => {
+                        const rung = (health.personas.ladder || []).find(
+                            (entry) => entry.persona === pilot.key
+                        );
+
+                        return (
+                            <Row
+                                key={pilot.key}
+                                label={pilot.label}
+                                value={t('{{games}} games', {
+                                    games: (pilot.games || 0).toLocaleString()
+                                })}
+                                hint={
+                                    rung && rung.games
+                                        ? t('{{rate}}% vs the others ({{games}})', {
+                                              rate: Math.round(rung.rate * 100),
+                                              games: rung.games
+                                          })
+                                        : pilot.avgTurns
+                                        ? t('{{turns}} turns avg', { turns: pilot.avgTurns })
+                                        : undefined
+                                }
+                            />
+                        );
+                    })}
                     <Row
                         label={t('Showcase games')}
                         value={(health.deep.games || 0).toLocaleString()}

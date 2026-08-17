@@ -16,6 +16,18 @@ const MIN_CONFIDENT_GAMES = 20;
 const MIN_OPENING_GAMES = 5;
 
 /**
+ * ARCHON (N28): games under one of the three sparring pilots before that
+ * pilot's verdict on a deck is worth comparing to the others.
+ *
+ * The comparison is the whole value of playing three pilots - "wins under the
+ * Racer, loses under the Bruiser" is a fact about the deck - and comparing two
+ * five-game records produces that sentence out of noise about half the time.
+ * Lower than MIN_CONFIDENT_GAMES because each pilot only ever gets a third of a
+ * deck's games, and a threshold a deck can never reach reports nothing forever.
+ */
+const MIN_STYLE_GAMES = 10;
+
+/**
  * Lower bound of the 95% Wilson score interval for a win rate.
  *
  * The hidden-gem rule uses the LOWER bound rather than the observed rate on
@@ -264,6 +276,7 @@ function buildFindings(decks, limit = 8) {
 module.exports = {
     MIN_CONFIDENT_GAMES,
     MIN_OPENING_GAMES,
+    MIN_STYLE_GAMES,
     wilsonLowerBound,
     wilsonInterval,
     sprt,

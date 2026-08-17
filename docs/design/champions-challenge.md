@@ -214,6 +214,51 @@ Field games move ARI at the sim rate like any sparring game, count against the
 same per-deck daily budget, and — because a field game needs only one of the
 member's decks — give a single-deck roster games the mirror lab never could.
 
+## Three sparring partners (N28)
+
+Every sparring game the lab had ever played was piloted by one policy, so a
+deck's win rate meant **"how this deck does against this bot"**. A deck that
+happened to punish that bot's habits carried a rating saying it was strong, and
+nothing in the output could show it: a tidy 62% is a tidy 62% whether it was
+earned against a varied field or against one opponent's blind spot.
+
+So three pilots now rotate, and each of them plays every deck. A rating is an
+average over three styles instead of a measurement against one, and the **spread**
+across the three is a new fact worth having — a deck that wins under the Racer
+and loses under the Bruiser is a deck whose result depends on what the opponent
+is trying to do, which one number cannot say.
+
+**One brain, three styles.** A persona is a small fixed bias added to the
+champion model's weights (`labPersonas.js`) — nothing is trained separately and
+the learning loop does not fork. Three independently trained models would need
+three diaries, three arenas and three times the games, and would converge on the
+same play anyway, because all three would be trained to win. Two consequences
+are deliberate: personas bias **action** features only (state features are
+identical across every candidate at one decision point, so a state bias would
+look meaningful and change nothing), and a persona is slightly the weaker player
+for being pulled away from the policy trained to win. That is the price of
+decorrelating one pilot's errors, and it is what `personaStrength` dials.
+
+**Both seats share the pilot.** Within a game, symmetric piloting is what keeps
+the result attributable to the DECKS; across games, the pilot rotates. Two
+different pilots in one game would put "which bot flew it" into every row.
+Showcase games are unstyled — a showcase is meant to be the best play the site
+can produce — and arena games are unstyled too, because a title fight measures
+brains, not styles.
+
+**The pilots duel, so the spread can be trusted.** A persona pulled too far is
+simply a bad player, and a deck's spread would then measure "which decks punish
+bad play" rather than style matchup. Ordinary sparring cannot show that, because
+both seats share the pilot — so two personas meet on the arena's neutral decks
+with **paired seeds**, one seed played twice with the pilots swapped between
+seats, exactly as a candidate meets the champion. What survives the pair is the
+difference between the players. The ladder is on the member's page (with
+intervals) and in the admin health panel beside each pilot's game count.
+
+`personasEnabled` off, or `personaStrength` 0, restores the single-pilot lab
+exactly; the recorded `Persona` column then stays null and the page shows no
+styles rather than empty ones.
+
 ## Where the games run (N24)
 
 A simulated game is about half a second of solid CPU and a deep showcase game

@@ -666,8 +666,9 @@ class GauntletService {
      * @param {object} game.opponent as returned by drawOpponent
      * @param {boolean} game.won
      * @param {object} game.result the SimulatedGame result
+     * @param {string|null} [game.persona] which of the three pilots played it
      */
-    async recordGame({ userId, deckId, opponent, won, result }) {
+    async recordGame({ userId, deckId, opponent, won, result, persona = null }) {
         const mine = won ? 'winner' : 'loser';
         const theirs = won ? 'loser' : 'winner';
 
@@ -675,8 +676,8 @@ class GauntletService {
             'INSERT INTO "GauntletGames" ' +
                 '("UserId", "DeckId", "OpponentUuid", "OpponentName", "OpponentSas", "Won", ' +
                 '"MyKeys", "OpponentKeys", "Turns", "WentFirst", "MyFirstHouse", ' +
-                '"OpponentFirstHouse", "DurationMs", "FinishedAt") ' +
-                'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, ' +
+                '"OpponentFirstHouse", "DurationMs", "Persona", "FinishedAt") ' +
+                'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, ' +
                 "now() AT TIME ZONE 'utc')",
             [
                 userId,
@@ -691,7 +692,8 @@ class GauntletService {
                 won ? !!result.winnerWentFirst : !result.winnerWentFirst,
                 result[`${mine}FirstHouse`] || null,
                 result[`${theirs}FirstHouse`] || null,
-                result.durationMs
+                result.durationMs,
+                persona
             ]
         );
     }

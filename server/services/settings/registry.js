@@ -523,6 +523,37 @@ const REGISTRY = {
                 max: 5000,
                 default: 400
             },
+            // ARCHON (N28): three sparring pilots instead of one. A deck's win
+            // rate used to mean "how this deck does against this bot", so a deck
+            // that punished the bot's habits carried a rating that said it was
+            // strong. Rotating three styles averages that out, and the spread
+            // between them is a fact about the deck. See labPersonas.js.
+            personasEnabled: {
+                type: 'boolean',
+                label: 'Rotate three sparring styles instead of playing one (better ratings)',
+                default: true
+            },
+            personaStrength: {
+                type: 'number',
+                // A persona is the champion pulled away from its own best play,
+                // so this dial trades style for strength: too high and the pilots
+                // are simply bad players, which measures which decks punish bad
+                // play instead of which decks depend on the matchup. The duels
+                // are how you see that happening.
+                label: 'How strongly a style pulls the bot away from its best play (0 = off)',
+                min: 0,
+                max: 3,
+                default: 1
+            },
+            personaDuelPairsPerSweep: {
+                type: 'number',
+                // One pair is two games - the same seed played twice with the
+                // pilots swapped between seats.
+                label: 'Style-versus-style calibration pairs per sweep (0 = never calibrate)',
+                min: 0,
+                max: 10,
+                default: 1
+            },
             // The deep planner: fewer, slower, annotated showcase games. A
             // deep game costs seconds-to-minutes of CPU where a fast one
             // costs half a second - these knobs are the leash.

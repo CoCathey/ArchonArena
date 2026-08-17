@@ -41,6 +41,11 @@ CREATE TABLE IF NOT EXISTS public."BotTrainingGames"
     -- 'challenger-alpha' | 'challenger-omega'
     "WinnerSide" text COLLATE pg_catalog."default" NOT NULL,
     "Decisions" jsonb NOT NULL,
+    -- ARCHON (N28): the persona that piloted this game, when one did. The rows
+    -- are still valid training data - labels come from outcomes and search, not
+    -- from the behaviour that produced them - but "how much of my diary is one
+    -- style" should have an answer. See labPersonas.js.
+    "Persona" text COLLATE pg_catalog."default",
     "CreatedAt" timestamp without time zone NOT NULL,
     CONSTRAINT "PK_BotTrainingGames" PRIMARY KEY ("Id")
 )
@@ -53,3 +58,27 @@ CREATE INDEX IF NOT EXISTS "IX_BotTrainingGames_Id"
     ON public."BotTrainingGames" USING btree
     ("Id" DESC NULLS LAST)
     TABLESPACE pg_default;
+
+-- ARCHON (N28): the persona ladder - the three sparring pilots' records against
+-- each other.
+--
+-- A persona is the champion model pulled away from the policy trained to win, so
+-- each is slightly the weaker player for it; one pulled too far is simply a bad
+-- player, and a deck's spread across the three would then measure which decks
+-- punish bad play. Ordinary sparring cannot show that, because both seats share
+-- one pilot by design - that is what keeps a game's result attributable to the
+-- decks - so the personas duel each other on neutral decks with paired seeds,
+-- the same way a candidate meets the champion.
+--
+-- One row per unordered pair, keys sorted so a pair is one record.
+CREATE TABLE IF NOT EXISTS public."ChallengePersonaDuels"
+(
+    "PersonaA" text COLLATE pg_catalog."default" NOT NULL,
+    "PersonaB" text COLLATE pg_catalog."default" NOT NULL,
+    "WinsA" integer NOT NULL DEFAULT 0,
+    "WinsB" integer NOT NULL DEFAULT 0,
+    "UpdatedAt" timestamp without time zone NOT NULL,
+    CONSTRAINT "PK_ChallengePersonaDuels" PRIMARY KEY ("PersonaA", "PersonaB")
+)
+
+TABLESPACE pg_default;

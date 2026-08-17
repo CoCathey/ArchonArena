@@ -119,6 +119,8 @@ CREATE TABLE IF NOT EXISTS public."GauntletGames"
     "MyFirstHouse" text COLLATE pg_catalog."default",
     "OpponentFirstHouse" text COLLATE pg_catalog."default",
     "DurationMs" integer,
+    -- ARCHON (N28): which of the three sparring pilots played it, both seats.
+    "Persona" text COLLATE pg_catalog."default",
     "FinishedAt" timestamp without time zone NOT NULL,
     CONSTRAINT "PK_GauntletGames" PRIMARY KEY ("Id"),
     CONSTRAINT "FK_GauntletGames_Users" FOREIGN KEY ("UserId")

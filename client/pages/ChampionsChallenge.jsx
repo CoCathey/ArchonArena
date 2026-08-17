@@ -589,6 +589,162 @@ const StrengthCurve = ({ curve, t }) => {
 
 StrengthCurve.propTypes = { curve: PropTypes.array, t: PropTypes.func };
 
+/**
+ * ARCHON (N28): the three pilots, and what each of them makes of your decks.
+ *
+ * Every sparring game used to be flown by one policy, so a deck's win rate meant
+ * "how this deck does against this bot" - and a deck that happened to punish that
+ * bot's habits carried a rating saying it was strong, with nothing on the page
+ * able to show it. Three styles now rotate, which is what makes the overall rate
+ * an average rather than a measurement against one opponent.
+ *
+ * The interesting number here is the SPREAD. A deck that wins under the Racer and
+ * loses under the Bruiser is a deck whose result depends on what the opponent is
+ * trying to do; one overall percentage cannot say that, and would read as
+ * moderate either way.
+ *
+ * The ladder beneath is the honesty check: a style is the champion pulled away
+ * from its own best play, so if one of the three is much the weaker player, a
+ * deck's spread says more about that than about the deck.
+ */
+const StylePanel = ({ personas, decks, t }) => {
+    const roster = personas?.roster || [];
+    const withStyles = (decks || []).filter((deck) => (deck.styles || []).length > 0);
+
+    if (roster.length === 0) {
+        return null;
+    }
+
+    const ladder = personas.ladder || [];
+
+    return (
+        <Panel type='default' compactHeader title={t('Three sparring partners')}>
+            <ul className='m-0 list-none space-y-1 p-0 text-sm'>
+                {roster.map((persona) => (
+                    <li key={persona.key}>
+                        <span className='font-semibold text-foreground'>{persona.label}</span>{' '}
+                        <span className='text-muted'>{persona.description}</span>
+                    </li>
+                ))}
+            </ul>
+
+            {withStyles.length > 0 && (
+                <div className='overflow-x-auto pt-3'>
+                    <table className='w-full min-w-[28rem] border-collapse text-sm'>
+                        <thead>
+                            <tr className='text-left text-[11px] uppercase tracking-wide text-muted'>
+                                <th className='py-1 pr-2 font-normal'>{t('Deck')}</th>
+                                {roster.map((persona) => (
+                                    <th className='py-1 pr-2 font-normal' key={persona.key}>
+                                        {persona.label}
+                                    </th>
+                                ))}
+                                <th className='py-1 font-normal'>{t('Spread')}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {withStyles.map((deck) => (
+                                <tr className='border-t border-border/40' key={deck.deckId}>
+                                    <td className='max-w-[12rem] truncate py-1 pr-2 text-foreground'>
+                                        {deck.name}
+                                    </td>
+                                    {roster.map((persona) => {
+                                        const style = (deck.styles || []).find(
+                                            (entry) => entry.persona === persona.key
+                                        );
+                                        // Blank, not a percentage, below the
+                                        // threshold: a five-game record next to a
+                                        // forty-game one invites exactly the
+                                        // comparison it cannot support.
+                                        const thin =
+                                            !style || style.games < (personas.minStyleGames || 10);
+
+                                        return (
+                                            <td className='py-1 pr-2' key={persona.key}>
+                                                {thin ? (
+                                                    <span
+                                                        className='text-muted'
+                                                        title={t('{{games}} games so far', {
+                                                            games: style ? style.games : 0
+                                                        })}
+                                                    >
+                                                        —
+                                                    </span>
+                                                ) : (
+                                                    <span
+                                                        className='text-foreground'
+                                                        title={t('{{wins}}–{{losses}}', {
+                                                            wins: style.wins,
+                                                            losses: style.losses
+                                                        })}
+                                                    >
+                                                        {pct(style.rate)}
+                                                    </span>
+                                                )}
+                                            </td>
+                                        );
+                                    })}
+                                    <td className='py-1'>
+                                        {deck.styleSpread == null ? (
+                                            <span className='text-muted'>—</span>
+                                        ) : (
+                                            <span
+                                                className={
+                                                    deck.styleSpread >= 0.15
+                                                        ? 'font-semibold text-amber-200'
+                                                        : 'text-muted'
+                                                }
+                                                title={
+                                                    deck.hardestStyle
+                                                        ? t('Hardest: {{label}}', {
+                                                              label: deck.hardestStyle.label
+                                                          })
+                                                        : undefined
+                                                }
+                                            >
+                                                {pct(deck.styleSpread)}
+                                            </span>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            {ladder.length > 1 && (
+                <p className='m-0 pt-3 text-[11px] text-muted'>
+                    {t('Between themselves, on neutral decks: ')}
+                    {ladder
+                        .map((entry) =>
+                            t('{{label}} {{rate}} ({{games}})', {
+                                label: entry.label,
+                                rate: pct(entry.rate),
+                                games: entry.games
+                            })
+                        )
+                        .join(' · ')}
+                </p>
+            )}
+
+            <p className='m-0 pt-2 text-[11px] text-muted'>
+                {t(
+                    'All three are the same learned brain with a different plan, and both seats ' +
+                        'of a game share one — so a result is still about the decks. A wide spread ' +
+                        'means this deck cares what the opponent is trying to do.'
+                )}
+            </p>
+        </Panel>
+    );
+};
+
+StylePanel.propTypes = {
+    personas: PropTypes.object,
+    decks: PropTypes.array,
+    t: PropTypes.func
+};
+
 const ChampionsChallenge = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -911,6 +1067,7 @@ const ChampionsChallenge = () => {
                         )}
                     </Panel>
 
+                    <StylePanel personas={data?.personas} decks={data?.decks} t={t} />
                     <MatchupMatrix matchups={data?.matchups} t={t} />
                     <CardContribution cards={data?.cards} t={t} />
                     <StrengthCurve curve={data?.strengthCurve} t={t} />

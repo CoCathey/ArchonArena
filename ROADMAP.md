@@ -2022,6 +2022,53 @@ indistinguishable from working.
         can.
 -   [x] Neither sweep can be configured into never running at all.
 
+#### N28 — Three sparring partners, so a rating means more _(done)_
+
+**Why:** every sparring game the lab had ever played was piloted by one policy, so a deck's win
+rate meant "how this deck does against this bot". A deck that punished that bot's particular
+habits carried a rating saying it was strong, and nothing in the output could show it — a tidy
+62% looks the same whether it was earned against a varied field or against one opponent's blind
+spot. ARI is built on those games, so the bias went straight into the platform's deck rating.
+
+**Tasks**
+
+-   [x] **Three pilots, rotated** (`labPersonas.js`): the Racer (runs the amber race), the
+        Bruiser (fights for the board), the Schemer (artifacts, abilities, disruption). Each is
+        the champion model plus a small fixed bias — one learned brain, three styles, no second
+        training loop. Round-robin rather than random, because the per-style records are the
+        point and a coin leaves one pilot short.
+-   [x] **Action biases only.** State features are identical across every candidate at one
+        decision point, so a state bias would look meaningful and change nothing. The spec builds
+        the set of keys the extractor can actually emit and requires every bias to be one of
+        them: a mistyped key is otherwise silently inert, and the lab would report three styles
+        while playing one.
+-   [x] **Both seats share the pilot**, so a game's result stays attributable to the decks;
+        the pilot rotates between games instead. Showcase games and arena games stay unstyled —
+        one is meant to be the best play the site can produce, the other measures brains.
+-   [x] **The pilot is part of the record** (`Persona` on the mirror games, the field games and
+        the diary, migration 78), because a game whose pilot went unrecorded can never be
+        attributed afterwards.
+-   [x] **Per-style records on the page**, with intervals, blank below `MIN_STYLE_GAMES` — and
+        the spread, which is the interesting number: a wide spread means the deck cares what the
+        opponent is trying to do.
+-   [x] **The pilots duel** (`ChallengePersonaDuels`): paired seeds on neutral decks with the
+        pilots swapped between seats, the same instrument the title fight uses. Without it a
+        persona pulled too far by `personaStrength` is just a bad player, and a deck's spread
+        would measure which decks punish bad play. The ladder is on the member's page and beside
+        each pilot's game count in the admin health panel.
+-   Later: personas as opponents a member can pick for a one-off game; a per-persona value model
+    (the diary already records which pilot produced each row); a fourth style trained rather
+    than hand-biased.
+
+**Depends on:** N21/N25 (the learned model), N19 (ARI). **Acceptance criteria**
+
+-   [x] Every persona bias names a feature the extractor really emits.
+-   [x] Two pilots pick different moves from the same position.
+-   [x] A sweep's games are spread across all three pilots, and each row records its own.
+-   [x] `personasEnabled` off restores the single-pilot lab exactly, with no styles shown rather
+        than empty ones.
+-   [x] A duel pair with an abandoned half is dropped whole.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
