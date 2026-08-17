@@ -353,6 +353,29 @@ export const api = createApi({
             },
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
+        // ARCHON (N18): the Proving Grounds - background simulated deck
+        // testing for Vault Master. One request draws the whole page: the
+        // roster, every deck's simulated record, and the findings all read
+        // the same games, and splitting them would let the panels disagree.
+        getProvingGrounds: builder.query({
+            query: () => '/proving-grounds',
+            providesTags: [TAG_TYPES.PROVING_GROUNDS]
+        }),
+        enrollProvingGroundsDeck: builder.mutation({
+            query: (deckId) => ({
+                url: '/proving-grounds/decks',
+                method: 'POST',
+                body: { deckId }
+            }),
+            invalidatesTags: [TAG_TYPES.PROVING_GROUNDS]
+        }),
+        withdrawProvingGroundsDeck: builder.mutation({
+            query: (deckId) => ({
+                url: `/proving-grounds/decks/${deckId}`,
+                method: 'DELETE'
+            }),
+            invalidatesTags: [TAG_TYPES.PROVING_GROUNDS]
+        }),
         // ARCHON (N12): is Patreon configured on this deployment, and where is
         // the campaign page. Public - the client renders no Patreon UI at all
         // when it comes back disabled.
@@ -1234,6 +1257,10 @@ export const {
     useGetMetaIntelligenceQuery,
     useGetAercIntelligenceQuery,
     useGetTournamentLabQuery,
+    // ARCHON (N18): the Proving Grounds.
+    useGetProvingGroundsQuery,
+    useEnrollProvingGroundsDeckMutation,
+    useWithdrawProvingGroundsDeckMutation,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,
     useGetPatreonMembershipQuery,

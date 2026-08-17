@@ -354,6 +354,62 @@ const REGISTRY = {
             // dok.maxImportDecks, which they hit first.
         }
     },
+    // ARCHON (N18): the Proving Grounds - Vault Master background deck testing.
+    provingGrounds: {
+        title: 'Proving Grounds',
+        description:
+            'Background deck testing for Vault Master members: the lobby quietly plays enrolled ' +
+            'decks against each other with a simulated player and reports how each deck performs ' +
+            'against what its SAS predicts. Simulated games live in their own tables and can ' +
+            'never touch Amber, deck records or any statistic. Each game costs the lobby ' +
+            'roughly half a second of CPU, spread out with event-loop yields - the pace knobs ' +
+            'below are what an operator reaches for if that ever shows.',
+        fields: {
+            enabled: {
+                type: 'boolean',
+                label: 'Play simulated games in the background',
+                default: true
+            },
+            sweepIntervalSeconds: {
+                type: 'number',
+                label: 'Play a batch of games every (seconds)',
+                min: 15,
+                max: 3600,
+                default: 60
+            },
+            gamesPerSweep: {
+                type: 'number',
+                label: 'Games played per batch, across all members',
+                min: 1,
+                max: 10,
+                default: 2
+            },
+            gamesPerDeckPerDay: {
+                type: 'number',
+                label: 'Most games one deck plays per day (UTC)',
+                min: 0,
+                max: 200,
+                default: 12
+            },
+            maxEnrolledPerUser: {
+                type: 'number',
+                label: 'Decks one member may enroll at once',
+                min: 2,
+                max: 32,
+                default: 8
+            },
+            // A safety valve, not a pacing knob: a simulated game that is
+            // still going after this many player turns is assumed wedged,
+            // abandoned, and recorded nowhere.
+            maxTurnsPerGame: {
+                type: 'number',
+                label: 'Abandon a simulated game after (turns)',
+                min: 20,
+                max: 200,
+                default: 80
+            }
+        }
+    },
     tournament: {
         title: 'Tournaments',
         description:

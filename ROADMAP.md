@@ -1323,6 +1323,68 @@ half-finished. Whether the result actually looks premium is a judgement call, an
 what this item can promise is that the judgement gets made once, deliberately, rather than
 re-improvised per page.
 
+#### N18 — The Proving Grounds: background deck testing for Vault Master _(done)_
+
+**Why:** Vault Master's pitch is "everything, first", and until now what it sold was previews,
+cosmetics and organizer exports — nothing only a $20 member could point at. This is the first
+capability that is genuinely new capability: a computer plays a member's decks against each
+other around the clock, in the background, and reports what their collection is actually made
+of — including the decks whose SAS undersells them. It is also, quietly, the platform's first
+AI player driving the real engine, which is the hard half of **F9** (bot showcase) and the
+foundation **F3** (AI analysis) wants.
+
+**Tasks**
+
+-   [x] **A simulated player that always finishes.** Drives the engine through the ordinary
+        player interface (`server/services/provinggrounds/SimulatedGame.js`): house choice by
+        hand-and-board count, plays everything legal, reaps what is ready, and answers _any_
+        card prompt generically from the buttons and selectable cards the prompt publishes.
+        Termination is the requirement, strength is not (yet): Done/Autoresolve preferred on
+        selection prompts, Cancel never pressed while an alternative exists, the loop stops on
+        `game.winner` before the rematch prompt can seduce it, and turn/interaction caps abandon
+        the pathological case. Spec plays real full games and pins a legitimate three-key win.
+-   [x] **Simulated games live in their own tables** (`ProvingGroundsDecks`,
+        `ProvingGroundsGames`, migration 72). Never `Games`/`GamePlayers`, never the rating
+        engine — every official statistic filters only on FinishedAt/WinnerId, so one row in
+        the shared table would be a real result in thirty queries at once. A spec forbids the
+        official tables' names in any SQL the lab runs.
+-   [x] **The sweep** (`Lobby.runProvingGroundsSweep`): ticks like the import worker, consults
+        its cadence on every tick, round-robins rosters so one member cannot starve another,
+        re-checks the owner's entitlement before spending CPU (a lapsed pledge stops play the
+        day it lapses; results are kept and play resumes with the membership), and yields to
+        the event loop mid-game so real players never feel a simulated one.
+-   [x] **The report** (`/api/proving-grounds`, page `/proving-grounds`): per-deck simulated
+        record against a SAS expectation computed with the site's own Elo model (same
+        `sasWeight` the Amber ladder uses); a "plays like" SAS from a chess-style performance
+        rating (withheld under 20 games, clamped at ±100 SAS); openings and first-player
+        splits; findings in sentences. **Hidden gem** requires the entire 95% Wilson interval
+        clear of the SAS expectation — the lab must be the most honest analyst on the site,
+        because nobody can argue with a computer that plays in private.
+-   [x] **(admin-config)** `provingGrounds` settings section: on/off, sweep cadence, games per
+        batch, per-deck daily budget, roster size, turn cap.
+-   [x] Capability `proving_grounds` on the Vault Master tier, gated end to end
+        (`requireCapability` on every route, `PremiumLock` on the page), declared across
+        server, client and mobile mirrors.
+-   Later: let the bot spar a member directly (the **F9** practice opponent), matchup matrices
+    between specific enrolled decks, and strength upgrades to the player — every point of
+    which sharpens the same ratings this feature already reports.
+
+**Depends on:** N12 (membership), the gameplay engine. **Feeds F9 and F3** — the AI player
+exists now; the showcase supervisor and the analysis models build on it.
+
+**Acceptance criteria**
+
+-   [x] A simulated game reaches a legitimate conclusion (three keys) without stalling,
+        looping or throwing; a wedged game is abandoned and recorded nowhere — asserted by
+        specs that play real games.
+-   [x] No simulated game appears in any leaderboard, player stat, deck record or meta
+        aggregate: the lab writes only its own tables, asserted by a spec that forbids
+        `"Games"`, `"GamePlayers"` and `"RatingHistory"` in lab SQL.
+-   [x] A Vault Master (or admin) can enroll an owned, SAS-rated, simulatable deck and see
+        its simulated record; everyone else gets the locked preview and a 403 from the API.
+-   [x] "Hidden gem" is a statistical claim (Wilson lower bound above SAS expectation over
+        ≥20 games), computed in one tested place.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
@@ -1397,8 +1459,10 @@ around the clock give the Watch hub content from day one, let a visitor see the 
 commit to it, and run the engine as a continuous soak test.
 **Tasks**
 
--   An AI player driving the engine through the ordinary player interface (house choice, play /
-    use / reap / fight, key timing). Strength can start crude — never stalling matters more.
+-   [x] An AI player driving the engine through the ordinary player interface (house choice,
+        play / use / reap / fight, key timing). Strength can start crude — never stalling
+        matters more. **Built as the Proving Grounds' sparring partner (N18)** —
+        `server/services/provinggrounds/SimulatedGame.js`; the showcase reuses it.
 -   A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends, and
     publishes it to the Watch hub as spectatable.
 -   Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics aggregate.
@@ -1821,8 +1885,10 @@ much stronger deck pays less.
 -   [ ] AI game analysis: blunder detection, alternative-line suggestions, win-probability
         graph per turn (model over the replay event stream) → **F3**.
 -   [ ] AI deck insights: strengths/weaknesses vs. meta, SAS-context commentary → **F3**.
--   [ ] An AI player able to drive the engine — first as the bot showcase and a practice
-        opponent (**F9**), then as the model behind analysis (**F3**).
+-   [x] An AI player able to drive the engine — shipped first as the Proving Grounds'
+        sparring partner (**N18**, `server/services/provinggrounds/SimulatedGame.js`).
+-   [ ] The same player as the bot showcase and a practice opponent (**F9**), then as the
+        model behind analysis (**F3**).
 
 ## Phase 14 — Mobile support
 

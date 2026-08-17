@@ -193,6 +193,19 @@ class Lobby {
             this.roundDeadlineSweep.unref();
         }
 
+        // ARCHON (N18): the Proving Grounds - simulated games for Vault
+        // Master rosters. Ticks often and consults the admin-configured
+        // cadence on each tick, like the crawl and the import worker,
+        // because the pace knobs exist precisely for the day an operator
+        // needs the lab to slow down without a restart. Optional the same
+        // way analytics is: a lobby built without the service plays nothing.
+        this.provingGroundsService = options.provingGroundsService || null;
+        this.lastProvingGroundsSweepMs = 0;
+        this.provingGroundsSweep = setInterval(() => this.runProvingGroundsSweep(), 15 * 1000);
+        if (this.provingGroundsSweep && this.provingGroundsSweep.unref) {
+            this.provingGroundsSweep.unref();
+        }
+
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
 
         this.io =
@@ -624,6 +637,52 @@ class Lobby {
             logger.error('DoK auto-sync sweep failed', err);
         } finally {
             this.dokAutoSyncRunning = false;
+        }
+    }
+
+    /**
+     * ARCHON (N18): play the Proving Grounds' simulated games.
+     *
+     * The service does everything - picks the roster most in need, checks the
+     * owner still holds the capability, plays the games with event-loop
+     * yields, records the results in the lab's own tables. This provides the
+     * tick, the cadence gate, and the guarantee that one failed sweep cannot
+     * take the interval down with it. The `enabled` switch is read inside
+     * `runSweep` on every pass, so switching the lab off in admin settings
+     * stops play within a tick.
+     */
+    async runProvingGroundsSweep() {
+        if (!this.provingGroundsService || this.provingGroundsSweepRunning) {
+            return;
+        }
+
+        try {
+            const config = this.provingGroundsService.getConfig();
+            const seconds = Math.max(15, Number(config.sweepIntervalSeconds) || 60);
+            const now = Date.now();
+
+            if (now - this.lastProvingGroundsSweepMs < seconds * 1000) {
+                return;
+            }
+
+            this.lastProvingGroundsSweepMs = now;
+            this.provingGroundsSweepRunning = true;
+
+            const result = await this.provingGroundsService.runSweep();
+
+            if (result && result.played > 0) {
+                logger.info(`Proving Grounds played ${result.played} simulated game(s)`);
+            }
+
+            if (result && result.abandoned > 0) {
+                logger.warn(
+                    `Proving Grounds abandoned ${result.abandoned} simulated game(s) this sweep`
+                );
+            }
+        } catch (err) {
+            logger.error('Proving Grounds sweep failed', err);
+        } finally {
+            this.provingGroundsSweepRunning = false;
         }
     }
 

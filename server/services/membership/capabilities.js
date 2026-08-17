@@ -43,7 +43,8 @@ const CAPABILITIES = {
     BETA_FEATURES: 'beta_features',
     ENHANCED_COSMETICS: 'enhanced_cosmetics',
     ORGANIZER_TOOLS: 'organizer_tools',
-    PRIORITY_ACCESS: 'priority_access'
+    PRIORITY_ACCESS: 'priority_access',
+    PROVING_GROUNDS: 'proving_grounds'
 };
 
 /**
@@ -264,6 +265,16 @@ const CAPABILITY_CATALOG = {
         // A head start measured in days, not a feeling. See previews.js.
         learn: 'Every preview reaches you the day it opens, ahead of the tier it is being tested for.',
         where: 'Profile → Previews'
+    },
+    [CAPABILITIES.PROVING_GROUNDS]: {
+        label: 'Proving Grounds',
+        // Simulated games, never official ones: nothing here touches Amber,
+        // deck records or any leaderboard. See docs/design/proving-grounds.md.
+        learn:
+            'A computer plays your decks against each other around the clock - practice ' +
+            'games, not rated ones - and tells you which decks keep beating what their ' +
+            'SAS predicts.',
+        where: 'Archon+ → Proving Grounds'
     }
 };
 

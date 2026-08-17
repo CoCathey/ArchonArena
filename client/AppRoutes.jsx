@@ -54,6 +54,8 @@ import Patreon from './pages/Patreon';
 import Membership from './pages/Membership';
 import ArchonIntelligence from './pages/ArchonIntelligence';
 import TournamentLab from './pages/TournamentLab';
+// ARCHON (N18): the Proving Grounds - Vault Master background deck testing
+import ProvingGrounds from './pages/ProvingGrounds';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import Watch from './pages/Watch';
@@ -166,6 +168,7 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/membership' element={<Membership />} />
             <Route path='/intelligence' element={<ArchonIntelligence />} />
             <Route path='/tournament-lab' element={<TournamentLab />} />
+            <Route path='/proving-grounds' element={<ProvingGrounds />} />
             {/* ARCHON (N12): Patreon's OAuth callback. `state` is checked
                 server-side against a signed cookie; `error` is set when the
                 player declined on Patreon's consent screen. */}

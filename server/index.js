@@ -101,6 +101,9 @@ async function runServer() {
     options.analyticsService = require('./api/analytics').analyticsService;
     // ARCHON (N5): the lobby enforces mutes and timeouts on the chat paths.
     options.moderationService = require('./api/moderation').moderationService;
+    // ARCHON (N18): the lobby plays the Proving Grounds' simulated games.
+    // Shared with the API so both read the same service and card cache.
+    options.provingGroundsService = require('./api/provinggrounds').provingGroundsService;
 
     let server = new Server(process.env.NODE_ENV !== 'production');
     let httpServer = await server.init(options);

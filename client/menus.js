@@ -128,6 +128,7 @@ export const SidebarMenu = [
         childItems: [
             { path: '/intelligence', title: 'Archon Intelligence', showOnlyWhenLoggedIn: true },
             { path: '/tournament-lab', title: 'Tournament Lab', showOnlyWhenLoggedIn: true },
+            { path: '/proving-grounds', title: 'Proving Grounds', showOnlyWhenLoggedIn: true },
             { path: '/membership', title: 'Membership' }
         ]
     },

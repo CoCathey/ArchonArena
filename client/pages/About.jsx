@@ -376,11 +376,12 @@ const About = () => {
                                     {
                                         term: t('Vault Master'),
                                         description: t(
-                                            'Everything above, plus the preview programme — ' +
-                                                'experimental and beta tools as they are built, and ' +
-                                                'every preview on the day it opens — nameplate and ' +
-                                                'badge cosmetics other players can see, and ' +
-                                                'spreadsheet exports for the events you run.'
+                                            'Everything above, plus the Proving Grounds — a computer ' +
+                                                'plays your decks against each other in the background ' +
+                                                'and finds the hidden gems — the preview programme with ' +
+                                                'every preview on the day it opens, nameplate and badge ' +
+                                                'cosmetics other players can see, and spreadsheet ' +
+                                                'exports for the events you run.'
                                         )
                                     }
                                 ]}
