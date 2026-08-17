@@ -42,15 +42,18 @@ export const LeftMenu = [
             { path: '/privacy', title: 'Privacy Policy' }
         ]
     },
+    // ARCHON: News and Motd are not linked from here. Neither feature is in
+    // use and neither is coming back, so an admin menu that offers them is
+    // three quarters chores nobody does. The pages, routes, permissions and
+    // server code are all still in place - re-adding an entry here is the
+    // whole of turning either back on. Ban List is not listed either: it is a
+    // section of User Admin now, which is where a ban belongs.
     {
         title: 'Admin',
         showOnlyWhenLoggedIn: true,
         childItems: [
-            { path: '/news', title: 'News', permission: 'canEditNews' },
             { path: '/users', title: 'Users', permission: 'canManageUsers' },
-            { path: '/nodes', title: 'Nodes', permission: 'canManageNodes' },
-            { path: '/banlist', title: 'Ban List', permission: 'canManageBanlist' },
-            { path: '/admin/motd', title: 'Motd', permission: 'canManageMotd' }
+            { path: '/nodes', title: 'Nodes', permission: 'canManageNodes' }
         ]
     }
 ];
@@ -165,11 +168,14 @@ export const SidebarMenu = [
             // exist, whatever the router says.
             { path: '/admin/analytics', title: 'Analytics & Lab', permission: 'isAdmin' },
             { path: '/admin/bug-reports', title: 'Bug Reports', permission: 'isAdmin' },
-            { path: '/news', title: 'News Admin', permission: 'canEditNews' },
+            // ARCHON: News Admin, Motd Admin and Ban List used to sit here.
+            // The first two are features this site does not run and does not
+            // intend to; the third moved into User Admin, because banning an
+            // address is something you do while looking at an account. All
+            // three pages still exist and still serve - see the note on the
+            // Admin menu above.
             { path: '/users', title: 'User Admin', permission: 'canManageUsers' },
-            { path: '/nodes', title: 'Node Admin', permission: 'canManageNodes' },
-            { path: '/banlist', title: 'Ban List', permission: 'canManageBanlist' },
-            { path: '/admin/motd', title: 'Motd Admin', permission: 'canManageMotd' }
+            { path: '/nodes', title: 'Node Admin', permission: 'canManageNodes' }
         ]
     }
 ];

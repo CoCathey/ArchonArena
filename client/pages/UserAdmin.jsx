@@ -11,6 +11,10 @@ import ApiStatus from '../Components/Site/ApiStatus';
 import ReactTable from '../Components/Table/ReactTable';
 import AdminRatings from '../Components/Admin/AdminRatings';
 import AdminUserDanger from '../Components/Admin/AdminUserDanger';
+// ARCHON: the ban list is a section of this page now rather than a menu entry
+// of its own - blocking an address is something you do while looking at the
+// account that earned it, not on a screen you have to go and find.
+import BanlistAdmin from './BanlistAdmin';
 import { useFindUserQuery, useSaveUserMutation } from '../redux/api';
 import { clearUserSessions } from '../redux/slices/adminSlice';
 
@@ -164,8 +168,14 @@ const UserAdmin = () => {
         }, 1500);
     };
 
-    return (
-        <div className='mx-auto w-full max-w-6xl'>
+    // Each half of this page answers to its own permission, because the two
+    // are genuinely separable: a moderator can be trusted with an IP ban
+    // without being handed the account editor.
+    const canManageUsers = !!user?.permissions?.canManageUsers;
+    const canManageBanlist = !!user?.permissions?.canManageBanlist;
+
+    const userManagement = (
+        <>
             <ApiStatus state={apiState} onClose={() => setSearchUsername('')} />
             <Formik
                 validationSchema={schema}
@@ -408,6 +418,19 @@ const UserAdmin = () => {
                     </form>
                 )}
             </Formik>
+        </>
+    );
+
+    return (
+        <div className='mx-auto w-full max-w-6xl'>
+            {canManageUsers ? userManagement : null}
+            {/* ARCHON: the ban list, which used to be a menu entry of its own.
+                It renders below the account editor rather than above it: you
+                arrive here to look at a person, and the address they came from
+                is the follow-up. Its own permission still governs it, so a ban
+                list manager who cannot edit accounts sees this and nothing
+                else. */}
+            {canManageBanlist ? <BanlistAdmin /> : null}
         </div>
     );
 };
