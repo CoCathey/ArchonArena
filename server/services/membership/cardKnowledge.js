@@ -40,7 +40,19 @@ const ROLES = {
     /** Forges a key outside the normal start-of-turn forge. */
     KEY_CHEAT: 'key-cheat',
     /** A creature whose own text forbids it from reaping. */
-    CANNOT_REAP: 'cannot-reap'
+    CANNOT_REAP: 'cannot-reap',
+    /**
+     * ARCHON (F9): carries a Fate ability - the penalty that fires when the
+     * prophecy it was buried under is fulfilled.
+     *
+     * Prophetic Visions makes activating a prophecy cost one card from hand,
+     * placed face down beneath it; when the prophecy comes true, the buried
+     * card's Fate ability resolves against its owner ("destroy the most
+     * powerful friendly creature", "your opponent gains 3", "lose 2"). So
+     * which card goes under a prophecy is a real decision, and a card
+     * carrying a Fate ability is the wrong answer to it.
+     */
+    HAS_FATE: 'has-fate'
 };
 
 /**
@@ -57,6 +69,8 @@ const KEY_CHEAT_RE = /forge a key/i;
 const KEY_CHEAT_NEGATED_RE = /(cannot|can['’]t)[^.]{0,40}forge/i;
 const CANNOT_REAP_RE = /cannot reap/i;
 const ENEMY_CANNOT_REAP_RE = /enemy creatures cannot reap/i;
+// The ability label itself, which is canonical and unambiguous.
+const HAS_FATE_RE = /\bFate:/;
 
 /**
  * Classify one card's data into roles. Pure, so the patterns can be tested
@@ -91,6 +105,10 @@ function classify(card) {
         !ENEMY_CANNOT_REAP_RE.test(text)
     ) {
         roles.add(ROLES.CANNOT_REAP);
+    }
+
+    if (HAS_FATE_RE.test(text)) {
+        roles.add(ROLES.HAS_FATE);
     }
 
     return roles;

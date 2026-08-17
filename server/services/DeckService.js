@@ -324,7 +324,7 @@ class DeckService {
      */
     async getRandomDeckIdForUser(
         userId,
-        { isAlliance, unchainedOnly = false, sasMin, sasMax, house } = {}
+        { isAlliance, unchainedOnly = false, sasMin, sasMax } = {}
     ) {
         const params = [userId];
         let where = 'WHERE d."UserId" = $1 ';
@@ -332,20 +332,6 @@ class DeckService {
         if (isAlliance !== undefined && isAlliance !== null) {
             params.push(isAlliance);
             where += `AND d."IsAlliance" = $${params.length} `;
-        }
-
-        // ARCHON (F9): "a deck this bot may play". Each practice bot belongs
-        // to a house and only ever plays decks containing it, so the house is
-        // a filter on the roll rather than something checked afterwards -
-        // rolling first and rejecting would loop on a collection where most
-        // decks are the wrong colour. Same EXISTS the deck list's `house`
-        // filter uses, so the dice and the list agree on what contains a
-        // house.
-        if (house) {
-            params.push(String(house).toLowerCase());
-            where +=
-                'AND EXISTS (SELECT 1 FROM "DeckHouses" dh JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
-                `WHERE dh."DeckId" = d."Id" AND h."Code" = $${params.length}) `;
         }
 
         // Playable only in the unchained format, and the only thing playable
@@ -407,31 +393,116 @@ class DeckService {
     }
 
     /**
-     * ARCHON (F9): how many decks this account holds containing a house.
+     * ARCHON (F9): a random deck for a practice bot, from the whole library.
      *
-     * Only the Bot Settings page asks - so an admin can see at a glance that
-     * the Ekwidon bot has nothing to play and that no amount of enabling it
-     * will change that. Same EXISTS as the roll, so the number and the roll
-     * cannot disagree.
+     * The pool is every deck this platform has ever imported - each one came
+     * from Master Vault by way of Decks of KeyForge, and a deck is 36 cards
+     * with a uuid, not somebody's property: the bot plays the cards, nothing
+     * about whose collection a copy sits in reaches the table. Counting by
+     * uuid rather than by row is what makes that true in the arithmetic too,
+     * so a deck twenty people own is one deck in the hat, not twenty.
+     *
+     * Drawing from the library rather than from the bot's own collection is
+     * what gives the difficulty settings something to choose from: three ARI
+     * bands need hundreds of decks per house to feel different, and no
+     * hand-stocked account is going to hold them.
+     *
+     * @param {object} options
+     * @param {string} options.house the bot's house; the deck must contain it
+     * @param {number} [options.minAri] inclusive
+     * @param {number} [options.maxAri] inclusive
+     * @param {number} [options.userId] restrict to one account's collection
+     * @returns {Promise<number|null>} a "Decks" row id, or null for an empty pool
      */
-    async countDecksForUserWithHouse(userId, house) {
+    async getRandomPracticeDeckId(options = {}) {
+        const { sql, params } = this.practiceDeckPool(options);
+
+        try {
+            const total = await this.countPracticeDecks(options);
+
+            if (total === 0) {
+                return null;
+            }
+
+            // Chosen here rather than by `ORDER BY random()`, for the reason
+            // given on the Lucky Dice roll above.
+            const rows = await db.query(
+                `SELECT "Id" FROM (${sql}) pool ORDER BY "Id" OFFSET $${params.length + 1} LIMIT 1`,
+                [...params, secureRandom.randomInt(total)]
+            );
+
+            return rows && rows.length > 0 ? rows[0].Id : null;
+        } catch (err) {
+            logger.error('Failed to pick a practice deck', err);
+
+            return null;
+        }
+    }
+
+    /**
+     * How many distinct decks that pool holds - what Bot Settings shows, and
+     * the total the random offset is drawn against.
+     */
+    async countPracticeDecks(options = {}) {
+        const { sql, params } = this.practiceDeckPool(options);
+
         try {
             const rows = await db.query(
-                'SELECT count(*)::int AS "Total" FROM "Decks" d ' +
-                    'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
-                    'WHERE d."UserId" = $1 AND d."IsAlliance" = false ' +
-                    `AND e."ExpansionId" <> ${UNCHAINED_EXPANSION_ID} ` +
-                    'AND EXISTS (SELECT 1 FROM "DeckHouses" dh JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
-                    'WHERE dh."DeckId" = d."Id" AND h."Code" = $2)',
-                [userId, String(house).toLowerCase()]
+                `SELECT count(*)::int AS "Total" FROM (${sql}) pool`,
+                params
             );
 
             return (rows && rows[0] && rows[0].Total) || 0;
         } catch (err) {
-            logger.error(`Failed to count ${house} decks for user ${userId}`, err);
+            logger.error('Failed to count practice decks', err);
 
             return 0;
         }
+    }
+
+    /** The pool query itself, shared by the count and the draw. */
+    practiceDeckPool({ house, minAri, maxAri, userId } = {}) {
+        const params = [];
+        // A deck with no uuid predates the column; it is still one deck, and
+        // its row id is the only identity it has.
+        const identity = 'COALESCE(d."Uuid", \'row:\' || d."Id"::text)';
+        let where =
+            'WHERE d."IsAlliance" = false AND d."Banned" = false ' +
+            'AND COALESCE(d."Flagged", false) = false ' +
+            `AND e."ExpansionId" <> ${UNCHAINED_EXPANSION_ID} `;
+
+        if (userId) {
+            params.push(userId);
+            where += `AND d."UserId" = $${params.length} `;
+        }
+
+        if (house) {
+            params.push(String(house).toLowerCase());
+            where +=
+                'AND EXISTS (SELECT 1 FROM "DeckHouses" dh JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
+                `WHERE dh."DeckId" = d."Id" AND h."Code" = $${params.length}) `;
+        }
+
+        if (minAri !== undefined && minAri !== null) {
+            params.push(minAri);
+            where += `AND ${EFFECTIVE_ARI_SQL} >= $${params.length} `;
+        }
+
+        if (maxAri !== undefined && maxAri !== null) {
+            params.push(maxAri);
+            where += `AND ${EFFECTIVE_ARI_SQL} <= $${params.length} `;
+        }
+
+        return {
+            sql:
+                `SELECT DISTINCT ON (${identity}) d."Id" FROM "Decks" d ` +
+                'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
+                'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                'LEFT JOIN "DeckAri" da ON da."Uuid" = d."Uuid" ' +
+                where +
+                `ORDER BY ${identity}, d."Id"`,
+            params
+        };
     }
 
     async deckExistsForUser(user, deckId) {

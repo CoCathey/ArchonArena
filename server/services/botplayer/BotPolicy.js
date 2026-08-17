@@ -18,10 +18,11 @@
  * The player is honest but plain, and that is a design choice rather than a
  * shortcut: what every host needs first is games that always FINISH. So the
  * policy is a few sound KeyForge instincts - call the house you can use most
- * of, play everything playable, reap with what is ready, end the turn -
- * wrapped in a completely generic prompt handler that can answer ANY prompt
- * the 2,700-odd card implementations can raise, because it answers from the
- * buttons and selectable cards the prompt itself publishes.
+ * of, build the board before playing the cards that need one, fight only
+ * the fights it wins, reap with the rest, keep what it cannot use, end the
+ * turn - wrapped in a completely generic prompt handler that can answer ANY
+ * prompt the 2,700-odd card implementations can raise, because it answers
+ * from the buttons and selectable cards the prompt itself publishes.
  *
  * Termination is treated as a hard requirement rather than a hope:
  *
@@ -42,7 +43,15 @@
 // learned, rather than a second, worse bot maintained separately.
 const { chooseDecision } = require('../championschallenge/labPolicy');
 const { decisionRecord } = require('../championschallenge/labFeatures');
-const { INTENT_BUTTONS, mainWindowCandidates, textOf } = require('./decisions');
+const {
+    INTENT_BUTTONS,
+    bestCandidates,
+    bestFateCard,
+    bestFightTarget,
+    houseScore,
+    mainWindowCandidates,
+    textOf
+} = require('./decisions');
 
 // Buttons the bot must never press while any alternative exists. Concede and
 // rematch protect the game; manual-mode toggles protect the bot's honesty.
@@ -69,6 +78,14 @@ const MAIN_WINDOW_TITLE = 'choose a card to play, discard or use';
 const HOUSE_CHOICE_TITLE = 'choose which house you want to activate this turn';
 const END_TURN_CONFIRM_TITLE = 'are you sure you want to end your turn?';
 const MULLIGAN_TITLE = 'keep starting hand?';
+// The opponent's request to switch manual mode on. Matched loosely because
+// the title interpolates their name.
+const MANUAL_MODE_MARKER = 'manual mode';
+// Asked after the bot clicks one of its prophecies.
+const ACTIVATE_PROPHECY_TITLE = 'activate prophecy?';
+// "Choose a card from your hand to place under the prophecy" - the cost of
+// activating one, and a decision rather than a formality.
+const FATE_CARD_MARKER = 'under the prophecy';
 
 function pick(list, rng) {
     return list[Math.floor(rng() * list.length)];
@@ -89,6 +106,9 @@ class BotPolicy {
         // opens next is answered with the move that was intended rather than
         // by a fixed preference order.
         this.pendingIntent = null;
+        // The creature that was sent to fight, held until the prompt asking
+        // WHO it fights has been answered.
+        this.attacker = null;
 
         // How each seat has played, keyed by player name and filled lazily so
         // the policy serves any table, not just the lab's fixed seat names.
@@ -112,6 +132,7 @@ class BotPolicy {
             // Back at the main window means the last card's menu is closed,
             // whatever became of it.
             this.pendingIntent = null;
+            this.attacker = null;
 
             return this.playFromMainWindow(game, player, buttons);
         }
@@ -132,6 +153,31 @@ class BotPolicy {
             return this.press(game, player, buttons, ['keep hand']);
         }
 
+        if (title === ACTIVATE_PROPHECY_TITLE) {
+            // This prompt exists only because the bot clicked the prophecy,
+            // and it clicked it because it chose to. Answering Yes here
+            // rather than from the intent alone also closes the one loop
+            // this move could form: a No leaves the prophecy activatable,
+            // and the main window would offer it again forever.
+            return this.press(game, player, buttons, ['yes']);
+        }
+
+        // --- Manual mode: always yes -------------------------------------
+        //
+        // The person across the table asked to switch manual mode on and the
+        // engine is asking the bot to allow it. This used to fall through to
+        // the generic "press something sensible" branch, which picks among
+        // Yes and No at RANDOM - so the bot allowed it once and refused the
+        // next time, for no reason anyone could see. A bot has nothing to
+        // protect from manual mode and no way to judge the request, and the
+        // person it is playing is the only one who can want it. Always yes.
+        if (
+            title.includes(MANUAL_MODE_MARKER) &&
+            buttons.some((button) => textOf(button.text) === 'yes')
+        ) {
+            return this.press(game, player, buttons, ['yes']);
+        }
+
         // --- Selection prompts --------------------------------------------
         if (state.selectCard && selectable.length) {
             const selected = state.selectedCards || [];
@@ -141,7 +187,18 @@ class BotPolicy {
             // Keep selecting while the prompt wants more; press Done once it
             // is offered and something is selected (or nothing CAN be).
             if (unselected.length && (!doneButton || !selected.length)) {
-                game.cardClicked(player.name, pick(unselected, this.rng).uuid);
+                // Two prompts the bot can answer with judgement rather than
+                // a coin flip: which creature to attack, having sent one to
+                // fight, and which card to bury under a prophecy it just
+                // activated. Every other selection is a card ability's own
+                // question, and the bot has no business guessing at those.
+                const chosen = title.includes(FATE_CARD_MARKER)
+                    ? bestFateCard(player, unselected)
+                    : bestFightTarget(this.attacker, unselected);
+
+                this.attacker = null;
+
+                game.cardClicked(player.name, (chosen || pick(unselected, this.rng)).uuid);
 
                 return true;
             }
@@ -210,31 +267,54 @@ class BotPolicy {
      * stops a young model from discovering the strategy of doing nothing.
      */
     playFromMainWindow(game, player, buttons) {
-        const { hand, inPlay, candidates } = mainWindowCandidates(player);
+        const { hand, inPlay, prophecies, candidates } = mainWindowCandidates(player);
 
         if (!candidates.length) {
             return this.press(game, player, buttons, ['end turn']);
         }
 
         const chosen = this.chooseCandidate(game, player, candidates);
-        const list = chosen.list === 'hand' ? hand : inPlay;
-        const card = list[chosen.index];
+        const lists = { hand, play: inPlay, prophecy: prophecies };
+        const card = (lists[chosen.list] || [])[chosen.index];
 
         if (!card) {
             return this.press(game, player, buttons, ['end turn']);
         }
 
+        // A prophecy is not clicked the way a card is: it sits beside the
+        // board rather than in a zone, and the engine has its own entry
+        // point for it.
+        if (chosen.list === 'prophecy') {
+            this.pendingIntent = { kind: chosen.kind };
+            this.attacker = null;
+
+            game.clickProphecy(player.name, card.uuid);
+
+            return true;
+        }
+
         // Remember WHY this card was clicked: the menu that opens next is
         // answered with that move rather than by preference order, so a
-        // creature chosen to fight is not reaped on the way through.
-        this.pendingIntent = chosen.list === 'play' ? { kind: chosen.kind } : null;
+        // creature chosen to fight is not reaped on the way through - and a
+        // card chosen for the bin is not played instead, which is the whole
+        // point of enumerating the two separately.
+        this.pendingIntent = { kind: chosen.kind };
+        this.attacker = chosen.kind === 'fight' ? card : null;
 
         game.cardClicked(player.name, card.uuid);
 
         return true;
     }
 
-    /** Rank the moves: the learned model when there is one, else the old order. */
+    /**
+     * Rank the moves: the learned model when there is one, else the plain
+     * player's order.
+     *
+     * The fallback is not a stub. Until a site has run the Champion's
+     * Challenge there IS no model, so this order is what every practice
+     * opponent plays - it has to be sound by itself. It lives in the shared
+     * move module so the lab's own unmodelled play matches it exactly.
+     */
     chooseCandidate(game, player, candidates) {
         if (this.policy && candidates.length > 1) {
             const records = candidates.map((candidate) =>
@@ -248,22 +328,15 @@ class BotPolicy {
             return candidates[Math.max(0, index)];
         }
 
-        const handCandidates = candidates.filter((candidate) => candidate.list === 'hand');
-
-        if (handCandidates.length) {
-            return pick(handCandidates, this.rng);
-        }
-
-        const reaps = candidates.filter((candidate) => candidate.kind === 'reap');
-
-        return pick(reaps.length ? reaps : candidates, this.rng);
+        return pick(bestCandidates(player, candidates), this.rng);
     }
 
     /**
-     * Call the house this hand and board can do the most with: one point per
-     * card in hand, one per ready card in play, and a whisper of randomness
-     * so equal houses trade off across games instead of always resolving the
-     * same way.
+     * Call the house this hand and board can do the most with - and, when
+     * the opponent forges at the start of their next turn, the house that
+     * can take that amber off them first. The scoring is shared with the lab
+     * (`decisions.houseScore`); the whisper of randomness on top is so equal
+     * houses trade off across games instead of always resolving the same way.
      */
     chooseHouse(game, player, buttons) {
         let best = null;
@@ -285,12 +358,7 @@ class BotPolicy {
             let bestScore = -1;
 
             for (const button of buttons) {
-                const house = textOf(button.text);
-                const inHand = player.hand.filter((card) => card.hasHouse(house)).length;
-                const ready = player.cardsInPlay.filter(
-                    (card) => card.hasHouse(house) && !card.exhausted
-                ).length;
-                const score = inHand + ready + this.rng() * 0.75;
+                const score = houseScore(player, textOf(button.text)) + this.rng() * 0.75;
 
                 if (score > bestScore) {
                     bestScore = score;

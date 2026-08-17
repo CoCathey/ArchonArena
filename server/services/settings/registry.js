@@ -700,8 +700,10 @@ const REGISTRY = {
             'Practice bots host an open game in the lobby around the clock. Anyone can join, and ' +
             'the game starts the moment they pick a deck. Each bot belongs to a house and only ' +
             'plays decks containing it; a table that gets joined is replaced by one hosted by a ' +
-            'different bot. Practice games are never persisted or rated and can never touch ' +
-            'Amber, deck records or any statistic. Nobody can log into a bot account.',
+            'different bot. Difficulty is the deck the bot brings, not how well it plays - the ' +
+            'ARI band it draws from, chosen by whoever joins the table. Practice games are ' +
+            'recorded and replayable but are never results: they can never touch Amber, deck ' +
+            'records, ratings or any statistic. Nobody can log into a bot account.',
         fields: {
             enabled: {
                 type: 'boolean',
@@ -726,6 +728,20 @@ const REGISTRY = {
                 type: 'boolean',
                 label: 'Allow spectators on bot games',
                 default: true
+            },
+            // ARCHON (F9): difficulty is the bot's DECK, not its brain - the
+            // ARI band it brings a deck from. This is what an unattended
+            // table opens at; whoever joins can change it before the game
+            // starts.
+            defaultDifficulty: {
+                type: 'select',
+                label: 'Difficulty a new practice table opens at',
+                default: 'medium',
+                options: [
+                    { value: 'easy', label: 'Easy (ARI 45-65)' },
+                    { value: 'medium', label: 'Medium (ARI 66-89)' },
+                    { value: 'hard', label: 'Hard (ARI 90-125)' }
+                ]
             },
             // ARCHON (F9): the bot decides in microseconds, and a whole turn
             // landing in one frame reads as a glitch rather than an

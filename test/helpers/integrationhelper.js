@@ -65,20 +65,40 @@ globalThis.describe.only = function (name, fn) {
     });
 };
 
-globalThis.it = function (name, fn) {
-    return originalIt(name, function () {
-        return fn.call(testContext);
-    });
+// ARCHON: the timeout a spec declares has to survive this wrapper.
+//
+// These wrappers took (name, fn) and dropped everything after it, so a spec
+// written as `it('...', fn, 120000)` silently ran under vitest's 5s default
+// and passed only for as long as it happened to finish inside it. The deep
+// game spec sat at 4.3 seconds of real engine for months on a budget it had
+// already asked to raise; any machine under load failed it, and the failure
+// pointed at the test rather than at here.
+globalThis.it = function (name, fn, timeout) {
+    return originalIt(
+        name,
+        function () {
+            return fn.call(testContext);
+        },
+        timeout
+    );
 };
-globalThis.it.skip = function (name, fn) {
-    return originalIt.skip(name, function () {
-        return fn.call(testContext);
-    });
+globalThis.it.skip = function (name, fn, timeout) {
+    return originalIt.skip(
+        name,
+        function () {
+            return fn.call(testContext);
+        },
+        timeout
+    );
 };
-globalThis.it.only = function (name, fn) {
-    return originalIt.only(name, function () {
-        return fn.call(testContext);
-    });
+globalThis.it.only = function (name, fn, timeout) {
+    return originalIt.only(
+        name,
+        function () {
+            return fn.call(testContext);
+        },
+        timeout
+    );
 };
 
 globalThis.beforeEach = function (fn) {
