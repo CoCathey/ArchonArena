@@ -1363,14 +1363,24 @@ house calls that had almost nothing to act on when another house was full, ready
 of the called house left unused at end of main, playable cards held that displaced fresh
 draws, and a house clogging the hand across consecutive turns. Deliberately heuristic and
 deliberately phrased as questions - it is arithmetic over recorded state
-(`replayMisplays.js`), not a simulation; card text and the player's plan are not in it.
+(`replayMisplays.js`), not a simulation.
 Good decisions that merely look thin are recognised and dropped rather than flagged: v5
 recordings carry the active player's legally callable houses (so Control the Weak is never
-a "misplay"), a stocked archive disqualifies the house-call arithmetic outright, and
-hindsight over the rest of the recording clears a call that forged, out-earned the fuller
-house or denied a check, a hold that got played within two turns (or that the game ended
-too soon to judge), idle creatures already past the point of mattering, and a clog that
-cashed out into a big turn. True "what would have happened" alternative lines and
+a "misplay"), and hindsight over the rest of the recording clears a call that forged,
+out-earned the fuller house or denied a check, a hold that got played within two turns (or
+that the game ended too soon to judge), idle creatures already past the point of
+mattering, and a clog that cashed out into a big turn.
+**Card knowledge** (`cardKnowledge.js`): the review also reads what each card DOES, from
+the canonical master-vault text - narrow, high-precision roles only (steals/captures,
+board wipes, key cheats, cannot-reap). v6 recordings add the owner's archives beside the
+hands (same table, same stripping rules), so every zone the player could reach is read.
+On top of that: house-call worth counts bonus pips and recorded archives; a creature that
+cannot reap is never "unused"; a hold of pure answers is insurance, not a slip; the
+"answer held" moment names the steal or wipe that sat reachable while the check or the
+wide board it answers actually landed; and a per-house **toolbox** profiles what the deck
+showed (cards, pips, steals, wipes, key cheats) - the reading house calls are planned
+with. Always availability, never outcome: conditions, costs and targets stay invisible,
+and the panel says so. True "what would have happened" alternative lines and
 win-probability remain open, and would sit on the same recordings.
 **Depends on:** N1 (board-state replays are the input). **Acceptance:** a coach and student
 step through the same replay in sync, and a finished game produces a win-probability graph.

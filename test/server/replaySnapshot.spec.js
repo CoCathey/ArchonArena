@@ -74,6 +74,29 @@ describe('replay board snapshots', function () {
             }
         });
 
+        // ARCHON (F3): the owner's view of their archives, beside the hands.
+        // The board pile stays a facedown count - that is what a spectator
+        // sees - while the review and the owner read the real contents.
+        it('records each player’s own archives beside the frame', function () {
+            this.player1.moveCard(this.player1.player.hand[0], 'archives');
+            this.game.addMessage('a fresh frame');
+            this.game.recordBoardSnapshot();
+
+            const replay = this.game.getReplay();
+            const frame = replay.snapshots[replay.snapshots.length - 1];
+            const names = (entries) => entries.map((entry) => replay.handCards[entry].name);
+
+            expect(frame.archives.player1.length).toBe(1);
+            expect(names(frame.archives.player1)).toContain('Troll');
+            // And never through the public table or the board's pile.
+            expect(replay.cards.map((card) => card.name)).not.toContain('Troll');
+
+            const board = frame.board.players.find((player) => player.name === 'player1');
+
+            expect(board.cardPiles.archives.length).toBe(1);
+            expect(replay.cards[board.cardPiles.archives[0]].facedown).toBe(true);
+        });
+
         // The other half: the recording itself carries each player's hand for
         // the misplay review, from the player's own perspective, in the
         // separable side channel the serving layer strips for anyone who may
@@ -239,7 +262,7 @@ describe('replay board snapshots', function () {
 
             const replay = this.game.getReplay();
 
-            expect(replay.version).toBe(5);
+            expect(replay.version).toBe(6);
             expect(replay.messages).toBeDefined();
             expect(replay.snapshots.length).toBe(1);
             expect(replay.players.length).toBe(2);

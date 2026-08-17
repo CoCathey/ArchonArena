@@ -2190,6 +2190,30 @@ class Game extends EventEmitter {
     }
 
     /**
+     * ARCHON (F3): each player's archives at this moment, from the owner's
+     * perspective, for the misplay review and the replay viewer.
+     *
+     * The board snapshot records archives as a facedown count - that is what
+     * a spectator sees, and it stays that way. This is the owner's view of
+     * the same pile: the archives feed every house call (they come to hand on
+     * calling ANY house), so a review that cannot see them cannot read house
+     * calls honestly. Same table, same side channel and same stripping rules
+     * as the hands: share links never, your own only, admins both. A card
+     * hidden even from its owner records as its facedown identity.
+     */
+    getArchivesSnapshot() {
+        const archives = {};
+
+        for (const player of this.getPlayers()) {
+            archives[player.name] = player
+                .getSummaryForCardList(player.archives, player)
+                .map((card) => this.indexReplayHandCard(card));
+        }
+
+        return archives;
+    }
+
+    /**
      * ARCHON: append a board snapshot to the in-memory recording, keyed to how
      * far the message log had got, so the viewer can show the board as it stood
      * at any point in the play-by-play.
@@ -2240,14 +2264,15 @@ class Game extends EventEmitter {
 
         try {
             // The board first: it is the half that must never fail, and its
-            // capture populates the public card table before the hands touch
-            // their own. `hands` is a sibling of `board` rather than part of
-            // it, so thinning keeps the two aligned and stripping hidden
-            // information is the removal of one key.
+            // capture populates the public card table before the hidden zones
+            // touch their own. `hands` and `archives` are siblings of `board`
+            // rather than part of it, so thinning keeps them aligned and
+            // stripping hidden information is the removal of known keys.
             this.replaySnapshots.push({
                 messageIndex,
                 board: this.getBoardSnapshot(),
-                hands: this.getHandsSnapshot()
+                hands: this.getHandsSnapshot(),
+                archives: this.getArchivesSnapshot()
             });
         } catch {
             // A replay is never worth risking a live game over. The flag is
@@ -2268,12 +2293,14 @@ class Game extends EventEmitter {
             // v3 added the final winning snapshot, each player's deck name,
             // houses and end state, and who went first. v4 added each player's
             // hand beside every frame (`snapshots[].hands`, indexing into
-            // `handCards`) for the misplay review. v5 adds the active player's
-            // legally callable houses per frame, so the review can tell a
-            // forced call from a chosen one. Earlier recordings are still
+            // `handCards`) for the misplay review. v5 added the active
+            // player's legally callable houses per frame, so the review can
+            // tell a forced call from a chosen one. v6 adds each player's own
+            // view of their archives beside the hands, in the same table and
+            // under the same stripping rules. Earlier recordings are still
             // readable - the viewer and the analysis both treat everything
             // added since as optional.
-            version: 5,
+            version: 6,
             gameId: this.id,
             gameFormat: this.gameFormat,
             startedAt: this.startedAt,
@@ -2304,10 +2331,10 @@ class Game extends EventEmitter {
             // The card table the snapshots' piles index into. Written once for
             // the whole recording rather than repeated in every frame.
             cards: this.replayCards || [],
-            // The table the recorded hands index into - separate from `cards`
-            // so hidden information never seeps into the public table, and so
-            // stripping the hands (share links, accounts below Archon) removes
-            // every trace of them at once.
+            // The table the recorded hidden zones (hands and archives) index
+            // into - separate from `cards` so hidden information never seeps
+            // into the public table, and so stripping them (share links,
+            // accounts below Archon) removes every trace at once.
             handCards: this.replayHandCards || [],
             snapshots: this.replaySnapshots || [],
             truncated: !!this.replayTruncated,
