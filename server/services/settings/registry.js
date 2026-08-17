@@ -410,6 +410,59 @@ const REGISTRY = {
             }
         }
     },
+    // ARCHON (F9): the Helper Bot - a practice opponent that always hosts an
+    // open table in the lobby.
+    helperBot: {
+        title: 'Helper Bot',
+        description:
+            'A house bot that always hosts one open game in the lobby. Anyone can join, and the ' +
+            'game starts the moment they pick a deck; the bot plays a random deck from its own ' +
+            'collection (import decks into the bot account to curate its pool), or a random ' +
+            'standalone deck when it owns none. Practice games are never persisted or rated and ' +
+            'can never touch Amber, deck records or any statistic. Nobody can log into the bot ' +
+            'account.',
+        fields: {
+            enabled: {
+                type: 'boolean',
+                label: 'Host an open Helper Bot table',
+                default: true
+            },
+            botUsername: {
+                type: 'text',
+                label: 'Bot account name (3-15 letters, numbers, - or _)',
+                maxLength: 15,
+                default: 'HelperBot'
+            },
+            maxConcurrentGames: {
+                type: 'number',
+                label: 'Most bot games running at once (a new table opens while under this)',
+                min: 1,
+                max: 20,
+                default: 3
+            },
+            pendingRecycleMinutes: {
+                type: 'number',
+                label: 'Re-open a table whose joiner never picked a deck after (minutes)',
+                min: 1,
+                max: 120,
+                default: 10
+            },
+            allowSpectators: {
+                type: 'boolean',
+                label: 'Allow spectators on bot games',
+                default: true
+            },
+            // A safety valve, not a pacing knob: past this many rounds the
+            // bot concedes so the table can never be held forever.
+            maxTurns: {
+                type: 'number',
+                label: 'Bot concedes past (rounds)',
+                min: 20,
+                max: 200,
+                default: 80
+            }
+        }
+    },
     tournament: {
         title: 'Tournaments',
         description:

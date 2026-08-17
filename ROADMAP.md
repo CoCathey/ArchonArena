@@ -1372,9 +1372,10 @@ foundation **F3** (AI analysis) wants.
 -   [x] Capability `proving_grounds` on the Vault Master tier, gated end to end
         (`requireCapability` on every route, `PremiumLock` on the page), declared across
         server, client and mobile mirrors.
--   Later: let the bot spar a member directly (the **F9** practice opponent), matchup matrices
-    between specific enrolled decks, and strength upgrades to the player — every point of
-    which sharpens the same ratings this feature already reports.
+-   Later: matchup matrices between specific enrolled decks, and strength upgrades to the
+    player — every point of which sharpens the same ratings this feature already reports.
+    (The bot sparring a member directly landed as the **F9** Helper Bot, driving the same
+    `BotPolicy` this lab plays with.)
 
 **Depends on:** N12 (membership), the gameplay engine. **Feeds F9 and F3** — the AI player
 exists now; the showcase supervisor and the analysis models build on it.
@@ -1482,22 +1483,38 @@ commit to it, and run the engine as a continuous soak test.
 -   [x] An AI player driving the engine through the ordinary player interface (house choice,
         play / use / reap / fight, key timing). Strength can start crude — never stalling
         matters more. **Built as the Proving Grounds' sparring partner (N18)** —
-        `server/services/provinggrounds/SimulatedGame.js`; the showcase reuses it.
+        `server/services/provinggrounds/SimulatedGame.js`; the showcase reuses it. The policy
+        now lives in `server/services/botplayer/BotPolicy.js`, shared with the Helper Bot.
+-   [x] **The practice opponent: the Helper Bot** (design: `docs/design/helper-bot.md`). A
+        house bot that always hosts one open table in the lobby — join it, pick a deck, and
+        the game starts itself; the bot plays a random deck (its own collection first,
+        standalone decks as the zero-setup fallback) through the real engine on the real game
+        node, answering instantly, and opens a fresh table for the next player. Wedges end in
+        an honest concede, never a hang. **(admin-config)** `helperBot`: on/off, bot name,
+        concurrent-table cap, joiner grace period, spectators, turn cap.
+-   [x] Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics
+        aggregate — never persisted at all (the Proving Grounds doctrine, applied at the
+        router), and Quick Join never matches into a bot table. Asserted by
+        `test/server/gameRouterBotGames.spec.js`.
 -   A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends, and
-    publishes it to the Watch hub as spectatable.
--   Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics aggregate.
--   **(admin-config)**: how many bot tables run, how their decks are chosen, and whether the
-    showcase is on at all.
--   Later: bots as practice opponents, as the tutorial's sparring partner (**N11**), and as the
-    base for AI analysis (**F3**).
+    publishes it to the Watch hub as spectatable. (The node driver already plays both seats —
+    `test/server/gameserver.botdriver.spec.js` pins a full bot-vs-bot game — so what remains
+    is the supervisor and the Watch listing.)
+-   **(admin-config)**: how many showcase tables run, how their decks are chosen, and whether
+    the showcase is on at all.
+-   Later: the bot as the tutorial's sparring partner (**N11**), and as the base for AI
+    analysis (**F3**).
 
 **Depends on:** N1 (Watch hub). Feeds F3 and N11.
 **Acceptance criteria**
 
 -   A logged-out visitor can watch a live game within seconds of landing on the site.
--   A bot game reaches a legitimate conclusion (three keys or deck-out) without stalling, looping,
-    or throwing; a wedged table is detected and replaced.
--   No bot game appears in any leaderboard, player stat, or meta aggregate — asserted by a test.
+-   [x] A bot game reaches a legitimate conclusion (three keys or deck-out) without stalling,
+        looping, or throwing; a wedged table concedes rather than holds its player — asserted
+        by `test/server/gameserver.botdriver.spec.js`, which plays full games through the real
+        game server wiring.
+-   [x] No bot game appears in any leaderboard, player stat, or meta aggregate — asserted by
+        `test/server/gameRouterBotGames.spec.js`.
 
 ---
 
