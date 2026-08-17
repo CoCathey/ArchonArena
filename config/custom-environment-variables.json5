@@ -52,6 +52,10 @@
         // "false", which is truthy, and the override would do the opposite of
         // what whoever set it intended.
         requireActivation: { __name: 'REQUIRE_ACTIVATION', __format: 'json' },
+        // __format json for the same reason: FLAG_SHARED_DECKS=false must not
+        // arrive as the truthy string "false". Off unless deliberately turned
+        // on - see the note in config/default.json5.
+        flagSharedDecks: { __name: 'FLAG_SHARED_DECKS', __format: 'json' },
         // Public origin for absolute links in notification email.
         siteUrl: 'SITE_URL',
         awsSesRegion: 'AWS_SES_REGION',
@@ -91,7 +95,6 @@
     gameNode: {
         name: 'SERVER',
         host: 'HOST',
-        socketioPort: 'PORT',
-        maxGames: 'MAX_GAMES'
+        socketioPort: 'PORT'
     }
 }

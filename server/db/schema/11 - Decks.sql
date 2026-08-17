@@ -63,3 +63,15 @@ CREATE INDEX "IX_Decks_UserId"
     ON public."Decks" USING btree
     ("UserId" ASC NULLS LAST)
     TABLESPACE pg_default;
+-- Index: IX_Decks_Uuid
+
+-- DROP INDEX public."IX_Decks_Uuid";
+
+-- ARCHON: owner counts and the all-players record group by uuid, which is the
+-- deck's identity; name is only a fallback for rows that have no uuid, and
+-- nothing looks a null uuid up, so this is partial. See migration 70.
+CREATE INDEX "IX_Decks_Uuid"
+    ON public."Decks" USING btree
+    ("Uuid" COLLATE pg_catalog."default" ASC NULLS LAST)
+    TABLESPACE pg_default
+    WHERE "Uuid" IS NOT NULL;

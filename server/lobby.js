@@ -1978,24 +1978,7 @@ class Lobby {
             }
         }
 
-        let deckUsageLevel = 0;
-        if (
-            deck.usageCount > this.configService.getValueForSection('lobby', 'lowerDeckThreshold')
-        ) {
-            deckUsageLevel = 1;
-        }
-
-        if (
-            deck.usageCount > this.configService.getValueForSection('lobby', 'middleDeckThreshold')
-        ) {
-            deckUsageLevel = 2;
-        }
-
-        if (
-            deck.usageCount > this.configService.getValueForSection('lobby', 'upperDeckThreshold')
-        ) {
-            deckUsageLevel = 3;
-        }
+        const deckUsageLevel = this.deckService.usageLevelFor(deck);
 
         let hasEnhancementsSet = true;
         if (deck.cards.some((c) => c.enhancements && c.enhancements[0] === '')) {

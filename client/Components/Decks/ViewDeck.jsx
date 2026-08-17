@@ -77,7 +77,19 @@ const ViewDeck = ({ deck }) => {
                 </div>
             </div>
             <div className='min-h-0 flex-1 overflow-auto pe-1'>
-                <DeckSummary deck={deck} />
+                {/* ARCHON: the list payload carries only this account's record
+                    with the deck; the detail endpoint also carries every
+                    owner's. Only those three fields are lifted across - the
+                    rest of the detail deck is the raw row, whose `cards` have
+                    not been through the redux normaliser this component's
+                    rendering depends on. The summary renders immediately
+                    either way and gains the second column when it arrives. */}
+                <DeckSummary
+                    deck={deck}
+                    globalWins={deckDetail?.deck?.globalWins}
+                    globalLosses={deckDetail?.deck?.globalLosses}
+                    globalWinRate={deckDetail?.deck?.globalWinRate}
+                />
                 {deckDetail?.aerc && (
                     <div className='mt-3 border-t border-border/50 pt-3'>
                         <AercBreakdown aerc={deckDetail.aerc} />

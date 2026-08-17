@@ -10,32 +10,14 @@
     # lobby by identity (node-0, node-1, ...) and listen on
     # /<identity>/socket.io; browsers connect to those paths on the site
     # origin. Add a matcher+handle pair per additional node.
-    #
-    # Deliberately no health checks on these: a node being replaced is drained
-    # first and reports itself unready while it plays out the games it still
-    # holds. Routing away from an unready node would cut off exactly the players
-    # the drain exists to protect.
     @node0 path /node-0/socket.io /node-0/socket.io/*
     handle @node0 {
         reverse_proxy node-0:9500
     }
 
-    @node1 path /node-1/socket.io /node-1/socket.io/*
-    handle @node1 {
-        reverse_proxy node-1:9500
-    }
-
     # Everything else (app, API, lobby websocket) goes to the lobby.
     handle {
-        reverse_proxy lobby:4000 {
-            # There is one lobby, and replacing it during a deploy leaves a few
-            # seconds with nothing listening. Hold requests that arrive in that
-            # window and retry them instead of answering 502 — a dial that never
-            # connected has sent nothing upstream, so retrying it is safe for any
-            # method. Live websockets still drop; socket.io reconnects them.
-            lb_try_duration 30s
-            lb_try_interval 250ms
-        }
+        reverse_proxy lobby:4000
     }
 }
 

@@ -59,7 +59,10 @@ describe('Lobby deck rules', function () {
         deckService = {
             getById: vi.fn(),
             getStandaloneDeckById: vi.fn(),
-            getRandomDeckIdForUser: vi.fn()
+            getRandomDeckIdForUser: vi.fn(),
+            // Sharing a deck is allowed, so the real one answers 0 unless an
+            // operator turns lobby.flagSharedDecks on.
+            usageLevelFor: vi.fn().mockReturnValue(0)
         };
         dokService = {
             // By default decks come back rated 70, like a healthy cache.

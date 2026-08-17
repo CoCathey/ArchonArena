@@ -8,6 +8,7 @@ import Panel from '../Site/Panel';
 import Avatar from '../Site/Avatar';
 import PlayerAmber from '../Site/PlayerAmber';
 import PlayerName from '../Site/PlayerName';
+import { describeDeckStatus } from './deckStatusLabel';
 
 /**
  * @typedef PendingGamePlayersProps
@@ -78,33 +79,7 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
         };
     };
 
-    const getDeckValidity = (status) => {
-        if (!status) {
-            return {
-                label: t('Pending'),
-                tone: 'text-foreground/75 bg-surface-secondary/35 border-border/50'
-            };
-        }
-
-        const isValid =
-            (status.usageLevel === 0 || status.verified) &&
-            status.basicRules &&
-            !status.notVerified &&
-            status.noUnreleasedCards &&
-            !status.impossible;
-
-        if (isValid) {
-            return {
-                label: t('Valid'),
-                tone: 'text-emerald-700 bg-emerald-500/12 border-emerald-500/30 dark:text-emerald-300 dark:bg-emerald-500/10'
-            };
-        }
-
-        return {
-            label: t('Invalid'),
-            tone: 'text-[color:color-mix(in_oklab,var(--brand)_85%,black)] bg-[color:color-mix(in_oklab,var(--brand)_12%,white)] border-[color:color-mix(in_oklab,var(--brand)_35%,transparent)] dark:text-rose-300 dark:bg-rose-500/10 dark:border-rose-500/30'
-        };
-    };
+    const getDeckValidity = (status) => describeDeckStatus(status, t);
 
     return (
         <Panel
@@ -246,11 +221,7 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                             </div>
                             <span
                                 className={`shrink-0 whitespace-nowrap rounded border px-1.5 py-0 text-xs font-medium leading-4 ${deckValidity.tone}`}
-                                title={
-                                    player.deck?.status?.notVerified
-                                        ? t('Enhancements not verified')
-                                        : undefined
-                                }
+                                title={deckValidity.hint}
                             >
                                 {deckValidity.label}
                             </span>
