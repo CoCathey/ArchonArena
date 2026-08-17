@@ -41,16 +41,30 @@ export function CardZoomOverlay(props: { card?: CardSummary; onClose: () => void
 
     const shown = underneath && !showToken ? underneath : card;
     const url = shown.facedown ? undefined : cardImageUrl(shown);
+    // Attribution stays with the token/creature itself, not whichever image
+    // is currently flipped up — an effect boosting a token creature is not
+    // acting on the card underneath it.
+    const effectSources = card.effectSources ?? [];
 
     return (
         <Pressable style={styles.zoomBackdrop} onPress={props.onClose}>
             <View style={{ alignItems: 'center' }}>
-                <Image
-                    source={url ? { uri: url } : CARDBACK}
-                    style={{ width, height, borderRadius: 14 }}
-                    contentFit='cover'
-                    transition={100}
-                />
+                <View style={{ width, height }}>
+                    <Image
+                        source={url ? { uri: url } : CARDBACK}
+                        style={{ width, height, borderRadius: 14 }}
+                        contentFit='cover'
+                        transition={100}
+                    />
+                    {effectSources.length > 0 ? (
+                        <View style={styles.zoomEffects}>
+                            <Text style={styles.zoomEffectsText} numberOfLines={3}>
+                                <Text style={styles.zoomEffectsLabel}>Affected by </Text>
+                                {effectSources.join(', ')}
+                            </Text>
+                        </View>
+                    ) : null}
+                </View>
                 {(card.upgrades?.length ?? 0) > 0 ? (
                     <View style={styles.zoomAttachRow}>
                         {card.upgrades!.map((upgrade) => (
@@ -293,6 +307,29 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginTop: spacing.md,
         fontSize: 12
+    },
+    // Overlaid on the bottom of the card image, like the web card zoom's
+    // .card-zoom-effects — only rendered when there is something to say, so
+    // the art is unobscured the rest of the time.
+    zoomEffects: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        backgroundColor: 'rgba(0, 0, 0, 0.78)',
+        borderBottomLeftRadius: 14,
+        borderBottomRightRadius: 14
+    },
+    zoomEffectsText: {
+        color: '#fff',
+        fontSize: 12,
+        lineHeight: 15,
+        textAlign: 'center'
+    },
+    zoomEffectsLabel: {
+        opacity: 0.7
     },
     zoomAttachRow: {
         flexDirection: 'row',
