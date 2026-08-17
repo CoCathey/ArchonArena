@@ -37,6 +37,6 @@ export const TAG_TYPES = {
     MEMBERSHIP: 'Membership',
     // ARCHON (N12): Archon Intelligence analytics.
     INTELLIGENCE: 'Intelligence',
-    // ARCHON (N18): the Proving Grounds - simulated deck testing.
-    PROVING_GROUNDS: 'ProvingGrounds'
+    // ARCHON (N18): the Champion’s Challenge - simulated deck testing.
+    CHAMPIONS_CHALLENGE: 'ChampionsChallenge'
 };

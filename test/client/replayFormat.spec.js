@@ -1,4 +1,5 @@
 import {
+    archivesAtStep,
     boardAtStep,
     handsAtStep,
     hydrateBoard,
@@ -202,6 +203,25 @@ describe('replay format', function () {
 
             expect(frame.board.round).toBe(2);
             expect(frame.hands.alice).toEqual([1]);
+        });
+
+        // ARCHON (F3): v6 records the owner's archives beside the hands, out
+        // of the same table.
+        it('resolves recorded archives the same way', function () {
+            const withArchives = [
+                {
+                    messageIndex: 5,
+                    board: { round: 1 },
+                    hands: { alice: [0] },
+                    archives: { alice: [1] }
+                }
+            ];
+            const resolved = archivesAtStep(withArchives, 9, handCards);
+
+            expect(resolved.alice.length).toBe(1);
+            expect(resolved.alice[0].name).toBe('Troll');
+            expect(resolved.alice[0].location).toBe('archives');
+            expect(archivesAtStep(snapshots, 9, handCards)).toEqual({});
         });
     });
 });

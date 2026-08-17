@@ -1,11 +1,14 @@
 /**
- * ARCHON (F3): who may read the hands inside a recording.
+ * ARCHON (F3): who may read the hidden zones inside a recording.
  *
  * A version 4 recording carries each player's hand beside every board frame
- * (`snapshots[].hands`), indexing into a `handCards` table that is separate
- * from the public `cards` table on purpose: the public table only ever learns
- * about cards that showed in an open zone, so hands can be removed without a
- * trace by dropping their own two keys.
+ * (`snapshots[].hands`), and a version 6 one the owner's view of their
+ * archives (`snapshots[].archives`), both indexing into a `handCards` table
+ * that is separate from the public `cards` table on purpose: the public
+ * table only ever learns about cards that showed in an open zone, so the
+ * hidden zones can be removed without a trace by dropping their own keys.
+ * (The facedown archives COUNT in the board frames is public - a live
+ * spectator sees that much - and is untouched here.)
  *
  * The rules this module enforces at the point of serving:
  *
@@ -63,32 +66,46 @@ function stripReplayHands(replay, keepNames = []) {
         return remap.get(index);
     };
 
+    // Hands since v4, the owner's view of their archives since v6: one
+    // side channel, one set of rules, one strip.
+    const HIDDEN_ZONES = ['hands', 'archives'];
+
     const strippedSnapshots = snapshots.map((snapshot) => {
-        if (!snapshot || typeof snapshot !== 'object' || !snapshot.hands) {
+        if (
+            !snapshot ||
+            typeof snapshot !== 'object' ||
+            !HIDDEN_ZONES.some((zone) => snapshot[zone])
+        ) {
             return snapshot;
         }
 
-        const { hands, ...rest } = snapshot;
+        const rest = { ...snapshot };
 
-        if (keep.size === 0 || typeof hands !== 'object') {
-            return rest;
-        }
+        for (const zone of HIDDEN_ZONES) {
+            const piles = rest[zone];
 
-        const keptHands = {};
+            delete rest[zone];
 
-        for (const [name, entries] of Object.entries(hands)) {
-            if (!keep.has(name) || !Array.isArray(entries)) {
+            if (keep.size === 0 || !piles || typeof piles !== 'object') {
                 continue;
             }
 
-            keptHands[name] = entries.map(remapped).filter((entry) => entry !== null);
+            const kept = {};
+
+            for (const [name, entries] of Object.entries(piles)) {
+                if (!keep.has(name) || !Array.isArray(entries)) {
+                    continue;
+                }
+
+                kept[name] = entries.map(remapped).filter((entry) => entry !== null);
+            }
+
+            if (Object.keys(kept).length > 0) {
+                rest[zone] = kept;
+            }
         }
 
-        if (Object.keys(keptHands).length === 0) {
-            return rest;
-        }
-
-        return { ...rest, hands: keptHands };
+        return rest;
     });
 
     const result = { ...replay, snapshots: strippedSnapshots };

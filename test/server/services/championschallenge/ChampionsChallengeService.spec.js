@@ -1,5 +1,5 @@
-const ProvingGroundsService = require('../../../../server/services/provinggrounds/ProvingGroundsService');
-const { MIN_CONFIDENT_GAMES } = require('../../../../server/services/provinggrounds/labMath');
+const ChampionsChallengeService = require('../../../../server/services/championschallenge/ChampionsChallengeService');
+const { MIN_CONFIDENT_GAMES } = require('../../../../server/services/championschallenge/labMath');
 
 // The service against a mocked db, dispatching on SQL substrings the way the
 // catalog and deck-import specs do. What is being pinned:
@@ -23,14 +23,14 @@ const defaultConfig = {
     maxTurnsPerGame: 80
 };
 
-describe('ProvingGroundsService', function () {
+describe('ChampionsChallengeService', function () {
     let db;
     let service;
     let config;
 
     const configService = { getValue: () => ({}) };
     const settingsService = {
-        getSectionWithDefaults: (name) => (name === 'provingGrounds' ? { ...config } : {}),
+        getSectionWithDefaults: (name) => (name === 'championsChallenge' ? { ...config } : {}),
         getSection: () => ({})
     };
 
@@ -64,7 +64,7 @@ describe('ProvingGroundsService', function () {
     beforeEach(function () {
         config = { ...defaultConfig };
         db = { query: vi.fn().mockResolvedValue([]) };
-        service = new ProvingGroundsService(configService, db, settingsService);
+        service = new ChampionsChallengeService(configService, db, settingsService);
     });
 
     afterEach(function () {
@@ -103,7 +103,9 @@ describe('ProvingGroundsService', function () {
         it('refuses a full roster by naming the limit', async function () {
             enrollAnswers(ownDeck, { enrolledCount: 8 });
 
-            await expect(service.enrollDeck(USER, 7)).rejects.toThrow(/8 Proving Grounds slots/);
+            await expect(service.enrollDeck(USER, 7)).rejects.toThrow(
+                /8 Champion’s Challenge slots/
+            );
         });
 
         it("refuses another player's deck", async function () {
@@ -205,7 +207,15 @@ describe('ProvingGroundsService', function () {
             expect(service.runMatch).toHaveBeenCalledTimes(1);
             // The engine decks carry their db ids so results can be recorded.
             expect(service.runMatch.mock.calls[0][0].dbId).toBeDefined();
-            expect(service.runMatch.mock.calls[0][2]).toEqual({ maxTurns: 80 });
+
+            // ARCHON (N21): sparring games are seeded (replayable), explore
+            // at a softmax temperature, and log their decisions for training.
+            const options = service.runMatch.mock.calls[0][2];
+
+            expect(options.maxTurns).toBe(80);
+            expect(Number.isFinite(options.seed)).toBe(true);
+            expect(options.temperature).toBeGreaterThan(0);
+            expect(options.recordDecisions).toBe(true);
 
             const [insert] = queriesMatching('INSERT INTO "ProvingGroundsGames"');
             const params = insert[1];
@@ -223,7 +233,7 @@ describe('ProvingGroundsService', function () {
                     { UserId: USER, DeckId: 1 },
                     { UserId: USER, DeckId: 2 }
                 ],
-                // Archon is one tier short of the Proving Grounds.
+                // Archon is one tier short of the Champion’s Challenge.
                 membership: { ...vaultMasterRow, Tier: 'archon' }
             });
             service.runMatch = vi.fn();
@@ -232,6 +242,180 @@ describe('ProvingGroundsService', function () {
 
             expect(result.played).toBe(0);
             expect(service.runMatch).not.toHaveBeenCalled();
+        });
+
+        it('exempts a site admin’s decks from the daily budget', async function () {
+            answer([
+                [
+                    'SELECT "UserId", "DeckId" FROM "ProvingGroundsDecks"',
+                    [
+                        { UserId: USER, DeckId: 1 },
+                        { UserId: USER, DeckId: 2 }
+                    ]
+                ],
+                [
+                    "date_trunc('day'",
+                    [
+                        { DeckId: 1, GamesToday: 999 },
+                        { DeckId: 2, GamesToday: 999 }
+                    ]
+                ],
+                // The admin override needs no membership row at all.
+                ['FROM "UserRoles"', [{ IsAdmin: true }]],
+                ['FROM "Memberships"', []],
+                ['FROM "DeckCards"', deckCardRows],
+                ['FROM "DeckHouses"', deckHouseRows],
+                [
+                    'FROM "Decks" d WHERE d."Id"',
+                    (sql, params) => [{ Id: params[0], Name: `Deck ${params[0]}`, Uuid: 'u' }]
+                ]
+            ]);
+            config.gamesPerSweep = 1;
+            service.runMatch = vi.fn().mockResolvedValue(fakeResult(1, 2));
+
+            const result = await service.runSweep();
+
+            expect(result.played).toBe(1);
+        });
+
+        it('rotates a random slot that has served its games', async function () {
+            sweepAnswers({
+                enrollments: [
+                    { UserId: USER, DeckId: 1 },
+                    { UserId: USER, DeckId: 2 }
+                ],
+                membership: vaultMasterRow
+            });
+            config.gamesPerSweep = 1;
+            service.runMatch = vi.fn().mockResolvedValue(fakeResult(1, 2));
+
+            // Layer the randomizer's queries onto the sweep's: deck 1 is a
+            // random slot at its target, and deck 9 is the fresh draw.
+            const base = db.query.getMockImplementation();
+
+            db.query.mockImplementation(async (sql, params) => {
+                if (sql.includes('e."Random" = true')) {
+                    return [
+                        {
+                            DeckId: 1,
+                            RandomGamesTarget: 20,
+                            EnrolledAt: new Date(),
+                            PlayedSince: 20
+                        }
+                    ];
+                }
+
+                if (sql.includes('ORDER BY random()')) {
+                    return [{ Id: 9 }];
+                }
+
+                return base(sql, params);
+            });
+
+            const result = await service.runSweep();
+
+            expect(result.played).toBe(1);
+
+            // The served slot was withdrawn...
+            const withdrawals = queriesMatching('DELETE FROM "ProvingGroundsDecks"');
+
+            expect(withdrawals.some(([, deleteParams]) => deleteParams[1] === 1)).toBe(true);
+
+            // ...and its successor enrolled as a random slot with the same target.
+            const enrolls = queriesMatching('"Random", "RandomGamesTarget"');
+
+            expect(
+                enrolls.some(([, insertParams]) => insertParams[1] === 9 && insertParams[2] === 20)
+            ).toBe(true);
+        });
+
+        it('fills several randomizer slots in one call, never the same deck twice', async function () {
+            // The draw sees the roster: each enrollment is committed before
+            // the next candidate query, so a deck already taken cannot come
+            // back. The mock models that with a growing taken-set.
+            const taken = new Set();
+
+            answer([
+                [
+                    'ORDER BY random()',
+                    (sql, params) => {
+                        const excluded = new Set([...(params[1] || []), ...taken]);
+
+                        return [11, 12, 13, 14]
+                            .filter((id) => !excluded.has(id))
+                            .map((id) => ({ Id: id }));
+                    }
+                ],
+                ['FROM "DeckCards"', deckCardRows],
+                ['FROM "DeckHouses"', deckHouseRows],
+                [
+                    'FROM "Decks" d WHERE d."Id"',
+                    (sql, params) => [{ Id: params[0], Name: `Deck ${params[0]}`, Uuid: 'u' }]
+                ],
+                [
+                    '"Random", "RandomGamesTarget"',
+                    (sql, params) => {
+                        taken.add(params[1]);
+
+                        return [];
+                    }
+                ]
+            ]);
+
+            const enrolled = await service.enrollRandomDecks(USER, 30, 3);
+
+            expect(enrolled).toEqual([11, 12, 13]);
+            expect(new Set(enrolled).size).toBe(3);
+
+            const inserts = queriesMatching('"Random", "RandomGamesTarget"');
+
+            expect(inserts).toHaveLength(3);
+            // Every slot carries the requested swap cadence.
+            expect(inserts.every(([, params]) => params[2] === 30)).toBe(true);
+        });
+
+        it('returns what it could draw when the collection runs dry', async function () {
+            const taken = new Set();
+
+            answer([
+                [
+                    'ORDER BY random()',
+                    (sql, params) => {
+                        const excluded = new Set([...(params[1] || []), ...taken]);
+
+                        return [21, 22].filter((id) => !excluded.has(id)).map((id) => ({ Id: id }));
+                    }
+                ],
+                ['FROM "DeckCards"', deckCardRows],
+                ['FROM "DeckHouses"', deckHouseRows],
+                [
+                    'FROM "Decks" d WHERE d."Id"',
+                    (sql, params) => [{ Id: params[0], Name: `Deck ${params[0]}`, Uuid: 'u' }]
+                ],
+                [
+                    '"Random", "RandomGamesTarget"',
+                    (sql, params) => {
+                        taken.add(params[1]);
+
+                        return [];
+                    }
+                ]
+            ]);
+
+            // Asked for five, owns two eligible: a partial fill is the answer,
+            // not an error.
+            expect(await service.enrollRandomDecks(USER, 20, 5)).toEqual([21, 22]);
+        });
+
+        it('never fills more slots than the roster holds', async function () {
+            answer([['ORDER BY random()', []]]);
+
+            await service.enrollRandomDecks(USER, 20, 999);
+
+            // maxEnrolledPerUser is 8, so the loop cannot run 999 times.
+            expect(queriesMatching('ORDER BY random()').length).toBeLessThanOrEqual(
+                config.maxEnrolledPerUser
+            );
         });
 
         it('respects the per-deck daily budget', async function () {
@@ -337,18 +521,56 @@ describe('ProvingGroundsService', function () {
         ];
 
         // The candidates query's NOT EXISTS subquery also mentions
-        // "ProvingGroundsDecks", so it must be dispatched on first.
+        // "ProvingGroundsDecks", so it must be dispatched on first; likewise
+        // the ARI read joins DeckSas, so it must be matched before the plain
+        // DeckSas fallback.
         const reportAnswers = () =>
             answer([
                 ['AND NOT EXISTS', [{ Id: 9, Name: 'Bench', SasRating: 64 }]],
                 [
                     'FROM "ProvingGroundsDecks" e',
                     [
-                        { DeckId: 1, EnrolledAt: new Date(), Name: 'Gem', SasRating: 70 },
-                        { DeckId: 2, EnrolledAt: new Date(), Name: 'Big', SasRating: 80 }
+                        {
+                            DeckId: 1,
+                            EnrolledAt: new Date(),
+                            Name: 'Gem',
+                            Uuid: 'u-1',
+                            SasRating: 70
+                        },
+                        {
+                            DeckId: 2,
+                            EnrolledAt: new Date(),
+                            Name: 'Big',
+                            Uuid: 'u-2',
+                            SasRating: 80
+                        }
                     ]
                 ],
-                ['FROM "ProvingGroundsGames" WHERE "UserId"', games]
+                ['FROM "ProvingGroundsGames" WHERE "UserId"', games],
+                [
+                    'LEFT JOIN "DeckAri"',
+                    [
+                        // The gem's ARI has been climbing with its sparring
+                        // wins; Big has never been adjusted and reads as its
+                        // SAS/AERC seed.
+                        {
+                            Uuid: 'u-1',
+                            SasRating: 70,
+                            AercScore: 70,
+                            Ari: 78.4,
+                            RatedGames: 0,
+                            SimGames: 24
+                        },
+                        {
+                            Uuid: 'u-2',
+                            SasRating: 80,
+                            AercScore: 80,
+                            Ari: null,
+                            RatedGames: 0,
+                            SimGames: 24
+                        }
+                    ]
+                ]
             ]);
 
         it('aggregates a roster end to end', async function () {
@@ -376,14 +598,18 @@ describe('ProvingGroundsService', function () {
             expect(gem.hiddenGem).toBe(true);
             // Performance against an SAS-80 field at 75% reads well above the
             // deck's own 70.
-            expect(gem.playsLikeSas).toBeGreaterThan(75);
+            // The deck's ARI is the stored, game-adjusted index; how much of
+            // its evidence was sparring rides along.
+            expect(gem.ari).toBe(78.4);
+            expect(gem.ariSimGames).toBe(24);
             expect(gem.avgTurns).toBeCloseTo(20, 5);
             expect(gem.avgKeysFor).toBeCloseTo((18 * 3 + 6 * 1) / 24, 5);
 
             expect(big.wins).toBe(6);
             expect(big.hiddenGem).toBe(false);
             expect(big.delta).toBeLessThan(0);
-            expect(big.playsLikeSas).toBeLessThan(75);
+            // Never adjusted: Big's ARI is its SAS/AERC seed.
+            expect(big.ari).toBe(80);
 
             // Gems sort first, and the findings lead with the gem sentence.
             expect(report.decks[0].deckId).toBe(1);

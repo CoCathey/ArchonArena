@@ -212,6 +212,12 @@ class SettingsService {
             sections[key] = {
                 title: definition.title,
                 description: definition.description,
+                // ARCHON (F9): which admin screen edits this section. Absent
+                // for all but a few: the general Site Settings screen shows
+                // every section that does not name a screen of its own, and
+                // that screen shows its own. Storage, validation and the
+                // audit trail are identical either way.
+                page: definition.page,
                 fields: definition.fields,
                 overrides: this.getSection(key),
                 audit: audit[key] || null

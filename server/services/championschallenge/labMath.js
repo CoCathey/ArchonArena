@@ -1,7 +1,7 @@
 const { expectedScore } = require('../rating/EloCalculator');
 
 /**
- * ARCHON (N18): the arithmetic of the Proving Grounds, kept pure.
+ * ARCHON (N18): the arithmetic of the Champion’s Challenge, kept pure.
  *
  * Everything here is a function of its arguments - no IO, no clock - so the
  * claims the lab makes ("this deck is a hidden gem", "plays like SAS 74")
@@ -59,64 +59,6 @@ function sasExpectedScore(sasSelf, sasOpponent, eloConfig) {
 }
 
 /**
- * The SAS a deck's lab results would justify: its performance rating against
- * the opponents it actually faced (taken at their SAS), read back on the SAS
- * scale. "SAS says 68, plays like 79."
- *
- * Chess performance-rating construction: find the rating R at which the
- * expected score against this opponent list equals the achieved score, then
- * divide by sasWeight to land back on SAS. A perfect (or winless) record
- * would push R to infinity, so half a virtual draw against the average
- * opponent is mixed in - the standard smoothing, and it also keeps the
- * estimate honest at tiny sample sizes.
- *
- * @param {{opponentSas: number, won: boolean}[]} games only games with a known opponent SAS
- * @param {object} eloConfig a normalized elo config (needs `.sasWeight`)
- * @returns {number|null} a SAS-scale number, or null with no usable games
- */
-function performanceSas(games, eloConfig) {
-    if (!games || !games.length) {
-        return null;
-    }
-
-    const weight = eloConfig.sasWeight || 1;
-    const opponentRatings = games.map((game) => weight * game.opponentSas);
-    const averageOpponent =
-        opponentRatings.reduce((sum, rating) => sum + rating, 0) / opponentRatings.length;
-
-    // The virtual half-draw: one extra "game" against the average opponent
-    // scoring 0.5.
-    const targetScore = games.filter((game) => game.won).length + 0.5;
-    const allRatings = [...opponentRatings, averageOpponent];
-
-    const expectedTotal = (rating) =>
-        allRatings.reduce(
-            (sum, opponent) => sum + expectedScore(rating, opponent, 0, eloConfig),
-            0
-        );
-
-    // Bisection: expectedTotal is strictly increasing in rating. The window
-    // doubles as a deliberate clamp at ±100 SAS around the field (chess caps
-    // performance-rating gaps the same way, at 400 Elo): a record extreme
-    // enough to escape it - a near-perfect run - has no finite performance
-    // rating worth quoting, so it reads as the cap rather than as noise.
-    let low = Math.min(...opponentRatings) - weight * 100;
-    let high = Math.max(...opponentRatings) + weight * 100;
-
-    for (let i = 0; i < 80; i++) {
-        const mid = (low + high) / 2;
-
-        if (expectedTotal(mid) < targetScore) {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-
-    return (low + high) / 2 / weight;
-}
-
-/**
  * Is this deck a hidden gem?
  *
  * The claim being made: with statistical confidence, the deck's true win
@@ -169,7 +111,7 @@ const pct = (value) => `${Math.round(value * 100)}%`;
  * over or under their rating, then how each deck wins - its best opening,
  * and any first-player split too large to ignore.
  *
- * @param {object[]} decks aggregated rows (see ProvingGroundsService)
+ * @param {object[]} decks aggregated rows (see ChampionsChallengeService)
  * @param {number} [limit]
  * @returns {{deckId: number, text: string}[]}
  */
@@ -243,7 +185,6 @@ module.exports = {
     MIN_OPENING_GAMES,
     wilsonLowerBound,
     sasExpectedScore,
-    performanceSas,
     isHiddenGem,
     buildFindings,
     houseName

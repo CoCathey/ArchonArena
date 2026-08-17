@@ -31,10 +31,10 @@ the tree at every audit, and one of them is not being kept.
         deck service, replay service, membership, moderation, API, and frontend are separate,
         loosely-coupled modules under `server/services/`.
 -   [x] Prefer reusable services over logic embedded in the gameplay engine. The engine is still
-        reached through the ordinary player interface even by the Proving Grounds' AI player.
+        reached through the ordinary player interface even by the Champion’s Challenge bots.
 -   [ ] **Not kept: TypeScript for all new code.** The server has zero `.ts` files and the web
         client one `.d.ts`; everything added since the fork — ratings, tournaments, membership,
-        moderation, the Proving Grounds — is JavaScript, type-checked only as far as JSDoc and
+        moderation, the Champion’s Challenge — is JavaScript, type-checked only as far as JSDoc and
         `checkJs: false` allow. The Expo app is the exception and is fully TypeScript. Either
         start keeping this or strike it; carrying a principle nothing follows makes the rest of
         the list mean less.
@@ -59,14 +59,17 @@ roadmap — ratings, tournaments, community, matchmaking, statistics, replays, n
 moderation, a premium membership, a native iOS app — is built, tested, and wired end to end.
 The site is live and players are playing real games on it (**I1**).
 
-**Three things changed the shape of the platform since the last audit.** The tournament engine
+**Four things changed the shape of the platform since the last audit.** The tournament engine
 went from "the most complete system and the least finished product" to running every format to
 a champion against real PostgreSQL, with the deck lock, hybrid and asynchronous events, prize
 pools and organizer exports (**N9**, **N17**). A premium membership system landed and grew into
 its own product surface — tiers, capabilities, Archon Intelligence, the Tournament Lab, AERC
-analysis, replay analysis, cosmetics, a preview programme and the Proving Grounds (**N12**,
-**N18**). And moderation, teams, in-person games and a Learn-to-Play walkthrough — all four
-listed as _missing entirely_ at the last audit — shipped (**N5**, **N7**, **N13**, **N11**).
+analysis, replay analysis, cosmetics, a preview programme and the Champion’s Challenge
+(**N12**, **N18**). Moderation, teams, in-person games and a Learn-to-Play walkthrough — all four listed
+as _missing entirely_ at the last audit — shipped (**N5**, **N7**, **N13**, **N11**). And the
+platform stopped renting its idea of deck strength: **ARI** (**N19**) is now what the Elo
+handicap reads, with SAS demoted to the seed, while thirteen practice bots keep an open table in
+the lobby at all times (**F9**) and a learning bot studies its own games (**N21**).
 
 **What is missing is the last mile, and it is mostly operational or visual.** Observability is
 still unset on the live host (**Q1**) and there are no off-host backups (**I7**) — both gated on
@@ -77,26 +80,26 @@ ends games in progress.
 
 **Built and working**
 
-| Area                 | State                                                                                                                                                                                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gameplay engine      | keyteki fork, 14 sets, 40,144-test baseline, green in CI; shuffles and coin flips drawn from `crypto` rather than `Math.random`                                                                                                                   |
-| Brand & navigation   | Full rebrand, chess.com-style sidebar, landing hero, token-based light/dark theme                                                                                                                                                                 |
-| Auth                 | Local (with verified activation email) + Keybringer OIDC (PKCE, JWKS, auto-link, link/unlink UI) built but disabled; owner-initiated account deletion distinct from a ban                                                                         |
-| Decks                | Master Vault import, DoK SAS enrichment + background refresh sweep, rate-limited outbound calls, bulk collection import, a remembered DoK key with scheduled sync, a paced import worker, a Master Vault name catalog, Alliance builder           |
-| Ratings ("Amber")    | SAS-adjusted Elo, FIDE-style K tiers, provisional K, floors, decay, seasons + archive, recalculation tool, admin tools, pools (Archon/Sealed/Alliance)                                                                                            |
-| Rankings             | Leaderboards (world/region/country/state), personal Ratings page, W–L records, public player profiles every username links to                                                                                                                     |
-| Tournaments          | Swiss / single-elim / double-elim / round robin / cut-to-top-N, Bo1/3/5, online / in-person / hybrid / asynchronous, waitlists, QR check-in, staff and judge tools, seeding, penalties, brackets, printables, prize pools, entry-fee register     |
-| Matchmaking          | Quick Match queue with Amber-proximity pairing and widening tolerance, plus queue-health telemetry                                                                                                                                                |
-| Notifications        | Typed taxonomy, in-app centre (bell + unread), branded email over Resend / SMTP / SES with a daily and monthly budget cap, Expo push to the phone, per-category opt-out                                                                           |
-| Community            | Friends, member directory, clubs (leaderboards, approval joins, named invitations, ownership transfer), teams with their own ladder, local store directory, Play IRL hub, in-person game tracking, onboarding wizard                              |
-| Moderation           | Reports with captured snapshots, claim/resolve queue, graduated actions with reason and expiry, chat content filter, full audit log, admin-config policy thresholds                                                                               |
-| Membership (Archon+) | Tiers → capabilities → entitlements, badges beside names everywhere, Archon Intelligence, Tournament Lab, AERC analysis, replay analysis and the misplay review, profile cosmetics, the preview programme, organizer CSV exports, Proving Grounds |
-| Statistics           | Meta dashboard (house/set win rates, SAS bands, format share, house matchup matrix) + per-player and per-deck breakdowns, TTL-cached                                                                                                              |
-| Match history        | Filterable Game History on PostgreSQL; board-state replays with forge jumps, turn navigation, playback, per-player perspective and public share links; Watch hub                                                                                  |
-| Learn                | A played-through Learn-to-Play walkthrough at `/learn` — 93 steps, no account needed                                                                                                                                                              |
-| Admin                | Settings service + `/admin/settings` (fifteen sections including feature flags and moderation policy), `/admin/analytics`, `/admin/moderation`, user/ratings/season/banlist/nodes/motd/news/bug-report admin, scoped statistics reset             |
-| Mobile               | Expo iOS app (`mobile/`): login, decks, lobby, pending, full board, spectate, reconnect, tournaments, membership, Archon Intelligence, push notifications; EAS + TestFlight runbook; App Store compliance pass                                    |
-| Ops                  | CI (typecheck/lint/build/test + CodeQL), weekly upstream-sync workflow, prod compose + Caddy TLS, `deploy/healthcheck.sh`, `deploy/update.sh`, encrypted off-host backup/restore rehearsed in CI, Sentry wired client + server                    |
+| Area                 | State                                                                                                                                                                                                                                                                       |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gameplay engine      | keyteki fork, 14 sets, 40,245-test baseline, green in CI; shuffles and coin flips drawn from `crypto` rather than `Math.random`                                                                                                                                             |
+| Brand & navigation   | Full rebrand, chess.com-style sidebar, landing hero, token-based light/dark theme                                                                                                                                                                                           |
+| Auth                 | Local (with verified activation email) + Keybringer OIDC (PKCE, JWKS, auto-link, link/unlink UI) built but disabled; owner-initiated account deletion distinct from a ban                                                                                                   |
+| Decks                | Master Vault import, DoK SAS enrichment + background refresh sweep, rate-limited outbound calls, bulk collection import, a remembered DoK key with scheduled sync, a paced import worker, a Master Vault name catalog, Alliance builder                                     |
+| Ratings ("Amber")    | ARI-adjusted Elo (SAS seeds it, play moves it), FIDE-style K tiers, provisional K, floors, decay, seasons + archive, recalculation tool, admin tools, pools (Archon/Sealed/Alliance)                                                                                        |
+| Rankings             | Leaderboards under Community (world/region/country/state), a single Stats page, W–L records, public player profiles every username links to                                                                                                                                 |
+| Tournaments          | Swiss / single-elim / double-elim / round robin / cut-to-top-N, Bo1/3/5, online / in-person / hybrid / asynchronous, waitlists, QR check-in, staff and judge tools, seeding, penalties, brackets, printables, prize pools, entry-fee register                               |
+| Matchmaking          | Quick Match queue with Amber-proximity pairing and widening tolerance, plus queue-health telemetry                                                                                                                                                                          |
+| Notifications        | Typed taxonomy, in-app centre (bell + unread), branded email over Resend / SMTP / SES with a daily and monthly budget cap, Expo push to the phone, per-category opt-out                                                                                                     |
+| Community            | Friends, member directory, clubs (leaderboards, approval joins, named invitations, ownership transfer), teams with their own ladder, local store directory, Play IRL hub, in-person game tracking, onboarding wizard                                                        |
+| Moderation           | Reports with captured snapshots, claim/resolve queue, graduated actions with reason and expiry, chat content filter, full audit log, admin-config policy thresholds                                                                                                         |
+| Membership (Archon+) | Tiers → capabilities → entitlements, badges beside names everywhere, Archon Intelligence, Tournament Lab, AERC analysis, deck comparison, replay analysis and the misplay review, profile cosmetics, the preview programme, organizer CSV exports, the Champion's Challenge |
+| Statistics           | Meta dashboard (house/set win rates, SAS bands, format share, house matchup matrix) + per-player and per-deck breakdowns, TTL-cached                                                                                                                                        |
+| Match history        | Filterable Game History on PostgreSQL; board-state replays with forge jumps, turn navigation, playback, per-player perspective and public share links; Watch hub                                                                                                            |
+| Learn                | A played-through Learn-to-Play walkthrough at `/learn` — 93 steps, no account needed                                                                                                                                                                                        |
+| Admin                | Settings service + `/admin/settings` (sixteen sections including feature flags, bots and moderation policy), `/admin/analytics`, `/admin/moderation`, `/admin/bots`, user/ratings/season/banlist/nodes/motd/news/bug-report admin, scoped statistics reset                  |
+| Mobile               | Expo iOS app (`mobile/`): login, decks, lobby, pending, full board, spectate, reconnect, tournaments, membership, Archon Intelligence, push notifications; EAS + TestFlight runbook; App Store compliance pass                                                              |
+| Ops                  | CI (typecheck/lint/build/test + CodeQL), weekly upstream-sync workflow, prod compose + Caddy TLS, `deploy/healthcheck.sh`, `deploy/update.sh`, encrypted off-host backup/restore rehearsed in CI, Sentry wired client + server                                              |
 
 **Incomplete — built but not finished**
 
@@ -133,8 +136,10 @@ ends games in progress.
 -   **Self-serve app distribution.** `/mobile/ios` and `/mobile/android` are still `Placeholder`
     pages, so the only way into the beta is knowing the owner (**N14**).
 -   **Staging and load testing** (**N10**).
--   **A reason to visit an empty site.** The AI player exists — it is the Proving Grounds'
-    sparring partner (**N18**) — but nothing keeps a bot table live and watchable (**F9**).
+-   **Something to _watch_ on an empty site.** The empty-lobby problem is half solved: thirteen
+    practice bots keep an open table you can join at any hour (**F9**). What is still missing is
+    the bot-vs-bot showcase — the node driver already plays both seats, so what remains is the
+    supervisor that keeps one live and lists it on the Watch hub.
 -   **PWA, a responsive pass, an accessibility pass** (**N6**) and the **visual redesign**
     (**N16**).
 -   **Versioned public API**, **Discord**, **coaching and AI analysis** beyond the shipped
@@ -1144,9 +1149,11 @@ is one document holding both the promise and what backs it.
         `{available: false, reason}` and renders as "not recorded yet" rather than as a zero,
         because a fabricated zero is worse than an absent number — a player will act on it.
         Set-aware, since a result from a rotated-out set answers a different question.
--   [x] **The Tournament Lab** (`/tournament-lab`) — "which of my decks should I bring to this
-        event", assembled only from the player's own recorded results, with a `confidence` marker
-        about sample size so a 3-game 100% cannot sit unlabelled beside a 40-game 58%.
+-   [x] **The Tournament Lab, sold as Deep Probe** (`/deep-probe`; the capability id and API
+        paths keep the working name, because released phone builds gate on them) — "which of my
+        decks should I bring to this event", assembled only from the player's own recorded
+        results, with a `confidence` marker about sample size so a 3-game 100% cannot sit
+        unlabelled beside a 40-game 58%. Deck comparison sits alongside it.
 -   [x] **AERC analysis** — the same record read in AERC terms rather than SAS. "My win rate drops
         against decks with amber control above 8" is actionable; "I lose to decks with 5 more SAS"
         is not. Built from the AERC breakdown DoK already returns and the platform already stores.
@@ -1175,7 +1182,8 @@ is one document holding both the promise and what backs it.
 -   [x] **Organizer exports** (`organizerExport.js`) — standings, pairings and the entry list of
         any event you run, as CSV, built from the payload the tournament page already renders so
         an export cannot disagree with the screen the organizer is looking at.
--   [x] **The Proving Grounds** — Vault Master's first genuinely new capability. See **N18**.
+-   [x] **The Champion’s Challenge** — Vault Master's first genuinely new capability, and the
+        one that took the tier off the shelf. See **N18**.
 -   [x] **Per-tier checkout links.** Patreon takes a `?rid=` per tier; without it every button on
         the pricing page lands on the campaign homepage and the player who just chose Archon has
         to go and find Archon again. Reward ids live in config, so a tier recreated on Patreon is
@@ -1528,7 +1536,7 @@ half-finished. Whether the result actually looks premium is a judgement call, an
 what this item can promise is that the judgement gets made once, deliberately, rather than
 re-improvised per page.
 
-#### N18 — The Proving Grounds: background deck testing for Vault Master _(done)_
+#### N18 — The Champion’s Challenge: background deck testing for Vault Master _(done)_
 
 **Why:** Vault Master's pitch is "everything, first", and until now what it sold was previews,
 cosmetics and organizer exports — nothing only a $20 member could point at. This is the first
@@ -1541,7 +1549,7 @@ foundation **F3** (AI analysis) wants.
 **Tasks**
 
 -   [x] **A simulated player that always finishes.** Drives the engine through the ordinary
-        player interface (`server/services/provinggrounds/SimulatedGame.js`): house choice by
+        player interface (`server/services/championschallenge/SimulatedGame.js`): house choice by
         hand-and-board count, plays everything legal, reaps what is ready, and answers _any_
         card prompt generically from the buttons and selectable cards the prompt publishes.
         Termination is the requirement, strength is not (yet): Done/Autoresolve preferred on
@@ -1553,26 +1561,27 @@ foundation **F3** (AI analysis) wants.
         engine — every official statistic filters only on FinishedAt/WinnerId, so one row in
         the shared table would be a real result in thirty queries at once. A spec forbids the
         official tables' names in any SQL the lab runs.
--   [x] **The sweep** (`Lobby.runProvingGroundsSweep`): ticks like the import worker, consults
+-   [x] **The sweep** (`Lobby.runChampionsChallengeSweep`): ticks like the import worker, consults
         its cadence on every tick, round-robins rosters so one member cannot starve another,
         re-checks the owner's entitlement before spending CPU (a lapsed pledge stops play the
         day it lapses; results are kept and play resumes with the membership), and yields to
         the event loop mid-game so real players never feel a simulated one.
--   [x] **The report** (`/api/proving-grounds`, page `/proving-grounds`): per-deck simulated
+-   [x] **The report** (`/api/champions-challenge`, page `/champions-challenge`): per-deck simulated
         record against a SAS expectation computed with the site's own Elo model (same
         `sasWeight` the Amber ladder uses); a "plays like" SAS from a chess-style performance
         rating (withheld under 20 games, clamped at ±100 SAS); openings and first-player
         splits; findings in sentences. **Hidden gem** requires the entire 95% Wilson interval
         clear of the SAS expectation — the lab must be the most honest analyst on the site,
         because nobody can argue with a computer that plays in private.
--   [x] **(admin-config)** `provingGrounds` settings section: on/off, sweep cadence, games per
+-   [x] **(admin-config)** `championsChallenge` settings section: on/off, sweep cadence, games per
         batch, per-deck daily budget, roster size, turn cap.
--   [x] Capability `proving_grounds` on the Vault Master tier, gated end to end
+-   [x] Capability `champions_challenge` on the Vault Master tier, gated end to end
         (`requireCapability` on every route, `PremiumLock` on the page), declared across
         server, client and mobile mirrors.
--   Later: let the bot spar a member directly (the **F9** practice opponent), matchup matrices
-    between specific enrolled decks, and strength upgrades to the player — every point of
-    which sharpens the same ratings this feature already reports.
+-   Later: matchup matrices between specific enrolled decks, and strength upgrades to the
+    player — every point of which sharpens the same ratings this feature already reports.
+    (The bot sparring a member directly landed as the **F9** Helper Bot, driving the same
+    `BotPolicy` this lab plays with.)
 
 **Depends on:** N12 (membership), the gameplay engine. **Feeds F9 and F3** — the AI player
 exists now; the showcase supervisor and the analysis models build on it.
@@ -1590,7 +1599,145 @@ exists now; the showcase supervisor and the analysis models build on it.
 -   [x] "Hidden gem" is a statistical claim (Wilson lower bound above SAS expectation over
         ≥20 games), computed in one tested place.
 
-#### N19 — Getting decks onto the site without a Master Vault link _(done; catalog off by default)_
+#### N19 — ARI: the Archon Rating Index _(done)_
+
+**Why:** the ladder priced deck strength with SAS — somebody else's model of a deck, frozen at
+scoring time, blind to how the deck actually performs. ARI is the platform's own living deck
+rating: every deck has one, it starts where the card math points, and it moves with what the
+platform witnesses. It is also a differentiator no deck database can copy, because it is fed
+by play that happens here.
+
+**Tasks**
+
+-   [x] **The index** (`server/services/rating/AriService.js`, `DeckAri` migration 73, keyed by
+        Master Vault uuid like `DeckSas`): seeded at the SAS/AERC midpoint (either alone when
+        one is missing; no seed, no ARI — zero is a claim, not an absence), moved Elo-fashion
+        by results, clamped to a sane band, with rated-game and sparring-game counters kept
+        separately so "how much of this number is sparring" always has an answer.
+-   [x] **It moves with real games.** After every rated game, both decks' ARIs shift against
+        the expectation the Elo engine actually used (players and decks), so the index absorbs
+        only what player ratings could not explain — outside the rating transaction, so an ARI
+        failure can never unrate a game.
+-   [x] **It moves with the Champion’s Challenge.** Sparring games nudge ARI at a gentler
+        admin-configurable rate (`simGameK`, default half the real-game `gameK`) — the bot's
+        evidence is real but plainer. The Challenge page's rating column IS the deck's ARI now
+        (the fitted "plays like" it replaced is gone).
+-   [x] **It is what Amber spends.** `RatingService` hands the calculator ARI differentials in
+        place of raw SAS — same scale, same `sasWeight`, same formula, so nothing about the
+        engine changed except what the number knows. History rows record the values used;
+        the config snapshot beside them says which regime. **(admin-config)** `rating.ari`:
+        the switch (off = raw SAS exactly as before), `gameK`, `simGameK`.
+-   [x] **Every deck shows it**: an ARI column beside SAS on the deck list, the deck summary,
+        and the Challenge — served wherever SAS already was (`mapDeck`, `attachStats`), so any
+        surface that knows a deck's SAS now knows its ARI.
+
+**Alongside, a naming pass:** the Proving Grounds shipped as the **Champion’s Challenge**
+(tables keep their birth names; everything above SQL renamed), the Tournament Lab is sold as
+**Deep Probe** (capability id and API paths keep the working name — released phone builds gate
+on them), Clubs gather under the **Grand Alliance Council**, and Play IRL is **Into the Fray**
+— each page now opens by saying what it is for.
+
+**Depends on:** N18 (the sparring games), the rating engine. **Acceptance criteria**
+
+-   [x] A deck with SAS and AERC has an ARI before its first game; a deck with neither has
+        none, and its games move no index — asserted in `AriService.spec.js`.
+-   [x] Winner and loser move symmetrically, more when the result was surprising, at the sim
+        rate for sparring games — asserted with exact arithmetic.
+-   [x] With `rating.ari.enabled` off, rating behaves byte-for-byte as before (the rating
+        specs run unchanged either way, because the seed falls back to SAS alone when AERC is
+        absent).
+
+#### N20 — The new-player welcome: a fortnight of Archon, and a pill that says be nice _(done)_
+
+**Why:** the best moment to show somebody what the platform can tell them about their decks is
+while they are still deciding whether to stay — and a fresh face in a lobby full of veterans
+deserves to be legible as one.
+
+**Tasks**
+
+-   [x] **Fifteen days of the Archon tier for every new account**, resolved rather than
+        stored: `resolveEntitlements` folds the trial in from the registration date the same
+        way it folds in a grant or a pledge — the higher tier wins, so a new player who pays
+        for Vault Master keeps it, a Supporter runs the trial and lapses back to what they pay
+        for, and the trial ends the moment day fifteen does, with no claim button, no
+        membership row and no sweep. A constant (`NEW_PLAYER_TRIAL_DAYS`) rather than a
+        setting, because the resolver is deliberately pure.
+-   [x] **The "New" pill** next to fresh names, everywhere names render: `publicBadge` carries
+        `isNew` (from `Users.Registered`, through the batched badge lookup, the profile
+        identity, and lobby summaries), and `PlayerBadge` draws an emerald pill — a welcome,
+        never a key, because the tier badge is a claim about money and the trial makes none.
+        A brand-new free account is now worth including in the badge payload; the
+        nothing-to-show filter keeps it.
+-   [x] The membership page states the trial with the same number the resolver enforces,
+        served on the public catalogue.
+
+**Depends on:** N12. **Acceptance criteria**
+
+-   [x] A three-day-old account resolves to Archon (`source: 'new-player-trial'`,
+        complimentary, expiring on day fifteen exactly) and a fifteen-day-old account to free
+        — pinned in `entitlements.spec.js`.
+-   [x] A trial account's public badge shows the New pill and no tier key; a paying new
+        player shows both their paid tier and the pill — pinned in `publicBadge.spec.js`.
+
+#### N21 — The learning bot: a sparring partner that studies its own games _(done)_
+
+**Why:** every number the Champion's Challenge reports is only as good as the player producing
+it. A bot that learns makes every ARI, every hidden gem and every finding sharper — and the
+machinery it needs (self-play at volume, deterministic replay, a value model) is exactly what
+F9's practice opponent and F3's game analysis have been waiting for. Perfect play is not on
+any menu (hidden information sees to that); _provably improving_ play is, and proof is the
+design's spine.
+
+**Tasks**
+
+-   [x] **The learning loop.** Sparring games log every chosen decision as features
+        (`labFeatures.js` — only what a seated player could see); finished games label them;
+        a dependency-free logistic model with per-card learned weights (`labPolicy.js`, spec
+        proves it finds a planted signal) trains in-process; and the champion model steers
+        every sparring game, exploring at softmax temperature so the diary stays honest.
+-   [x] **Champion gating.** A candidate trains every `trainEveryGames` logged games and
+        must TAKE the title: head-to-head against the champion (per-seat policies), on
+        neutral decks that touch nobody's stats, promoted only when the 95% Wilson lower
+        bound of its record clears 50% — retired, record kept, if it cannot prove itself in
+        the window. The bot can get provably stronger and can never quietly get worse.
+-   [x] **Card abilities taken literally: deterministic replay and forking.** Simulated
+        games run seeded — engine randomness scoped through an AsyncLocalStorage source
+        (`secureRandom.withRandomSource`; real games never enter the scope), bot dice on a
+        separate stream, every input logged by list-position. `replayTo` reconstructs the
+        exact game at any point (fingerprint-verified in specs), and a mismatch aborts the
+        fork loudly rather than play a subtly different game.
+-   [x] **The deep bot** (`DeepGame.js`): at the decisions that matter (house calls, key
+        turns) it forks the live game, plays each candidate move out — the card's REAL
+        ability code resolving — across sampled futures, scores the horizon with the value
+        model, and keeps the best road. Every analyzed decision leaves an annotation with
+        win odds and alternatives; the largest swing is flagged as where the game turned.
+-   [x] **Two bots, one product**: the fast bot keeps the volume (ARI, win rates, gems);
+        the deep bot plays `deepGamesPerDay` showcase games rendered on the page with its
+        working shown. **(admin-config)** for all of it — the learning switch, training
+        cadence and diary depth, arena thresholds, and every deep-thinking budget.
+-   [x] **The randomizer**: 🎲 slots fill with a random eligible deck and swap themselves
+        for a fresh one after a member-configured number of games — collection-wide gem
+        hunting with no manual enrollment. Site admins' decks are exempt from the daily
+        game cap, so the operator can flood the lab they are tuning.
+-   Later: the deep bot as F9's practice opponent; the value model over real replays as
+    F3's win-probability graph and blunder detection; richer features and search budgets as
+    the diary deepens.
+
+**Depends on:** N18/N19. **Feeds F9 and F3.**
+**Acceptance criteria**
+
+-   [x] Two runs from one seed play the identical game, and a mid-game fork reconstructs
+        the exact recorded state before diverging — asserted on real games.
+-   [x] Training provably learns: a planted signal (winning moves, a strong card) is found
+        from outcomes alone, and the model never trains in place.
+-   [x] Promotion demands proof: 52% over 200 games does not take the title; a Wilson-clear
+        record does; an unproven candidate retires.
+-   [x] Deep games finish legitimately, annotate their decisions, and flag exactly one
+        turning point — asserted on a real planned game.
+-   [x] Arena games appear in no member-facing table; sparring and showcase games keep
+        every existing exclusion (no `Games`, no Elo, no leaderboards).
+
+#### N22 — Getting decks onto the site without a Master Vault link _(done; catalog off by default)_
 
 **Why:** written up after the fact, because it shipped without a backlog entry. Adding a deck
 required having its Master Vault link to hand, which is not how players hold their collection —
@@ -1635,7 +1782,7 @@ uuid.
 -   [x] A stored DoK key is unreadable at rest and dropped the moment DoK refuses it.
 -   [x] A large collection import is paced, resumable, and cannot be lost to a lobby restart.
 
-#### N20 — Account deletion and App Store compliance _(done)_
+#### N23 — Account deletion and App Store compliance _(done)_
 
 **Why:** also written up after the fact. Shipping the Expo app to a real review queue turned a
 set of legal and safety requirements into engineering work, and one of them — deletion — was a
@@ -1707,9 +1854,25 @@ house calls that had almost nothing to act on when another house was full, ready
 of the called house left unused at end of main, playable cards held that displaced fresh
 draws, and a house clogging the hand across consecutive turns. Deliberately heuristic and
 deliberately phrased as questions - it is arithmetic over recorded state
-(`replayMisplays.js`), not a simulation; card text, restrictions and the player's plan are
-not in it. True "what would have happened" alternative lines and win-probability remain
-open, and would sit on the same v4 recordings.
+(`replayMisplays.js`), not a simulation.
+Good decisions that merely look thin are recognised and dropped rather than flagged: v5
+recordings carry the active player's legally callable houses (so Control the Weak is never
+a "misplay"), and hindsight over the rest of the recording clears a call that forged,
+out-earned the fuller house or denied a check, a hold that got played within two turns (or
+that the game ended too soon to judge), idle creatures already past the point of
+mattering, and a clog that cashed out into a big turn.
+**Card knowledge** (`cardKnowledge.js`): the review also reads what each card DOES, from
+the canonical master-vault text - narrow, high-precision roles only (steals/captures,
+board wipes, key cheats, cannot-reap). v6 recordings add the owner's archives beside the
+hands (same table, same stripping rules), so every zone the player could reach is read.
+On top of that: house-call worth counts bonus pips and recorded archives; a creature that
+cannot reap is never "unused"; a hold of pure answers is insurance, not a slip; the
+"answer held" moment names the steal or wipe that sat reachable while the check or the
+wide board it answers actually landed; and a per-house **toolbox** profiles what the deck
+showed (cards, pips, steals, wipes, key cheats) - the reading house calls are planned
+with. Always availability, never outcome: conditions, costs and targets stay invisible,
+and the panel says so. True "what would have happened" alternative lines and
+win-probability remain open, and would sit on the same recordings.
 **Depends on:** N1 (board-state replays are the input). **Acceptance:** a coach and student
 step through the same replay in sync, and a finished game produces a win-probability graph.
 
@@ -1740,7 +1903,7 @@ lesson on something specific — a keyword, a house, reading SAS — without pla
 
 App Store release of the existing Expo iOS app and an Android build, then the rest of feature
 parity with the web platform. Tournaments, membership, Archon Intelligence and push notifications
-are already in the app (**N14**/**N20**); community, public profiles and a replay viewer are not.
+are already in the app (**N14**/**N23**); community, public profiles and a replay viewer are not.
 **Depends on:** N2 (done), N6, and **N14** for the distribution path in between.
 **Acceptance:** both stores carry a build that can play, enter a tournament, and receive pairing
 pushes.
@@ -1762,23 +1925,46 @@ commit to it, and run the engine as a continuous soak test.
 
 -   [x] An AI player driving the engine through the ordinary player interface (house choice,
         play / use / reap / fight, key timing). Strength can start crude — never stalling
-        matters more. **Built as the Proving Grounds' sparring partner (N18)** —
-        `server/services/provinggrounds/SimulatedGame.js`; the showcase reuses it.
+        matters more. **Built as the Champion’s Challenge sparring partner (N18)** —
+        `server/services/championschallenge/SimulatedGame.js`; the showcase reuses it. The
+        policy was extracted to `server/services/botplayer/BotPolicy.js`, which the practice
+        bots (F9) still play; this lab moved on to a learned policy in **N21**.
+-   [x] **The practice opponents: thirteen bots, one per house** (design:
+        `docs/design/practice-bots.md`). The lobby always has an open table hosted by a bot
+        from the roster — join it, pick a deck, and the game starts itself. Each bot belongs
+        to a house and plays only decks containing it (its own collection first, standalone
+        decks as the zero-setup fallback), so the table that replaces a joined one is a
+        different character playing a different colour of deck. Games run on the real engine
+        on the real game node, answering instantly; wedges end in an honest concede, never a
+        hang, and a pump can never hold the node's event loop.
+-   [x] **Bot Settings** (`/admin/bots`, isAdmin): the roster with each bot's name, picture,
+        profile, on/off switch and deck count, plus the knobs that govern all of them. Bots
+        are ordinary accounts, so their pictures and profiles go through the same pipeline a
+        player's do — and are unenterable, house-keyed, and can never capture a real
+        account's name.
+-   [x] Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics
+        aggregate — never persisted at all (the Champion’s Challenge doctrine, applied at
+        the router), and Quick Join never matches into a bot table. Asserted by
+        `test/server/gameRouterBotGames.spec.js`.
 -   A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends, and
-    publishes it to the Watch hub as spectatable.
--   Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics aggregate.
--   **(admin-config)**: how many bot tables run, how their decks are chosen, and whether the
-    showcase is on at all.
--   Later: bots as practice opponents, as the tutorial's sparring partner (**N11**), and as the
-    base for AI analysis (**F3**).
+    publishes it to the Watch hub as spectatable. (The node driver already plays both seats —
+    `test/server/gameserver.botdriver.spec.js` pins a full bot-vs-bot game — so what remains
+    is the supervisor and the Watch listing.)
+-   **(admin-config)**: how many showcase tables run, how their decks are chosen, and whether
+    the showcase is on at all.
+-   Later: the bot as the tutorial's sparring partner (**N11**), and as the base for AI
+    analysis (**F3**).
 
 **Depends on:** N1 (Watch hub). Feeds F3 and N11.
 **Acceptance criteria**
 
 -   A logged-out visitor can watch a live game within seconds of landing on the site.
--   A bot game reaches a legitimate conclusion (three keys or deck-out) without stalling, looping,
-    or throwing; a wedged table is detected and replaced.
--   No bot game appears in any leaderboard, player stat, or meta aggregate — asserted by a test.
+-   [x] A bot game reaches a legitimate conclusion (three keys or deck-out) without stalling,
+        looping, or throwing; a wedged table concedes rather than holds its player — asserted
+        by `test/server/gameserver.botdriver.spec.js`, which plays full games through the real
+        game server wiring.
+-   [x] No bot game appears in any leaderboard, player stat, or meta aggregate — asserted by
+        `test/server/gameRouterBotGames.spec.js`.
 
 ---
 
@@ -1921,12 +2107,12 @@ OpenID Connect.
 -   [x] AERC component breakdown display from stored RawData (**N3**), and AERC-based analysis
         of a player's own record (**N12**).
 -   [x] **Master Vault deck catalog** — a background crawl building a name → uuid index so decks
-        can be added by name rather than by link; off by default (**N19**,
+        can be added by name rather than by link; off by default (**N22**,
         docs/design/deck-catalog.md).
 -   [x] **Stored DoK key with scheduled sync**, sealed at rest, and a **paced import worker** so
-        a large collection import is a job rather than a request (**N19**).
+        a large collection import is a job rather than a request (**N22**).
 -   [x] **Deck co-ownership**, and deleting a deck archives its games rather than erasing them
-        (**N19**).
+        (**N22**).
 -   [ ] Redis-backed shared rate-limit counter for multi-process scale → **F8**.
 
 ## Phase 5 — Rating engine: SAS-adjusted Elo
@@ -2255,8 +2441,8 @@ much stronger deck pays less.
 -   [ ] AI game analysis: blunder detection, alternative-line suggestions, win-probability
         graph per turn (model over the replay event stream) → **F3**.
 -   [ ] AI deck insights: strengths/weaknesses vs. meta, SAS-context commentary → **F3**.
--   [x] An AI player able to drive the engine — shipped first as the Proving Grounds'
-        sparring partner (**N18**, `server/services/provinggrounds/SimulatedGame.js`).
+-   [x] An AI player able to drive the engine — shipped first as the Champion’s Challenge'
+        sparring partner (**N18**, `server/services/championschallenge/SimulatedGame.js`).
 -   [ ] The same player as the bot showcase and a practice opponent (**F9**), then as the
         model behind analysis (**F3**).
 
@@ -2274,11 +2460,11 @@ much stronger deck pays less.
 -   [x] **Tournaments in the app**: browse, create, register, report, and the event detail screen.
 -   [x] **Archon+ in the app**: membership status, Archon Intelligence, the Tournament Lab, the
         set filter, Replay Intelligence, and Patreon linking — with every money surface stripped
-        out of the iOS build rather than merely hidden (**N20**).
+        out of the iOS build rather than merely hidden (**N23**).
 -   [x] **Board completeness**: prophecies, a pile viewer that cannot lock up, hiding your own
         hand on the opponent's turn, every offered game mode, and passive-effect attribution on
         card zoom (**N15**).
--   [x] Account deletion and the safety controls App Store review asks for (**N20**).
+-   [x] Account deletion and the safety controls App Store review asks for (**N23**).
 -   [ ] Mobile-responsive web as the baseline → **N6**.
 -   [ ] PWA: installable, **browser** push for round pairings/turn timers → **N6**. Native push
         is done; this is the web half.
@@ -2367,13 +2553,13 @@ competitive advantage.
 -   [x] **Archon+ built end to end** (**N12**): four tiers backed by a capability system, a
         pricing page, per-tier checkout links, badges, cosmetics, a preview programme, and the
         analytics products the paid tiers are sold on — Archon Intelligence, the Tournament Lab,
-        AERC analysis, replay analysis and the Proving Grounds. Every capability is enforced
+        AERC analysis, replay analysis and the Champion’s Challenge. Every capability is enforced
         server-side, and a tier that would deliver nothing over the one below it cannot be sold.
 -   [x] **Perks stay clear of competitive fairness**, asserted by the persona specs rather than
         promised in prose: no capability touches Amber, matchmaking, tournament eligibility or
         any other competitive outcome.
 -   [x] **The apps sell nothing on iOS** — prices and checkout links are stripped out of the
-        payload rather than merely hidden (**N20**).
+        payload rather than merely hidden (**N23**).
 -   [ ] **Owner: a live campaign.** Credentials, tiers and reward ids, then link one real account
         to prove the round trip. Nothing above has run against a real pledge → **N12**.
 -   [ ] Publish running costs and what supporters cover, so the ask is concrete — the missing
@@ -2388,9 +2574,10 @@ competitive advantage.
 -   [x] **Settings service**: typed registry, DB-backed (SiteSettings), in-memory
         snapshot with periodic refresh, who/when audit, defaults in code
         (docs/design/settings-service.md).
--   [x] Admin settings UI at /admin/settings (isAdmin). Fifteen sections: rating (Elo knobs,
-        decay, seasons, leaderboard threshold), DoK (including the background SAS sweep), the
-        Master Vault catalog crawl, the deck-import worker, the Proving Grounds, tournaments,
+-   [x] Admin settings UI at /admin/settings (isAdmin). Sixteen sections: rating (Elo knobs,
+        ARI, decay, seasons, leaderboard threshold), DoK (including the background SAS sweep), the
+        Master Vault catalog crawl, the deck-import worker, the Champion's Challenge, the practice
+        bots, tournaments,
         replays (recording, size cap, retention, purge cadence, sharing), watch (spectator
         counts, broadcast delay, featured game), regions, site content, navigation page
         visibility, team rating, in-person games, moderation policy, and feature flags.
@@ -2560,6 +2747,3 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         `DEPLOYMENT.md`, `SECURITY.md`, `UPSTREAM.md`, `docs/design/`) that has been written
         since. Engine-facing docs, so nothing is wrong in them — they are just addressed to a
         project this is no longer only a fork of.
--   [ ] **`docs/TEST-BASELINE.md` trails the tree by one feature.** The 40,144 row was recorded
-        at the misplay review; the Proving Grounds landed after it and added specs that play real
-        games. Re-record on the next green full run.

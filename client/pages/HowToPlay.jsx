@@ -465,7 +465,7 @@ const HowToPlay = () => {
                         <P>
                             {t('Games played across a real table can be recorded from ')}
                             <Link className='text-accent hover:underline' href='/play-irl'>
-                                {t('Play IRL')}
+                                {t('Into the Fray')}
                             </Link>
                             {t(
                                 '. Both players confirm the result, so it counts the same as one played ' +

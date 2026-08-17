@@ -94,9 +94,9 @@ class PlayerProfileService {
      * @returns {Promise<{role: string, tier: string, tierName: string|null}>}
      */
     async getBadge(userId) {
-        const { permissions, membership } = await this.loadMembershipState(userId);
+        const { permissions, membership, registered } = await this.loadMembershipState(userId);
 
-        return publicBadge({ permissions, membership });
+        return publicBadge({ permissions, membership, registered });
     }
 
     /**
@@ -122,12 +122,12 @@ class PlayerProfileService {
      * @returns {Promise<{badge: object, cosmetics: object}>}
      */
     async getIdentity(userId) {
-        const { permissions, membership } = await this.loadMembershipState(userId);
+        const { permissions, membership, registered } = await this.loadMembershipState(userId);
         const entitlements = resolveEntitlements({ user: { permissions }, membership });
         const stored = await this.cosmeticsService.get(userId);
 
         return {
-            badge: publicBadge({ permissions, membership }),
+            badge: publicBadge({ permissions, membership, registered }),
             cosmetics: resolveCosmetics(stored, entitlements.capabilities)
         };
     }
@@ -143,6 +143,7 @@ class PlayerProfileService {
     async loadMembershipState(userId) {
         let roleNames = [];
         let membership;
+        let registered = null;
 
         try {
             const rows = await this.db.query(
@@ -166,9 +167,22 @@ class PlayerProfileService {
             logger.warn('Failed to look up membership for player profile', err);
         }
 
+        // ARCHON (N20): when the account was created, for the New pill. Same
+        // fail-soft posture as the rest: a profile with no pill still works.
+        try {
+            const rows = await this.db.query('SELECT "Registered" FROM "Users" WHERE "Id" = $1', [
+                userId
+            ]);
+
+            registered = rows && rows[0] ? rows[0].Registered : null;
+        } catch (err) {
+            logger.warn('Failed to look up registration date for player profile', err);
+        }
+
         return {
             permissions: permissionsFromRoleNames(roleNames),
-            membership: membership || null
+            membership: membership || null,
+            registered
         };
     }
 

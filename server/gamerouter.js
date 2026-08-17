@@ -52,7 +52,13 @@ class GameRouter extends EventEmitter {
             return undefined;
         }
 
-        this.gameService.create(game.getSaveState());
+        // ARCHON (F9): practice games against the Helper Bot are invisible to
+        // the rest of the platform - the Champion’s Challenge doctrine. Every
+        // official statistic filters only on FinishedAt/WinnerId, so a single
+        // row in "Games" would be a real result in thirty queries at once.
+        if (!game.botGame) {
+            this.gameService.create(game.getSaveState());
+        }
 
         node.numGames++;
 
@@ -213,6 +219,12 @@ class GameRouter extends EventEmitter {
      * @param {object} game a save state from a game node
      */
     persistFinishedGame(game) {
+        // ARCHON (F9): a Helper Bot practice game was never created, so there
+        // is no row to update - and there must never be one.
+        if (game && game.botGame) {
+            return;
+        }
+
         Promise.resolve(this.gameService.update(game)).catch((err) =>
             logger.error(`Failed to persist finished game ${game && game.gameId}`, err)
         );
@@ -284,6 +296,14 @@ class GameRouter extends EventEmitter {
 
                 break;
             case 'GAMEWIN':
+                // ARCHON (F9): a Helper Bot practice game finishing is not a
+                // result. No row, no replay, no rating - the same invisibility
+                // the Champion’s Challenge simulated games keep.
+                if (message.arg.game && message.arg.game.botGame) {
+                    this.emit('onGameWin', message.arg.game);
+                    break;
+                }
+
                 // ARCHON: persist the result, then save the replay and rate the
                 // game. Best effort and idempotent; never blocks the game flow.
                 // The lobby also listens so tournament matches auto-report.

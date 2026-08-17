@@ -13,7 +13,7 @@ import ReplayAnalysis from './ReplayAnalysis';
 import PremiumLock from '../Membership/PremiumLock';
 import { CAPABILITIES, hasCapability } from '../../membership';
 import { findKeyForges, findTurns } from '../../replayMarkers';
-import { boardAtStep, handsAtStep } from '../../replayFormat';
+import { archivesAtStep, boardAtStep, handsAtStep } from '../../replayFormat';
 import { useShareReplayMutation, useUnshareReplayMutation } from '../../redux/api';
 
 /** How fast autoplay steps through the log, in log entries per second. */
@@ -147,10 +147,11 @@ const ReplayViewer = ({ replay, gameId, canShare = false, shareToken: viaShareTo
     // the current log position. Version 1 recordings have no frames at all, and
     // the viewer degrades to the log alone.
     const currentBoard = boardAtStep(snapshots, step);
-    // ARCHON (F3): the recorded hands at this point - only ever the ones the
-    // server let this reader have (their own, with the Archon tier; both, for
-    // an admin; none on a share link or an older recording).
+    // ARCHON (F3): the recorded hands and archives at this point - only ever
+    // the ones the server let this reader have (their own, with the Archon
+    // tier; both, for an admin; none on a share link or an older recording).
     const currentHands = handsAtStep(snapshots, step, replay?.handCards);
+    const currentArchives = archivesAtStep(snapshots, step, replay?.handCards);
     const handsRecorded = snapshots.some((snapshot) => snapshot?.hands);
     // A participant whose recording HAS hands they are not being served is
     // told what would unlock them; everyone else just sees no hand pile.
@@ -495,6 +496,7 @@ const ReplayViewer = ({ replay, gameId, canShare = false, shareToken: viaShareTo
                         board={currentBoard}
                         cards={cards}
                         hands={currentHands}
+                        archives={currentArchives}
                         perspective={perspective}
                         onCardMouseOver={onCardMouseOver}
                         onCardMouseOut={onCardMouseOut}

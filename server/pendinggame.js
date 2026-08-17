@@ -109,6 +109,9 @@ class PendingGame {
         return {
             id: this.id,
             adaptive: this.adaptive,
+            // ARCHON (F9): practice games against the Helper Bot are never
+            // persisted or rated; the flag travels with every save state.
+            botGame: this.botGame || undefined,
             expansions: this.expansions,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
@@ -422,6 +425,9 @@ class PendingGame {
         return {
             adaptive: this.adaptive,
             allowSpectators: this.allowSpectators,
+            // ARCHON (F9): lets the game list say this table is the Helper
+            // Bot's practice table rather than an ordinary player's game.
+            botGame: this.botGame || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
@@ -496,6 +502,11 @@ class PendingGame {
         return {
             adaptive: this.adaptive,
             allowSpectators: this.allowSpectators,
+            // ARCHON (F9): tells the game node which table this is (and the
+            // node's driver its turn cap); the bot seat itself travels on its
+            // player record as `isBot`.
+            botGame: this.botGame || undefined,
+            botMaxTurns: this.botMaxTurns,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,

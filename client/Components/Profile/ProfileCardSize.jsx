@@ -1,7 +1,10 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import IdentityDefault from '../../assets/img/idbacks/identity.jpg';
+// ARCHON: the generic KeyForge archon-card back, not TCO's branded one -
+// this platform is not The Crucible Online, and the settings preview was the
+// last place still wearing its logo.
+import IdentityDefault from '../../assets/img/idbacks/idback_blanks/cardback_1.png';
 
 /**
  * @typedef ProfileCardSizeOption

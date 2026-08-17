@@ -6,8 +6,18 @@ const moment = require('moment');
 const _ = require('underscore');
 const EmailService = require('../services/EmailService');
 const fs = require('fs');
-const path = require('path');
-const { FabricImage, StaticCanvas } = require('../fabricNode');
+// ARCHON: the picture pipeline is shared with the practice bots' admin
+// screen (F9) - a bot is an ordinary account, and its picture must land in
+// the same place with the same checks.
+const {
+    AVATAR_SIZE,
+    isValidImage,
+    sanitizePathSegment,
+    buildPngPath,
+    removePng,
+    processImage,
+    saveAvatarImage
+} = require('../services/images/userImages');
 
 const logger = require('../log.js');
 const { wrapAsync } = require('../util.js');
@@ -138,12 +148,6 @@ function verifyPassword(password, dbPassword) {
     });
 }
 
-function isValidImage(base64Image) {
-    let buffer = Buffer.from(base64Image, 'base64');
-
-    return buffer.toString('hex', 0, 4) === '89504e47' || buffer.toString('hex', 0, 2) === 'ffd8';
-}
-
 function validateUserName(username) {
     if (!username) {
         return 'You must specify a username';
@@ -188,48 +192,6 @@ function validatePassword(password) {
     return undefined;
 }
 
-function sanitizePathSegment(input) {
-    return String(input || '').replace(/[^A-Za-z0-9_-]/g, '');
-}
-
-function buildPngPath(baseDir, name) {
-    const safeName = sanitizePathSegment(name);
-    if (!safeName) {
-        throw new Error('Invalid file name');
-    }
-
-    const resolvedBase = path.resolve(baseDir);
-    const resolvedFile = path.resolve(resolvedBase, `${safeName}.png`);
-
-    if (!resolvedFile.startsWith(resolvedBase + path.sep)) {
-        throw new Error('Invalid file path');
-    }
-
-    return resolvedFile;
-}
-
-function removePng(baseDir, name) {
-    if (!name) {
-        return;
-    }
-
-    try {
-        const resolvedPath = buildPngPath(baseDir, name);
-        if (fs.existsSync(resolvedPath)) {
-            fs.unlinkSync(resolvedPath);
-        }
-    } catch (err) {
-        logger.warn(`Failed to resolve file path for ${name}`, err);
-    }
-}
-
-// ARCHON: avatars were stored at 24x24 - the exact size the web client draws
-// them at, and a blurry mess on any high-DPI screen (the mobile app shows them
-// considerably larger). Stored at 96 they stay crisp everywhere; the web is
-// unaffected since it scales them down in CSS, and avatars already on disk keep
-// working untouched.
-const AVATAR_SIZE = 96;
-
 async function getRandomAvatar(user) {
     let stringToHash = crypto.randomBytes(32).toString('hex');
     let md5Hash = crypto.createHash('md5').update(stringToHash).digest('hex');
@@ -245,55 +207,12 @@ async function getRandomAvatar(user) {
     await fs.promises.writeFile(buildPngPath('public/img/avatar', user.username), avatar);
 }
 
-async function processImage(image, width, height) {
-    const canvas = new StaticCanvas(null, { width, height });
-    // Fabric rejects rather than yielding a null image when the data URL will
-    // not decode, so an unusable avatar arrives here as a throw and is caught
-    // by the caller exactly as the old null check was.
-    const img = await FabricImage.fromURL('data:image/png;base64,' + image, {
-        crossOrigin: 'anonymous'
-    });
-
-    if (!img || img.getElement() == null) {
-        throw new Error('Error occurred in fabric');
-    }
-
-    // Not chained: from v6 these return nothing rather than the object.
-    img.scaleToWidth(width);
-    img.scaleToHeight(height);
-    img.set({
-        originX: 'center',
-        originY: 'center',
-        left: width / 2,
-        top: height / 2
-    });
-    canvas.add(img);
-    canvas.renderAll();
-
-    return canvas;
-}
-
 async function processAvatar(newUser, user) {
-    let hash = crypto.randomBytes(16).toString('hex');
-
-    removePng('public/img/avatar', user.settings.avatar);
-
-    let canvas;
-    try {
-        canvas = await processImage(newUser.avatar, AVATAR_SIZE, AVATAR_SIZE);
-    } catch (err) {
-        logger.error(err);
-        return null;
-    }
-
-    let fileName = `${sanitizePathSegment(user.username)}-${hash}`;
-    const stream = canvas.createPNGStream();
-    const out = fs.createWriteStream(buildPngPath('public/img/avatar', fileName));
-    stream.on('data', (chunk) => {
-        out.write(chunk);
+    return saveAvatarImage({
+        base64Image: newUser.avatar,
+        username: user.username,
+        previousAvatar: user.settings.avatar
     });
-
-    return fileName;
 }
 
 async function processCustomBackground(newUser, user) {

@@ -23,6 +23,8 @@ const TournamentService = require('./services/tournament/TournamentService');
 const tournamentEvents = require('./services/tournament/tournamentEvents');
 // ARCHON: Quick Match matchmaking queue (Amber-based pairing)
 const MatchmakingService = require('./services/matchmaking/MatchmakingService');
+// ARCHON (F9): the practice bots - one per house, always hosting a table
+const BotService = require('./services/botgames/BotService');
 const { UNCHAINED_EXPANSION_ID } = require('./services/DeckService');
 const { filterText } = require('./services/moderation/contentFilter');
 const RatingService = require('./services/rating/RatingService');
@@ -193,17 +195,39 @@ class Lobby {
             this.roundDeadlineSweep.unref();
         }
 
-        // ARCHON (N18): the Proving Grounds - simulated games for Vault
+        // ARCHON (N18): the Champion’s Challenge - simulated games for Vault
         // Master rosters. Ticks often and consults the admin-configured
         // cadence on each tick, like the crawl and the import worker,
         // because the pace knobs exist precisely for the day an operator
         // needs the lab to slow down without a restart. Optional the same
         // way analytics is: a lobby built without the service plays nothing.
-        this.provingGroundsService = options.provingGroundsService || null;
-        this.lastProvingGroundsSweepMs = 0;
-        this.provingGroundsSweep = setInterval(() => this.runProvingGroundsSweep(), 15 * 1000);
-        if (this.provingGroundsSweep && this.provingGroundsSweep.unref) {
-            this.provingGroundsSweep.unref();
+        this.championsChallengeService = options.championsChallengeService || null;
+        this.lastChampionsChallengeSweepMs = 0;
+        this.championsChallengeSweep = setInterval(
+            () => this.runChampionsChallengeSweep(),
+            15 * 1000
+        );
+        if (this.championsChallengeSweep && this.championsChallengeSweep.unref) {
+            this.championsChallengeSweep.unref();
+        }
+
+        // ARCHON (F9): the practice bots' open table. The sweep keeps exactly
+        // one unstarted bot game waiting in the lobby (while the concurrency
+        // cap allows), hosted by a bot chosen at random from the roster, so
+        // the next person to arrive meets a different character playing a
+        // different house. It also recycles a table whose joiner wandered
+        // off, and takes the table down when an admin switches the bots off -
+        // read on every tick, so it works without a restart.
+        this.botService =
+            options.botService ||
+            new BotService({
+                userService: this.userService,
+                deckService: this.deckService
+            });
+        this.lastBotDeckWarnMs = 0;
+        this.botTableSweep = setInterval(() => this.runBotTableSweep(), 15 * 1000);
+        if (this.botTableSweep && this.botTableSweep.unref) {
+            this.botTableSweep.unref();
         }
 
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
@@ -641,7 +665,7 @@ class Lobby {
     }
 
     /**
-     * ARCHON (N18): play the Proving Grounds' simulated games.
+     * ARCHON (N18): play the Champion’s Challenge' simulated games.
      *
      * The service does everything - picks the roster most in need, checks the
      * owner still holds the capability, plays the games with event-loop
@@ -651,39 +675,317 @@ class Lobby {
      * `runSweep` on every pass, so switching the lab off in admin settings
      * stops play within a tick.
      */
-    async runProvingGroundsSweep() {
-        if (!this.provingGroundsService || this.provingGroundsSweepRunning) {
+    async runChampionsChallengeSweep() {
+        if (!this.championsChallengeService || this.championsChallengeSweepRunning) {
             return;
         }
 
         try {
-            const config = this.provingGroundsService.getConfig();
+            const config = this.championsChallengeService.getConfig();
             const seconds = Math.max(15, Number(config.sweepIntervalSeconds) || 60);
             const now = Date.now();
 
-            if (now - this.lastProvingGroundsSweepMs < seconds * 1000) {
+            if (now - this.lastChampionsChallengeSweepMs < seconds * 1000) {
                 return;
             }
 
-            this.lastProvingGroundsSweepMs = now;
-            this.provingGroundsSweepRunning = true;
+            this.lastChampionsChallengeSweepMs = now;
+            this.championsChallengeSweepRunning = true;
 
-            const result = await this.provingGroundsService.runSweep();
+            const result = await this.championsChallengeService.runSweep();
 
             if (result && result.played > 0) {
-                logger.info(`Proving Grounds played ${result.played} simulated game(s)`);
+                logger.info(`Champion’s Challenge played ${result.played} simulated game(s)`);
             }
 
             if (result && result.abandoned > 0) {
                 logger.warn(
-                    `Proving Grounds abandoned ${result.abandoned} simulated game(s) this sweep`
+                    `Champion’s Challenge abandoned ${result.abandoned} simulated game(s) this sweep`
                 );
             }
         } catch (err) {
-            logger.error('Proving Grounds sweep failed', err);
+            logger.error('Champion’s Challenge sweep failed', err);
         } finally {
-            this.provingGroundsSweepRunning = false;
+            this.championsChallengeSweepRunning = false;
         }
+    }
+
+    /**
+     * ARCHON (F9): keep a practice table open.
+     *
+     * The invariant is simple: while the bots are on and under the
+     * concurrency cap, exactly one unstarted bot game with a free seat is
+     * waiting in the lobby - hosted by a bot picked at random from the
+     * roster, so the table that replaces a joined one is a different
+     * character playing a different house.
+     *
+     * Everything else here is repair: starting a table whose seats are both
+     * decked, re-opening one whose joiner never picked a deck, and taking
+     * them all down when an admin switches the bots off. The sweep recreates
+     * rather than preserves, so any state it loses (a restart, an admin
+     * force-close, a node death) heals on the next tick.
+     */
+    async runBotTableSweep() {
+        if (!this.botService || this.botTableSweepRunning) {
+            return;
+        }
+
+        this.botTableSweepRunning = true;
+
+        try {
+            const config = this.botService.getConfig();
+            const pendingBotGames = () =>
+                Object.values(this.games).filter((game) => game.botGame && !game.started);
+
+            if (!config.enabled) {
+                for (const game of pendingBotGames()) {
+                    this.removeBotTable(game);
+                }
+
+                return;
+            }
+
+            const recycleMs = Math.max(1, Number(config.pendingRecycleMinutes) || 10) * 60 * 1000;
+
+            for (const game of pendingBotGames()) {
+                const humanSeated = Object.values(game.getPlayers()).some(
+                    (player) => !player.isBot
+                );
+
+                if (!humanSeated) {
+                    game.botTableHumanSince = undefined;
+                    continue;
+                }
+
+                /**
+                 * ARCHON (F9): the heal, and the reason a bot table can never
+                 * sit there ready-but-idle.
+                 *
+                 * onSelectDeck starts the table the instant the human picks a
+                 * deck, and that is what players actually experience. But it
+                 * is one hook on one path, and a table nobody can start is a
+                 * dead end for the person sitting at it: the bot owns the
+                 * table, so the Start button belongs to a player with no
+                 * hands. Anything that costs us that single call - a game
+                 * node briefly unavailable, a deck applied down a path that
+                 * does not reach the hook, a rejected promise after the deck
+                 * was already seated - used to strand the table forever.
+                 *
+                 * So readiness is re-checked every tick from the lobby's own
+                 * state rather than trusted to an event. Costs one predicate
+                 * per table and removes the whole class of failure.
+                 */
+                if (this.startBotGameIfReady(game)) {
+                    continue;
+                }
+
+                // A human who is still choosing needs a clock, whichever path
+                // seated them.
+                if (!game.botTableHumanSince) {
+                    game.botTableHumanSince = Date.now();
+                }
+
+                if (Date.now() - game.botTableHumanSince > recycleMs) {
+                    // Somebody sat down and never picked a deck. Free the
+                    // table for the next player; the joiner just returns to
+                    // the lobby.
+                    this.removeBotTable(game);
+                }
+            }
+
+            const botGames = Object.values(this.games).filter((game) => game.botGame);
+            const open = botGames.filter(
+                (game) =>
+                    !game.started &&
+                    !Object.values(game.getPlayers()).some((player) => !player.isBot)
+            );
+
+            if (open.length === 0) {
+                if (botGames.length < Math.max(1, Number(config.maxConcurrentGames) || 1)) {
+                    await this.createBotTable(config);
+                }
+            } else {
+                // One open table is the promise; a second is clutter.
+                for (const extra of open.slice(1)) {
+                    this.removeBotTable(extra);
+                }
+            }
+        } catch (err) {
+            logger.error('Bot table sweep failed', err);
+        } finally {
+            this.botTableSweepRunning = false;
+        }
+    }
+
+    /**
+     * Everyone the lobby currently has seated, bots included.
+     *
+     * The roster picks the next host from whoever is NOT in here: an account
+     * in two games at once is one seat pretending to be two, and meeting a
+     * different character each time is the whole point of thirteen of them.
+     */
+    seatedUsernames() {
+        const seated = [];
+
+        for (const game of Object.values(this.games)) {
+            for (const player of Object.values(game.getPlayers())) {
+                seated.push(player.name);
+            }
+        }
+
+        return seated;
+    }
+
+    /**
+     * Host one open bot table: a bot chosen at random from the roster, seated
+     * as owner with a deck of its own house already picked, ready for anyone
+     * to join.
+     *
+     * The host and its deck are chosen together (`pickHost`), because a bot
+     * with nothing to play cannot host: the roster hands back the first bot
+     * that has a deck rather than opening a table that could never start.
+     * The deck is applied before the game is published, so the lobby never
+     * lists a bot table that is not ready for a joiner.
+     */
+    async createBotTable(config) {
+        const host = await this.botService.pickHost(this.seatedUsernames());
+
+        if (!host) {
+            // Once an hour, not once a tick: this repeats until an admin
+            // gives the bots decks, and every tick would bury the log.
+            if (Date.now() - this.lastBotDeckWarnMs > 60 * 60 * 1000) {
+                this.lastBotDeckWarnMs = Date.now();
+                logger.warn(
+                    'No practice bot can host a table - none of the enabled bots has a deck of ' +
+                        'its house. Import decks into the bot accounts (Bot Settings lists what ' +
+                        'each one holds), or seed the standalone decks: ' +
+                        'node server/scripts/importstandalonedecks.js'
+                );
+            }
+
+            return;
+        }
+
+        const { bot, deck } = host;
+        const botUser = bot.user;
+
+        const game = new PendingGame(botUser, {
+            allowSpectators: !!config.allowSpectators,
+            gameFormat: 'normal',
+            muteSpectators: false,
+            name: `Play against ${botUser.username}! (${bot.label} practice)`,
+            showHand: false
+        });
+
+        game.botGame = true;
+        game.botHouse = bot.house;
+        game.botMaxTurns = config.maxTurns;
+        // 'TBA' is the platform's existing "no socket" id: the lobby and the
+        // node both already treat such a seat as connectionless, so the game
+        // closes itself when the human is gone instead of waiting on the bot.
+        game.newGame('TBA', botUser, undefined, true);
+        game.players[botUser.username].isBot = true;
+
+        try {
+            await this.applyDeckSelection(game, botUser.username, deck.deckId, deck.isStandalone);
+        } catch (err) {
+            logger.error(`The ${bot.label} bot could not select its deck`, err);
+
+            return;
+        }
+
+        game.addMessage(
+            '{0} hosts this table and plays {1} decks. Join, pick a deck, and the game starts by itself - practice games are never rated.',
+            botUser.username,
+            bot.label
+        );
+
+        this.games[game.id] = game;
+        this.broadcastGameMessage('newgame', game);
+
+        logger.info(`${botUser.username} (${bot.label}) opened practice table ${game.id}`);
+    }
+
+    /** Retire an unstarted bot table, freeing anyone seated at it. */
+    removeBotTable(game) {
+        if (!game || game.started) {
+            return;
+        }
+
+        this.broadcastGameMessage('removegame', game);
+        delete this.games[game.id];
+    }
+
+    /**
+     * ARCHON (F9): a bot table starts itself the moment its human has a deck
+     * - the mirror of startTournamentGameIfReady, for the same reason: the
+     * owner seat (the bot) has no hand to press Start with.
+     *
+     * Safe to call repeatedly from anywhere: it re-derives everything from
+     * the table and does nothing unless the table is genuinely ready. The
+     * sweep leans on that, calling it every tick as the backstop.
+     *
+     * @returns {boolean} whether the game was started by this call
+     */
+    startBotGameIfReady(game) {
+        if (!game || game.started || !game.botGame) {
+            return false;
+        }
+
+        const players = Object.values(game.getPlayers());
+
+        if (players.length < 2 || players.some((player) => !player.deck)) {
+            return false;
+        }
+
+        const gameNode = this.router.startGame(game);
+
+        if (!gameNode) {
+            logger.error(`No game nodes available for practice game ${game.id}`);
+
+            // The joiner is sitting at a table that visibly did not start -
+            // say why instead of leaving the silence to them.
+            for (const player of players) {
+                if (!player.isBot) {
+                    this.sockets[player.id]?.send(
+                        'gameerror',
+                        'No game nodes available. Try again later.'
+                    );
+                }
+            }
+
+            return false;
+        }
+
+        game.node = gameNode;
+        game.started = true;
+
+        logger.info(
+            `Practice game ${game.id} started against ${players
+                .filter((player) => !player.isBot)
+                .map((player) => player.name)
+                .join(', ')}`
+        );
+
+        this.broadcastGameMessage('updategame', game);
+
+        for (const player of Object.values(game.getPlayersAndSpectators())) {
+            // The bot needs no handoff: it lives on the node already.
+            if (player.isBot) {
+                continue;
+            }
+
+            const socket = this.sockets[player.id];
+
+            if (!socket || !socket.user) {
+                logger.error(`Wanted to handoff to ${player.name}, but couldn't find a socket`);
+                continue;
+            }
+
+            this.sendHandoff(socket, gameNode, game.id);
+        }
+
+        return true;
     }
 
     /**
@@ -986,8 +1288,15 @@ class Lobby {
 
     async clearStalePendingGames() {
         const timeout = 15 * 60 * 1000;
+        // ARCHON (F9): bot tables are exempt - waiting is their job, and their
+        // own sweep already recycles the one stale shape they have (a joiner
+        // who never picked a deck).
         let staleGames = Object.values(this.games).filter(
-            (game) => !game.started && !game.tournament && Date.now() - game.createdAt > timeout
+            (game) =>
+                !game.started &&
+                !game.tournament &&
+                !game.botGame &&
+                Date.now() - game.createdAt > timeout
         );
 
         for (let game of staleGames) {
@@ -1417,6 +1726,10 @@ class Lobby {
                     // opted into from the game list, never matched into.
                     !game.sasBound &&
                     !game.luckyDice &&
+                    // ARCHON (F9): and a plain game means a person. The Helper
+                    // Bot's table is opted into from the game list, never
+                    // matched into.
+                    !game.botGame &&
                     game.isVisibleFor(socket.user)
             );
 
@@ -1473,6 +1786,12 @@ class Lobby {
         this.sendGameState(game);
         this.broadcastGameMessage('updategame', game);
 
+        // ARCHON (F9): the clock the sweep recycles an idle joiner on. The
+        // game itself starts from onSelectDeck, the moment they hold a deck.
+        if (game.botGame) {
+            game.botTableHumanSince = Date.now();
+        }
+
         // ARCHON: joining your tournament table auto-selects your
         // registered deck and starts the game once both players are in.
         if (game.tournament) {
@@ -1498,6 +1817,29 @@ class Lobby {
         // allowed and stranded the owner in a board with no opponent.
         if (Object.values(game.getPlayers()).length < 2) {
             socket.send('gameerror', 'You need an opponent before the game can start');
+            return;
+        }
+
+        // ARCHON (F9): a practice bot owns its table but has no hands to
+        // press Start with, so ownership cannot be what gates starting one -
+        // the player who joined it may. Selecting a deck normally starts the
+        // table before anybody reaches for the button; this is what makes the
+        // button in front of them real rather than decorative.
+        if (game.botGame) {
+            const seat = game.getPlayerByName(socket.user.username);
+
+            if (!seat) {
+                return;
+            }
+
+            if (!seat.deck) {
+                socket.send('gameerror', 'Select a deck before starting the game');
+
+                return;
+            }
+
+            this.startBotGameIfReady(game);
+
             return;
         }
 
@@ -1929,6 +2271,12 @@ class Lobby {
                 if (game.tournament) {
                     this.startTournamentGameIfReady(game);
                 }
+
+                // ARCHON (F9): a bot table launches as soon as its human
+                // holds a deck - the bot picked its own at hosting time.
+                if (game.botGame) {
+                    this.startBotGameIfReady(game);
+                }
             })
             .catch((err) => {
                 // A rejection with a playerMessage is the game refusing the
@@ -1941,6 +2289,15 @@ class Lobby {
                 }
 
                 logger.info(err);
+
+                // ARCHON (F9): the deck is seated before the parts of
+                // selection that can fail late (the SAS attach, a state
+                // push), so a table can be perfectly ready and still arrive
+                // here. Ask anyway - it refuses unless everything is really
+                // in place, and the alternative is a table nobody can start.
+                if (game.botGame) {
+                    this.startBotGameIfReady(game);
+                }
 
                 return;
             });
@@ -2841,6 +3198,14 @@ class Lobby {
             return;
         }
 
+        // ARCHON (F9): the bot holds no socket, so seating always refuses and
+        // hands the table back - from where re-picking a deck starts the next
+        // game. Refresh the recycle clock so the sweep does not sweep the
+        // table out from under the player who just asked to keep playing.
+        if (game.botGame) {
+            game.botTableHumanSince = Date.now();
+        }
+
         const seating = this.rematchSeating(game);
 
         if (seating.error) {
@@ -2958,6 +3323,12 @@ class Lobby {
             logger.warn(`Ignored a rematch request for tournament table ${gameId}`);
 
             return;
+        }
+
+        // ARCHON (F9): same as onGameRematch - the refusal returns the table,
+        // and the clock must not immediately recycle it.
+        if (game.botGame) {
+            game.botTableHumanSince = Date.now();
         }
 
         // Nobody needs a deck in hand here - the whole point is that everyone
@@ -3198,6 +3569,9 @@ class Lobby {
                 name: game.name
             });
             syncGame.adaptive = game.adaptive;
+            // ARCHON (F9): a practice game keeps counting against the Helper
+            // Bot's concurrency cap across a lobby restart.
+            syncGame.botGame = game.botGame;
             syncGame.createdAt = game.startedAt;
             syncGame.gameFormat = game.gameFormat;
             syncGame.gamePrivate = game.gamePrivate;

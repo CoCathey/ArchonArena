@@ -19,7 +19,7 @@ import { colors, radius, spacing } from '../src/theme';
 import { Button, Card, ErrorBanner } from '../src/ui/primitives';
 
 /**
- * ARCHON (N12): the Tournament Lab on the phone.
+ * ARCHON (N12): Deep Probe (né the Tournament Lab) on the phone.
  *
  * "Which of my decks should I bring?" — answered from the player's own results
  * rather than from a rating anybody could look up.
@@ -148,7 +148,7 @@ export default function TournamentLabScreen() {
         try {
             setData(await fetchTournamentLab(selected));
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Could not load the Tournament Lab.');
+            setError(err instanceof Error ? err.message : 'Could not load Deep Probe.');
         } finally {
             setLoading(false);
         }

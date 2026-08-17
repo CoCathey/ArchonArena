@@ -109,7 +109,15 @@ BoardCard.propTypes = {
     onCardMouseOver: PropTypes.func
 };
 
-const ReplayBoard = ({ board, cards, hands, perspective, onCardMouseOver, onCardMouseOut }) => {
+const ReplayBoard = ({
+    board,
+    cards,
+    hands,
+    archives,
+    perspective,
+    onCardMouseOver,
+    onCardMouseOut
+}) => {
     const { t } = useTranslation();
     const resolved = hydrateBoard(board, cards);
 
@@ -191,14 +199,18 @@ const ReplayBoard = ({ board, cards, hands, perspective, onCardMouseOver, onCard
                     </div>
 
                     <div className='space-y-2'>
-                        {/* ARCHON (F3): the recorded hand - only ever present
-                            for hands this reader may see (their own, with the
-                            Archon tier; both, for an admin). The server
-                            strips the rest before it leaves, so presence here
-                            IS permission. */}
+                        {/* ARCHON (F3): the recorded hidden zones - only ever
+                            present for players this reader may see (their
+                            own, with the Archon tier; both, for an admin).
+                            The server strips the rest before it leaves, so
+                            presence here IS permission. Recorded archives
+                            replace the facedown pile the board frame holds;
+                            everyone else still sees the cardbacks. */}
                         {renderPile('Hand (recorded)', hands?.[player.name])}
                         {renderPile('In play', player.cardPiles?.cardsInPlay)}
-                        {renderPile('Archives', player.cardPiles?.archives)}
+                        {archives?.[player.name]?.length
+                            ? renderPile('Archives (recorded)', archives[player.name])
+                            : renderPile('Archives', player.cardPiles?.archives)}
                         {renderPile('Discard', player.cardPiles?.discard)}
                         {renderPile('Purged', player.cardPiles?.purged)}
                     </div>
@@ -209,6 +221,7 @@ const ReplayBoard = ({ board, cards, hands, perspective, onCardMouseOver, onCard
 };
 
 ReplayBoard.propTypes = {
+    archives: PropTypes.object,
     board: PropTypes.object,
     cards: PropTypes.array,
     hands: PropTypes.object,

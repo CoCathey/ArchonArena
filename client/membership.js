@@ -43,7 +43,7 @@ export const CAPABILITIES = Object.freeze({
     ENHANCED_COSMETICS: 'enhanced_cosmetics',
     ORGANIZER_TOOLS: 'organizer_tools',
     PRIORITY_ACCESS: 'priority_access',
-    PROVING_GROUNDS: 'proving_grounds'
+    CHAMPIONS_CHALLENGE: 'champions_challenge'
 });
 
 export const TIERS = Object.freeze({

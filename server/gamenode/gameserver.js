@@ -18,6 +18,10 @@ const Game = require('../game/game');
 const Socket = require('../socket');
 const ConfigService = require('../services/ConfigService');
 const HealthServer = require('./healthserver.js');
+// ARCHON (F9): the Helper Bot's seat - answers the bot's prompts after every
+// event that can change game state. Attached to the game instance itself so
+// it lives and dies with the game.
+const BotDriver = require('./botdriver.js');
 
 class GameServer {
     constructor() {
@@ -266,6 +270,14 @@ class GameServer {
             if (game.checkInactivity()) {
                 this.runAndCatchErrors(game, () => {
                     game.continue();
+
+                    // ARCHON (F9): safety net - if a prompt has somehow been
+                    // waiting on the bot since the last event, answer it now
+                    // rather than leaving the human staring at a stuck board.
+                    if (game.botDriver) {
+                        game.botDriver.pump(game);
+                    }
+
                     this.sendGameState(game);
                 });
             }
@@ -279,6 +291,11 @@ class GameServer {
             this.runAndCatchErrors(game, () => {
                 if (game.checkAbandonment()) {
                     game.continue();
+
+                    if (game.botDriver) {
+                        game.botDriver.pump(game);
+                    }
+
                     this.sendGameState(game);
                 }
             });
@@ -606,6 +623,33 @@ class GameServer {
         if (pendingGame.rematch) {
             game.addAlert('info', 'The rematch is ready');
         }
+
+        // ARCHON (F9): seat the bot. The lobby marks the bot's seat on the
+        // start details (player.isBot); the driver answers its prompts from
+        // here on - starting now, because initialise() has already dealt the
+        // mulligan prompt and nobody is coming to click for the bot.
+        const botNames = Object.values(pendingGame.players)
+            .filter((player) => player.isBot)
+            .map((player) => player.name);
+
+        if (botNames.length > 0) {
+            game.botDriver = new BotDriver(botNames, {
+                maxTurns: pendingGame.botMaxTurns,
+                // A pump that runs out of its event-loop budget finishes here,
+                // on a later tick, with the board pushed out as it goes. The
+                // node stays responsive to every other game on it - and to the
+                // lobby's ping, which is what decides this node is alive.
+                resume: () =>
+                    this.runAndCatchErrors(game, () => {
+                        game.botDriver.pump(game);
+                        this.sendGameState(game);
+                    })
+            });
+            game.addAlert('info', 'Good luck, have fun!');
+            this.runAndCatchErrors(game, () => {
+                game.botDriver.pump(game);
+            });
+        }
     }
 
     /**
@@ -896,6 +940,14 @@ class GameServer {
             game[command](socket.user.username, ...args);
 
             game.continue();
+
+            // ARCHON (F9): whatever the human just did may have handed the
+            // bot a prompt (its turn, a trigger window, a fight choice).
+            // Answer before the state goes out, so the human never watches
+            // a bot "thinking" about a window they cannot see.
+            if (game.botDriver) {
+                game.botDriver.pump(game);
+            }
 
             this.sendGameState(game);
         });

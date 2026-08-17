@@ -63,7 +63,7 @@ class BadgeService {
         const cosmeticGroup = cosmeticColumns;
 
         return this.db.query(
-            'SELECT u."Username", ' +
+            'SELECT u."Username", u."Registered", ' +
                 '  COALESCE(array_agg(r."Name") FILTER (WHERE r."Name" IS NOT NULL), ' +
                 '    \'{}\') AS "Roles", ' +
                 '  m."Tier", m."Status", m."ExpiresAt", m."GrantedTier", m."GrantedUntil"' +
@@ -75,7 +75,7 @@ class BadgeService {
                 cosmeticJoin +
                 'WHERE lower(u."Username") = ANY($1) ' +
                 '  AND u."Disabled" IS NOT TRUE AND u."Verified" IS TRUE ' +
-                'GROUP BY u."Username", m."Tier", m."Status", m."ExpiresAt", ' +
+                'GROUP BY u."Username", u."Registered", m."Tier", m."Status", m."ExpiresAt", ' +
                 '  m."GrantedTier", m."GrantedUntil"' +
                 cosmeticGroup,
             [wanted, BADGE_ROLE_NAMES]
@@ -165,10 +165,17 @@ class BadgeService {
             const badge = publicBadge({
                 permissions,
                 membership,
-                cosmetics: this.storedCosmetics(row)
+                cosmetics: this.storedCosmetics(row),
+                // ARCHON (N20): drives the New pill next to fresh accounts.
+                registered: row.Registered
             });
 
-            if (badge.role === 'user' && badge.tier === TIER_IDS.FREE && !badge.cosmetics) {
+            if (
+                badge.role === 'user' &&
+                badge.tier === TIER_IDS.FREE &&
+                !badge.cosmetics &&
+                !badge.isNew
+            ) {
                 continue;
             }
 

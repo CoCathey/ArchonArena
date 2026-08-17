@@ -42,7 +42,6 @@ import AnalyticsAdmin from './pages/AnalyticsAdmin';
 // ARCHON (N5): reports and the moderation queue
 import ModerationQueue from './pages/ModerationQueue';
 import Onboarding from './pages/Onboarding';
-import Ratings from './pages/Ratings';
 import PlayerProfile from './pages/PlayerProfile';
 import PlayIrl from './pages/PlayIrl';
 import MotdAdmin from './pages/MotdAdmin';
@@ -53,9 +52,9 @@ import Patreon from './pages/Patreon';
 // ARCHON (N12): premium membership
 import Membership from './pages/Membership';
 import ArchonIntelligence from './pages/ArchonIntelligence';
-import TournamentLab from './pages/TournamentLab';
-// ARCHON (N18): the Proving Grounds - Vault Master background deck testing
-import ProvingGrounds from './pages/ProvingGrounds';
+import DeepProbe from './pages/DeepProbe';
+// ARCHON (N18): the Champion’s Challenge - Vault Master background deck testing
+import ChampionsChallenge from './pages/ChampionsChallenge';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import Watch from './pages/Watch';
@@ -64,21 +63,23 @@ import Register from './pages/Register';
 import ResetPassword from './pages/ResetPassword';
 import Security from './pages/Security.jsx';
 import SettingsAdmin from './pages/SettingsAdmin';
+import BotAdmin from './pages/BotAdmin';
 import Unauthorised from './pages/Unauthorised';
 import UserAdmin from './pages/UserAdmin';
 import GameLobby from './Components/Games/GameLobby';
 import GameBoard from './Components/GameBoard/GameBoard.jsx';
 
 /**
- * The leaderboards moved under /stats. Season history links carry
- * `?season=N`, so this preserves the query rather than dropping a player on
- * the live ladder when they asked for an archived one.
+ * The leaderboards live under /community now (they were briefly under
+ * /stats). Season history links carry `?season=N`, so this preserves the
+ * query rather than dropping a player on the live ladder when they asked for
+ * an archived one.
  */
 const LeaderboardsRedirect = () => {
     const [searchParams] = useSearchParams();
     const search = searchParams.toString();
 
-    return <Navigate to={`/stats/leaderboards${search ? `?${search}` : ''}`} replace />;
+    return <Navigate to={`/community/leaderboards${search ? `?${search}` : ''}`} replace />;
 };
 
 LeaderboardsRedirect.displayName = 'LeaderboardsRedirect';
@@ -149,6 +150,8 @@ const AppRoutes = ({ currentGame, user }) => {
                 path='/admin/settings'
                 element={requirePermission('isAdmin', <SettingsAdmin />)}
             />
+            {/* ARCHON (F9): the practice bot roster (admin only) */}
+            <Route path='/admin/bots' element={requirePermission('isAdmin', <BotAdmin />)} />
             {/* ARCHON (N8): operations dashboard (admin only) */}
             <Route
                 path='/admin/analytics'
@@ -167,8 +170,8 @@ const AppRoutes = ({ currentGame, user }) => {
                 what makes them an upgrade moment instead of a dead end. */}
             <Route path='/membership' element={<Membership />} />
             <Route path='/intelligence' element={<ArchonIntelligence />} />
-            <Route path='/tournament-lab' element={<TournamentLab />} />
-            <Route path='/proving-grounds' element={<ProvingGrounds />} />
+            <Route path='/deep-probe' element={<DeepProbe />} />
+            <Route path='/champions-challenge' element={<ChampionsChallenge />} />
             {/* ARCHON (N12): Patreon's OAuth callback. `state` is checked
                 server-side against a signed cookie; `error` is set when the
                 player declined on Patreon's consent screen. */}
@@ -224,22 +227,20 @@ const AppRoutes = ({ currentGame, user }) => {
             />
             {/* ARCHON: the statistics pages - site stats, your own Amber, and
                 the rankings - used to be scattered across Play, Community and
-                two top-level tabs. They are one Stats section now, and Top
-                Players (which was the rankings query pinned to the worldwide
-                top 25) has been folded into Leaderboards.
+                two top-level tabs. Your Amber and the meta are one page now
+                (/stats, opening on your own numbers), and the rankings sit in
+                Community with the other people-shaped pages.
 
                 Every former path still resolves: they are linked from
                 profiles, the About page and anywhere a player has bookmarked
                 them, and a dead link is a worse outcome than a redirect nobody
                 notices. `replace` keeps the old URL out of history, so Back
-                does not bounce through it. */}
+                does not bounce through it. /stats/me is not a redirect - it
+                still names a real view, the overview's first tab. */}
             <Route path='/stats' element={<Stats />} />
-            <Route path='/stats/me' element={<Ratings />} />
-            <Route path='/stats/leaderboards' element={<Leaderboards />} />
-            <Route
-                path='/stats/top-players'
-                element={<Navigate to='/stats/leaderboards' replace />}
-            />
+            <Route path='/stats/me' element={<Stats />} />
+            <Route path='/stats/leaderboards' element={<LeaderboardsRedirect />} />
+            <Route path='/stats/top-players' element={<LeaderboardsRedirect />} />
             <Route path='/tournaments' element={<Tournaments />} />
             <Route path='/tournaments/:id' element={<TournamentDetail />} />
             {/* ARCHON (N9): what the printed check-in QR points at. Both
@@ -258,13 +259,11 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/community/teams' element={<Teams />} />
             <Route path='/community/teams/:id' element={<TeamDetail />} />
             <Route path='/community/members' element={<Members />} />
+            <Route path='/community/leaderboards' element={<Leaderboards />} />
             {/* Former homes of the ranking pages. A query string on a
                 leaderboard link (?season=3, from the season history) has to
-                survive the move, so that one carries its search through. */}
-            <Route
-                path='/community/top-players'
-                element={<Navigate to='/stats/leaderboards' replace />}
-            />
+                survive the move, so those carry their search through. */}
+            <Route path='/community/top-players' element={<LeaderboardsRedirect />} />
             <Route path='/community/ratings' element={<Navigate to='/stats/me' replace />} />
             <Route path='/leaderboards' element={<LeaderboardsRedirect />} />
             <Route

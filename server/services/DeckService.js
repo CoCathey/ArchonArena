@@ -2,6 +2,7 @@ const logger = require('../log');
 const util = require('../util');
 const db = require('../db');
 const { expand, flatten } = require('../Array');
+const { effectiveAri } = require('./rating/AriService');
 const Constants = require('../constants');
 // ARCHON: game-deciding randomness comes from one place - see the module.
 const secureRandom = require('../game/secureRandom');
@@ -321,7 +322,7 @@ class DeckService {
      */
     async getRandomDeckIdForUser(
         userId,
-        { isAlliance, unchainedOnly = false, sasMin, sasMax } = {}
+        { isAlliance, unchainedOnly = false, sasMin, sasMax, house } = {}
     ) {
         const params = [userId];
         let where = 'WHERE d."UserId" = $1 ';
@@ -329,6 +330,20 @@ class DeckService {
         if (isAlliance !== undefined && isAlliance !== null) {
             params.push(isAlliance);
             where += `AND d."IsAlliance" = $${params.length} `;
+        }
+
+        // ARCHON (F9): "a deck this bot may play". Each practice bot belongs
+        // to a house and only ever plays decks containing it, so the house is
+        // a filter on the roll rather than something checked afterwards -
+        // rolling first and rejecting would loop on a collection where most
+        // decks are the wrong colour. Same EXISTS the deck list's `house`
+        // filter uses, so the dice and the list agree on what contains a
+        // house.
+        if (house) {
+            params.push(String(house).toLowerCase());
+            where +=
+                'AND EXISTS (SELECT 1 FROM "DeckHouses" dh JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
+                `WHERE dh."DeckId" = d."Id" AND h."Code" = $${params.length}) `;
         }
 
         // Playable only in the unchained format, and the only thing playable
@@ -387,6 +402,34 @@ class DeckService {
         }
 
         return rows && rows.length > 0 ? rows[0].Id : null;
+    }
+
+    /**
+     * ARCHON (F9): how many decks this account holds containing a house.
+     *
+     * Only the Bot Settings page asks - so an admin can see at a glance that
+     * the Ekwidon bot has nothing to play and that no amount of enabling it
+     * will change that. Same EXISTS as the roll, so the number and the roll
+     * cannot disagree.
+     */
+    async countDecksForUserWithHouse(userId, house) {
+        try {
+            const rows = await db.query(
+                'SELECT count(*)::int AS "Total" FROM "Decks" d ' +
+                    'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
+                    'WHERE d."UserId" = $1 AND d."IsAlliance" = false ' +
+                    `AND e."ExpansionId" <> ${UNCHAINED_EXPANSION_ID} ` +
+                    'AND EXISTS (SELECT 1 FROM "DeckHouses" dh JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
+                    'WHERE dh."DeckId" = d."Id" AND h."Code" = $2)',
+                [userId, String(house).toLowerCase()]
+            );
+
+            return (rows && rows[0] && rows[0].Total) || 0;
+        } catch (err) {
+            logger.error(`Failed to count ${house} decks for user ${userId}`, err);
+
+            return 0;
+        }
     }
 
     async deckExistsForUser(user, deckId) {
@@ -693,7 +736,7 @@ class DeckService {
                     // ARCHON: "DeckCount" quoted. Unquoted, Postgres folds the
                     // alias to `deckcount`, so mapDeck's `deck.DeckCount` was
                     // undefined and every deck's usage level computed as 0.
-                    `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
+                    `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ds."AercScore" AS "AercScore", da."Ari" AS "Ari", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     // ARCHON: SAS joined HERE rather than attached to the page
@@ -708,6 +751,8 @@ class DeckService {
                     'JOIN "Users" u ON u."Id" = "UserId" ' +
                     'JOIN "Expansions" e on e."Id" = d."ExpansionId" ' +
                     'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                    // ARCHON (N19): ARI beside SAS on every deck row.
+                    'LEFT JOIN "DeckAri" da ON da."Uuid" = d."Uuid" ' +
                     'WHERE "UserId" = $1 ' +
                     filter +
                     ') sq ' +
@@ -1993,7 +2038,11 @@ class DeckService {
             globalWinRate: deck.GlobalWinRate,
             // Present when the row came from a query that joins DeckSas.
             // attachStats fills this in for the paths that do not.
-            sasRating: deck.SasRating != null ? deck.SasRating : undefined
+            sasRating: deck.SasRating != null ? deck.SasRating : undefined,
+            // ARCHON (N19): the Archon Rating Index - stored when any game
+            // has moved it, the SAS/AERC seed otherwise, undefined on paths
+            // that did not join (attachStats decorates those).
+            ari: effectiveAri(deck) ?? undefined
         };
     }
 }

@@ -307,6 +307,14 @@ export const api = createApi({
             query: (deckId) => `/intelligence/deck/${deckId}`,
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
+        // ARCHON: several of your decks side by side, computed from your own
+        // games only. The ids travel in the order they were picked, and the
+        // server keeps that order so the columns do not shuffle on arrival.
+        getDeckComparison: builder.query({
+            query: (decks = []) =>
+                `/intelligence/deck-comparison?decks=${encodeURIComponent(decks.join(','))}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
         getPlayerIntelligence: builder.query({
             query: (sets = []) => `/intelligence/player${setsParam(sets)}`,
             providesTags: [TAG_TYPES.INTELLIGENCE]
@@ -353,28 +361,38 @@ export const api = createApi({
             },
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
-        // ARCHON (N18): the Proving Grounds - background simulated deck
+        // ARCHON (N18): the Champion’s Challenge - background simulated deck
         // testing for Vault Master. One request draws the whole page: the
         // roster, every deck's simulated record, and the findings all read
         // the same games, and splitting them would let the panels disagree.
-        getProvingGrounds: builder.query({
-            query: () => '/proving-grounds',
-            providesTags: [TAG_TYPES.PROVING_GROUNDS]
+        getChampionsChallenge: builder.query({
+            query: () => '/champions-challenge',
+            providesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
-        enrollProvingGroundsDeck: builder.mutation({
+        enrollChampionsChallengeDeck: builder.mutation({
             query: (deckId) => ({
-                url: '/proving-grounds/decks',
+                url: '/champions-challenge/decks',
                 method: 'POST',
                 body: { deckId }
             }),
-            invalidatesTags: [TAG_TYPES.PROVING_GROUNDS]
+            invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
-        withdrawProvingGroundsDeck: builder.mutation({
+        // ARCHON (N21): the randomizer - a slot filled with a random eligible
+        // deck that swaps itself for a fresh one after `games` games.
+        enrollRandomChampionsChallengeDeck: builder.mutation({
+            query: ({ games, count = 1 }) => ({
+                url: '/champions-challenge/decks/random',
+                method: 'POST',
+                body: { games, count }
+            }),
+            invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
+        }),
+        withdrawChampionsChallengeDeck: builder.mutation({
             query: (deckId) => ({
-                url: `/proving-grounds/decks/${deckId}`,
+                url: `/champions-challenge/decks/${deckId}`,
                 method: 'DELETE'
             }),
-            invalidatesTags: [TAG_TYPES.PROVING_GROUNDS]
+            invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
         // ARCHON (N12): is Patreon configured on this deployment, and where is
         // the campaign page. Public - the client renders no Patreon UI at all
@@ -900,6 +918,18 @@ export const api = createApi({
                 method: 'DELETE'
             })
         }),
+        // ARCHON (F9): the practice bot roster - names, pictures, profiles.
+        // Not a settings section: thirteen accounts with faces.
+        getAdminBots: builder.query({
+            query: () => '/admin/bots'
+        }),
+        saveAdminBot: builder.mutation({
+            query: ({ house, ...changes }) => ({
+                url: `/admin/bots/${house}`,
+                method: 'PUT',
+                body: changes
+            })
+        }),
         getCards: builder.query({
             query: () => '/cards',
             providesTags: [{ type: TAG_TYPES.CARDS, id: 'LIST' }]
@@ -1253,14 +1283,16 @@ export const {
     useGetMembershipPreviewsQuery,
     useSetMembershipPreviewMutation,
     useGetDeckIntelligenceQuery,
+    useGetDeckComparisonQuery,
     useGetPlayerIntelligenceQuery,
     useGetMetaIntelligenceQuery,
     useGetAercIntelligenceQuery,
     useGetTournamentLabQuery,
-    // ARCHON (N18): the Proving Grounds.
-    useGetProvingGroundsQuery,
-    useEnrollProvingGroundsDeckMutation,
-    useWithdrawProvingGroundsDeckMutation,
+    // ARCHON (N18): the Champion’s Challenge.
+    useGetChampionsChallengeQuery,
+    useEnrollChampionsChallengeDeckMutation,
+    useEnrollRandomChampionsChallengeDeckMutation,
+    useWithdrawChampionsChallengeDeckMutation,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,
     useGetPatreonMembershipQuery,
@@ -1293,6 +1325,8 @@ export const {
     useGetDeckStatsQuery,
     useGetPlayerProfileQuery,
     useGetAdminSettingsQuery,
+    useGetAdminBotsQuery,
+    useSaveAdminBotMutation,
     useSaveAdminSettingsMutation,
     useResetAdminSettingsMutation,
     useListEventsQuery,

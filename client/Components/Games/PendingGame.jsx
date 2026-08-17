@@ -141,8 +141,21 @@ const PendingGame = () => {
 
     const isLuckyDice = !!currentGame.luckyDice;
 
+    // ARCHON (F9): the Helper Bot owns its practice table but has no hands to
+    // press Start with, so at that table the player who joined holds the
+    // button. Picking a deck normally starts it before they reach for it -
+    // this is what stops the button being a decoration they cannot use.
+    const isBotTable = !!currentGame.botGame;
+    const isSeatedHere = Object.values(currentGame.players || {}).some(
+        (player) => player.name === user?.username
+    );
+
     const canClickStart = () => {
-        if (!user || !currentGame || currentGame.owner !== user.username || connecting) {
+        if (!user || !currentGame || connecting) {
+            return false;
+        }
+
+        if (currentGame.owner !== user.username && !(isBotTable && isSeatedHere)) {
             return false;
         }
 
@@ -293,6 +306,12 @@ const PendingGame = () => {
             })
         ) {
             return t('Waiting for players to select decks');
+        }
+
+        // ARCHON (F9): nobody is waiting on the bot to press anything - the
+        // table starts itself, and the player can start it too.
+        if (isBotTable && isSeatedHere) {
+            return t('Ready to begin, starting your game against the bot');
         }
 
         if (currentGame.owner === user.username) {

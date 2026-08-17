@@ -179,7 +179,7 @@ export default function RootLayout() {
                 />
                 <Stack.Screen
                     name='tournament-lab'
-                    options={{ title: 'Tournament Lab', headerBackTitle: 'Back' }}
+                    options={{ title: 'Deep Probe', headerBackTitle: 'Back' }}
                 />
                 <Stack.Screen
                     name='game'

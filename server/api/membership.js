@@ -16,6 +16,7 @@ const {
     TIER_IDS
 } = require('../services/membership/tiers');
 const { CAPABILITY_CATALOG } = require('../services/membership/capabilities');
+const { NEW_PLAYER_TRIAL_DAYS } = require('../services/membership/entitlements');
 const { entitlementsForRequest } = require('./requireCapability');
 
 const configService = new ConfigService();
@@ -59,7 +60,11 @@ module.exports.init = function (server) {
                 tiers: tierCatalog(configService.getValue('patreon') || {}),
                 // The copy for every capability, so locked panels and the
                 // pricing page describe a feature the same way.
-                capabilities: CAPABILITY_CATALOG
+                capabilities: CAPABILITY_CATALOG,
+                // ARCHON (N20): every new account's first fortnight comes with
+                // the Archon tier's tools. Sent so the pricing page can say so
+                // with the same number the resolver enforces.
+                newPlayerTrialDays: NEW_PLAYER_TRIAL_DAYS
             });
         })
     );

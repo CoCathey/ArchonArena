@@ -481,15 +481,33 @@ const Membership = () => {
                         >
                             {mine?.membership?.tierName || t('Free')}
                         </span>
-                        {mine?.membership?.complimentary && (
-                            <span className='text-xs text-muted'>{t('Complimentary access')}</span>
-                        )}
-                        {mine?.membership?.expiresAt && (
-                            <span className='text-xs text-muted'>
-                                {t('Renews or expires {{date}}', {
-                                    date: new Date(mine.membership.expiresAt).toLocaleDateString()
+                        {/* ARCHON (N20): the trial names itself - "complimentary"
+                            reads like an admin favour, and "renews" like a bill. */}
+                        {mine?.membership?.source === 'new-player-trial' ? (
+                            <span className='text-xs text-emerald-300'>
+                                {t('New player trial — Archon’s tools are yours until {{date}}', {
+                                    date: mine?.membership?.expiresAt
+                                        ? new Date(mine.membership.expiresAt).toLocaleDateString()
+                                        : ''
                                 })}
                             </span>
+                        ) : (
+                            <>
+                                {mine?.membership?.complimentary && (
+                                    <span className='text-xs text-muted'>
+                                        {t('Complimentary access')}
+                                    </span>
+                                )}
+                                {mine?.membership?.expiresAt && (
+                                    <span className='text-xs text-muted'>
+                                        {t('Renews or expires {{date}}', {
+                                            date: new Date(
+                                                mine.membership.expiresAt
+                                            ).toLocaleDateString()
+                                        })}
+                                    </span>
+                                )}
+                            </>
                         )}
                         <Link
                             className='text-xs text-accent hover:underline'
@@ -524,6 +542,17 @@ const Membership = () => {
                                 'your own game — never what happens in it.'
                         )}
                     </p>
+                    {/* ARCHON (N20): the trial is stated with the same number
+                        the resolver enforces, from the catalogue payload. */}
+                    {!!catalog?.newPlayerTrialDays && (
+                        <p className='m-0 max-w-3xl text-sm font-medium text-emerald-300'>
+                            {t(
+                                'Every new account starts with the Archon tier’s tools, free, for its ' +
+                                    'first {{days}} days — nothing to claim, it is simply on.',
+                                { days: catalog.newPlayerTrialDays }
+                            )}
+                        </p>
+                    )}
 
                     {/* Always offered to a signed-in account that has not linked
                         yet, not only after an upgrade click - somebody who

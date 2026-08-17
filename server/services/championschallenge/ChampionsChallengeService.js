@@ -4,13 +4,17 @@ const RatingService = require('../rating/RatingService');
 const MembershipService = require('../membership/MembershipService');
 const { resolveEntitlements } = require('../membership/entitlements');
 const { CAPABILITIES } = require('../membership/capabilities');
-const { cloneCard } = require('./packCards');
-const { runSimulatedGame } = require('./SimulatedGame');
+const crypto = require('node:crypto');
+
+const AriService = require('../rating/AriService');
+const BotPolicyService = require('./BotPolicyService');
+const { cloneCard, getCardIndex } = require('./packCards');
+const { runSimulatedGame, PLAYER_ONE } = require('./SimulatedGame');
+const { runDeepGame } = require('./DeepGame');
 const {
     MIN_CONFIDENT_GAMES,
     MIN_OPENING_GAMES,
     sasExpectedScore,
-    performanceSas,
     isHiddenGem,
     buildFindings
 } = require('./labMath');
@@ -22,7 +26,12 @@ const MAX_CANDIDATES = 60;
 const MAX_GAMES_READ = 20000;
 
 /**
- * ARCHON (N18): the Proving Grounds - Vault Master's background deck testing.
+ * ARCHON (N18): the Champion’s Challenge - Vault Master's background deck testing.
+ *
+ * (Shipped as "the Proving Grounds"; renamed before anyone met it. The two
+ * tables keep their birth names - ProvingGroundsDecks/ProvingGroundsGames -
+ * because renaming an applied migration's tables costs a checksum-guarded
+ * migration dance and buys nothing a comment doesn't.)
  *
  * A member enrolls decks onto a roster; the lobby's sweep quietly plays them
  * against each other with the simulated player (SimulatedGame.js); and the
@@ -48,7 +57,7 @@ const MAX_GAMES_READ = 20000;
  *    MIN_CONFIDENT_GAMES. The lab must be the most honest analyst on the
  *    site, because nobody can argue with a computer that plays in private.
  */
-class ProvingGroundsService {
+class ChampionsChallengeService {
     constructor(configService, db = require('../../db'), settingsService = require('../settings')) {
         this.configService = configService;
         this.db = db;
@@ -57,14 +66,25 @@ class ProvingGroundsService {
         // For the SAS exchange rate only, so lab expectations track the same
         // admin-tunable model that rates real games.
         this.ratingService = new RatingService(configService, db, settingsService);
-        // Injectable for tests: specs replace this with a stub rather than
-        // playing half a second of real game per assertion.
+        // ARCHON (N19): sparring games move each deck's ARI - the gentler
+        // simGameK, but the same index real games move.
+        this.ariService = new AriService(db);
+        // ARCHON (N21): the learning loop's diary, candidates and champion.
+        this.policyService = new BotPolicyService(configService, db, settingsService);
+        // Injectable for tests: specs replace these with stubs rather than
+        // playing real games per assertion.
         this.runMatch = runSimulatedGame;
+        this.runDeep = runDeepGame;
+    }
+
+    /** A fresh 32-bit seed for a deterministic, replayable sparring game. */
+    newSeed() {
+        return crypto.randomInt(0x7fffffff);
     }
 
     /** Admin-configurable knobs, defaults from the settings registry. */
     getConfig() {
-        return this.settingsService.getSectionWithDefaults('provingGrounds');
+        return this.settingsService.getSectionWithDefaults('championsChallenge');
     }
 
     /** The elo config whose sasWeight the lab's expectations use. */
@@ -83,6 +103,21 @@ class ProvingGroundsService {
      * @returns {Promise<boolean>}
      */
     async userMayUseLab(userId) {
+        const access = await this.rosterAccess(userId);
+
+        return access.mayUse;
+    }
+
+    /**
+     * Access AND standing: whether this roster's owner may use the lab, and
+     * whether they are a site admin - admins' decks are exempt from the
+     * per-deck daily budget, because the person tuning the lab needs to be
+     * able to flood it.
+     *
+     * @param {number} userId
+     * @returns {Promise<{mayUse: boolean, isAdmin: boolean}>}
+     */
+    async rosterAccess(userId) {
         let isAdmin = false;
 
         try {
@@ -95,7 +130,7 @@ class ProvingGroundsService {
             isAdmin = !!(rows && rows[0] && rows[0].IsAdmin);
         } catch (err) {
             logger.error(
-                'Proving Grounds admin lookup failed for user %s: %s',
+                'Champion’s Challenge admin lookup failed for user %s: %s',
                 userId,
                 err.message
             );
@@ -107,7 +142,10 @@ class ProvingGroundsService {
             membership
         });
 
-        return entitlements.capabilities.includes(CAPABILITIES.PROVING_GROUNDS);
+        return {
+            mayUse: entitlements.capabilities.includes(CAPABILITIES.CHAMPIONS_CHALLENGE),
+            isAdmin
+        };
     }
 
     /**
@@ -131,7 +169,7 @@ class ProvingGroundsService {
 
         if (enrolled[0] && enrolled[0].Count >= config.maxEnrolledPerUser) {
             throw new Error(
-                `All ${config.maxEnrolledPerUser} Proving Grounds slots are in use. ` +
+                `All ${config.maxEnrolledPerUser} Champion’s Challenge slots are in use. ` +
                     'Withdraw a deck to enroll another.'
             );
         }
@@ -169,7 +207,7 @@ class ProvingGroundsService {
 
         if (missing.length || engineDeck.houses.length !== 3) {
             throw new Error(
-                "The Proving Grounds cannot play that deck yet - it uses cards this server's " +
+                "The Champion’s Challenge cannot play that deck yet - it uses cards this server's " +
                     'simulation data does not cover.'
             );
         }
@@ -252,7 +290,7 @@ class ProvingGroundsService {
             deck: {
                 dbId: deckId,
                 name: (row && row.Name) || `Deck ${deckId}`,
-                uuid: (row && row.Uuid) || `proving-${deckId}`,
+                uuid: (row && row.Uuid) || `challenge-${deckId}`,
                 expansion: (row && row.ExpansionId) || 341,
                 houses: (houseRows || []).map((house) => house.Code).filter(Boolean),
                 cards
@@ -274,6 +312,11 @@ class ProvingGroundsService {
         if (!config.enabled) {
             return { played: 0, abandoned: 0 };
         }
+
+        // ARCHON (N19): read once per sweep - which index rate sparring games
+        // move ARI at, and whether they move it at all.
+        const ariConfig = (this.ratingService.getConfig() || {}).ari || {};
+        const eloConfig = this.eloConfig();
 
         const enrollments = await this.db.query(
             'SELECT "UserId", "DeckId" FROM "ProvingGroundsDecks"'
@@ -309,13 +352,19 @@ class ProvingGroundsService {
             rosters.get(enrollment.UserId).push(enrollment.DeckId);
         }
 
+        // ARCHON (N21): the champion model plays every sparring game; its
+        // games feed the diary that trains its successor.
+        const learning = config.learningEnabled !== false;
+        const championModel = learning ? await this.policyService.champion() : null;
+        const championVersion = championModel ? championModel.version : null;
+
         // Rosters are visited round-robin in a shuffled order - one game per
         // member per pass - so one member's full queue cannot starve
         // another's, while a quiet site still gets its full batch from the
         // one roster that wants games. Entitlement verdicts are cached per
         // sweep; budgets are re-read from `gamesToday` as it fills.
         const users = shuffle([...rosters.keys()]);
-        const mayUse = new Map();
+        const access = new Map();
         let played = 0;
         let abandoned = 0;
         let progress = true;
@@ -328,19 +377,26 @@ class ProvingGroundsService {
                     break;
                 }
 
-                const eligible = rosters
-                    .get(userId)
-                    .filter((deckId) => (gamesToday.get(deckId) || 0) < config.gamesPerDeckPerDay);
+                if (!access.has(userId)) {
+                    access.set(userId, await this.rosterAccess(userId));
+                }
 
-                if (eligible.length < 2) {
+                if (!access.get(userId).mayUse) {
                     continue;
                 }
 
-                if (!mayUse.has(userId)) {
-                    mayUse.set(userId, await this.userMayUseLab(userId));
-                }
+                // ARCHON (N20-adjacent): a site admin's decks are exempt from
+                // the daily budget - the person tuning the lab must be able
+                // to flood it. Everyone else's decks rest at the cap.
+                const unlimited = access.get(userId).isAdmin;
+                const eligible = rosters
+                    .get(userId)
+                    .filter(
+                        (deckId) =>
+                            unlimited || (gamesToday.get(deckId) || 0) < config.gamesPerDeckPerDay
+                    );
 
-                if (!mayUse.get(userId)) {
+                if (eligible.length < 2) {
                     continue;
                 }
 
@@ -363,21 +419,43 @@ class ProvingGroundsService {
                     omega.deck.houses.length !== 3
                 ) {
                     logger.warn(
-                        `Proving Grounds skipped rosters of user ${userId}: deck ` +
+                        `Champion’s Challenge skipped rosters of user ${userId}: deck ` +
                             `${alpha.missing.length ? pair[0] : pair[1]} is not simulatable`
                     );
                     continue;
                 }
 
+                // ARCHON (N21): one deep, annotated showcase game per roster
+                // per day (config), when its budget allows; every other game
+                // is the fast bot exploring and logging its decisions.
+                const deepToday = await this.deepGamesToday(userId);
+                const playDeep = learning && deepToday < (config.deepGamesPerDay || 0);
                 let result;
 
                 try {
-                    result = await this.runMatch(alpha.deck, omega.deck, {
-                        maxTurns: config.maxTurnsPerGame
-                    });
+                    result = playDeep
+                        ? await this.runDeep(alpha.deck, omega.deck, {
+                              seed: this.newSeed(),
+                              policy: championModel,
+                              maxTurns: config.maxTurnsPerGame,
+                              maxAnalyzedDecisions: config.deepMaxAnalyzedDecisions,
+                              candidatesCap: config.deepCandidates,
+                              samplesPerCandidate: config.deepSamples,
+                              rolloutTurns: config.deepRolloutTurns
+                          })
+                        : await this.runMatch(alpha.deck, omega.deck, {
+                              seed: this.newSeed(),
+                              maxTurns: config.maxTurnsPerGame,
+                              policy: championModel,
+                              // Exploration keeps the diary honest: a bot
+                              // that never tries second-best moves can never
+                              // learn which ones were actually best.
+                              temperature: 0.7,
+                              recordDecisions: learning
+                          });
                 } catch (err) {
                     logger.error(
-                        `Proving Grounds game failed for user ${userId} ` +
+                        `Champion’s Challenge game failed for user ${userId} ` +
                             `(decks ${pair[0]} vs ${pair[1]}):`,
                         err
                     );
@@ -387,7 +465,7 @@ class ProvingGroundsService {
 
                 if (!result || !result.completed) {
                     logger.warn(
-                        `Proving Grounds abandoned a game for user ${userId} ` +
+                        `Champion’s Challenge abandoned a game for user ${userId} ` +
                             `(decks ${pair[0]} vs ${pair[1]}): ${result && result.reason}`
                     );
                     abandoned++;
@@ -395,6 +473,47 @@ class ProvingGroundsService {
                 }
 
                 await this.recordGame(userId, result);
+
+                // The diary: this game's decisions, labeled by its outcome.
+                if (learning && result.decisions && result.decisions.length) {
+                    try {
+                        const logged = await this.policyService.recordTrainingGame(
+                            {
+                                policyVersion: championVersion,
+                                winnerSide: result.winner,
+                                decisions: result.decisions
+                            },
+                            config.trainingGamesKept
+                        );
+
+                        if (logged % (config.trainEveryGames || 25) === 0) {
+                            await this.policyService.trainCandidate({
+                                batchGames: (config.trainEveryGames || 25) * 8
+                            });
+                        }
+                    } catch (err) {
+                        logger.error('Challenge bot: failed to log training game', err);
+                    }
+                }
+
+                // The randomizer: a random slot that has served its games
+                // swaps for a fresh random deck.
+                await this.rotateRandomSlots(userId, [pair[0], pair[1]]);
+
+                // ARCHON (N19): a sparring result moves both decks' ARIs at
+                // the sim rate. Best-effort by AriService contract - a failed
+                // index update never fails the sweep - and skipped entirely
+                // when the admin has ARI off.
+                if (ariConfig.enabled) {
+                    await this.ariService.applyGameResult({
+                        winnerUuid: result.winnerDeck.uuid,
+                        loserUuid: result.loserDeck.uuid,
+                        k: ariConfig.simGameK,
+                        sasWeight: eloConfig.sasWeight,
+                        sim: true
+                    });
+                }
+
                 gamesToday.set(
                     result.winnerDeck.dbId,
                     (gamesToday.get(result.winnerDeck.dbId) || 0) + 1
@@ -408,17 +527,247 @@ class ProvingGroundsService {
             }
         }
 
+        // ARCHON (N21): the title fight. If a candidate is in training, it
+        // plays the champion on NEUTRAL decks - never anyone's roster, never
+        // recorded as deck data - and its record decides the crown.
+        if (learning) {
+            try {
+                await this.runArenaStep(config);
+            } catch (err) {
+                logger.error('Challenge bot: arena step failed', err);
+            }
+        }
+
         return { played, abandoned };
     }
 
-    /** Persist one finished simulated game. */
+    /** How many deep showcase games this roster has had today (UTC). */
+    async deepGamesToday(userId) {
+        const rows = await this.db.query(
+            'SELECT COUNT(*)::int AS "DeepToday" FROM "ProvingGroundsGames" ' +
+                'WHERE "UserId" = $1 AND "Deep" = true ' +
+                "AND \"FinishedAt\" >= date_trunc('day', now() AT TIME ZONE 'utc')",
+            [userId]
+        );
+
+        return rows && rows[0] ? rows[0].DeepToday : 0;
+    }
+
+    /**
+     * ARCHON (N21): one arena game between the candidate and the champion,
+     * seats alternated by coin flip, on neutral decks built from pack data.
+     * The result goes only to the candidate's record; promotion and
+     * retirement live in BotPolicyService.
+     */
+    async runArenaStep(config) {
+        const candidate = await this.policyService.candidate();
+
+        if (!candidate) {
+            return;
+        }
+
+        const champion = await this.policyService.champion();
+        const [deckA, deckB] = this.neutralArenaDecks();
+        // Seats flipped by coin so neither brain owns the stronger arena
+        // deck or the first-player advantage across the fight.
+        const candidateIsAlpha = crypto.randomInt(2) === 0;
+
+        const result = await this.runMatch(deckA, deckB, {
+            seed: this.newSeed(),
+            maxTurns: config.maxTurnsPerGame,
+            // A genuine head-to-head: one brain per seat. A null champion is
+            // the heuristics - exactly the baseline the first candidate has
+            // to dethrone.
+            policies: candidateIsAlpha
+                ? { alpha: candidate.Model, omega: champion }
+                : { alpha: champion, omega: candidate.Model },
+            temperature: 0,
+            recordDecisions: false
+        });
+
+        if (!result || !result.completed) {
+            return;
+        }
+
+        const candidateWon = candidateIsAlpha
+            ? result.winner === PLAYER_ONE
+            : result.winner !== PLAYER_ONE;
+
+        await this.policyService.recordArenaResult(candidate.Id, candidateWon, {
+            minGames: config.arenaMinGames,
+            decideGames: config.arenaDecideGames
+        });
+    }
+
+    /**
+     * Two fixed 36-card decks from pack data, for arena games: neutral
+     * ground that no member's stats can be polluted by and every candidate
+     * meets alike.
+     */
+    neutralArenaDecks() {
+        if (this.arenaDecks) {
+            return this.arenaDecks;
+        }
+
+        const build = (name, houses) => {
+            const byHouse = {};
+
+            for (const card of Object.values(getCardIndex())) {
+                if (
+                    houses.includes(card.house) &&
+                    !card.isNonDeck &&
+                    ['creature', 'artifact', 'action', 'upgrade'].includes(card.type)
+                ) {
+                    (byHouse[card.house] = byHouse[card.house] || []).push(card);
+                }
+            }
+
+            const cards = [];
+
+            for (const house of houses) {
+                const pool = byHouse[house];
+
+                for (let i = 0; i < 12; i++) {
+                    const card = pool[(i * 5) % pool.length];
+
+                    cards.push({ id: card.id, count: 1, card: cloneCard(card.id) });
+                }
+            }
+
+            return { name, uuid: `arena-${name}`, expansion: 341, houses, cards };
+        };
+
+        this.arenaDecks = [
+            build('Arena Alpha', ['brobnar', 'dis', 'logos']),
+            build('Arena Omega', ['sanctum', 'shadows', 'untamed'])
+        ];
+
+        return this.arenaDecks;
+    }
+
+    /**
+     * ARCHON (N21): the randomizer's rotation. Any random slot among the
+     * decks that just played, whose games since enrollment have reached its
+     * target, is swapped for a fresh random deck carrying the same target.
+     */
+    async rotateRandomSlots(userId, deckIds) {
+        try {
+            const slots = await this.db.query(
+                'SELECT e."DeckId", e."RandomGamesTarget", e."EnrolledAt", ' +
+                    '(SELECT COUNT(*)::int FROM "ProvingGroundsGames" g ' +
+                    ' WHERE g."UserId" = e."UserId" ' +
+                    ' AND (g."WinnerDeckId" = e."DeckId" OR g."LoserDeckId" = e."DeckId") ' +
+                    ' AND g."FinishedAt" >= e."EnrolledAt") AS "PlayedSince" ' +
+                    'FROM "ProvingGroundsDecks" e ' +
+                    'WHERE e."UserId" = $1 AND e."Random" = true AND e."DeckId" = ANY($2)',
+                [userId, deckIds]
+            );
+
+            for (const slot of slots || []) {
+                if (!slot.RandomGamesTarget || slot.PlayedSince < slot.RandomGamesTarget) {
+                    continue;
+                }
+
+                await this.withdrawDeck(userId, slot.DeckId);
+
+                const swapped = await this.enrollRandomDeck(userId, slot.RandomGamesTarget, {
+                    exclude: [slot.DeckId]
+                });
+
+                logger.info(
+                    `Challenge randomizer: user ${userId} deck ${slot.DeckId} rotated out ` +
+                        `after ${slot.PlayedSince} games` +
+                        (swapped ? ` for deck ${swapped}` : ' (no replacement available)')
+                );
+            }
+        } catch (err) {
+            logger.error('Challenge randomizer rotation failed', err);
+        }
+    }
+
+    /**
+     * Fill several randomizer slots in one go, stopping early when the roster
+     * runs out of room or the collection runs out of eligible decks - a
+     * partial fill is a real answer here ("I asked for five, I own three"),
+     * so the caller gets the list and decides what to say about it.
+     *
+     * Each deck is enrolled before the next is drawn, and the draw excludes
+     * anything already on the roster, so one call cannot pick the same deck
+     * twice.
+     *
+     * @returns {Promise<number[]>} the enrolled deck ids, in the order drawn
+     */
+    async enrollRandomDecks(userId, gamesTarget, count) {
+        const wanted = Math.max(1, Math.min(this.getConfig().maxEnrolledPerUser, count || 1));
+        const enrolled = [];
+
+        for (let slot = 0; slot < wanted; slot++) {
+            const deckId = await this.enrollRandomDeck(userId, gamesTarget, {
+                exclude: enrolled
+            });
+
+            if (!deckId) {
+                break;
+            }
+
+            enrolled.push(deckId);
+        }
+
+        return enrolled;
+    }
+
+    /**
+     * Enroll a random eligible deck into a randomizer slot: owned, rated,
+     * simulatable, not already on the roster, not excluded. A handful of
+     * candidates are drawn and tried in random order, because "simulatable"
+     * can only be proven by loading the deck.
+     *
+     * @returns {Promise<number|null>} the enrolled deck id, or null
+     */
+    async enrollRandomDeck(userId, gamesTarget, { exclude = [] } = {}) {
+        const target = Math.max(1, Math.min(500, parseInt(gamesTarget, 10) || 20));
+        const candidates = await this.db.query(
+            'SELECT d."Id" FROM "Decks" d ' +
+                'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                'WHERE d."UserId" = $1 AND NOT COALESCE(d."Banned", false) ' +
+                'AND ds."SasRating" IS NOT NULL ' +
+                'AND NOT (d."Id" = ANY($2)) ' +
+                'AND NOT EXISTS (SELECT 1 FROM "ProvingGroundsDecks" e ' +
+                'WHERE e."UserId" = $1 AND e."DeckId" = d."Id") ' +
+                'ORDER BY random() LIMIT 8',
+            [userId, exclude]
+        );
+
+        for (const row of candidates || []) {
+            const { missing, deck } = await this.loadEngineDeck(row.Id);
+
+            if (missing.length || deck.houses.length !== 3) {
+                continue;
+            }
+
+            await this.db.query(
+                'INSERT INTO "ProvingGroundsDecks" ' +
+                    '("UserId", "DeckId", "EnrolledAt", "Random", "RandomGamesTarget") ' +
+                    "VALUES ($1, $2, now() AT TIME ZONE 'utc', true, $3) " +
+                    'ON CONFLICT ("UserId", "DeckId") DO NOTHING',
+                [userId, row.Id, target]
+            );
+
+            return row.Id;
+        }
+
+        return null;
+    }
+
+    /** Persist one finished simulated game, deep annotations and all. */
     async recordGame(userId, result) {
         await this.db.query(
             'INSERT INTO "ProvingGroundsGames" ' +
                 '("UserId", "WinnerDeckId", "LoserDeckId", "WinnerKeys", "LoserKeys", "Turns", ' +
                 '"WinnerWentFirst", "WinnerFirstHouse", "LoserFirstHouse", "WinnerHouseCalls", ' +
-                '"LoserHouseCalls", "DurationMs", "FinishedAt") ' +
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now() AT TIME ZONE 'utc')",
+                '"LoserHouseCalls", "DurationMs", "Deep", "Annotations", "FinishedAt") ' +
+                'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, ' +
+                "now() AT TIME ZONE 'utc')",
             [
                 userId,
                 result.winnerDeck.dbId,
@@ -431,23 +780,26 @@ class ProvingGroundsService {
                 result.loserFirstHouse,
                 JSON.stringify(result.winnerHouseCalls || {}),
                 JSON.stringify(result.loserHouseCalls || {}),
-                result.durationMs
+                result.durationMs,
+                !!result.deep,
+                result.annotations ? JSON.stringify(result.annotations) : null
             ]
         );
     }
 
     /**
-     * Everything the Proving Grounds page shows, in one read.
+     * Everything the Champion’s Challenge page shows, in one read.
      *
      * @param {number} userId
      * @returns {Promise<object>}
      */
-    async getLabReport(userId) {
+    async getLabReport(userId, { isAdmin = false } = {}) {
         const config = this.getConfig();
 
         const [enrollmentRows, gameRows, candidateRows] = await Promise.all([
             this.db.query(
-                'SELECT e."DeckId", e."EnrolledAt", d."Name", ds."SasRating" ' +
+                'SELECT e."DeckId", e."EnrolledAt", e."Random", e."RandomGamesTarget", ' +
+                    'd."Name", d."Uuid", ds."SasRating" ' +
                     'FROM "ProvingGroundsDecks" e ' +
                     'JOIN "Decks" d ON d."Id" = e."DeckId" ' +
                     'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
@@ -500,8 +852,14 @@ class ProvingGroundsService {
         }
 
         const eloConfig = this.eloConfig();
+        // ARCHON (N19): each deck's ARI - stored when any game has moved it,
+        // the SAS/AERC seed otherwise - so the page always has a number where
+        // the deck's rating goes.
+        const ariByUuid = await this.ariService.ariForUuids(
+            enrollmentList.map((enrollment) => enrollment.Uuid)
+        );
         const decks = enrollmentList.map((enrollment) =>
-            this.aggregateDeck(enrollment, games, sasByDeck, eloConfig)
+            this.aggregateDeck(enrollment, games, sasByDeck, eloConfig, ariByUuid)
         );
 
         // Gems first, then by how far above expectation each deck runs.
@@ -516,10 +874,33 @@ class ProvingGroundsService {
 
         utcMidnight.setUTCHours(0, 0, 0, 0);
 
+        // ARCHON (N21): the latest deep showcase games, annotations and all,
+        // with names for both seats so the sentences read as decks.
+        const nameByDeck = new Map(
+            enrollmentList.map((enrollment) => [enrollment.DeckId, enrollment.Name])
+        );
+        const showcase = games
+            .filter((game) => game.Deep && game.Annotations)
+            .slice(-5)
+            .reverse()
+            .map((game) => ({
+                playedAt: game.FinishedAt,
+                winner: nameByDeck.get(game.WinnerDeckId) || `Deck ${game.WinnerDeckId}`,
+                loser: nameByDeck.get(game.LoserDeckId) || `Deck ${game.LoserDeckId}`,
+                winnerKeys: game.WinnerKeys,
+                loserKeys: game.LoserKeys,
+                turns: game.Turns,
+                annotations: game.Annotations
+            }));
+
+        const bot = await this.policyService.vitals().catch(() => null);
+
         return {
             running: !!config.enabled,
             maxEnrolled: config.maxEnrolledPerUser,
             gamesPerDeckPerDay: config.gamesPerDeckPerDay,
+            // ARCHON: a site admin's decks are exempt from the daily budget.
+            unlimited: !!isAdmin,
             minConfidentGames: MIN_CONFIDENT_GAMES,
             totals: {
                 games: games.length,
@@ -531,7 +912,9 @@ class ProvingGroundsService {
                 sas: candidate.SasRating
             })),
             decks,
-            findings: buildFindings(decks)
+            findings: buildFindings(decks),
+            showcase,
+            bot
         };
     }
 
@@ -539,9 +922,10 @@ class ProvingGroundsService {
      * One enrolled deck's games folded into the row the page renders.
      * Pure given its arguments; the SQL above is the only IO.
      */
-    aggregateDeck(enrollment, games, sasByDeck, eloConfig) {
+    aggregateDeck(enrollment, games, sasByDeck, eloConfig, ariByUuid = new Map()) {
         const deckId = enrollment.DeckId;
         const sas = enrollment.SasRating;
+        const ariInfo = ariByUuid.get(enrollment.Uuid);
 
         let wins = 0;
         let losses = 0;
@@ -553,7 +937,10 @@ class ProvingGroundsService {
         let expectedSum = 0;
         let expectedGames = 0;
         let lastPlayedAt = null;
-        const expectationGames = [];
+        // ARCHON (N21): the randomizer's odometer - games since this slot
+        // was (re)filled, against its swap target.
+        let sinceEnrolled = 0;
+        const enrolledAt = enrollment.EnrolledAt ? new Date(enrollment.EnrolledAt) : null;
         const openings = new Map();
 
         for (const game of games) {
@@ -589,7 +976,6 @@ class ProvingGroundsService {
             if (sas != null && opponentSas != null) {
                 expectedSum += sasExpectedScore(sas, opponentSas, eloConfig);
                 expectedGames++;
-                expectationGames.push({ opponentSas, won });
             }
 
             if (firstHouse) {
@@ -603,16 +989,15 @@ class ProvingGroundsService {
             if (!lastPlayedAt || game.FinishedAt > lastPlayedAt) {
                 lastPlayedAt = game.FinishedAt;
             }
+
+            if (enrolledAt && new Date(game.FinishedAt) >= enrolledAt) {
+                sinceEnrolled++;
+            }
         }
 
         const total = wins + losses;
         const winRate = total ? wins / total : null;
         const expectedWinRate = expectedGames ? expectedSum / expectedGames : null;
-        // A performance rating over a thin sample swings wildly (a 3-0 start
-        // reads as +80 SAS), so it is withheld until the deck has a sample
-        // that can carry the number.
-        const playsLike =
-            total >= MIN_CONFIDENT_GAMES ? performanceSas(expectationGames, eloConfig) : null;
         const secondGames = total - wentFirstGames;
         const secondWins = wins - wentFirstWins;
 
@@ -638,7 +1023,12 @@ class ProvingGroundsService {
             winRate,
             expectedWinRate,
             delta: winRate != null && expectedWinRate != null ? winRate - expectedWinRate : null,
-            playsLikeSas: playsLike != null ? Math.round(playsLike * 10) / 10 : null,
+            // ARCHON (N19): the deck's ARI - the platform's living rating,
+            // which these very games have been moving - plus how much of its
+            // evidence is sparring, so the page can say so.
+            ari: ariInfo && ariInfo.ari != null ? Math.round(ariInfo.ari * 10) / 10 : null,
+            ariSimGames: ariInfo ? ariInfo.simGames : 0,
+            ariRatedGames: ariInfo ? ariInfo.ratedGames : 0,
             confident: total >= MIN_CONFIDENT_GAMES,
             avgTurns: total ? Math.round((turnsTotal / total) * 10) / 10 : null,
             avgKeysFor: total ? Math.round((keysFor / total) * 100) / 100 : null,
@@ -646,7 +1036,11 @@ class ProvingGroundsService {
             firstPlayerWinRate: wentFirstGames >= 5 ? wentFirstWins / wentFirstGames : null,
             secondPlayerWinRate: secondGames >= 5 ? secondWins / secondGames : null,
             openings: openingRows,
-            bestOpening
+            bestOpening,
+            // ARCHON (N21): randomizer slots and their odometers.
+            random: !!enrollment.Random,
+            randomGamesTarget: enrollment.RandomGamesTarget || null,
+            gamesSinceEnrolled: sinceEnrolled
         };
 
         deck.hiddenGem = isHiddenGem(deck);
@@ -679,4 +1073,4 @@ function shuffle(list) {
     return copy;
 }
 
-module.exports = ProvingGroundsService;
+module.exports = ChampionsChallengeService;

@@ -189,6 +189,33 @@ const REGISTRY = {
                         default: 1200
                     }
                 }
+            },
+            // ARCHON (N19): ARI, the Archon Rating Index - the deck rating the
+            // Elo deck term reads instead of raw SAS while enabled.
+            ari: {
+                type: 'section',
+                label: 'ARI (Archon Rating Index)',
+                fields: {
+                    enabled: {
+                        type: 'boolean',
+                        label: 'Use ARI (seeded from SAS/AERC, moved by results) as the deck term',
+                        default: true
+                    },
+                    gameK: {
+                        type: 'number',
+                        label: 'ARI movement per rated real game (Elo points per unit surprise)',
+                        min: 0,
+                        max: 64,
+                        default: 8
+                    },
+                    simGameK: {
+                        type: 'number',
+                        label: "ARI movement per Champion's Challenge sparring game",
+                        min: 0,
+                        max: 64,
+                        default: 4
+                    }
+                }
             }
         }
     },
@@ -354,9 +381,9 @@ const REGISTRY = {
             // dok.maxImportDecks, which they hit first.
         }
     },
-    // ARCHON (N18): the Proving Grounds - Vault Master background deck testing.
-    provingGrounds: {
-        title: 'Proving Grounds',
+    // ARCHON (N18): the Champion’s Challenge - Vault Master background deck testing.
+    championsChallenge: {
+        title: 'Champion’s Challenge',
         description:
             'Background deck testing for Vault Master members: the lobby quietly plays enrolled ' +
             'decks against each other with a simulated player and reports how each deck performs ' +
@@ -404,6 +431,133 @@ const REGISTRY = {
             maxTurnsPerGame: {
                 type: 'number',
                 label: 'Abandon a simulated game after (turns)',
+                min: 20,
+                max: 200,
+                default: 80
+            },
+            // ARCHON (N21): the learning bot. Off switches the sparring
+            // partner back to the fixed heuristics and stops all training,
+            // arena play and deep games in one move.
+            learningEnabled: {
+                type: 'boolean',
+                label: 'Learning bot: train from games and play with the champion model',
+                default: true
+            },
+            trainEveryGames: {
+                type: 'number',
+                label: 'Train a new candidate every (logged games)',
+                min: 10,
+                max: 1000,
+                default: 25
+            },
+            trainingGamesKept: {
+                type: 'number',
+                label: 'Training games kept (older pruned)',
+                min: 100,
+                max: 50000,
+                default: 4000
+            },
+            arenaMinGames: {
+                type: 'number',
+                label: 'Arena games before a candidate may take the title',
+                min: 20,
+                max: 2000,
+                default: 150
+            },
+            arenaDecideGames: {
+                type: 'number',
+                label: 'Arena games before an unproven candidate retires',
+                min: 50,
+                max: 5000,
+                default: 400
+            },
+            // The deep planner: fewer, slower, annotated showcase games. A
+            // deep game costs seconds-to-minutes of CPU where a fast one
+            // costs half a second - these knobs are the leash.
+            deepGamesPerDay: {
+                type: 'number',
+                label: 'Deep showcase games per roster per day (0 = none)',
+                min: 0,
+                max: 20,
+                default: 2
+            },
+            deepMaxAnalyzedDecisions: {
+                type: 'number',
+                label: 'Decisions analyzed per deep game',
+                min: 2,
+                max: 40,
+                default: 10
+            },
+            deepCandidates: {
+                type: 'number',
+                label: 'Candidate moves tried per analyzed decision',
+                min: 2,
+                max: 12,
+                default: 5
+            },
+            deepSamples: {
+                type: 'number',
+                label: 'Sampled futures per candidate move',
+                min: 1,
+                max: 8,
+                default: 2
+            },
+            deepRolloutTurns: {
+                type: 'number',
+                label: 'Turns each sampled future is played forward',
+                min: 2,
+                max: 20,
+                default: 5
+            }
+        }
+    },
+    // ARCHON (F9): the practice bots - one per house, always hosting an open
+    // table in the lobby.
+    //
+    // `page` moves a section off the general Site Settings screen and onto a
+    // screen of its own: these knobs belong next to the roster they govern
+    // (names, pictures, profiles, which bots play), and that roster is not
+    // registry-shaped. The section is still stored, validated and audited
+    // exactly like every other one - only where it is EDITED changes.
+    bots: {
+        title: 'Bots',
+        page: 'bots',
+        description:
+            'Practice bots host an open game in the lobby around the clock. Anyone can join, and ' +
+            'the game starts the moment they pick a deck. Each bot belongs to a house and only ' +
+            'plays decks containing it; a table that gets joined is replaced by one hosted by a ' +
+            'different bot. Practice games are never persisted or rated and can never touch ' +
+            'Amber, deck records or any statistic. Nobody can log into a bot account.',
+        fields: {
+            enabled: {
+                type: 'boolean',
+                label: 'Keep an open practice table in the lobby',
+                default: true
+            },
+            maxConcurrentGames: {
+                type: 'number',
+                label: 'Most bot games running at once (a new table opens while under this)',
+                min: 1,
+                max: 20,
+                default: 3
+            },
+            pendingRecycleMinutes: {
+                type: 'number',
+                label: 'Re-open a table whose joiner never picked a deck after (minutes)',
+                min: 1,
+                max: 120,
+                default: 10
+            },
+            allowSpectators: {
+                type: 'boolean',
+                label: 'Allow spectators on bot games',
+                default: true
+            },
+            // A safety valve, not a pacing knob: past this many rounds the
+            // bot concedes so the table can never be held forever.
+            maxTurns: {
+                type: 'number',
+                label: 'Bot concedes past (rounds)',
                 min: 20,
                 max: 200,
                 default: 80

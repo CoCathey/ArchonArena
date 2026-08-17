@@ -13,11 +13,15 @@ sets can be pulled in — see [docs/UPSTREAM.md](docs/UPSTREAM.md).
 Around the inherited gameplay engine (14 sets, all card scripts and their regression suite),
 Archon Arena adds a competitive platform as separate, loosely-coupled services:
 
--   **SAS-adjusted Elo ratings ("Amber")** — chess-style Elo modified by key differential and
-    deck SAS (power) difference, with FIDE-style K tiers, provisional placements, rating floors,
+-   **Ratings ("Amber")** — chess-style Elo modified by key differential and by how far apart the
+    two decks are in strength, with FIDE-style K tiers, provisional placements, rating floors,
     decay and seasons. Separate pools for Archon, Sealed and Alliance. Fully admin-configurable.
--   **Rankings** — worldwide, region, country and state leaderboards, plus a personal ratings
-    page and public player profiles that every username on the site links to.
+-   **ARI, the Archon Rating Index** — the platform's own deck rating, and what the Elo handicap
+    now reads. Every deck has one: it starts where the card math (SAS/AERC) points and then moves
+    with what the platform actually witnesses, so a deck that overperforms its paper score stops
+    being handicapped as though it had not.
+-   **Rankings** — worldwide, region, country and state leaderboards under Community, a single
+    Stats page, and public player profiles that every username on the site links to.
 -   **Tournaments** — Swiss, single/double elimination, round robin and cut-to-top-N, Bo1/3/5,
     online / in-person / hybrid / asynchronous pacing, waitlists, QR check-in, staff and judge
     tools, seeding, penalties, brackets, printables, prize-pool and entry-fee tracking, and
@@ -33,22 +37,24 @@ Archon Arena adds a competitive platform as separate, loosely-coupled services:
     by name rather than by pasting a link.
 -   **Statistics** — a meta dashboard (house and set win rates, SAS bands, format share, the
     house matchup matrix) plus per-player and per-deck breakdowns.
--   **Community** — friends, a member directory, clubs with leaderboards and invitations, teams
-    with their own ladder, a local store directory and a Play IRL hub. Paper games can be
-    recorded by both players independently and count on the same ladder.
+-   **Community** — friends, a member directory, clubs (the Grand Alliance Council) with
+    leaderboards and invitations, teams with their own ladder, a local store directory and an
+    in-person play hub (Into the Fray). Paper games can be recorded by both players independently
+    and count on the same ladder.
 -   **Moderation** — reports with captured evidence, a claim/resolve queue, graduated actions
     (note, warn, mute, timeout, ban) with reasons and expiries, a chat content filter, and a
     full audit log.
 -   **Notifications** — a typed taxonomy behind an in-app centre, branded email and push to the
     mobile app, with per-category opt-out.
 -   **Archon+ membership** — an optional Patreon-backed supporter program (Supporter / Archon /
-    Vault Master) whose perks are analytics and cosmetics only: Archon Intelligence, the
-    Tournament Lab, AERC analysis, replay analysis and the misplay review, profile
-    customisation, organizer CSV exports, a preview programme, and the Proving Grounds, where a
-    computer play-tests your decks against each other in the background. Nothing a member buys
-    touches Amber, matchmaking or tournament eligibility.
--   **Learn** — a played-through Learn-to-Play walkthrough at `/learn` that teaches the game a
-    move at a time, no account required.
+    Vault Master) whose perks are analytics and cosmetics only: Archon Intelligence, Deep Probe,
+    AERC analysis, deck comparison, replay analysis and the misplay review, profile
+    customisation, organizer CSV exports, a preview programme, and the Champion's Challenge,
+    where a computer play-tests your decks against each other in the background. Nothing a member
+    buys touches Amber, matchmaking or tournament eligibility.
+-   **Learn and practice** — a played-through Learn-to-Play walkthrough at `/learn` that teaches
+    the game a move at a time, no account required, and thirteen practice bots (one per house)
+    that keep an open table in the lobby at any hour.
 -   **Mobile** — an Expo iOS app (`mobile/`) that plays the full game board, plus decks,
     tournaments, membership and push notifications.
 -   **Admin** — a settings service backing every runtime-tunable value, an admin settings page,
