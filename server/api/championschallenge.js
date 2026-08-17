@@ -36,14 +36,19 @@ module.exports.init = function (server) {
         })
     );
 
-    // ARCHON (N21): the randomizer - fill a roster slot with a random
-    // eligible deck that swaps itself for a fresh one after `games` games.
+    // ARCHON (N21): the randomizer - fill roster slots with random eligible
+    // decks, each swapping itself for a fresh one after `games` games.
+    // `count` fills several at once; it is clamped to the slots actually
+    // free rather than refused, because "add 5" with 3 slots left plainly
+    // means "add what fits".
     server.post(
         '/api/champions-challenge/decks/random',
         passport.authenticate('jwt', { session: false }),
         requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
         wrapAsync(async (req, res) => {
             const games = parseInt(req.body && req.body.games, 10);
+            const requested =
+                req.body && req.body.count !== undefined ? parseInt(req.body.count, 10) : 1;
 
             if (!Number.isFinite(games) || games < 1 || games > 500) {
                 return res.status(400).send({
@@ -53,12 +58,22 @@ module.exports.init = function (server) {
             }
 
             const config = championsChallenge.getConfig();
+
+            if (!Number.isFinite(requested) || requested < 1) {
+                return res.status(400).send({
+                    success: false,
+                    message: 'Number of random decks must be at least 1.'
+                });
+            }
+
             const enrolled = await championsChallenge.db.query(
                 'SELECT COUNT(*)::int AS "Count" FROM "ProvingGroundsDecks" WHERE "UserId" = $1',
                 [req.user.id]
             );
+            const used = (enrolled[0] && enrolled[0].Count) || 0;
+            const free = config.maxEnrolledPerUser - used;
 
-            if (enrolled[0] && enrolled[0].Count >= config.maxEnrolledPerUser) {
+            if (free <= 0) {
                 return res.status(400).send({
                     success: false,
                     message:
@@ -67,9 +82,13 @@ module.exports.init = function (server) {
                 });
             }
 
-            const deckId = await championsChallenge.enrollRandomDeck(req.user.id, games);
+            const deckIds = await championsChallenge.enrollRandomDecks(
+                req.user.id,
+                games,
+                Math.min(requested, free)
+            );
 
-            if (!deckId) {
+            if (!deckIds.length) {
                 return res.status(400).send({
                     success: false,
                     message:
@@ -78,7 +97,14 @@ module.exports.init = function (server) {
                 });
             }
 
-            res.send({ success: true, deckId });
+            res.send({
+                success: true,
+                deckIds,
+                // Kept for older clients, which asked for one and read one.
+                deckId: deckIds[0],
+                added: deckIds.length,
+                requested
+            });
         })
     );
 

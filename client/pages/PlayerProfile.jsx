@@ -78,7 +78,7 @@ const PlayerProfile = () => {
                     <p className='text-sm text-muted'>
                         {t('No player named {{username}}.', { username })}{' '}
                         <Link href='/community/members' className='text-amber-300 underline'>
-                            {t('Browse members')}
+                            {t('Browse players')}
                         </Link>
                     </p>
                 </Panel>

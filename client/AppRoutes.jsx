@@ -42,7 +42,6 @@ import AnalyticsAdmin from './pages/AnalyticsAdmin';
 // ARCHON (N5): reports and the moderation queue
 import ModerationQueue from './pages/ModerationQueue';
 import Onboarding from './pages/Onboarding';
-import Ratings from './pages/Ratings';
 import PlayerProfile from './pages/PlayerProfile';
 import PlayIrl from './pages/PlayIrl';
 import MotdAdmin from './pages/MotdAdmin';
@@ -70,15 +69,16 @@ import GameLobby from './Components/Games/GameLobby';
 import GameBoard from './Components/GameBoard/GameBoard.jsx';
 
 /**
- * The leaderboards moved under /stats. Season history links carry
- * `?season=N`, so this preserves the query rather than dropping a player on
- * the live ladder when they asked for an archived one.
+ * The leaderboards live under /community now (they were briefly under
+ * /stats). Season history links carry `?season=N`, so this preserves the
+ * query rather than dropping a player on the live ladder when they asked for
+ * an archived one.
  */
 const LeaderboardsRedirect = () => {
     const [searchParams] = useSearchParams();
     const search = searchParams.toString();
 
-    return <Navigate to={`/stats/leaderboards${search ? `?${search}` : ''}`} replace />;
+    return <Navigate to={`/community/leaderboards${search ? `?${search}` : ''}`} replace />;
 };
 
 LeaderboardsRedirect.displayName = 'LeaderboardsRedirect';
@@ -224,22 +224,20 @@ const AppRoutes = ({ currentGame, user }) => {
             />
             {/* ARCHON: the statistics pages - site stats, your own Amber, and
                 the rankings - used to be scattered across Play, Community and
-                two top-level tabs. They are one Stats section now, and Top
-                Players (which was the rankings query pinned to the worldwide
-                top 25) has been folded into Leaderboards.
+                two top-level tabs. Your Amber and the meta are one page now
+                (/stats, opening on your own numbers), and the rankings sit in
+                Community with the other people-shaped pages.
 
                 Every former path still resolves: they are linked from
                 profiles, the About page and anywhere a player has bookmarked
                 them, and a dead link is a worse outcome than a redirect nobody
                 notices. `replace` keeps the old URL out of history, so Back
-                does not bounce through it. */}
+                does not bounce through it. /stats/me is not a redirect - it
+                still names a real view, the overview's first tab. */}
             <Route path='/stats' element={<Stats />} />
-            <Route path='/stats/me' element={<Ratings />} />
-            <Route path='/stats/leaderboards' element={<Leaderboards />} />
-            <Route
-                path='/stats/top-players'
-                element={<Navigate to='/stats/leaderboards' replace />}
-            />
+            <Route path='/stats/me' element={<Stats />} />
+            <Route path='/stats/leaderboards' element={<LeaderboardsRedirect />} />
+            <Route path='/stats/top-players' element={<LeaderboardsRedirect />} />
             <Route path='/tournaments' element={<Tournaments />} />
             <Route path='/tournaments/:id' element={<TournamentDetail />} />
             {/* ARCHON (N9): what the printed check-in QR points at. Both
@@ -258,13 +256,11 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/community/teams' element={<Teams />} />
             <Route path='/community/teams/:id' element={<TeamDetail />} />
             <Route path='/community/members' element={<Members />} />
+            <Route path='/community/leaderboards' element={<Leaderboards />} />
             {/* Former homes of the ranking pages. A query string on a
                 leaderboard link (?season=3, from the season history) has to
-                survive the move, so that one carries its search through. */}
-            <Route
-                path='/community/top-players'
-                element={<Navigate to='/stats/leaderboards' replace />}
-            />
+                survive the move, so those carry their search through. */}
+            <Route path='/community/top-players' element={<LeaderboardsRedirect />} />
             <Route path='/community/ratings' element={<Navigate to='/stats/me' replace />} />
             <Route path='/leaderboards' element={<LeaderboardsRedirect />} />
             <Route
