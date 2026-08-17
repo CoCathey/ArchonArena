@@ -2376,6 +2376,31 @@ whether anything was happening. The rating path is sound — the reporting aroun
 -   [x] A practice game says so immediately rather than making anyone wait.
 -   [x] A slow rating names itself, with its duration, in the logs.
 
+#### N37 — Comping a tier, from a screen _(done)_
+
+**Why:** giving somebody a week of Vault Master — to try before an event, or to put something
+right — required a hand-written POST. Everything else was already built.
+
+**Tasks**
+
+-   [x] **A button, at last.** `Memberships."GrantedTier"`/`"GrantedUntil"`, the resolver that
+        folds a comp above any paid membership, the admin endpoint and even the RTK mutation have
+        existed since N12. Nothing rendered them. This is the third time in this project a
+        finished feature turned out to be unreachable (the analytics route, the Vault Tour field,
+        this), so the spec asserts the wiring rather than only the parts.
+-   [x] **The seven-day Vault Master trial is one click**, not a form: username, button. The tier
+        and length pickers sit below for contributors, apologies and open-ended comps.
+-   [x] **Current comps are listed, with a revoke.** A grant screen that cannot show its own
+        grants invites the same comp twice and an expiry nobody can plan around. Revoking clears
+        the comp only — a paid membership underneath is untouched, which is why grants live in
+        their own columns.
+
+**Acceptance criteria**
+
+-   [x] The trial always carries an expiry; a comp that never ends is a free tier given away.
+-   [x] A comp never demotes an account that pays for more.
+-   [x] Revoking a comp leaves a real membership intact.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
