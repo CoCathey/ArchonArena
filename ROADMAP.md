@@ -1437,6 +1437,38 @@ on them), Clubs gather under the **Grand Alliance Council**, and Play IRL is **I
         specs run unchanged either way, because the seed falls back to SAS alone when AERC is
         absent).
 
+#### N20 — The new-player welcome: a fortnight of Archon, and a pill that says be nice _(done)_
+
+**Why:** the best moment to show somebody what the platform can tell them about their decks is
+while they are still deciding whether to stay — and a fresh face in a lobby full of veterans
+deserves to be legible as one.
+
+**Tasks**
+
+-   [x] **Fifteen days of the Archon tier for every new account**, resolved rather than
+        stored: `resolveEntitlements` folds the trial in from the registration date the same
+        way it folds in a grant or a pledge — the higher tier wins, so a new player who pays
+        for Vault Master keeps it, a Supporter runs the trial and lapses back to what they pay
+        for, and the trial ends the moment day fifteen does, with no claim button, no
+        membership row and no sweep. A constant (`NEW_PLAYER_TRIAL_DAYS`) rather than a
+        setting, because the resolver is deliberately pure.
+-   [x] **The "New" pill** next to fresh names, everywhere names render: `publicBadge` carries
+        `isNew` (from `Users.Registered`, through the batched badge lookup, the profile
+        identity, and lobby summaries), and `PlayerBadge` draws an emerald pill — a welcome,
+        never a key, because the tier badge is a claim about money and the trial makes none.
+        A brand-new free account is now worth including in the badge payload; the
+        nothing-to-show filter keeps it.
+-   [x] The membership page states the trial with the same number the resolver enforces,
+        served on the public catalogue.
+
+**Depends on:** N12. **Acceptance criteria**
+
+-   [x] A three-day-old account resolves to Archon (`source: 'new-player-trial'`,
+        complimentary, expiring on day fifteen exactly) and a fifteen-day-old account to free
+        — pinned in `entitlements.spec.js`.
+-   [x] A trial account's public badge shows the New pill and no tier key; a paying new
+        player shows both their paid tier and the pill — pinned in `publicBadge.spec.js`.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

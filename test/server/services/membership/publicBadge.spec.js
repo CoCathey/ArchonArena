@@ -58,6 +58,40 @@ describe('publicBadge', function () {
         expect(badge).toEqual({ role: 'user', tier: TIER_IDS.FREE, tierName: null });
     });
 
+    // ARCHON (N20): the new-player pill. The trial unlocks Archon's TOOLS,
+    // but the tier badge is a claim about money - a trial account wears the
+    // New pill, never a patron's key.
+    describe('the New pill', function () {
+        const NOW = new Date('2026-06-01T00:00:00Z');
+        const daysAgo = (days) => new Date(NOW.getTime() - days * 86400000);
+
+        it('marks a fresh account as new without asserting any tier', function () {
+            const badge = publicBadge({ registered: daysAgo(2), now: NOW });
+
+            expect(badge.isNew).toBe(true);
+            expect(badge.tier).toBe(TIER_IDS.FREE);
+            expect(badge.tierName).toBeNull();
+        });
+
+        it('keeps the pill on a new player who already pays', function () {
+            const badge = publicBadge({
+                membership: active(TIER_IDS.SUPPORTER),
+                registered: daysAgo(2),
+                now: NOW
+            });
+
+            expect(badge.isNew).toBe(true);
+            expect(badge.tier).toBe(TIER_IDS.SUPPORTER);
+        });
+
+        it('is omitted, not false, once the window closes', function () {
+            const badge = publicBadge({ registered: daysAgo(16), now: NOW });
+
+            expect(badge).toEqual({ role: 'user', tier: TIER_IDS.FREE, tierName: null });
+            expect('isNew' in badge).toBe(false);
+        });
+    });
+
     it('drops the badge when a comped grant expires', function () {
         const expired = {
             grantedTier: TIER_IDS.VAULT_MASTER,
@@ -136,6 +170,24 @@ describe('BadgeService', function () {
         ]).getBadges(['MIXEDCASE']);
 
         expect(badges.mixedcase).toBeDefined();
+    });
+
+    // ARCHON (N20): a fresh free account has something to show now - the New
+    // pill - so the nothing-to-show filter must keep it.
+    it('keeps a badge-less new player for the New pill', async function () {
+        const badges = await service([
+            {
+                Username: 'rookie',
+                Roles: [],
+                Tier: null,
+                Status: null,
+                Registered: new Date(Date.now() - 24 * 60 * 60 * 1000)
+            }
+        ]).getBadges(['rookie']);
+
+        expect(badges.rookie).toBeDefined();
+        expect(badges.rookie.isNew).toBe(true);
+        expect(badges.rookie.tier).toBe(TIER_IDS.FREE);
     });
 
     it('asks for nothing when given no names', async function () {

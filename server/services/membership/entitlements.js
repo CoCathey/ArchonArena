@@ -48,6 +48,44 @@ const {
 const ACTIVE_STATUSES = ['active', 'active_patron', 'complimentary', 'manual'];
 
 /**
+ * ARCHON (N20): every new account spends its first fortnight with the Archon
+ * tier's tools. The best moment to show somebody what the platform can tell
+ * them about their decks is while they are still deciding whether to stay -
+ * and a trial that starts silently at registration needs no claim button, no
+ * membership row, and no sweep to end it. Resolution checks the date, so the
+ * trial expires the moment it expires, exactly like a lapsed pledge.
+ *
+ * A constant rather than a setting because it feeds `resolveEntitlements`,
+ * which is deliberately pure - threading a settings read through every
+ * entitlement resolution would trade that purity for a knob. Changing the
+ * length is an edit here and nothing else.
+ */
+const NEW_PLAYER_TRIAL_DAYS = 15;
+
+const TRIAL_MS = NEW_PLAYER_TRIAL_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * When this account's new-player trial ends, or null when it never had one
+ * (no registration date) or the date cannot be read.
+ *
+ * @param {string|Date|null|undefined} registered
+ * @returns {Date|null}
+ */
+function newPlayerTrialEndsAt(registered) {
+    if (!registered) {
+        return null;
+    }
+
+    const start = registered instanceof Date ? registered : new Date(registered);
+
+    if (Number.isNaN(start.getTime())) {
+        return null;
+    }
+
+    return new Date(start.getTime() + TRIAL_MS);
+}
+
+/**
  * @typedef Entitlements
  * @property {string} tierId          the effective tier id
  * @property {string} tierName        its display name
@@ -163,6 +201,26 @@ function resolveEntitlements({ user, membership, now = new Date() } = {}) {
         }
     }
 
+    // ARCHON (N20): the new-player trial - Archon's tools for the account's
+    // first NEW_PLAYER_TRIAL_DAYS days. Folded like every other source: the
+    // higher tier wins, so a new player who already pays for Vault Master
+    // keeps Vault Master, and a Supporter's trial hands them Archon until it
+    // lapses back to what they pay for. A user object that carries no
+    // registration date simply has no trial - resolution stays pure and
+    // nothing is guessed.
+    const trialEndsAt = newPlayerTrialEndsAt(user && user.registered);
+
+    if (trialEndsAt && trialEndsAt.getTime() > now.getTime()) {
+        const combined = higherTier(tierId, TIER_IDS.ARCHON);
+
+        if (combined !== tierId) {
+            tierId = combined;
+            source = 'new-player-trial';
+            complimentary = true;
+            expiresAt = trialEndsAt;
+        }
+    }
+
     const tier = tierById(tierId) || FREE_TIER;
 
     return {
@@ -225,5 +283,7 @@ module.exports = {
     resolveEntitlements,
     can,
     anonymousEntitlements,
-    ACTIVE_STATUSES
+    ACTIVE_STATUSES,
+    NEW_PLAYER_TRIAL_DAYS,
+    newPlayerTrialEndsAt
 };
