@@ -1,5 +1,7 @@
 const crypto = require('node:crypto');
 
+const { effectiveAri } = require('../rating/AriService');
+
 const logger = require('../../log');
 
 // ARCHON: one sliding window per Api-Key, not one per process.
@@ -514,8 +516,13 @@ class DokService {
 
         let rows;
         try {
+            // ARCHON (N19): DeckAri rides along so every reader of a deck's
+            // SAS can carry its ARI too - one join here instead of a second
+            // lookup on every path that decorates decks.
             rows = await this.db.query(
-                'SELECT "Uuid", "SasRating", "AercScore", "FetchedAt" FROM "DeckSas" WHERE "Uuid" = ANY($1)',
+                'SELECT ds."Uuid", ds."SasRating", ds."AercScore", ds."FetchedAt", da."Ari" ' +
+                    'FROM "DeckSas" ds LEFT JOIN "DeckAri" da ON da."Uuid" = ds."Uuid" ' +
+                    'WHERE ds."Uuid" = ANY($1)',
                 [uuids]
             );
         } catch (err) {
@@ -734,6 +741,9 @@ class DokService {
             if (row) {
                 deck.sasRating = row.SasRating;
                 deck.aercScore = row.AercScore;
+                // ARCHON (N19): the platform's own index - stored where any
+                // game has moved it, the SAS/AERC seed otherwise.
+                deck.ari = effectiveAri(row);
             }
 
             if (

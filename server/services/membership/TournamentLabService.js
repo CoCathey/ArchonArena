@@ -9,7 +9,8 @@ const {
 } = require('./setFilter');
 
 /**
- * ARCHON (N12): the Tournament Lab.
+ * ARCHON (N12): the Tournament Lab - sold as "Deep Probe" since the rename;
+ * class, routes and capability id keep the working name.
  *
  * One question: "which of my decks should I bring to this event?"
  *

@@ -231,6 +231,25 @@ const DeckSummary = ({ deck, globalWins, globalLosses, globalWinRate }) => {
                                 {showGlobal && <span />}
                             </>
                         )}
+                        {/* ARCHON (N19): ARI - the platform's own index, the
+                            deck term Amber actually uses. */}
+                        {deck.ari != null && (
+                            <>
+                                <span
+                                    className='text-muted'
+                                    title={t(
+                                        'Archon Rating Index: starts from SAS and AERC, then moves ' +
+                                            'with this deck’s real and sparring results.'
+                                    )}
+                                >
+                                    {t('ARI')}
+                                </span>
+                                <span className='font-bold text-accent'>
+                                    {Math.round(deck.ari)}
+                                </span>
+                                {showGlobal && <span />}
+                            </>
+                        )}
                     </div>
                     {Object.keys(enhancements).length > 0 ? (
                         <div className='deck-enhancements flex flex-wrap items-center gap-3 ps-0 pt-3'>

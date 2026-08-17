@@ -4,13 +4,13 @@ const RatingService = require('../rating/RatingService');
 const MembershipService = require('../membership/MembershipService');
 const { resolveEntitlements } = require('../membership/entitlements');
 const { CAPABILITIES } = require('../membership/capabilities');
+const AriService = require('../rating/AriService');
 const { cloneCard } = require('./packCards');
 const { runSimulatedGame } = require('./SimulatedGame');
 const {
     MIN_CONFIDENT_GAMES,
     MIN_OPENING_GAMES,
     sasExpectedScore,
-    performanceSas,
     isHiddenGem,
     buildFindings
 } = require('./labMath');
@@ -22,7 +22,12 @@ const MAX_CANDIDATES = 60;
 const MAX_GAMES_READ = 20000;
 
 /**
- * ARCHON (N18): the Proving Grounds - Vault Master's background deck testing.
+ * ARCHON (N18): the Champion’s Challenge - Vault Master's background deck testing.
+ *
+ * (Shipped as "the Proving Grounds"; renamed before anyone met it. The two
+ * tables keep their birth names - ProvingGroundsDecks/ProvingGroundsGames -
+ * because renaming an applied migration's tables costs a checksum-guarded
+ * migration dance and buys nothing a comment doesn't.)
  *
  * A member enrolls decks onto a roster; the lobby's sweep quietly plays them
  * against each other with the simulated player (SimulatedGame.js); and the
@@ -48,7 +53,7 @@ const MAX_GAMES_READ = 20000;
  *    MIN_CONFIDENT_GAMES. The lab must be the most honest analyst on the
  *    site, because nobody can argue with a computer that plays in private.
  */
-class ProvingGroundsService {
+class ChampionsChallengeService {
     constructor(configService, db = require('../../db'), settingsService = require('../settings')) {
         this.configService = configService;
         this.db = db;
@@ -57,6 +62,9 @@ class ProvingGroundsService {
         // For the SAS exchange rate only, so lab expectations track the same
         // admin-tunable model that rates real games.
         this.ratingService = new RatingService(configService, db, settingsService);
+        // ARCHON (N19): sparring games move each deck's ARI - the gentler
+        // simGameK, but the same index real games move.
+        this.ariService = new AriService(db);
         // Injectable for tests: specs replace this with a stub rather than
         // playing half a second of real game per assertion.
         this.runMatch = runSimulatedGame;
@@ -64,7 +72,7 @@ class ProvingGroundsService {
 
     /** Admin-configurable knobs, defaults from the settings registry. */
     getConfig() {
-        return this.settingsService.getSectionWithDefaults('provingGrounds');
+        return this.settingsService.getSectionWithDefaults('championsChallenge');
     }
 
     /** The elo config whose sasWeight the lab's expectations use. */
@@ -95,7 +103,7 @@ class ProvingGroundsService {
             isAdmin = !!(rows && rows[0] && rows[0].IsAdmin);
         } catch (err) {
             logger.error(
-                'Proving Grounds admin lookup failed for user %s: %s',
+                'Champion’s Challenge admin lookup failed for user %s: %s',
                 userId,
                 err.message
             );
@@ -107,7 +115,7 @@ class ProvingGroundsService {
             membership
         });
 
-        return entitlements.capabilities.includes(CAPABILITIES.PROVING_GROUNDS);
+        return entitlements.capabilities.includes(CAPABILITIES.CHAMPIONS_CHALLENGE);
     }
 
     /**
@@ -131,7 +139,7 @@ class ProvingGroundsService {
 
         if (enrolled[0] && enrolled[0].Count >= config.maxEnrolledPerUser) {
             throw new Error(
-                `All ${config.maxEnrolledPerUser} Proving Grounds slots are in use. ` +
+                `All ${config.maxEnrolledPerUser} Champion’s Challenge slots are in use. ` +
                     'Withdraw a deck to enroll another.'
             );
         }
@@ -169,7 +177,7 @@ class ProvingGroundsService {
 
         if (missing.length || engineDeck.houses.length !== 3) {
             throw new Error(
-                "The Proving Grounds cannot play that deck yet - it uses cards this server's " +
+                "The Champion’s Challenge cannot play that deck yet - it uses cards this server's " +
                     'simulation data does not cover.'
             );
         }
@@ -252,7 +260,7 @@ class ProvingGroundsService {
             deck: {
                 dbId: deckId,
                 name: (row && row.Name) || `Deck ${deckId}`,
-                uuid: (row && row.Uuid) || `proving-${deckId}`,
+                uuid: (row && row.Uuid) || `challenge-${deckId}`,
                 expansion: (row && row.ExpansionId) || 341,
                 houses: (houseRows || []).map((house) => house.Code).filter(Boolean),
                 cards
@@ -274,6 +282,11 @@ class ProvingGroundsService {
         if (!config.enabled) {
             return { played: 0, abandoned: 0 };
         }
+
+        // ARCHON (N19): read once per sweep - which index rate sparring games
+        // move ARI at, and whether they move it at all.
+        const ariConfig = (this.ratingService.getConfig() || {}).ari || {};
+        const eloConfig = this.eloConfig();
 
         const enrollments = await this.db.query(
             'SELECT "UserId", "DeckId" FROM "ProvingGroundsDecks"'
@@ -363,7 +376,7 @@ class ProvingGroundsService {
                     omega.deck.houses.length !== 3
                 ) {
                     logger.warn(
-                        `Proving Grounds skipped rosters of user ${userId}: deck ` +
+                        `Champion’s Challenge skipped rosters of user ${userId}: deck ` +
                             `${alpha.missing.length ? pair[0] : pair[1]} is not simulatable`
                     );
                     continue;
@@ -377,7 +390,7 @@ class ProvingGroundsService {
                     });
                 } catch (err) {
                     logger.error(
-                        `Proving Grounds game failed for user ${userId} ` +
+                        `Champion’s Challenge game failed for user ${userId} ` +
                             `(decks ${pair[0]} vs ${pair[1]}):`,
                         err
                     );
@@ -387,7 +400,7 @@ class ProvingGroundsService {
 
                 if (!result || !result.completed) {
                     logger.warn(
-                        `Proving Grounds abandoned a game for user ${userId} ` +
+                        `Champion’s Challenge abandoned a game for user ${userId} ` +
                             `(decks ${pair[0]} vs ${pair[1]}): ${result && result.reason}`
                     );
                     abandoned++;
@@ -395,6 +408,21 @@ class ProvingGroundsService {
                 }
 
                 await this.recordGame(userId, result);
+
+                // ARCHON (N19): a sparring result moves both decks' ARIs at
+                // the sim rate. Best-effort by AriService contract - a failed
+                // index update never fails the sweep - and skipped entirely
+                // when the admin has ARI off.
+                if (ariConfig.enabled) {
+                    await this.ariService.applyGameResult({
+                        winnerUuid: result.winnerDeck.uuid,
+                        loserUuid: result.loserDeck.uuid,
+                        k: ariConfig.simGameK,
+                        sasWeight: eloConfig.sasWeight,
+                        sim: true
+                    });
+                }
+
                 gamesToday.set(
                     result.winnerDeck.dbId,
                     (gamesToday.get(result.winnerDeck.dbId) || 0) + 1
@@ -437,7 +465,7 @@ class ProvingGroundsService {
     }
 
     /**
-     * Everything the Proving Grounds page shows, in one read.
+     * Everything the Champion’s Challenge page shows, in one read.
      *
      * @param {number} userId
      * @returns {Promise<object>}
@@ -447,7 +475,7 @@ class ProvingGroundsService {
 
         const [enrollmentRows, gameRows, candidateRows] = await Promise.all([
             this.db.query(
-                'SELECT e."DeckId", e."EnrolledAt", d."Name", ds."SasRating" ' +
+                'SELECT e."DeckId", e."EnrolledAt", d."Name", d."Uuid", ds."SasRating" ' +
                     'FROM "ProvingGroundsDecks" e ' +
                     'JOIN "Decks" d ON d."Id" = e."DeckId" ' +
                     'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
@@ -500,8 +528,14 @@ class ProvingGroundsService {
         }
 
         const eloConfig = this.eloConfig();
+        // ARCHON (N19): each deck's ARI - stored when any game has moved it,
+        // the SAS/AERC seed otherwise - so the page always has a number where
+        // the deck's rating goes.
+        const ariByUuid = await this.ariService.ariForUuids(
+            enrollmentList.map((enrollment) => enrollment.Uuid)
+        );
         const decks = enrollmentList.map((enrollment) =>
-            this.aggregateDeck(enrollment, games, sasByDeck, eloConfig)
+            this.aggregateDeck(enrollment, games, sasByDeck, eloConfig, ariByUuid)
         );
 
         // Gems first, then by how far above expectation each deck runs.
@@ -539,9 +573,10 @@ class ProvingGroundsService {
      * One enrolled deck's games folded into the row the page renders.
      * Pure given its arguments; the SQL above is the only IO.
      */
-    aggregateDeck(enrollment, games, sasByDeck, eloConfig) {
+    aggregateDeck(enrollment, games, sasByDeck, eloConfig, ariByUuid = new Map()) {
         const deckId = enrollment.DeckId;
         const sas = enrollment.SasRating;
+        const ariInfo = ariByUuid.get(enrollment.Uuid);
 
         let wins = 0;
         let losses = 0;
@@ -553,7 +588,6 @@ class ProvingGroundsService {
         let expectedSum = 0;
         let expectedGames = 0;
         let lastPlayedAt = null;
-        const expectationGames = [];
         const openings = new Map();
 
         for (const game of games) {
@@ -589,7 +623,6 @@ class ProvingGroundsService {
             if (sas != null && opponentSas != null) {
                 expectedSum += sasExpectedScore(sas, opponentSas, eloConfig);
                 expectedGames++;
-                expectationGames.push({ opponentSas, won });
             }
 
             if (firstHouse) {
@@ -608,11 +641,6 @@ class ProvingGroundsService {
         const total = wins + losses;
         const winRate = total ? wins / total : null;
         const expectedWinRate = expectedGames ? expectedSum / expectedGames : null;
-        // A performance rating over a thin sample swings wildly (a 3-0 start
-        // reads as +80 SAS), so it is withheld until the deck has a sample
-        // that can carry the number.
-        const playsLike =
-            total >= MIN_CONFIDENT_GAMES ? performanceSas(expectationGames, eloConfig) : null;
         const secondGames = total - wentFirstGames;
         const secondWins = wins - wentFirstWins;
 
@@ -638,7 +666,12 @@ class ProvingGroundsService {
             winRate,
             expectedWinRate,
             delta: winRate != null && expectedWinRate != null ? winRate - expectedWinRate : null,
-            playsLikeSas: playsLike != null ? Math.round(playsLike * 10) / 10 : null,
+            // ARCHON (N19): the deck's ARI - the platform's living rating,
+            // which these very games have been moving - plus how much of its
+            // evidence is sparring, so the page can say so.
+            ari: ariInfo && ariInfo.ari != null ? Math.round(ariInfo.ari * 10) / 10 : null,
+            ariSimGames: ariInfo ? ariInfo.simGames : 0,
+            ariRatedGames: ariInfo ? ariInfo.ratedGames : 0,
             confident: total >= MIN_CONFIDENT_GAMES,
             avgTurns: total ? Math.round((turnsTotal / total) * 10) / 10 : null,
             avgKeysFor: total ? Math.round((keysFor / total) * 100) / 100 : null,
@@ -679,4 +712,4 @@ function shuffle(list) {
     return copy;
 }
 
-module.exports = ProvingGroundsService;
+module.exports = ChampionsChallengeService;

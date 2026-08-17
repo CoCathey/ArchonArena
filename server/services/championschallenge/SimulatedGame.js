@@ -3,7 +3,7 @@ const { randomUUID } = require('node:crypto');
 /**
  * ARCHON (N18): one simulated game, played start to finish by the computer.
  *
- * This is the sparring partner behind the Proving Grounds: it drives the real
+ * This is the sparring partner behind the Champion’s Challenge: it drives the real
  * gameplay engine through the ordinary player interface - the same
  * `menuButton`/`cardClicked` calls a browser click becomes - so a simulated
  * game obeys exactly the rules a real one does, card fixes and all. Nothing
@@ -39,8 +39,8 @@ const { randomUUID } = require('node:crypto');
  * in has real players whose latency matters more than the bot's.
  */
 
-const PLAYER_ONE = 'proving-alpha';
-const PLAYER_TWO = 'proving-omega';
+const PLAYER_ONE = 'challenger-alpha';
+const PLAYER_TWO = 'challenger-omega';
 
 // Buttons the bot must never press while any alternative exists. Concede and
 // rematch protect the game; manual-mode toggles protect the simulation's
@@ -144,7 +144,7 @@ class SimulatedGame {
         const game = new Game(
             {
                 id: randomUUID(),
-                name: 'Proving Grounds',
+                name: 'Champion’s Challenge',
                 owner: alpha,
                 saveGameId: 0,
                 players: [

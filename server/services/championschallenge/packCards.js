@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * ARCHON (N18): the card index the Proving Grounds simulates with.
+ * ARCHON (N18): the card index the Champion’s Challenge simulates with.
  *
  * The engine wants every deck entry to carry the full card JSON, and in a real
  * game the lobby joins that in from the Redis-backed CardService

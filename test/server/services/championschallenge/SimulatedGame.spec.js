@@ -1,11 +1,14 @@
-const { getCardIndex, cloneCard } = require('../../../../server/services/provinggrounds/packCards');
+const {
+    getCardIndex,
+    cloneCard
+} = require('../../../../server/services/championschallenge/packCards');
 const {
     runSimulatedGame,
     PLAYER_ONE,
     PLAYER_TWO
-} = require('../../../../server/services/provinggrounds/SimulatedGame');
+} = require('../../../../server/services/championschallenge/SimulatedGame');
 
-// The one property the whole Proving Grounds stands on: a simulated game,
+// The one property the whole Champion’s Challenge stands on: a simulated game,
 // played by the computer through the real engine, always reaches a legitimate
 // conclusion. Everything else the lab reports is arithmetic over what these
 // games record.

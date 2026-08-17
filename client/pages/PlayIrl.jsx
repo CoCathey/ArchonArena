@@ -22,7 +22,7 @@ const EMPTY_FORM = {
 };
 
 /**
- * ARCHON: Play IRL (Phase 9). In-person play hub - a community directory of
+ * ARCHON: Into the Fray (né Play IRL, Phase 9). In-person play hub - a directory of
  * local game stores / venues (searchable by location, anyone can add one)
  * plus pointers to running in-person tournaments and clubs.
  */
@@ -89,10 +89,14 @@ const PlayIrl = () => {
 
     return (
         <div className='mx-auto w-full max-w-4xl space-y-4'>
-            <Panel title={t('Play In Person')}>
+            <Panel title={t('Into the Fray')}>
                 <p className='text-sm text-muted'>
                     {t(
-                        'KeyForge is best shared across a table. Find a local game store or venue below, or run an in-person event with the tournament tools - organizers report results and standings update live.'
+                        'Into the Fray is the home of in-person KeyForge: everything here is about ' +
+                            'finding real matchups across a real table. Look up a local game store ' +
+                            'or venue below, run an in-person event with the tournament tools — ' +
+                            'organizers report results and standings update live — or record a ' +
+                            'paper game so it counts on your ladder.'
                     )}
                 </p>
                 <div className='mt-3 flex flex-wrap gap-2'>
@@ -103,7 +107,7 @@ const PlayIrl = () => {
                     </Link>
                     <Link href='/community/clubs'>
                         <HeroButton size='sm' variant='tertiary'>
-                            {t('Find a club')}
+                            {t('Grand Alliance Council')}
                         </HeroButton>
                     </Link>
                 </div>

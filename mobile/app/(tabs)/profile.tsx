@@ -268,7 +268,7 @@ export default function ProfileScreen() {
                         onPress={() => router.push('/tournament-lab')}
                         style={styles.linkItem}
                     >
-                        <Text style={styles.linkText}>Tournament Lab</Text>
+                        <Text style={styles.linkText}>Deep Probe</Text>
                         <Text style={styles.linkHint}>Which of your decks should you bring?</Text>
                     </Pressable>
                 </View>

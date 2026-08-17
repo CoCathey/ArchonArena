@@ -1,5 +1,5 @@
-const ProvingGroundsService = require('../../../../server/services/provinggrounds/ProvingGroundsService');
-const { MIN_CONFIDENT_GAMES } = require('../../../../server/services/provinggrounds/labMath');
+const ChampionsChallengeService = require('../../../../server/services/championschallenge/ChampionsChallengeService');
+const { MIN_CONFIDENT_GAMES } = require('../../../../server/services/championschallenge/labMath');
 
 // The service against a mocked db, dispatching on SQL substrings the way the
 // catalog and deck-import specs do. What is being pinned:
@@ -23,14 +23,14 @@ const defaultConfig = {
     maxTurnsPerGame: 80
 };
 
-describe('ProvingGroundsService', function () {
+describe('ChampionsChallengeService', function () {
     let db;
     let service;
     let config;
 
     const configService = { getValue: () => ({}) };
     const settingsService = {
-        getSectionWithDefaults: (name) => (name === 'provingGrounds' ? { ...config } : {}),
+        getSectionWithDefaults: (name) => (name === 'championsChallenge' ? { ...config } : {}),
         getSection: () => ({})
     };
 
@@ -64,7 +64,7 @@ describe('ProvingGroundsService', function () {
     beforeEach(function () {
         config = { ...defaultConfig };
         db = { query: vi.fn().mockResolvedValue([]) };
-        service = new ProvingGroundsService(configService, db, settingsService);
+        service = new ChampionsChallengeService(configService, db, settingsService);
     });
 
     afterEach(function () {
@@ -103,7 +103,9 @@ describe('ProvingGroundsService', function () {
         it('refuses a full roster by naming the limit', async function () {
             enrollAnswers(ownDeck, { enrolledCount: 8 });
 
-            await expect(service.enrollDeck(USER, 7)).rejects.toThrow(/8 Proving Grounds slots/);
+            await expect(service.enrollDeck(USER, 7)).rejects.toThrow(
+                /8 Champion’s Challenge slots/
+            );
         });
 
         it("refuses another player's deck", async function () {
@@ -223,7 +225,7 @@ describe('ProvingGroundsService', function () {
                     { UserId: USER, DeckId: 1 },
                     { UserId: USER, DeckId: 2 }
                 ],
-                // Archon is one tier short of the Proving Grounds.
+                // Archon is one tier short of the Champion’s Challenge.
                 membership: { ...vaultMasterRow, Tier: 'archon' }
             });
             service.runMatch = vi.fn();
@@ -337,18 +339,56 @@ describe('ProvingGroundsService', function () {
         ];
 
         // The candidates query's NOT EXISTS subquery also mentions
-        // "ProvingGroundsDecks", so it must be dispatched on first.
+        // "ProvingGroundsDecks", so it must be dispatched on first; likewise
+        // the ARI read joins DeckSas, so it must be matched before the plain
+        // DeckSas fallback.
         const reportAnswers = () =>
             answer([
                 ['AND NOT EXISTS', [{ Id: 9, Name: 'Bench', SasRating: 64 }]],
                 [
                     'FROM "ProvingGroundsDecks" e',
                     [
-                        { DeckId: 1, EnrolledAt: new Date(), Name: 'Gem', SasRating: 70 },
-                        { DeckId: 2, EnrolledAt: new Date(), Name: 'Big', SasRating: 80 }
+                        {
+                            DeckId: 1,
+                            EnrolledAt: new Date(),
+                            Name: 'Gem',
+                            Uuid: 'u-1',
+                            SasRating: 70
+                        },
+                        {
+                            DeckId: 2,
+                            EnrolledAt: new Date(),
+                            Name: 'Big',
+                            Uuid: 'u-2',
+                            SasRating: 80
+                        }
                     ]
                 ],
-                ['FROM "ProvingGroundsGames" WHERE "UserId"', games]
+                ['FROM "ProvingGroundsGames" WHERE "UserId"', games],
+                [
+                    'LEFT JOIN "DeckAri"',
+                    [
+                        // The gem's ARI has been climbing with its sparring
+                        // wins; Big has never been adjusted and reads as its
+                        // SAS/AERC seed.
+                        {
+                            Uuid: 'u-1',
+                            SasRating: 70,
+                            AercScore: 70,
+                            Ari: 78.4,
+                            RatedGames: 0,
+                            SimGames: 24
+                        },
+                        {
+                            Uuid: 'u-2',
+                            SasRating: 80,
+                            AercScore: 80,
+                            Ari: null,
+                            RatedGames: 0,
+                            SimGames: 24
+                        }
+                    ]
+                ]
             ]);
 
         it('aggregates a roster end to end', async function () {
@@ -376,14 +416,18 @@ describe('ProvingGroundsService', function () {
             expect(gem.hiddenGem).toBe(true);
             // Performance against an SAS-80 field at 75% reads well above the
             // deck's own 70.
-            expect(gem.playsLikeSas).toBeGreaterThan(75);
+            // The deck's ARI is the stored, game-adjusted index; how much of
+            // its evidence was sparring rides along.
+            expect(gem.ari).toBe(78.4);
+            expect(gem.ariSimGames).toBe(24);
             expect(gem.avgTurns).toBeCloseTo(20, 5);
             expect(gem.avgKeysFor).toBeCloseTo((18 * 3 + 6 * 1) / 24, 5);
 
             expect(big.wins).toBe(6);
             expect(big.hiddenGem).toBe(false);
             expect(big.delta).toBeLessThan(0);
-            expect(big.playsLikeSas).toBeLessThan(75);
+            // Never adjusted: Big's ARI is its SAS/AERC seed.
+            expect(big.ari).toBe(80);
 
             // Gems sort first, and the findings lead with the gem sentence.
             expect(report.decks[0].deckId).toBe(1);

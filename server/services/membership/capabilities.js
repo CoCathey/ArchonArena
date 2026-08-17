@@ -44,7 +44,7 @@ const CAPABILITIES = {
     ENHANCED_COSMETICS: 'enhanced_cosmetics',
     ORGANIZER_TOOLS: 'organizer_tools',
     PRIORITY_ACCESS: 'priority_access',
-    PROVING_GROUNDS: 'proving_grounds'
+    CHAMPIONS_CHALLENGE: 'champions_challenge'
 };
 
 /**
@@ -162,7 +162,7 @@ const CAPABILITY_CATALOG = {
     [CAPABILITIES.DECK_COMPARISON]: {
         label: 'Deck comparison',
         learn: 'Put your decks side by side on record, Elo and matchups.',
-        where: 'Archon+ → Tournament Lab'
+        where: 'Archon+ → Deep Probe'
     },
     [CAPABILITIES.PERSONAL_DECK_RANKINGS]: {
         label: 'Personal deck rankings',
@@ -170,9 +170,12 @@ const CAPABILITY_CATALOG = {
         where: 'Archon Intelligence → Deck Intelligence'
     },
     [CAPABILITIES.TOURNAMENT_LAB]: {
-        label: 'Tournament Lab',
+        // The player-facing name is Deep Probe; the id stays 'tournament_lab'
+        // because released phone builds gate their screen on that string, and
+        // an id is an identifier, not a name.
+        label: 'Deep Probe',
         learn: 'Work out which of your decks to bring to an event, from your own results.',
-        where: 'Archon+ → Tournament Lab'
+        where: 'Archon+ → Deep Probe'
     },
     [CAPABILITIES.ADVANCED_REPLAYS]: {
         label: 'Replay analysis',
@@ -269,15 +272,15 @@ const CAPABILITY_CATALOG = {
         learn: 'Every preview reaches you the day it opens, ahead of the tier it is being tested for.',
         where: 'Profile → Previews'
     },
-    [CAPABILITIES.PROVING_GROUNDS]: {
-        label: 'Proving Grounds',
+    [CAPABILITIES.CHAMPIONS_CHALLENGE]: {
+        label: 'Champion’s Challenge',
         // Simulated games, never official ones: nothing here touches Amber,
-        // deck records or any leaderboard. See docs/design/proving-grounds.md.
+        // deck records or any leaderboard. See docs/design/champions-challenge.md.
         learn:
             'A computer plays your decks against each other around the clock - practice ' +
             'games, not rated ones - and tells you which decks keep beating what their ' +
             'SAS predicts.',
-        where: 'Archon+ → Proving Grounds'
+        where: 'Archon+ → Champion’s Challenge'
     }
 };
 

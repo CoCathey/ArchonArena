@@ -189,6 +189,33 @@ const REGISTRY = {
                         default: 1200
                     }
                 }
+            },
+            // ARCHON (N19): ARI, the Archon Rating Index - the deck rating the
+            // Elo deck term reads instead of raw SAS while enabled.
+            ari: {
+                type: 'section',
+                label: 'ARI (Archon Rating Index)',
+                fields: {
+                    enabled: {
+                        type: 'boolean',
+                        label: 'Use ARI (seeded from SAS/AERC, moved by results) as the deck term',
+                        default: true
+                    },
+                    gameK: {
+                        type: 'number',
+                        label: 'ARI movement per rated real game (Elo points per unit surprise)',
+                        min: 0,
+                        max: 64,
+                        default: 8
+                    },
+                    simGameK: {
+                        type: 'number',
+                        label: "ARI movement per Champion's Challenge sparring game",
+                        min: 0,
+                        max: 64,
+                        default: 4
+                    }
+                }
             }
         }
     },
@@ -354,9 +381,9 @@ const REGISTRY = {
             // dok.maxImportDecks, which they hit first.
         }
     },
-    // ARCHON (N18): the Proving Grounds - Vault Master background deck testing.
-    provingGrounds: {
-        title: 'Proving Grounds',
+    // ARCHON (N18): the Champion’s Challenge - Vault Master background deck testing.
+    championsChallenge: {
+        title: 'Champion’s Challenge',
         description:
             'Background deck testing for Vault Master members: the lobby quietly plays enrolled ' +
             'decks against each other with a simulated player and reports how each deck performs ' +

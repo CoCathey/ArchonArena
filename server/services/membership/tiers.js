@@ -123,7 +123,7 @@ const TIERS = [
             CAPABILITIES.ENHANCED_COSMETICS,
             CAPABILITIES.ORGANIZER_TOOLS,
             CAPABILITIES.PRIORITY_ACCESS,
-            CAPABILITIES.PROVING_GROUNDS
+            CAPABILITIES.CHAMPIONS_CHALLENGE
         ],
         includes: [],
         patreonTitles: ['vault master', 'vaultmaster', 'vault-master'],

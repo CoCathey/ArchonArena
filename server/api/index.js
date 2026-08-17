@@ -7,8 +7,8 @@ const patreon = require('./patreon');
 const membership = require('./membership');
 // ARCHON (N12): Archon Intelligence + Tournament Lab
 const intelligence = require('./intelligence');
-// ARCHON (N18): the Proving Grounds - Vault Master background deck testing
-const provingGrounds = require('./provinggrounds');
+// ARCHON (N18): the Champion’s Challenge - Vault Master background deck testing
+const championsChallenge = require('./championschallenge');
 // ARCHON: public rating lookups
 const ratings = require('./ratings');
 // ARCHON: runtime admin settings
@@ -58,9 +58,9 @@ module.exports.init = function (server, options) {
     // must beat the parameterised ones.
     membership.init(server);
     intelligence.init(server);
-    // ARCHON (N18): the Proving Grounds. Fixed /api/proving-grounds paths,
+    // ARCHON (N18): the Champion’s Challenge. Fixed /api/champions-challenge paths,
     // nothing under /api/account - order is unconstrained.
-    provingGrounds.init(server);
+    championsChallenge.init(server);
     // ARCHON: community (friends, members, clubs) and the profile a member
     // edits. Before account.init for the same reason as everything above it:
     // it owns the fixed paths /api/account/bio and /api/account/cosmetics, and

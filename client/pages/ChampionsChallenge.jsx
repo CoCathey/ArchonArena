@@ -9,14 +9,14 @@ import AlertPanel from '../Components/Site/AlertPanel';
 import PremiumLock from '../Components/Membership/PremiumLock';
 import { CAPABILITIES, hasCapability } from '../membership';
 import {
-    useGetProvingGroundsQuery,
-    useEnrollProvingGroundsDeckMutation,
-    useWithdrawProvingGroundsDeckMutation
+    useGetChampionsChallengeQuery,
+    useEnrollChampionsChallengeDeckMutation,
+    useWithdrawChampionsChallengeDeckMutation
 } from '../redux/api';
 import { serverMessage } from '../redux/apiError';
 
 /**
- * ARCHON (N18): the Proving Grounds.
+ * ARCHON (N18): the Champion’s Challenge.
  *
  * A computer plays a Vault Master's enrolled decks against each other in the
  * background - practice games on the real engine, never rated ones - and this
@@ -24,7 +24,7 @@ import { serverMessage } from '../redux/apiError';
  * compares with what its SAS predicted, and which decks keep winning more than
  * their rating says they should. Those are the hidden gems.
  *
- * Two deliberate refusals, matching the Tournament Lab:
+ * Two deliberate refusals, matching Deep Probe:
  *
  *  - No confident-looking numbers over tiny samples. A deck below the game
  *    threshold shows its record and a warning, and is never called a gem or a
@@ -110,17 +110,17 @@ const Verdict = ({ deck, t }) => {
 
 Verdict.propTypes = { deck: PropTypes.object, t: PropTypes.func };
 
-const ProvingGrounds = () => {
+const ChampionsChallenge = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
-    const unlocked = hasCapability(user, CAPABILITIES.PROVING_GROUNDS);
+    const unlocked = hasCapability(user, CAPABILITIES.CHAMPIONS_CHALLENGE);
     const [actionError, setActionError] = useState(null);
 
-    const { data, isFetching } = useGetProvingGroundsQuery(undefined, {
+    const { data, isFetching } = useGetChampionsChallengeQuery(undefined, {
         skip: !user || !unlocked
     });
-    const [enroll, { isLoading: enrolling }] = useEnrollProvingGroundsDeckMutation();
-    const [withdraw, { isLoading: withdrawing }] = useWithdrawProvingGroundsDeckMutation();
+    const [enroll, { isLoading: enrolling }] = useEnrollChampionsChallengeDeckMutation();
+    const [withdraw, { isLoading: withdrawing }] = useWithdrawChampionsChallengeDeckMutation();
 
     const busy = enrolling || withdrawing;
 
@@ -140,13 +140,13 @@ const ProvingGrounds = () => {
                 <AlertPanel
                     type='info'
                     message={t(
-                        'The Proving Grounds plays your decks against each other while you are away ' +
+                        'The Champion’s Challenge plays your decks against each other while you are away ' +
                             'and reports which ones outperform their ratings. Sign in to use it.'
                     )}
                 />
                 <div className='mt-3'>
                     <Link className='text-sm text-accent hover:underline' to='/membership'>
-                        {t('See what the Proving Grounds does')}
+                        {t('See what the Champion’s Challenge does')}
                     </Link>
                 </div>
             </div>
@@ -162,13 +162,15 @@ const ProvingGrounds = () => {
 
     return (
         <div className='mx-auto max-w-6xl space-y-3 p-3'>
-            <Panel type='default' compactHeader title={t('Proving Grounds')}>
+            <Panel type='default' compactHeader title={t('Champion’s Challenge')}>
                 <p className='m-0 text-sm text-muted'>
                     {t(
-                        'Enroll decks and a computer plays them against each other around the clock — ' +
-                            'practice games on the real engine, never rated ones. The Grounds report ' +
-                            'each deck’s simulated record against what its SAS predicts, and point ' +
-                            'out the hidden gems: decks that keep beating their own rating.'
+                        'Automated deck testing, running while you are away: enroll decks and a ' +
+                            'computer plays them against each other around the clock — practice ' +
+                            'games on the real engine, never rated ones. The Challenge reports ' +
+                            'each deck’s simulated record against what its SAS predicts, moves ' +
+                            'its ARI with every game, and points out the hidden gems: decks that ' +
+                            'keep beating their own rating.'
                     )}
                 </p>
                 <p className='m-0 pt-1.5 text-[11px] text-muted'>
@@ -181,7 +183,7 @@ const ProvingGrounds = () => {
             </Panel>
 
             <PremiumLock
-                capability={CAPABILITIES.PROVING_GROUNDS}
+                capability={CAPABILITIES.CHAMPIONS_CHALLENGE}
                 preview={<SampleGrounds />}
                 minHeight={260}
             >
@@ -190,7 +192,7 @@ const ProvingGrounds = () => {
                         <AlertPanel
                             type='warning'
                             message={t(
-                                'The Proving Grounds are paused site-wide at the moment. Enrolled decks ' +
+                                'The Champion’s Challenge is paused site-wide at the moment. Enrolled decks ' +
                                     'keep their results and play resumes when the lab is switched back on.'
                             )}
                         />
@@ -221,7 +223,7 @@ const ProvingGrounds = () => {
                                                 t('That deck could not be withdrawn.')
                                             )
                                         }
-                                        title={t('Withdraw from the Proving Grounds')}
+                                        title={t('Withdraw from the Champion’s Challenge')}
                                         type='button'
                                     >
                                         {deck.name}
@@ -338,7 +340,7 @@ const ProvingGrounds = () => {
                                                 {t('SAS')}
                                             </th>
                                             <th className='py-1.5 pr-2 text-right font-medium'>
-                                                {t('Plays like')}
+                                                {t('ARI')}
                                             </th>
                                             <th className='py-1.5 pr-2 text-right font-medium'>
                                                 {t('Record')}
@@ -379,10 +381,9 @@ const ProvingGrounds = () => {
                                                 <td className='py-1.5 pr-2 text-right text-muted'>
                                                     {deck.sas ?? '—'}
                                                 </td>
-                                                <td className='py-1.5 pr-2 text-right text-foreground'>
-                                                    {deck.playsLikeSas !== null &&
-                                                    deck.playsLikeSas !== undefined
-                                                        ? Math.round(deck.playsLikeSas)
+                                                <td className='py-1.5 pr-2 text-right font-medium text-accent'>
+                                                    {deck.ari !== null && deck.ari !== undefined
+                                                        ? Math.round(deck.ari)
                                                         : '—'}
                                                 </td>
                                                 <td className='py-1.5 pr-2 text-right text-foreground'>
@@ -424,10 +425,13 @@ const ProvingGrounds = () => {
                         {decks.length > 0 && (
                             <p className='m-0 pt-2 text-[11px] text-muted'>
                                 {t(
-                                    '"Plays like" is the SAS a deck’s simulated results would justify: ' +
-                                        'its lab rating fitted from every game on your roster, read on the ' +
-                                        'same scale as SAS. "vs SAS" is its win rate against what SAS ' +
-                                        'predicted for the opponents it actually faced.'
+                                    'ARI is the Archon Rating Index — the platform’s own deck rating, on ' +
+                                        'the same scale as SAS. It starts where SAS and AERC point and ' +
+                                        'then moves with results: every rated game the deck plays, and ' +
+                                        'every sparring game here, nudges it up or down. It is the deck ' +
+                                        'strength your Amber calculation actually uses. "vs SAS" is the ' +
+                                        'deck’s win rate against what SAS predicted for the opponents it ' +
+                                        'actually faced.'
                                 )}
                             </p>
                         )}
@@ -461,6 +465,6 @@ const ProvingGrounds = () => {
     );
 };
 
-ProvingGrounds.displayName = 'ProvingGrounds';
+ChampionsChallenge.displayName = 'ChampionsChallenge';
 
-export default ProvingGrounds;
+export default ChampionsChallenge;

@@ -144,3 +144,21 @@ override behavior.
     mean; the stats engine should track mean rating over time so admins can tune.
 -   **Anti-manipulation**: win-trading/sandbagging detection belongs in a separate integrity
     service that reads `RatingHistory`, not in the calculator.
+
+## ARI: the deck term is alive now (N19)
+
+The calculator is unchanged, but what rides through its `deckSas` input is
+not raw SAS any more: it is **ARI, the Archon Rating Index**
+(`server/services/rating/AriService.js`, `DeckAri` table, migration 73).
+Every deck's ARI starts at its SAS/AERC midpoint and then moves Elo-fashion
+with results — rated real games (at `rating.ari.gameK`, measured against the
+expectation the engine actually used, so ARI absorbs only what player
+ratings could not explain) and Champion's Challenge sparring games (at the
+gentler `simGameK`). The update runs after and outside the rating
+transaction; a failed index write can never unrate a game.
+
+ARI lives on the SAS scale by construction, so `sasWeight` keeps its meaning
+and every formula above is untouched. `rating.ari.enabled` (admin) switches
+the whole thing off, restoring raw SAS byte-for-byte. History rows record
+whichever values were used; the config snapshot beside them says which
+regime rated the game.

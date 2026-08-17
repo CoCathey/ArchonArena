@@ -353,28 +353,28 @@ export const api = createApi({
             },
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
-        // ARCHON (N18): the Proving Grounds - background simulated deck
+        // ARCHON (N18): the Champion’s Challenge - background simulated deck
         // testing for Vault Master. One request draws the whole page: the
         // roster, every deck's simulated record, and the findings all read
         // the same games, and splitting them would let the panels disagree.
-        getProvingGrounds: builder.query({
-            query: () => '/proving-grounds',
-            providesTags: [TAG_TYPES.PROVING_GROUNDS]
+        getChampionsChallenge: builder.query({
+            query: () => '/champions-challenge',
+            providesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
-        enrollProvingGroundsDeck: builder.mutation({
+        enrollChampionsChallengeDeck: builder.mutation({
             query: (deckId) => ({
-                url: '/proving-grounds/decks',
+                url: '/champions-challenge/decks',
                 method: 'POST',
                 body: { deckId }
             }),
-            invalidatesTags: [TAG_TYPES.PROVING_GROUNDS]
+            invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
-        withdrawProvingGroundsDeck: builder.mutation({
+        withdrawChampionsChallengeDeck: builder.mutation({
             query: (deckId) => ({
-                url: `/proving-grounds/decks/${deckId}`,
+                url: `/champions-challenge/decks/${deckId}`,
                 method: 'DELETE'
             }),
-            invalidatesTags: [TAG_TYPES.PROVING_GROUNDS]
+            invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
         // ARCHON (N12): is Patreon configured on this deployment, and where is
         // the campaign page. Public - the client renders no Patreon UI at all
@@ -1257,10 +1257,10 @@ export const {
     useGetMetaIntelligenceQuery,
     useGetAercIntelligenceQuery,
     useGetTournamentLabQuery,
-    // ARCHON (N18): the Proving Grounds.
-    useGetProvingGroundsQuery,
-    useEnrollProvingGroundsDeckMutation,
-    useWithdrawProvingGroundsDeckMutation,
+    // ARCHON (N18): the Champion’s Challenge.
+    useGetChampionsChallengeQuery,
+    useEnrollChampionsChallengeDeckMutation,
+    useWithdrawChampionsChallengeDeckMutation,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,
     useGetPatreonMembershipQuery,

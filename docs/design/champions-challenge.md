@@ -1,4 +1,4 @@
-# The Proving Grounds
+# The Champion’s Challenge
 
 ## Goal
 
@@ -8,8 +8,8 @@ each other in the background — practice games on the real engine, never rated
 ones — and reports which decks outperform what their SAS predicts. The user
 asks three questions and the lab answers all three:
 
-1. **How good are my decks really?** A simulated record per deck, plus a
-   "plays like" SAS fitted from its results.
+1. **How good are my decks really?** A simulated record per deck, plus the
+   deck's ARI - the platform's living rating, which these games help move.
 2. **How do they win?** Which opening house carries each deck, first-player
    splits, keys and tempo.
 3. **Do I own a hidden gem?** A deck whose lab record is _statistically_
@@ -20,24 +20,24 @@ the hard half of the F9 bot showcase and the base F3's analysis wants.
 
 ## What a member gets
 
-| Surface            | What                                                                                                             |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `/proving-grounds` | Enroll up to 8 decks (admin-config); each plays up to 12 games/day (admin-config) against the rest of the roster |
-| Results table      | Record, win rate, SAS expectation for the opponents actually faced, delta, "plays like" SAS, verdict             |
-| Hidden gem badge   | Wilson 95% lower bound of the sim win rate clears the SAS expectation, over ≥20 games                            |
-| Findings           | Sentences: the gems, over/under-performers, best opening house, first-player splits                              |
+| Surface                | What                                                                                                             |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `/champions-challenge` | Enroll up to 8 decks (admin-config); each plays up to 12 games/day (admin-config) against the rest of the roster |
+| Results table          | Record, win rate, SAS expectation for the opponents actually faced, delta, the deck's ARI, verdict               |
+| Hidden gem badge       | Wilson 95% lower bound of the sim win rate clears the SAS expectation, over ≥20 games                            |
+| Findings               | Sentences: the gems, over/under-performers, best opening house, first-player splits                              |
 
 ## Shape
 
 ```
-server/services/provinggrounds/SimulatedGame.js       the AI player; one game, start to winner
-server/services/provinggrounds/packCards.js           card JSON from master-vault-data, cloned per deck
-server/services/provinggrounds/labMath.js             Wilson, SAS expectation, performance SAS, gem rule, findings
-server/services/provinggrounds/ProvingGroundsService.js  enroll/withdraw, the sweep, the report
-server/api/provinggrounds.js                          routes, requireCapability(PROVING_GROUNDS)
-server/lobby.js  runProvingGroundsSweep               the tick, cadence gate, error containment
+server/services/championschallenge/SimulatedGame.js       the AI player; one game, start to winner
+server/services/championschallenge/packCards.js           card JSON from master-vault-data, cloned per deck
+server/services/championschallenge/labMath.js             Wilson, SAS expectation, gem rule, findings
+server/services/championschallenge/ChampionsChallengeService.js  enroll/withdraw, the sweep, the report
+server/api/championschallenge.js                          routes, requireCapability(CHAMPIONS_CHALLENGE)
+server/lobby.js  runChampionsChallengeSweep               the tick, cadence gate, error containment
 server/db/schema/migrations/72 - ProvingGrounds.sql   ProvingGroundsDecks + ProvingGroundsGames
-client/pages/ProvingGrounds.jsx                       the page, PremiumLock'd
+client/pages/ChampionsChallenge.jsx                       the page, PremiumLock'd
 ```
 
 Four properties are worth keeping if this is ever extended.
@@ -69,11 +69,11 @@ must keep the termination guarantees.
 the site's own Elo model (`EloCalculator.expectedScore` with the admin-tuned
 `sasWeight`), so "what SAS predicts" here is the same exchange rate the
 Amber ladder applies to real games. "Hidden gem" demands the whole 95%
-Wilson interval above expectation over at least 20 games; "plays like" is a
-chess-style performance rating, withheld under 20 games and clamped at ±100
-SAS so a lucky streak can never print a silly number. All of it lives in
-`labMath.js` as pure functions with specs — the page only maps server
-verdicts to pixels.
+Wilson interval above expectation over at least 20 games; and the rating
+column is the deck's ARI (N19, `rating/AriService.js`) — the same index
+rated games move, nudged here at the gentler `simGameK`. All the arithmetic
+lives in `labMath.js` and `AriService.js` as pure functions with specs — the
+page only maps server verdicts to pixels.
 
 **Lapsing pauses, it never deletes.** The sweep re-resolves the roster
 owner's entitlements (through `resolveEntitlements`, the one authority)
@@ -87,7 +87,7 @@ benefit, keep the data.
 A full simulated game is roughly half a second of CPU (measured; the engine
 is synchronous and timer-free), and the driver yields to the event loop
 every few moves, so the lobby's real players never queue behind a bot game.
-Pace is fully admin-config (`provingGrounds` settings section): sweep
+Pace is fully admin-config (`championsChallenge` settings section): sweep
 cadence, games per batch, per-deck daily budget, roster size, turn cap, and
 the off switch — which is read on every tick, so flipping it stops play
 within a sweep. The engine's ~2,600 card classes load lazily on the first

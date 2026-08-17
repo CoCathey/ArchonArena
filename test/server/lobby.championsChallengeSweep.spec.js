@@ -1,12 +1,12 @@
 const Lobby = require('../../server/lobby');
-const ProvingGroundsService = require('../../server/services/provinggrounds/ProvingGroundsService');
+const ChampionsChallengeService = require('../../server/services/championschallenge/ChampionsChallengeService');
 
-// The real Lobby.runProvingGroundsSweep against a REAL ProvingGroundsService
+// The real Lobby.runChampionsChallengeSweep against a REAL ChampionsChallengeService
 // with a mocked db - the same seam the deck-import sweep pins, for the same
 // reason: an interval wired to a method the service does not define is green
 // in both halves' unit tests and a TypeError every tick in production.
 
-describe('Lobby.runProvingGroundsSweep', function () {
+describe('Lobby.runChampionsChallengeSweep', function () {
     let logged;
     let db;
     let service;
@@ -14,14 +14,14 @@ describe('Lobby.runProvingGroundsSweep', function () {
 
     const configService = { getValue: () => ({}) };
     const settingsService = {
-        getSectionWithDefaults: (name) => (name === 'provingGrounds' ? { ...config } : {}),
+        getSectionWithDefaults: (name) => (name === 'championsChallenge' ? { ...config } : {}),
         getSection: () => ({})
     };
 
-    const makeLobby = (provingGroundsService, lastSweepMs = 0) => ({
-        provingGroundsService,
-        lastProvingGroundsSweepMs: lastSweepMs,
-        runProvingGroundsSweep: Lobby.prototype.runProvingGroundsSweep
+    const makeLobby = (championsChallengeService, lastSweepMs = 0) => ({
+        championsChallengeService,
+        lastChampionsChallengeSweepMs: lastSweepMs,
+        runChampionsChallengeSweep: Lobby.prototype.runChampionsChallengeSweep
     });
 
     beforeEach(function () {
@@ -40,7 +40,7 @@ describe('Lobby.runProvingGroundsSweep', function () {
             maxTurnsPerGame: 80
         };
         db = { query: vi.fn().mockResolvedValue([]) };
-        service = new ProvingGroundsService(configService, db, settingsService);
+        service = new ChampionsChallengeService(configService, db, settingsService);
     });
 
     afterEach(function () {
@@ -49,7 +49,7 @@ describe('Lobby.runProvingGroundsSweep', function () {
 
     // The regression this file exists to prevent.
     it('is a method the lobby actually defines', function () {
-        expect(typeof Lobby.prototype.runProvingGroundsSweep).toBe('function');
+        expect(typeof Lobby.prototype.runChampionsChallengeSweep).toBe('function');
     });
 
     it('calls a sweep method the real service defines', async function () {
@@ -58,7 +58,7 @@ describe('Lobby.runProvingGroundsSweep', function () {
             abandoned: 0
         });
 
-        await makeLobby(service).runProvingGroundsSweep();
+        await makeLobby(service).runChampionsChallengeSweep();
 
         expect(runSweep).toHaveBeenCalled();
         expect(logged.info.join(' ')).toMatch(/played 1 simulated game/i);
@@ -68,7 +68,7 @@ describe('Lobby.runProvingGroundsSweep', function () {
     it('does nothing for a lobby built without the service', async function () {
         const lobby = makeLobby(null);
 
-        await expect(lobby.runProvingGroundsSweep()).resolves.toBeUndefined();
+        await expect(lobby.runChampionsChallengeSweep()).resolves.toBeUndefined();
     });
 
     it('waits out the admin-configured cadence between sweeps', async function () {
@@ -77,7 +77,7 @@ describe('Lobby.runProvingGroundsSweep', function () {
             abandoned: 0
         });
 
-        await makeLobby(service, Date.now()).runProvingGroundsSweep();
+        await makeLobby(service, Date.now()).runChampionsChallengeSweep();
 
         expect(runSweep).not.toHaveBeenCalled();
     });
@@ -85,7 +85,7 @@ describe('Lobby.runProvingGroundsSweep', function () {
     it('reports abandoned games where an operator will see them', async function () {
         vi.spyOn(service, 'runSweep').mockResolvedValue({ played: 0, abandoned: 2 });
 
-        await makeLobby(service).runProvingGroundsSweep();
+        await makeLobby(service).runChampionsChallengeSweep();
 
         expect(logged.warn.join(' ')).toMatch(/abandoned 2/i);
     });
@@ -95,7 +95,7 @@ describe('Lobby.runProvingGroundsSweep', function () {
 
         const lobby = makeLobby(service);
 
-        await expect(lobby.runProvingGroundsSweep()).resolves.toBeUndefined();
+        await expect(lobby.runChampionsChallengeSweep()).resolves.toBeUndefined();
         expect(logged.error.length).toBe(1);
     });
 });

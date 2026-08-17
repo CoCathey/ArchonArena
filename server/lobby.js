@@ -193,17 +193,20 @@ class Lobby {
             this.roundDeadlineSweep.unref();
         }
 
-        // ARCHON (N18): the Proving Grounds - simulated games for Vault
+        // ARCHON (N18): the Champion’s Challenge - simulated games for Vault
         // Master rosters. Ticks often and consults the admin-configured
         // cadence on each tick, like the crawl and the import worker,
         // because the pace knobs exist precisely for the day an operator
         // needs the lab to slow down without a restart. Optional the same
         // way analytics is: a lobby built without the service plays nothing.
-        this.provingGroundsService = options.provingGroundsService || null;
-        this.lastProvingGroundsSweepMs = 0;
-        this.provingGroundsSweep = setInterval(() => this.runProvingGroundsSweep(), 15 * 1000);
-        if (this.provingGroundsSweep && this.provingGroundsSweep.unref) {
-            this.provingGroundsSweep.unref();
+        this.championsChallengeService = options.championsChallengeService || null;
+        this.lastChampionsChallengeSweepMs = 0;
+        this.championsChallengeSweep = setInterval(
+            () => this.runChampionsChallengeSweep(),
+            15 * 1000
+        );
+        if (this.championsChallengeSweep && this.championsChallengeSweep.unref) {
+            this.championsChallengeSweep.unref();
         }
 
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
@@ -641,7 +644,7 @@ class Lobby {
     }
 
     /**
-     * ARCHON (N18): play the Proving Grounds' simulated games.
+     * ARCHON (N18): play the Champion’s Challenge' simulated games.
      *
      * The service does everything - picks the roster most in need, checks the
      * owner still holds the capability, plays the games with event-loop
@@ -651,38 +654,38 @@ class Lobby {
      * `runSweep` on every pass, so switching the lab off in admin settings
      * stops play within a tick.
      */
-    async runProvingGroundsSweep() {
-        if (!this.provingGroundsService || this.provingGroundsSweepRunning) {
+    async runChampionsChallengeSweep() {
+        if (!this.championsChallengeService || this.championsChallengeSweepRunning) {
             return;
         }
 
         try {
-            const config = this.provingGroundsService.getConfig();
+            const config = this.championsChallengeService.getConfig();
             const seconds = Math.max(15, Number(config.sweepIntervalSeconds) || 60);
             const now = Date.now();
 
-            if (now - this.lastProvingGroundsSweepMs < seconds * 1000) {
+            if (now - this.lastChampionsChallengeSweepMs < seconds * 1000) {
                 return;
             }
 
-            this.lastProvingGroundsSweepMs = now;
-            this.provingGroundsSweepRunning = true;
+            this.lastChampionsChallengeSweepMs = now;
+            this.championsChallengeSweepRunning = true;
 
-            const result = await this.provingGroundsService.runSweep();
+            const result = await this.championsChallengeService.runSweep();
 
             if (result && result.played > 0) {
-                logger.info(`Proving Grounds played ${result.played} simulated game(s)`);
+                logger.info(`Champion’s Challenge played ${result.played} simulated game(s)`);
             }
 
             if (result && result.abandoned > 0) {
                 logger.warn(
-                    `Proving Grounds abandoned ${result.abandoned} simulated game(s) this sweep`
+                    `Champion’s Challenge abandoned ${result.abandoned} simulated game(s) this sweep`
                 );
             }
         } catch (err) {
-            logger.error('Proving Grounds sweep failed', err);
+            logger.error('Champion’s Challenge sweep failed', err);
         } finally {
-            this.provingGroundsSweepRunning = false;
+            this.championsChallengeSweepRunning = false;
         }
     }
 

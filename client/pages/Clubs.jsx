@@ -86,7 +86,16 @@ const Clubs = () => {
 
     return (
         <div className='mx-auto w-full max-w-3xl space-y-4'>
-            <Panel title={t('Clubs')}>
+            <Panel title={t('Grand Alliance Council')}>
+                <p className='mb-3 text-sm text-muted'>
+                    {t(
+                        'The Grand Alliance Council is where playgroups gather. Search the clubs ' +
+                            'other players have founded and ask to join, enter an invite code a ' +
+                            'club owner gave you, or found a club of your own. A club gives your ' +
+                            'group a shared home on the platform: a member roster, your recent ' +
+                            'games — online and across the table — and a place to organize.'
+                    )}
+                </p>
                 <div className='mb-3 flex gap-2'>
                     <Input
                         className='flex-1'

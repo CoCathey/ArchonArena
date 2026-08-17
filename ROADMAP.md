@@ -1327,7 +1327,7 @@ half-finished. Whether the result actually looks premium is a judgement call, an
 what this item can promise is that the judgement gets made once, deliberately, rather than
 re-improvised per page.
 
-#### N18 — The Proving Grounds: background deck testing for Vault Master _(done)_
+#### N18 — The Champion’s Challenge: background deck testing for Vault Master _(done)_
 
 **Why:** Vault Master's pitch is "everything, first", and until now what it sold was previews,
 cosmetics and organizer exports — nothing only a $20 member could point at. This is the first
@@ -1340,7 +1340,7 @@ foundation **F3** (AI analysis) wants.
 **Tasks**
 
 -   [x] **A simulated player that always finishes.** Drives the engine through the ordinary
-        player interface (`server/services/provinggrounds/SimulatedGame.js`): house choice by
+        player interface (`server/services/championschallenge/SimulatedGame.js`): house choice by
         hand-and-board count, plays everything legal, reaps what is ready, and answers _any_
         card prompt generically from the buttons and selectable cards the prompt publishes.
         Termination is the requirement, strength is not (yet): Done/Autoresolve preferred on
@@ -1352,21 +1352,21 @@ foundation **F3** (AI analysis) wants.
         engine — every official statistic filters only on FinishedAt/WinnerId, so one row in
         the shared table would be a real result in thirty queries at once. A spec forbids the
         official tables' names in any SQL the lab runs.
--   [x] **The sweep** (`Lobby.runProvingGroundsSweep`): ticks like the import worker, consults
+-   [x] **The sweep** (`Lobby.runChampionsChallengeSweep`): ticks like the import worker, consults
         its cadence on every tick, round-robins rosters so one member cannot starve another,
         re-checks the owner's entitlement before spending CPU (a lapsed pledge stops play the
         day it lapses; results are kept and play resumes with the membership), and yields to
         the event loop mid-game so real players never feel a simulated one.
--   [x] **The report** (`/api/proving-grounds`, page `/proving-grounds`): per-deck simulated
+-   [x] **The report** (`/api/champions-challenge`, page `/champions-challenge`): per-deck simulated
         record against a SAS expectation computed with the site's own Elo model (same
         `sasWeight` the Amber ladder uses); a "plays like" SAS from a chess-style performance
         rating (withheld under 20 games, clamped at ±100 SAS); openings and first-player
         splits; findings in sentences. **Hidden gem** requires the entire 95% Wilson interval
         clear of the SAS expectation — the lab must be the most honest analyst on the site,
         because nobody can argue with a computer that plays in private.
--   [x] **(admin-config)** `provingGrounds` settings section: on/off, sweep cadence, games per
+-   [x] **(admin-config)** `championsChallenge` settings section: on/off, sweep cadence, games per
         batch, per-deck daily budget, roster size, turn cap.
--   [x] Capability `proving_grounds` on the Vault Master tier, gated end to end
+-   [x] Capability `champions_challenge` on the Vault Master tier, gated end to end
         (`requireCapability` on every route, `PremiumLock` on the page), declared across
         server, client and mobile mirrors.
 -   Later: let the bot spar a member directly (the **F9** practice opponent), matchup matrices
@@ -1388,6 +1388,54 @@ exists now; the showcase supervisor and the analysis models build on it.
         its simulated record; everyone else gets the locked preview and a 403 from the API.
 -   [x] "Hidden gem" is a statistical claim (Wilson lower bound above SAS expectation over
         ≥20 games), computed in one tested place.
+
+#### N19 — ARI: the Archon Rating Index _(done)_
+
+**Why:** the ladder priced deck strength with SAS — somebody else's model of a deck, frozen at
+scoring time, blind to how the deck actually performs. ARI is the platform's own living deck
+rating: every deck has one, it starts where the card math points, and it moves with what the
+platform witnesses. It is also a differentiator no deck database can copy, because it is fed
+by play that happens here.
+
+**Tasks**
+
+-   [x] **The index** (`server/services/rating/AriService.js`, `DeckAri` migration 73, keyed by
+        Master Vault uuid like `DeckSas`): seeded at the SAS/AERC midpoint (either alone when
+        one is missing; no seed, no ARI — zero is a claim, not an absence), moved Elo-fashion
+        by results, clamped to a sane band, with rated-game and sparring-game counters kept
+        separately so "how much of this number is sparring" always has an answer.
+-   [x] **It moves with real games.** After every rated game, both decks' ARIs shift against
+        the expectation the Elo engine actually used (players and decks), so the index absorbs
+        only what player ratings could not explain — outside the rating transaction, so an ARI
+        failure can never unrate a game.
+-   [x] **It moves with the Champion’s Challenge.** Sparring games nudge ARI at a gentler
+        admin-configurable rate (`simGameK`, default half the real-game `gameK`) — the bot's
+        evidence is real but plainer. The Challenge page's rating column IS the deck's ARI now
+        (the fitted "plays like" it replaced is gone).
+-   [x] **It is what Amber spends.** `RatingService` hands the calculator ARI differentials in
+        place of raw SAS — same scale, same `sasWeight`, same formula, so nothing about the
+        engine changed except what the number knows. History rows record the values used;
+        the config snapshot beside them says which regime. **(admin-config)** `rating.ari`:
+        the switch (off = raw SAS exactly as before), `gameK`, `simGameK`.
+-   [x] **Every deck shows it**: an ARI column beside SAS on the deck list, the deck summary,
+        and the Challenge — served wherever SAS already was (`mapDeck`, `attachStats`), so any
+        surface that knows a deck's SAS now knows its ARI.
+
+**Alongside, a naming pass:** the Proving Grounds shipped as the **Champion’s Challenge**
+(tables keep their birth names; everything above SQL renamed), the Tournament Lab is sold as
+**Deep Probe** (capability id and API paths keep the working name — released phone builds gate
+on them), Clubs gather under the **Grand Alliance Council**, and Play IRL is **Into the Fray**
+— each page now opens by saying what it is for.
+
+**Depends on:** N18 (the sparring games), the rating engine. **Acceptance criteria**
+
+-   [x] A deck with SAS and AERC has an ARI before its first game; a deck with neither has
+        none, and its games move no index — asserted in `AriService.spec.js`.
+-   [x] Winner and loser move symmetrically, more when the result was surprising, at the sim
+        rate for sparring games — asserted with exact arithmetic.
+-   [x] With `rating.ari.enabled` off, rating behaves byte-for-byte as before (the rating
+        specs run unchanged either way, because the seed falls back to SAS alone when AERC is
+        absent).
 
 ### Future — differentiation
 
@@ -1478,8 +1526,8 @@ commit to it, and run the engine as a continuous soak test.
 
 -   [x] An AI player driving the engine through the ordinary player interface (house choice,
         play / use / reap / fight, key timing). Strength can start crude — never stalling
-        matters more. **Built as the Proving Grounds' sparring partner (N18)** —
-        `server/services/provinggrounds/SimulatedGame.js`; the showcase reuses it.
+        matters more. **Built as the Champion’s Challenge sparring partner (N18)** —
+        `server/services/championschallenge/SimulatedGame.js`; the showcase reuses it.
 -   A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends, and
     publishes it to the Watch hub as spectatable.
 -   Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics aggregate.
@@ -1902,8 +1950,8 @@ much stronger deck pays less.
 -   [ ] AI game analysis: blunder detection, alternative-line suggestions, win-probability
         graph per turn (model over the replay event stream) → **F3**.
 -   [ ] AI deck insights: strengths/weaknesses vs. meta, SAS-context commentary → **F3**.
--   [x] An AI player able to drive the engine — shipped first as the Proving Grounds'
-        sparring partner (**N18**, `server/services/provinggrounds/SimulatedGame.js`).
+-   [x] An AI player able to drive the engine — shipped first as the Champion’s Challenge'
+        sparring partner (**N18**, `server/services/championschallenge/SimulatedGame.js`).
 -   [ ] The same player as the bot showcase and a practice opponent (**F9**), then as the
         model behind analysis (**F3**).
 

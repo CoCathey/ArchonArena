@@ -1,5 +1,7 @@
 const logger = require('../../log');
 const { calculateGameResult, keyDifferential, normalizeConfig } = require('./EloCalculator');
+const AriService = require('./AriService');
+const { effectiveAri } = require('./AriService');
 const { isValidCountry, regionForCountry, countriesInRegion } = require('./regions');
 
 const DEFAULT_RATING_CONFIG = {
@@ -20,7 +22,14 @@ const DEFAULT_RATING_CONFIG = {
     // lobby's automatic decay sweep (0 = manual only).
     decay: { enabled: false, graceDays: 30, pointsPerWeek: 20, floor: 1200, autoApplyHours: 24 },
     // Season soft-reset policy, applied when an admin starts a new season.
-    season: { carryFactor: 0.5, baseline: 1200 }
+    season: { carryFactor: 0.5, baseline: 1200 },
+    // ARCHON (N19): ARI, the Archon Rating Index (see AriService). When
+    // enabled, the Elo deck-strength term reads each deck's ARI - seeded
+    // from SAS/AERC, moved by results - instead of raw SAS, and every rated
+    // game nudges both decks' ARIs by gameK (Elo points per unit surprise;
+    // Champion's Challenge sparring games use the gentler simGameK).
+    // Disabling falls straight back to raw SAS everywhere.
+    ari: { enabled: true, gameK: 8, simGameK: 4 }
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -115,6 +124,9 @@ class RatingService {
         this.configService = configService;
         this.db = db;
         this.settingsService = settingsService;
+        // ARCHON (N19): the deck index the Elo deck term reads and this
+        // service feeds back into after every rated game.
+        this.ariService = new AriService(db);
     }
 
     /**
@@ -153,6 +165,11 @@ class RatingService {
                 ...DEFAULT_RATING_CONFIG.season,
                 ...(fileConfig.season || {}),
                 ...(adminConfig.season || {})
+            },
+            ari: {
+                ...DEFAULT_RATING_CONFIG.ari,
+                ...(fileConfig.ari || {}),
+                ...(adminConfig.ari || {})
             }
         };
     }
@@ -204,11 +221,13 @@ class RatingService {
 
         const rows = await this.db.query(
             'SELECT g."Id" AS "GameDbId", g."GameFormat", g."WinnerId", g."WinReason", ' +
-                'gp."PlayerId", gp."Keys", d."Uuid" AS "DeckUuid", ds."SasRating" ' +
+                'gp."PlayerId", gp."Keys", d."Uuid" AS "DeckUuid", ds."SasRating", ' +
+                'ds."AercScore", da."Ari" ' +
                 'FROM "Games" g ' +
                 'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
                 'LEFT JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                 'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                'LEFT JOIN "DeckAri" da ON da."Uuid" = d."Uuid" ' +
                 'WHERE g."GameId" = $1',
             [gameUuid]
         );
@@ -271,17 +290,30 @@ class RatingService {
         // history row is exactly the tier the rating used - which is what makes
         // a later recalculation replay reproduce these numbers.
         const keyDiff = keyDifferential(loserRow.Keys);
+
+        // ARCHON (N19): the deck-strength term reads ARI - the platform's own
+        // index, seeded from SAS/AERC and moved by results - rather than raw
+        // SAS, unless an admin has switched ARI off. It rides through the
+        // calculator's `deckSas` input unchanged because ARI lives on the SAS
+        // scale by construction: same numbers, same sasWeight, same formula -
+        // only what the number knows has changed. A deck with neither score
+        // stays null, and the calculator's both-or-nothing rule applies as
+        // ever.
+        const ariEnabled = !!(config.ari && config.ari.enabled);
+        const winnerDeckStrength = ariEnabled ? effectiveAri(winnerRow) : winnerRow.SasRating;
+        const loserDeckStrength = ariEnabled ? effectiveAri(loserRow) : loserRow.SasRating;
+
         const result = calculateGameResult(
             {
                 winner: {
                     rating: winnerRating.rating,
                     gamesPlayed: winnerRating.gamesPlayed,
-                    deckSas: winnerRow.SasRating
+                    deckSas: winnerDeckStrength
                 },
                 loser: {
                     rating: loserRating.rating,
                     gamesPlayed: loserRating.gamesPlayed,
-                    deckSas: loserRow.SasRating
+                    deckSas: loserDeckStrength
                 },
                 keyDiff: keyDiff,
                 resultType: resultType,
@@ -302,6 +334,10 @@ class RatingService {
             // makes rating idempotent under concurrent GAMEWIN delivery (Redis
             // pub/sub fans a GAMEWIN out to every lobby instance); the earlier
             // pre-check alone was check-then-act and could double-apply.
+            // The Sas columns on the history row record the deck-strength
+            // values the rating actually used - ARI once N19 is on, raw SAS
+            // before it - so a recalculation replay reproduces these numbers
+            // either way. The config snapshot beside them says which.
             const gate = await this.insertHistory(client, {
                 gameDbId: game.GameDbId,
                 userId: winnerRow.PlayerId,
@@ -311,8 +347,8 @@ class RatingService {
                 before: winnerRating.rating,
                 after: result.winner.newRating,
                 expected: result.winner.expected,
-                ownSas: winnerRow.SasRating,
-                opponentSas: loserRow.SasRating,
+                ownSas: winnerDeckStrength,
+                opponentSas: loserDeckStrength,
                 keyDiff: keyDiff,
                 resultType: resultType,
                 configSnapshot: configSnapshot
@@ -333,8 +369,8 @@ class RatingService {
                 before: loserRating.rating,
                 after: result.loser.newRating,
                 expected: result.loser.expected,
-                ownSas: loserRow.SasRating,
-                opponentSas: winnerRow.SasRating,
+                ownSas: loserDeckStrength,
+                opponentSas: winnerDeckStrength,
                 keyDiff: keyDiff,
                 resultType: resultType,
                 configSnapshot: configSnapshot
@@ -361,6 +397,23 @@ class RatingService {
                     `${winnerRating.rating}->${result.winner.newRating}, ` +
                     `loser ${loserRow.PlayerId} ${loserRating.rating}->${result.loser.newRating}`
             );
+
+            // ARCHON (N19): fold the result into both decks' ARIs - after,
+            // and outside, the rating transaction, because the index learning
+            // from a game must never be able to unrate it. The surprise is
+            // measured against the expectation the Elo engine just used
+            // (players AND decks), so ARI absorbs only what player ratings
+            // could not explain. applyGameResult is best-effort by contract.
+            if (ariEnabled && winnerRow.DeckUuid && loserRow.DeckUuid) {
+                await this.ariService.applyGameResult({
+                    winnerUuid: winnerRow.DeckUuid,
+                    loserUuid: loserRow.DeckUuid,
+                    winnerExpected: result.winner.expected,
+                    k: config.ari.gameK,
+                    sasWeight: eloConfig.sasWeight,
+                    sim: false
+                });
+            }
         } catch (err) {
             await this.db.queryTran(client, 'ROLLBACK');
             throw err;

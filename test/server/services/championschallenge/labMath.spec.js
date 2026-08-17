@@ -3,17 +3,16 @@ const {
     MIN_CONFIDENT_GAMES,
     wilsonLowerBound,
     sasExpectedScore,
-    performanceSas,
     isHiddenGem,
     buildFindings
-} = require('../../../../server/services/provinggrounds/labMath');
+} = require('../../../../server/services/championschallenge/labMath');
 
-// The lab's claims - "hidden gem", "plays like SAS 79" - are arithmetic, and
+// The lab’s claims - "hidden gem", the SAS expectation a gem must beat - are arithmetic, and
 // this file pins the arithmetic. If any of these move, the badge criteria
 // moved, and that should be a deliberate edit here rather than a surprise on
 // somebody's roster.
 
-describe('Proving Grounds math', function () {
+describe('Champion’s Challenge math', function () {
     const elo = normalizeConfig({});
 
     describe('wilsonLowerBound', function () {
@@ -54,42 +53,6 @@ describe('Proving Grounds math', function () {
                 1,
                 10
             );
-        });
-    });
-
-    describe('performanceSas', function () {
-        const record = (opponentSas, wins, losses) => [
-            ...Array.from({ length: wins }, () => ({ opponentSas, won: true })),
-            ...Array.from({ length: losses }, () => ({ opponentSas, won: false }))
-        ];
-
-        it('is null with no usable games', function () {
-            expect(performanceSas([], elo)).toBeNull();
-            expect(performanceSas(null, elo)).toBeNull();
-        });
-
-        it('reads an even record against the field as the field SAS', function () {
-            expect(performanceSas(record(70, 10, 10), elo)).toBeCloseTo(70, 1);
-        });
-
-        it('reads winning above the field SAS, losing below it', function () {
-            expect(performanceSas(record(70, 15, 5), elo)).toBeGreaterThan(75);
-            expect(performanceSas(record(70, 5, 15), elo)).toBeLessThan(65);
-        });
-
-        it('reads a perfect record as the ±100 SAS cap, not as infinity', function () {
-            const perfect = performanceSas(record(70, 20, 0), elo);
-
-            expect(Number.isFinite(perfect)).toBe(true);
-            expect(perfect).toBeGreaterThan(90);
-            expect(perfect).toBeLessThanOrEqual(70 + 100);
-        });
-
-        it('rewards the same record more against stronger opponents', function () {
-            const versusWeak = performanceSas(record(60, 14, 6), elo);
-            const versusStrong = performanceSas(record(80, 14, 6), elo);
-
-            expect(versusStrong).toBeGreaterThan(versusWeak);
         });
     });
 

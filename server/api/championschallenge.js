@@ -2,15 +2,15 @@ const passport = require('passport');
 
 const { wrapAsync } = require('../util.js');
 const ConfigService = require('../services/ConfigService');
-const ProvingGroundsService = require('../services/provinggrounds/ProvingGroundsService');
+const ChampionsChallengeService = require('../services/championschallenge/ChampionsChallengeService');
 const { requireCapability } = require('./requireCapability');
 const { CAPABILITIES } = require('../services/membership/capabilities');
 
 const configService = new ConfigService();
-const provingGrounds = new ProvingGroundsService(configService);
+const championsChallenge = new ChampionsChallengeService(configService);
 
 /**
- * ARCHON (N18): the Proving Grounds - Vault Master's background deck testing.
+ * ARCHON (N18): the Champion’s Challenge - Vault Master's background deck testing.
  *
  * Every route is authenticated AND gated on the capability: the page blurs
  * itself for a locked account, but this is where the data is actually
@@ -24,20 +24,20 @@ const provingGrounds = new ProvingGroundsService(configService);
  */
 module.exports.init = function (server) {
     server.get(
-        '/api/proving-grounds',
+        '/api/champions-challenge',
         passport.authenticate('jwt', { session: false }),
-        requireCapability(CAPABILITIES.PROVING_GROUNDS),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
         wrapAsync(async (req, res) => {
-            const report = await provingGrounds.getLabReport(req.user.id);
+            const report = await championsChallenge.getLabReport(req.user.id);
 
             res.send({ success: true, ...report });
         })
     );
 
     server.post(
-        '/api/proving-grounds/decks',
+        '/api/champions-challenge/decks',
         passport.authenticate('jwt', { session: false }),
-        requireCapability(CAPABILITIES.PROVING_GROUNDS),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
         wrapAsync(async (req, res) => {
             const deckId = parseInt(req.body && req.body.deckId, 10);
 
@@ -46,7 +46,7 @@ module.exports.init = function (server) {
             }
 
             try {
-                await provingGrounds.enrollDeck(req.user.id, deckId);
+                await championsChallenge.enrollDeck(req.user.id, deckId);
             } catch (err) {
                 return res.status(400).send({ success: false, message: err.message });
             }
@@ -56,9 +56,9 @@ module.exports.init = function (server) {
     );
 
     server.delete(
-        '/api/proving-grounds/decks/:id',
+        '/api/champions-challenge/decks/:id',
         passport.authenticate('jwt', { session: false }),
-        requireCapability(CAPABILITIES.PROVING_GROUNDS),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
         wrapAsync(async (req, res) => {
             const deckId = parseInt(req.params.id, 10);
 
@@ -66,7 +66,7 @@ module.exports.init = function (server) {
                 return res.status(400).send({ success: false, message: 'Invalid deck id' });
             }
 
-            await provingGrounds.withdrawDeck(req.user.id, deckId);
+            await championsChallenge.withdrawDeck(req.user.id, deckId);
 
             res.send({ success: true });
         })
@@ -75,4 +75,4 @@ module.exports.init = function (server) {
 
 // The lobby reuses this instance for its sweep, the same way analytics and
 // moderation are shared - one service, one card cache, one config read.
-module.exports.provingGroundsService = provingGrounds;
+module.exports.championsChallengeService = championsChallenge;
