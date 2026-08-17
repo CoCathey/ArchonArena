@@ -98,7 +98,6 @@ systems are moderation (**N5**) and the tutorial (**N11**).
 -   **A funding path.** The Patreon link flow works, but there is no campaign, no credentials
     set, and no defined perks.
 -   **In-person game tracking.** Paper games can only be recorded through a tournament.
--   **A reason to visit an empty site.** Nothing to watch when nobody happens to be playing.
 -   **Teams**, **versioned public API**, **Discord**, **coaching/AI**, **streaming tools**,
     **organized-play program**.
 
@@ -1627,7 +1626,7 @@ deployments, multi-lobby settings invalidation, revisit Kubernetes (charts retai
 **Depends on:** N10 load testing telling us which ceiling is hit first.
 **Acceptance:** a documented scaling step exists for each ceiling the load test finds.
 
-#### F9 — Bot showcase: two AI players in a permanent watchable game
+#### F9 — Bot showcase: two AI players in a permanent watchable game _(done)_
 
 **Why:** an empty lobby is the hardest problem a new platform has. Two bots playing each other
 around the clock give the Watch hub content from day one, let a visitor see the game before they
@@ -1657,25 +1656,55 @@ commit to it, and run the engine as a continuous soak test.
         aggregate — never persisted at all (the Champion’s Challenge doctrine, applied at
         the router), and Quick Join never matches into a bot table. Asserted by
         `test/server/gameRouterBotGames.spec.js`.
--   A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends, and
-    publishes it to the Watch hub as spectatable. (The node driver already plays both seats —
-    `test/server/gameserver.botdriver.spec.js` pins a full bot-vs-bot game — so what remains
-    is the supervisor and the Watch listing.)
--   **(admin-config)**: how many showcase tables run, how their decks are chosen, and whether
-    the showcase is on at all.
+-   [x] **A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends, and
+        publishes it to the Watch hub as spectatable** (`Lobby.runShowcaseSweep` /
+        `createShowcaseTable`, `server/lobby.js`). The node driver already played both seats
+        (`test/server/gameserver.botdriver.spec.js`), so what this added was the supervisor
+        itself: two distinct bots chosen and decked the same way the practice table chooses its
+        host (`BotService.pickHost`, called twice with the first bot excluded from the second
+        pick), built already-decked and started immediately — there is no human to hand the
+        table to. It rides `game.botGame` for the same free invisibility the practice table
+        gets from the router (never created, replayed or rated, exempt from stale-pending
+        cleanup, never Quick-Joined into), and needs no Watch-hub changes at all: `/watch` was
+        already a filter over `started && allowSpectators && !gamePrivate`, so a showcase table
+        appears the instant it starts, with no code of its own. A finished showcase table never
+        gets a Rematch click — nobody is there to make one — so `onShowcaseGameWin` (bound to
+        the router's `onGameWin`, alongside the tournament handler) closes it on its node and
+        drops it from the lobby; the next 15-second sweep tick replaces it if the config still
+        wants one. Disabling the showcase, or turning its table count down, never force-closes a
+        game in progress — it only stops replacing one once it finishes, the same
+        repair-not-remove convention the practice table already uses for its own on/off switch.
+        The two supervisors are kept from competing for the practice table's own concurrency
+        cap by excluding `showcaseGame` tables from that count. Pinned by
+        `test/server/lobby.showcase.spec.js` (14 tests): two distinct bots, never a repeat
+        pairing, tops up to the configured count, excluded from the practice cap, never
+        force-closes a live table on disable or on a lowered count, closes and replaces on
+        finish, and stops replacing once disabled.
+-   [x] **(admin-config)**: `bots.showcaseEnabled`, `bots.showcaseTableCount` (0-10, default 1),
+        and `bots.showcaseMaxTurns` — how many showcase tables run, and whether the showcase is
+        on at all, alongside the practice table's own knobs on the same `/admin/bots` screen.
+        "How their decks are chosen" reuses the practice table's own pool (a bot's collection,
+        falling back to the curated standalone decks) rather than a separate setting — the same
+        governance (which bots are enabled, which have decks) already applies.
 -   Later: the bot as the tutorial's sparring partner (**N11**), and as the base for AI
     analysis (**F3**).
 
 **Depends on:** N1 (Watch hub). Feeds F3 and N11.
 **Acceptance criteria**
 
--   A logged-out visitor can watch a live game within seconds of landing on the site.
+-   [x] A logged-out visitor can watch a live game within seconds of landing on the site — the
+        showcase defaults to on with one table, and a fresh table is always either running or
+        (worst case, mid-relaunch) about to be, fifteen seconds later at the outside. **Not yet
+        verified against a running site**: this environment has no Docker daemon, so the claim
+        is pinned by the supervisor's unit tests rather than watched in a browser against a real
+        Postgres/Redis/game-node stack. Worth a manual pass once this deploys.
 -   [x] A bot game reaches a legitimate conclusion (three keys or deck-out) without stalling,
         looping, or throwing; a wedged table concedes rather than holds its player — asserted
         by `test/server/gameserver.botdriver.spec.js`, which plays full games through the real
         game server wiring.
 -   [x] No bot game appears in any leaderboard, player stat, or meta aggregate — asserted by
-        `test/server/gameRouterBotGames.spec.js`.
+        `test/server/gameRouterBotGames.spec.js`. A showcase table rides the same `botGame`
+        flag, so it inherits the same exclusion with no test changes needed there.
 
 ---
 
@@ -2052,7 +2081,7 @@ much stronger deck pays less.
         player's last 25 recordings, as Replay Intelligence on Archon Intelligence. It answers
         the one question no other table on the site can: which house you actually call, and how
         you do when you call it.
--   [ ] Two bots playing each other continuously, watchable by anyone — permanent content for the
+-   [x] Two bots playing each other continuously, watchable by anyone — permanent content for the
         Watch hub and a continuous engine soak test → **F9**.
 
 ## Phase 11 — Statistics & analytics

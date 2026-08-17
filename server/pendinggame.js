@@ -443,6 +443,9 @@ class PendingGame {
             previousWinner: this.previousWinner,
             quickMatch: this.quickMatch,
             sasBound: this.sasBound,
+            // ARCHON (F9): lets the game list tell a showcase match apart
+            // from an ordinary practice table - both are botGame.
+            showcaseGame: this.showcaseGame || undefined,
             showHand: this.showHand,
             started: this.started,
             swap: this.swap,
@@ -507,6 +510,10 @@ class PendingGame {
             // player record as `isBot`.
             botGame: this.botGame || undefined,
             botMaxTurns: this.botMaxTurns,
+            // ARCHON (F9): rides along so the node's own save state can carry
+            // it back on GAMEWIN - the supervisor's only signal that a
+            // showcase table finished and needs replacing.
+            showcaseGame: this.showcaseGame || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,

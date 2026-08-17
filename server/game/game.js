@@ -52,6 +52,10 @@ class Game extends EventEmitter {
         // ARCHON (F9): a Helper Bot practice game. Rides into the save state
         // so the lobby's router can keep it out of Games, replays and rating.
         this.botGame = !!details.botGame;
+        // ARCHON (F9): a bot-vs-bot showcase table. Rides into GAMEWIN's save
+        // state so the lobby's supervisor knows to close it and replace it -
+        // nobody is there to click Rematch.
+        this.showcaseGame = !!details.showcaseGame;
         // ARCHON: pre-assigned chains (SAS handicap / Chainbound events);
         // applied once at initialise, before the setup phase draws hands.
         this.startingChains = details.startingChains;
@@ -1921,6 +1925,9 @@ class Game extends EventEmitter {
             // REMATCH, PLAYERLEFT) can keep practice games out of the record.
             // Undefined rather than false keeps ordinary saves unchanged.
             botGame: this.botGame || undefined,
+            // ARCHON (F9): the supervisor's only signal that a showcase table
+            // finished and is ready to be closed and replaced.
+            showcaseGame: this.showcaseGame || undefined,
             finishedAt: this.finishedAt,
             gameFormat: this.gameFormat,
             gameId: this.id,
@@ -2442,6 +2449,7 @@ class Game extends EventEmitter {
             // ARCHON (F9): rides the node sync so a restarted lobby still
             // counts a running practice game against the Helper Bot's cap.
             botGame: this.botGame || undefined,
+            showcaseGame: this.showcaseGame || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,

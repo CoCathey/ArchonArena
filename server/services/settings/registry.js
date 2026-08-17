@@ -527,7 +527,9 @@ const REGISTRY = {
             'the game starts the moment they pick a deck. Each bot belongs to a house and only ' +
             'plays decks containing it; a table that gets joined is replaced by one hosted by a ' +
             'different bot. Practice games are never persisted or rated and can never touch ' +
-            'Amber, deck records or any statistic. Nobody can log into a bot account.',
+            'Amber, deck records or any statistic. Nobody can log into a bot account. The ' +
+            'showcase below reuses the same roster to keep a bot-vs-bot table running for anyone ' +
+            'to watch, with nothing to join.',
         fields: {
             enabled: {
                 type: 'boolean',
@@ -558,6 +560,29 @@ const REGISTRY = {
             maxTurns: {
                 type: 'number',
                 label: 'Bot concedes past (rounds)',
+                min: 20,
+                max: 200,
+                default: 80
+            },
+            // ARCHON (F9): the showcase - two bots playing each other with
+            // nobody to join, so an empty lobby still has something live to
+            // watch. Its own switch and count, because it is meant to run
+            // even on a site that has turned the joinable practice table off.
+            showcaseEnabled: {
+                type: 'boolean',
+                label: 'Run a bot-vs-bot showcase table, watchable on Watch',
+                default: true
+            },
+            showcaseTableCount: {
+                type: 'number',
+                label: 'How many showcase tables run at once',
+                min: 0,
+                max: 10,
+                default: 1
+            },
+            showcaseMaxTurns: {
+                type: 'number',
+                label: 'A showcase game concedes past (rounds)',
                 min: 20,
                 max: 200,
                 default: 80

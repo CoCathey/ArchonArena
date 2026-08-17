@@ -4,8 +4,10 @@
 
 There is always one open game in the lobby that anyone can join and play,
 against a bot that picks a random deck. An empty lobby is the hardest problem
-a new platform has; this is the half of F9 that answers it for a _player_ (the
-other half, a watchable bot-vs-bot showcase, builds on the same pieces).
+a new platform has; this is the half of F9 that answers it for a _player_. The
+other half - a watchable bot-vs-bot **showcase** that needs nobody to join it
+
+-   builds on the same roster and deck-picking; see "The showcase" below.
 
 ## Thirteen characters, one per house
 
@@ -54,6 +56,7 @@ server/services/championschallenge/SimulatedGame.js  the lab's driver, delegatin
 server/gamenode/botdriver.js                 the bot's seat at a real table (pump per event)
 server/gamenode/gameserver.js                pumps the driver at start, per input, per sweep
 server/lobby.js  runBotTableSweep            hosts/recycles the table, auto-starts on deck pick
+server/lobby.js  runShowcaseSweep            keeps the bot-vs-bot showcase table(s) running
 server/gamerouter.js                         skips create/update/replay/rating for bot games
 server/api/bots.js                           the Bot Settings API (isAdmin)
 client/pages/BotAdmin.jsx                    the Bot Settings screen, at /admin/bots
@@ -176,17 +179,43 @@ Skyborn and Unfathomable need decks imported before those four can play.
 **Bot Settings** (`/admin/bots`, isAdmin) holds both halves: the roster - each
 bot's name, picture, profile, on/off switch and deck count - and the knobs
 that govern all of them (keep a table open at all, most concurrent games, the
-joiner grace period, spectators, the concede cap). The knobs are an ordinary
-settings section (`bots`) stored, validated and audited like every other; the
+joiner grace period, spectators, the concede cap, and the showcase's own
+switch, table count and concede cap). The knobs are an ordinary settings
+section (`bots`) stored, validated and audited like every other; the
 registry's `page` field is what moves it off the general Site Settings screen
 and onto this one, next to the roster it governs. All of it is read per sweep
 tick, so nothing needs a restart.
 
+## The showcase
+
+`runShowcaseSweep` keeps `bots.showcaseTableCount` bot-vs-bot tables running -
+one bot against another, with nobody to join. It reuses everything above: the
+same roster, the same `pickHost` (called twice - once for the host, once for
+the challenger with the host added to the busy list, so the two are never the
+same character) and the same random-deck rule. The table is built already
+decked and started, because there is no human to hand it to; it rides
+`game.botGame` for the same free invisibility the practice table gets from
+the router (never created, replayed or rated), so the Watch hub needs no
+changes of its own - `/watch` was already a filter over `started &&
+allowSpectators && !gamePrivate`, and a showcase table is all three the
+instant it starts.
+
+The one thing a showcase table cannot borrow is the practice table's
+rematch-and-recycle machinery, because there is no player to click Rematch.
+So finishing is caught the other way: `onShowcaseGameWin` listens on the
+router's `onGameWin` (the same event the tournament service listens on, for
+its own reason) and, seeing `showcaseGame` on the save state, closes the
+table on its node and drops it from the lobby. The next sweep tick - up to
+15 seconds later - replaces it if the config still wants one. Turning the
+showcase off, or turning its count down, never force-closes a table that is
+still being played; it only stops replacing one once it finishes, the same
+repair-not-remove shape the practice table uses for its own switch. The two
+sweeps are kept from competing for the practice table's `maxConcurrentGames`
+cap by excluding showcase tables from that count - they are governed by
+`showcaseTableCount` instead.
+
 ## Future
 
--   The F9 showcase: a supervisor keeping a bot-vs-bot table spectatable is
-    the remaining half; the driver already plays both seats (the spec plays
-    full bot-vs-bot games through the real game server).
 -   A first-class rematch that reseats the human at a fresh bot table with
     one click.
 -   Per-bot personality: a policy weighting per house, so Brobnar's bot

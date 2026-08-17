@@ -79,6 +79,12 @@ class Lobby {
         // games per pairing and auto-reported results (Phase 7 inc. 2)
         this.tournamentService = options.tournamentService || new TournamentService();
         this.router.on('onGameWin', this.onTournamentGameWin.bind(this));
+        // ARCHON (F9): the showcase - a bot-vs-bot table never gets a
+        // Rematch click, so this is the supervisor's only signal that one
+        // finished and needs closing and replacing. A separate listener on
+        // the same event, so it runs whether or not the game is a tournament
+        // match (it is never both).
+        this.router.on('onGameWin', this.onShowcaseGameWin.bind(this));
         tournamentEvents.on('roundPaired', this.onTournamentRoundPaired.bind(this));
         tournamentEvents.on('ensureMatchGame', this.onTournamentEnsureMatchGame.bind(this));
         tournamentEvents.on('deckRegistered', this.onTournamentDeckRegistered.bind(this));
@@ -228,6 +234,18 @@ class Lobby {
         this.botTableSweep = setInterval(() => this.runBotTableSweep(), 15 * 1000);
         if (this.botTableSweep && this.botTableSweep.unref) {
             this.botTableSweep.unref();
+        }
+
+        // ARCHON (F9): the showcase - a bot-vs-bot table with nothing to
+        // join, kept running so an empty lobby still has something live on
+        // the Watch hub. Built from the same roster and reuses the practice
+        // table's invisibility (game.botGame), so it needs no gamerouter
+        // changes of its own - only a supervisor to keep it alive, since
+        // nobody is ever there to click Rematch.
+        this.lastShowcaseDeckWarnMs = 0;
+        this.showcaseSweep = setInterval(() => this.runShowcaseSweep(), 15 * 1000);
+        if (this.showcaseSweep && this.showcaseSweep.unref) {
+            this.showcaseSweep.unref();
         }
 
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
@@ -793,7 +811,13 @@ class Lobby {
                 }
             }
 
-            const botGames = Object.values(this.games).filter((game) => game.botGame);
+            // ARCHON (F9): the showcase reuses `botGame` for its own free
+            // ride through the router, but it is a separate supervisor with
+            // its own cap - excluded here so it never eats into the
+            // practice table's concurrency budget.
+            const botGames = Object.values(this.games).filter(
+                (game) => game.botGame && !game.showcaseGame
+            );
             const open = botGames.filter(
                 (game) =>
                     !game.started &&
@@ -986,6 +1010,197 @@ class Lobby {
         }
 
         return true;
+    }
+
+    /**
+     * ARCHON (F9): keep the showcase running.
+     *
+     * A showcase table has no human to hand it to, so there is nothing to
+     * wait for: unlike the practice sweep, this one only ever tops up - it
+     * creates tables until the admin-configured count is running and does
+     * nothing else. It never force-closes a live table just because the
+     * count was turned down; the count converges downward on its own as
+     * each game finishes and `onShowcaseGameWin` closes it without a
+     * replacement. Switching the showcase off works the same way: no new
+     * tables open, and whatever is still playing is left to finish.
+     */
+    async runShowcaseSweep() {
+        if (!this.botService || this.showcaseSweepRunning) {
+            return;
+        }
+
+        this.showcaseSweepRunning = true;
+
+        try {
+            const config = this.botService.getConfig();
+
+            if (!config.showcaseEnabled) {
+                return;
+            }
+
+            const running = Object.values(this.games).filter((game) => game.showcaseGame).length;
+            const wanted = Math.max(0, Math.min(10, Number(config.showcaseTableCount) || 0));
+
+            for (let i = running; i < wanted; i++) {
+                await this.createShowcaseTable(config);
+            }
+        } catch (err) {
+            logger.error('Showcase sweep failed', err);
+        } finally {
+            this.showcaseSweepRunning = false;
+        }
+    }
+
+    /**
+     * Start one showcase table: two distinct bots, chosen and decked the
+     * same way the practice table chooses its host (`pickHost`), built
+     * already started because there is no human to start it for.
+     *
+     * `game.botGame` rides along so the table inherits everything the
+     * practice table already gets for free from the router - never
+     * created, replayed or rated, never quick-joined into, exempt from the
+     * stale-pending sweep - with no changes of its own needed there.
+     */
+    async createShowcaseTable(config) {
+        const busy = this.seatedUsernames();
+        const first = await this.botService.pickHost(busy);
+
+        if (!first) {
+            this.warnNoShowcaseHost();
+
+            return;
+        }
+
+        const second = await this.botService.pickHost([...busy, first.bot.user.username]);
+
+        if (!second) {
+            this.warnNoShowcaseHost();
+
+            return;
+        }
+
+        const hostUser = first.bot.user;
+        const challengerUser = second.bot.user;
+
+        const game = new PendingGame(hostUser, {
+            allowSpectators: true,
+            gameFormat: 'normal',
+            muteSpectators: false,
+            name: `Showcase: ${hostUser.username} (${first.bot.label}) vs ${challengerUser.username} (${second.bot.label})`,
+            showHand: false
+        });
+
+        game.botGame = true;
+        game.showcaseGame = true;
+        game.botMaxTurns = config.showcaseMaxTurns;
+
+        game.newGame('TBA', hostUser, undefined, true);
+        game.players[hostUser.username].isBot = true;
+
+        const joinError = game.join('TBA', challengerUser);
+
+        if (joinError) {
+            logger.error(`Could not seat the showcase challenger: ${joinError}`);
+
+            return;
+        }
+
+        game.players[challengerUser.username].isBot = true;
+
+        try {
+            await this.applyDeckSelection(
+                game,
+                hostUser.username,
+                first.deck.deckId,
+                first.deck.isStandalone
+            );
+            await this.applyDeckSelection(
+                game,
+                challengerUser.username,
+                second.deck.deckId,
+                second.deck.isStandalone
+            );
+        } catch (err) {
+            logger.error('A showcase table could not deck its bots', err);
+
+            return;
+        }
+
+        game.addMessage(
+            '{0} and {1} play a showcase match - always on, never rated, and free to watch.',
+            hostUser.username,
+            challengerUser.username
+        );
+
+        const gameNode = this.router.startGame(game);
+
+        if (!gameNode) {
+            logger.error(`No game nodes available for showcase table ${game.id}`);
+
+            return;
+        }
+
+        game.node = gameNode;
+        game.started = true;
+
+        this.games[game.id] = game;
+        this.broadcastGameMessage('newgame', game);
+
+        logger.info(
+            `Showcase match started: ${hostUser.username} (${first.bot.label}) vs ` +
+                `${challengerUser.username} (${second.bot.label}) - ${game.id}`
+        );
+    }
+
+    /** Take a showcase table down - closes it on its node if it ever reached one. */
+    removeShowcaseTable(game) {
+        if (!game) {
+            return;
+        }
+
+        if (game.node) {
+            this.router.closeGame(game);
+        }
+
+        this.broadcastGameMessage('removegame', game);
+        delete this.games[game.id];
+    }
+
+    /**
+     * ARCHON (F9): a showcase table never gets a Rematch click - nobody is
+     * there to make one - so its GAMEWIN is the only signal the supervisor
+     * ever gets that it finished. Close it on its node (freeing the worker
+     * slot the way a human leaving or rematching normally would) and drop
+     * it from the lobby; the next sweep tick replaces it if the config
+     * still wants one.
+     */
+    onShowcaseGameWin(gameSave) {
+        if (!gameSave || !gameSave.showcaseGame) {
+            return;
+        }
+
+        const game = this.games[gameSave.gameId];
+
+        if (!game) {
+            return;
+        }
+
+        this.removeShowcaseTable(game);
+    }
+
+    /**
+     * Report at most once an hour: this repeats until an admin gives a
+     * second bot a deck, and every tick would bury the log.
+     */
+    warnNoShowcaseHost() {
+        if (Date.now() - this.lastShowcaseDeckWarnMs > 60 * 60 * 1000) {
+            this.lastShowcaseDeckWarnMs = Date.now();
+            logger.warn(
+                'No showcase table could be started - fewer than two practice bots can ' +
+                    'currently host (enabled, with a deck of their house, and not already seated ' +
+                    'elsewhere).'
+            );
+        }
     }
 
     /**
@@ -3572,6 +3787,7 @@ class Lobby {
             // ARCHON (F9): a practice game keeps counting against the Helper
             // Bot's concurrency cap across a lobby restart.
             syncGame.botGame = game.botGame;
+            syncGame.showcaseGame = game.showcaseGame;
             syncGame.createdAt = game.startedAt;
             syncGame.gameFormat = game.gameFormat;
             syncGame.gamePrivate = game.gamePrivate;
