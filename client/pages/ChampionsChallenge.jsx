@@ -8,10 +8,12 @@ import Panel from '../Components/Site/Panel';
 import AlertPanel from '../Components/Site/AlertPanel';
 import PremiumLock from '../Components/Membership/PremiumLock';
 import { CAPABILITIES, hasCapability } from '../membership';
+import { Constants } from '../constants';
 import {
     useGetChampionsChallengeQuery,
     useEnrollChampionsChallengeDeckMutation,
     useEnrollRandomChampionsChallengeDeckMutation,
+    useSaveChampionsChallengeGauntletMutation,
     useWithdrawChampionsChallengeDeckMutation
 } from '../redux/api';
 import { serverMessage } from '../redux/apiError';
@@ -111,6 +113,260 @@ const Verdict = ({ deck, t }) => {
 
 Verdict.propTypes = { deck: PropTypes.object, t: PropTypes.func };
 
+/** A togglable filter chip, used for sets, houses and strategies. */
+const Chip = ({ active, children, disabled, onClick, title }) => (
+    <button
+        className={[
+            'rounded-full border px-2.5 py-1 text-xs transition',
+            active
+                ? 'border-accent/60 bg-accent/20 text-amber-200'
+                : 'border-border/70 bg-surface-secondary/60 text-foreground hover:border-border',
+            disabled ? 'cursor-not-allowed opacity-40' : ''
+        ].join(' ')}
+        disabled={disabled}
+        onClick={onClick}
+        title={title}
+        type='button'
+    >
+        {children}
+    </button>
+);
+
+Chip.propTypes = {
+    active: PropTypes.bool,
+    children: PropTypes.node,
+    disabled: PropTypes.bool,
+    onClick: PropTypes.func,
+    title: PropTypes.string
+};
+
+/**
+ * ARCHON (N24): the Gauntlet panel - play the field, and choose which field.
+ *
+ * The honest bit is the pool line. Set and house filters are exact, because the
+ * catalog knows those; a SAS window or a strategy can only match decks whose
+ * Decks of KeyForge stats have been fetched, so this says how many decks the
+ * current filters actually reach rather than letting a member wonder why every
+ * game is still a mirror.
+ */
+const GauntletPanel = ({ gauntlet, onSave, saving, t }) => {
+    const [draft, setDraft] = useState(null);
+    const current = draft || {
+        enabled: !!gauntlet?.enabled,
+        fieldSharePct: gauntlet?.fieldSharePct ?? 50,
+        sets: gauntlet?.sets || [],
+        houses: gauntlet?.houses || [],
+        strategies: gauntlet?.strategies || [],
+        minSas: gauntlet?.minSas ?? '',
+        maxSas: gauntlet?.maxSas ?? ''
+    };
+    const pool = gauntlet?.pool;
+    const set = (changes) => setDraft({ ...current, ...changes });
+    const toggle = (key, value) =>
+        set({
+            [key]: current[key].includes(value)
+                ? current[key].filter((entry) => entry !== value)
+                : [...current[key], value]
+        });
+
+    return (
+        <Panel type='default' compactHeader title={t('The Gauntlet — play the field')}>
+            <p className='m-0 pb-2 text-sm text-muted'>
+                {t(
+                    'Sparring against your own decks measures a deck against the company it ' +
+                        'keeps. The Gauntlet plays it against decks nobody here owns — real ' +
+                        'registered decks drawn from the Master Vault catalog, never yours and ' +
+                        'never a friend’s. Results are reported separately, because beating your ' +
+                        'collection and beating the world are different claims.'
+                )}
+            </p>
+
+            <div className='flex flex-wrap items-center gap-3 pb-2'>
+                <Chip active={current.enabled} onClick={() => set({ enabled: !current.enabled })}>
+                    {current.enabled ? t('⚔ Playing the field') : t('Play the field')}
+                </Chip>
+                <label className='flex items-center gap-1.5 text-[11px] text-muted'>
+                    {t('share of games')}
+                    <input
+                        className='w-16 rounded border border-border/70 bg-surface-secondary/60 px-1.5 py-0.5 text-xs text-foreground'
+                        max={100}
+                        min={0}
+                        type='number'
+                        value={current.fieldSharePct}
+                        onChange={(event) =>
+                            set({
+                                fieldSharePct: Math.max(
+                                    0,
+                                    Math.min(100, parseInt(event.target.value, 10) || 0)
+                                )
+                            })
+                        }
+                    />
+                    %
+                </label>
+                <label className='flex items-center gap-1.5 text-[11px] text-muted'>
+                    {t('opponent SAS')}
+                    <input
+                        className='w-14 rounded border border-border/70 bg-surface-secondary/60 px-1.5 py-0.5 text-xs text-foreground'
+                        min={0}
+                        placeholder={t('min')}
+                        type='number'
+                        value={current.minSas}
+                        onChange={(event) => set({ minSas: event.target.value })}
+                    />
+                    <span>–</span>
+                    <input
+                        className='w-14 rounded border border-border/70 bg-surface-secondary/60 px-1.5 py-0.5 text-xs text-foreground'
+                        min={0}
+                        placeholder={t('max')}
+                        type='number'
+                        value={current.maxSas}
+                        onChange={(event) => set({ maxSas: event.target.value })}
+                    />
+                </label>
+            </div>
+
+            <div className='pb-2'>
+                <div className='mb-1 text-[10px] uppercase tracking-wide text-muted'>
+                    {t('Sets — any, unless you pick some')}
+                </div>
+                <div className='flex flex-wrap gap-1.5'>
+                    {Constants.Expansions.map((expansion) => (
+                        <Chip
+                            active={current.sets.includes(Number(expansion.value))}
+                            key={expansion.value}
+                            onClick={() => toggle('sets', Number(expansion.value))}
+                        >
+                            {expansion.label}
+                        </Chip>
+                    ))}
+                </div>
+            </div>
+
+            <div className='pb-2'>
+                <div className='mb-1 text-[10px] uppercase tracking-wide text-muted'>
+                    {t('Houses the opponent must contain')}
+                </div>
+                <div className='flex flex-wrap gap-1.5'>
+                    {Constants.Houses.map((house, index) => (
+                        <Chip
+                            active={current.houses.includes(house)}
+                            key={house}
+                            onClick={() => toggle('houses', house)}
+                        >
+                            {Constants.HousesNames[index]}
+                        </Chip>
+                    ))}
+                </div>
+            </div>
+
+            <div className='pb-2'>
+                <div className='mb-1 text-[10px] uppercase tracking-wide text-muted'>
+                    {t('Strategies — what the opponent should be good at')}
+                </div>
+                <div className='flex flex-wrap gap-1.5'>
+                    {(gauntlet?.strategies || []).map((strategy) => (
+                        <Chip
+                            active={current.strategies.includes(strategy.key)}
+                            key={strategy.key}
+                            onClick={() => toggle('strategies', strategy.key)}
+                            title={strategy.description}
+                        >
+                            {strategy.label}
+                        </Chip>
+                    ))}
+                </div>
+            </div>
+
+            <div className='flex flex-wrap items-center gap-3'>
+                <button
+                    className={[
+                        'rounded-md border border-accent/60 bg-accent/20 px-3 py-1 text-xs text-amber-200 transition',
+                        saving || !draft ? 'cursor-not-allowed opacity-40' : 'hover:bg-accent/30'
+                    ].join(' ')}
+                    disabled={saving || !draft}
+                    onClick={() =>
+                        onSave({
+                            ...current,
+                            minSas: current.minSas === '' ? null : current.minSas,
+                            maxSas: current.maxSas === '' ? null : current.maxSas
+                        }).then(() => setDraft(null))
+                    }
+                    type='button'
+                >
+                    {saving ? t('Saving…') : t('Save Gauntlet settings')}
+                </button>
+                {pool && (
+                    <span className='text-[11px] text-muted'>
+                        {t('{{matching}} of {{playable}} pool decks match your filters.', {
+                            matching: pool.matching,
+                            playable: pool.playable
+                        })}
+                        {pool.needsEnrichment && (
+                            <>
+                                {' '}
+                                {t(
+                                    'A SAS window or a strategy can only match decks whose ' +
+                                        'SAS and AERC have been fetched, so this number grows ' +
+                                        'as the pool is enriched.'
+                                )}
+                            </>
+                        )}
+                        {!pool.playable && (
+                            <>
+                                {' '}
+                                {t(
+                                    'The pool is still being built — the site fetches catalog ' +
+                                        'decks a few at a time so Master Vault is not hammered.'
+                                )}
+                            </>
+                        )}
+                    </span>
+                )}
+            </div>
+
+            {gauntlet?.recent?.length ? (
+                <div className='mt-3 border-t border-border/50 pt-2'>
+                    <div className='mb-1 text-[10px] uppercase tracking-wide text-muted'>
+                        {t('Latest field games')}
+                    </div>
+                    <ul className='m-0 list-none space-y-0.5 p-0 text-[11px]'>
+                        {gauntlet.recent.map((game, index) => (
+                            <li key={index} className='text-muted'>
+                                <span
+                                    className={
+                                        game.won
+                                            ? 'font-semibold text-emerald-300'
+                                            : 'font-semibold text-red-300'
+                                    }
+                                >
+                                    {game.won ? t('Won') : t('Lost')}
+                                </span>{' '}
+                                {t('{{keys}}–{{oppKeys}} · {{deck}} vs {{opponent}}', {
+                                    keys: game.myKeys,
+                                    oppKeys: game.opponentKeys,
+                                    deck: game.deckName || t('a deck'),
+                                    opponent: game.opponentName
+                                })}
+                                {game.opponentSas
+                                    ? ` ${t('(SAS {{sas}})', { sas: game.opponentSas })}`
+                                    : ''}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
+        </Panel>
+    );
+};
+
+GauntletPanel.propTypes = {
+    gauntlet: PropTypes.object,
+    onSave: PropTypes.func,
+    saving: PropTypes.bool,
+    t: PropTypes.func
+};
+
 const ChampionsChallenge = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -128,6 +384,8 @@ const ChampionsChallenge = () => {
     const [enrollRandom, { isLoading: randomizing }] =
         useEnrollRandomChampionsChallengeDeckMutation();
     const [withdraw, { isLoading: withdrawing }] = useWithdrawChampionsChallengeDeckMutation();
+    const [saveGauntlet, { isLoading: savingGauntlet }] =
+        useSaveChampionsChallengeGauntletMutation();
 
     const busy = enrolling || withdrawing || randomizing;
 
@@ -431,6 +689,29 @@ const ChampionsChallenge = () => {
                         )}
                     </Panel>
 
+                    {/* ARCHON (N24): the Gauntlet. Sits under the roster
+                        because it is a property of how the roster is played,
+                        not a separate feature with its own page. */}
+                    <GauntletPanel
+                        gauntlet={data?.gauntlet}
+                        saving={savingGauntlet}
+                        t={t}
+                        onSave={async (settings) => {
+                            setActionError(null);
+
+                            try {
+                                await saveGauntlet(settings).unwrap();
+                            } catch (error) {
+                                setActionError(
+                                    serverMessage(
+                                        error,
+                                        t('Those Gauntlet settings could not be saved.')
+                                    )
+                                );
+                            }
+                        }}
+                    />
+
                     {gems.length > 0 && (
                         <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
                             {gems.slice(0, 4).map((deck) => (
@@ -475,6 +756,17 @@ const ChampionsChallenge = () => {
                                             <th className='py-1.5 pr-2 text-right font-medium'>
                                                 {t('Win rate')}
                                             </th>
+                                            {/* ARCHON (N24): the field, beside
+                                                the mirror record - never
+                                                averaged with it. */}
+                                            <th
+                                                className='py-1.5 pr-2 text-right font-medium'
+                                                title={t(
+                                                    'Record against decks nobody here owns, drawn from the Master Vault catalog.'
+                                                )}
+                                            >
+                                                {t('vs field')}
+                                            </th>
                                             <th className='py-1.5 pr-2 text-right font-medium'>
                                                 {t('vs SAS')}
                                             </th>
@@ -518,6 +810,36 @@ const ChampionsChallenge = () => {
                                                 </td>
                                                 <td className='py-1.5 pr-2 text-right text-foreground'>
                                                     {pct(deck.winRate)}
+                                                </td>
+                                                <td className='py-1.5 pr-2 text-right'>
+                                                    {deck.field && deck.field.games ? (
+                                                        <span
+                                                            className={
+                                                                deck.field.confident
+                                                                    ? 'text-foreground'
+                                                                    : 'text-muted'
+                                                            }
+                                                            title={t(
+                                                                '{{wins}}–{{losses}} against the field, average opponent SAS {{sas}}',
+                                                                {
+                                                                    wins: deck.field.wins,
+                                                                    losses: deck.field.losses,
+                                                                    sas:
+                                                                        deck.field.avgOpponentSas ??
+                                                                        '—'
+                                                                }
+                                                            )}
+                                                        >
+                                                            {pct(deck.field.winRate)}
+                                                            <span className='ml-1 text-[10px] text-muted'>
+                                                                {t('({{games}})', {
+                                                                    games: deck.field.games
+                                                                })}
+                                                            </span>
+                                                        </span>
+                                                    ) : (
+                                                        <span className='text-muted'>—</span>
+                                                    )}
                                                 </td>
                                                 <td
                                                     className={[

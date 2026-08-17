@@ -692,7 +692,14 @@ class Lobby {
             this.lastChampionsChallengeSweepMs = now;
             this.championsChallengeSweepRunning = true;
 
-            const result = await this.championsChallengeService.runSweep();
+            // ARCHON (N24): through runSweepAs, never runSweep. The sweep can be
+            // hosted by a dedicated worker node instead of this process, and the
+            // lease inside runSweepAs is what stops both from playing at once -
+            // reaching past it would double every roster's games.
+            const result = await this.championsChallengeService.runSweepAs(
+                'lobby',
+                `lobby@${require('os').hostname()}:${process.pid}`
+            );
 
             if (result && result.played > 0) {
                 logger.info(`Champion’s Challenge played ${result.played} simulated game(s)`);

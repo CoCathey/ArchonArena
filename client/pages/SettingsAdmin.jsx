@@ -160,6 +160,27 @@ const SettingField = ({ descriptor, path, draft, setDraft }) => {
         );
     }
 
+    // ARCHON (N24): a fixed choice - a dropdown rather than a free-text field
+    // whose valid values live only in a comment.
+    if (descriptor.type === 'select') {
+        return (
+            <div>
+                <Label>{t(descriptor.label)}</Label>
+                <select
+                    className={inputClass}
+                    value={effective ?? descriptor.default ?? ''}
+                    onChange={(event) => setDraft(setPath(draft, path, event.target.value))}
+                >
+                    {(descriptor.options || []).map((option) => (
+                        <option key={option.value} value={option.value}>
+                            {t(option.label)}
+                        </option>
+                    ))}
+                </select>
+            </div>
+        );
+    }
+
     if (descriptor.type === 'stringMap') {
         const entries = Object.entries(effective || {});
 
