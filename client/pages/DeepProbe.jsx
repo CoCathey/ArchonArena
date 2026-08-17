@@ -282,6 +282,54 @@ const DeckColumn = ({ deck, t }) => (
 
 DeckColumn.propTypes = { deck: PropTypes.object, t: PropTypes.func };
 
+/**
+ * ARCHON (N32): the Vault Tour, from the page where somebody is picking a deck
+ * for an event.
+ *
+ * Deep Probe answers "which of these should I bring" from games already played.
+ * The Vault Tour answers the next question - "how does it hold up against what
+ * actually wins" - by playing a slate against a field of tournament decks, and
+ * this is the page where that question is being asked.
+ *
+ * It changes with what the reader already has rather than selling them something
+ * they own: a member without Vault Master is pointed at the tier, a member with
+ * it is pointed straight at the feature. Nobody is asked to buy twice.
+ */
+const VaultTourInvite = ({ t, user }) => {
+    const unlocked = hasCapability(user, CAPABILITIES.CHAMPIONS_CHALLENGE);
+
+    return (
+        <Panel type='default' compactHeader title={t('Prepping for a Vault Tour?')}>
+            <div className='flex flex-wrap items-center justify-between gap-3'>
+                <p className='m-0 max-w-3xl text-sm text-muted'>
+                    {unlocked
+                        ? t(
+                              'Run the Vault Tour gauntlet in the Champion’s Challenge: three of ' +
+                                  'your decks, played over and over against the decks that won ' +
+                                  'real events, with a matrix of how each matchup actually goes.'
+                          )
+                        : t(
+                              'Subscribe to Vault Master and run the Vault Tour gauntlet in the ' +
+                                  'Champion’s Challenge: three of your decks, played over and ' +
+                                  'over against the decks that won real events, with a matrix of ' +
+                                  'how each matchup actually goes.'
+                          )}
+                </p>
+                <HeroButton
+                    as={Link}
+                    size='sm'
+                    to={unlocked ? '/champions-challenge' : '/membership'}
+                    variant='primary'
+                >
+                    {unlocked ? t('Open the Champion’s Challenge') : t('Subscribe to Vault Master')}
+                </HeroButton>
+            </div>
+        </Panel>
+    );
+};
+
+VaultTourInvite.propTypes = { t: PropTypes.func, user: PropTypes.object };
+
 const DeepProbe = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -357,6 +405,8 @@ const DeepProbe = () => {
                     )}
                 </p>
             </Panel>
+
+            <VaultTourInvite t={t} user={user} />
 
             <PremiumLock
                 capability={CAPABILITIES.TOURNAMENT_LAB}

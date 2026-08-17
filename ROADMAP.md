@@ -2169,6 +2169,43 @@ Racer you sit down against.
         once the game is under way.
 -   [x] With no learned champion, no styles are offered at all.
 
+#### N32 — The Vault Tour: a slate against what wins _(done)_
+
+**Why:** the lab could tell a member how a deck did against their own collection and against a
+random slice of everything. Neither is the question somebody picking a deck for an event asks,
+and that field cannot be sampled — winning decks are a list, not a distribution.
+
+**Tasks**
+
+-   [x] **An admin-curated field** (`VaultTourDecks`, migration 81): tournament decks entered by
+        Master Vault or Decks of KeyForge link with their event and finish, cards fetched a few
+        per sweep at the Gauntlet's pacing. A deck this server cannot simulate is stored WITH the
+        reason rather than refused, so an operator's entry never silently fails to appear.
+-   [x] **A three-deck slate** (`VaultTourEntries`), separate from the eight-deck roster: a member
+        testing three decks against tournament decks should not have to withdraw five. No SAS
+        requirement, unlike the roster — this compares a deck with named opponents rather than
+        with what its rating predicted.
+-   [x] **Its own daily budget**: twelve games per deck per day counted from `VaultTourGames`
+        alone, so the two measurements cannot starve each other. Admins exempt.
+-   [x] **Never ARI, never the diary.** A hand-picked field of winners is the opposite of the
+        representative opposition a rating needs, and a rating quietly fed by an operator's choice
+        of opponents cannot be unpicked afterwards.
+-   [x] **The matrix**, which is the whole point: this deck against that deck, both records, with
+        the field total and its interval underneath.
+-   [x] **A starting field of 23 decks**, seeded on first sweep with `placing: unknown` — the list
+        arrived without placings, and "won the event" is not a claim to invent to fill a column.
+-   [x] **From Deep Probe**, where deck choice is being made: a panel offering the Vault Tour,
+        pointing a member without Vault Master at the tier and a member with it straight at the
+        feature.
+-   Later: per-event columns rather than per-deck when a field grows past a screenful; the same
+    matrix against a club's decks.
+
+**Depends on:** N24 (hydration), N28 (the pilots). **Acceptance criteria**
+
+-   [x] A Vault Tour game never moves ARI and never lands in the mirror record.
+-   [x] A deck at its twelve for the day rests; an admin's does not.
+-   [x] The seeded field cannot overwrite an operator's corrections.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

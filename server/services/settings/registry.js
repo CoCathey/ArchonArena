@@ -631,6 +631,31 @@ const REGISTRY = {
                 max: 60000,
                 default: 10000
             },
+            // ARCHON (N32): the Vault Tour - a member's three-deck slate against
+            // an admin-curated field of tournament winners. Its own budget (the
+            // same twelve a deck a day the roster gets, counted separately), its
+            // own record, and deliberately no ARI: a hand-picked field of
+            // winners is the opposite of the representative opposition a rating
+            // needs.
+            vaultTourEnabled: {
+                type: 'boolean',
+                label: 'Members may run a slate against the Vault Tour field',
+                default: true
+            },
+            vaultTourGamesPerSweep: {
+                type: 'number',
+                label: 'Vault Tour games played per sweep, across all members',
+                min: 0,
+                max: 200,
+                default: 6
+            },
+            vaultTourFetchPerRun: {
+                type: 'number',
+                label: 'Tournament decks fetched from Master Vault per sweep',
+                min: 1,
+                max: 25,
+                default: 3
+            },
             // ARCHON (N30): reading a pool deck's own cards to work out what it
             // is built to do. Pure CPU over cards already stored - no outbound
             // request, nobody's rate limit - so this is only about not stalling a

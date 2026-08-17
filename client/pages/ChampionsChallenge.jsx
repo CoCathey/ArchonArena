@@ -13,8 +13,10 @@ import {
     useGetChampionsChallengeQuery,
     useEnrollChampionsChallengeDeckMutation,
     useEnrollRandomChampionsChallengeDeckMutation,
+    useEnrollVaultTourDeckMutation,
     useSaveChampionsChallengeGauntletMutation,
-    useWithdrawChampionsChallengeDeckMutation
+    useWithdrawChampionsChallengeDeckMutation,
+    useWithdrawVaultTourDeckMutation
 } from '../redux/api';
 import { serverMessage } from '../redux/apiError';
 
@@ -776,6 +778,165 @@ StylePanel.propTypes = {
     t: PropTypes.func
 };
 
+/**
+ * ARCHON (N32): the Vault Tour - three of your decks against a field somebody
+ * won a tournament with.
+ *
+ * The rest of the lab answers "how does this deck do against my collection" and
+ * "against a random slice of everything". This answers the question a
+ * competitive player actually asks, and the answer is a MATRIX rather than a
+ * percentage: against a dozen named decks, the average is the least interesting
+ * number available. A deck at 60% overall that loses every game to the deck that
+ * won the biggest event of the year has been told something an average hides.
+ *
+ * Kept visibly separate from the roster above it, because it is separate: three
+ * slots not eight, its own twelve games a day, and no effect on ARI at all.
+ */
+const VaultTourPanel = ({ vaultTour, candidates, onAdd, onRemove, busy, t }) => {
+    if (!vaultTour || !vaultTour.enabled) {
+        return null;
+    }
+
+    const { slate = [], field = [], matrix = { opponents: [], cells: {}, totals: {} } } = vaultTour;
+    const slots = `${slate.length}/${vaultTour.slateSize}`;
+    const opponents = matrix.opponents || [];
+
+    return (
+        <Panel
+            type='default'
+            compactHeader
+            title={t('The Vault Tour ({{slots}} slots used)', { slots })}
+        >
+            <p className='m-0 pb-2 text-sm text-muted'>
+                {t(
+                    'Three decks, played over and over against a field of tournament decks an ' +
+                        'admin keeps. Separate from your roster above: its own slots, its own ' +
+                        '{{perDay}} games a day, and these games never move ARI — a hand-picked ' +
+                        'field of winners is the opposite of the ordinary opposition a rating needs.',
+                    { perDay: vaultTour.gamesPerDeckPerDay }
+                )}
+            </p>
+
+            <div className='flex flex-wrap items-center gap-1.5 pb-2'>
+                {slate.map((deck) => (
+                    <Chip active key={deck.deckId} onClick={() => onRemove(deck.deckId)}>
+                        {deck.name} ×
+                    </Chip>
+                ))}
+                {slate.length < vaultTour.slateSize &&
+                    (candidates || []).slice(0, 8).map((deck) => (
+                        <Chip disabled={busy} key={deck.deckId} onClick={() => onAdd(deck.deckId)}>
+                            + {deck.name}
+                        </Chip>
+                    ))}
+            </div>
+
+            {field.length === 0 ? (
+                <p className='m-0 text-[11px] text-muted'>
+                    {t(
+                        'No tournament decks have been entered yet. An admin adds them from the ' +
+                            'Vault Tour panel in site administration.'
+                    )}
+                </p>
+            ) : opponents.length === 0 ? (
+                <p className='m-0 text-[11px] text-muted'>
+                    {t(
+                        '{{count}} decks in the field, waiting on games. Put a deck on the slate ' +
+                            'and the lab starts playing it through them.',
+                        { count: field.length }
+                    )}
+                </p>
+            ) : (
+                <div className='overflow-x-auto'>
+                    <table className='w-full min-w-[34rem] border-collapse text-sm'>
+                        <thead>
+                            <tr className='text-left text-[11px] uppercase tracking-wide text-muted'>
+                                <th className='py-1 pr-2 font-normal'>{t('Opponent')}</th>
+                                {slate.map((deck) => (
+                                    <th className='py-1 pr-2 font-normal' key={deck.deckId}>
+                                        {deck.name}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {opponents.map((opponent) => (
+                                <tr className='border-t border-border/40' key={opponent.uuid}>
+                                    <td className='max-w-[16rem] truncate py-1 pr-2'>
+                                        <span className='text-foreground'>{opponent.name}</span>{' '}
+                                        <span className='text-[11px] text-muted'>
+                                            {opponent.placing === 'unknown'
+                                                ? opponent.event
+                                                : `${opponent.event} · ${opponent.placing}`}
+                                        </span>
+                                    </td>
+                                    {slate.map((deck) => {
+                                        const cell =
+                                            matrix.cells[`${deck.deckId}|${opponent.uuid}`];
+
+                                        return (
+                                            <td className='py-1 pr-2' key={deck.deckId}>
+                                                {cell ? (
+                                                    <span
+                                                        className={
+                                                            cell.winRate >= 0.5
+                                                                ? 'text-emerald-300'
+                                                                : 'text-red-300'
+                                                        }
+                                                        title={t('{{wins}}–{{losses}}', {
+                                                            wins: cell.wins,
+                                                            losses: cell.losses
+                                                        })}
+                                                    >
+                                                        {pct(cell.winRate)}
+                                                    </span>
+                                                ) : (
+                                                    <span className='text-muted'>—</span>
+                                                )}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))}
+                            <tr className='border-t border-border/60'>
+                                <td className='py-1 pr-2 text-[11px] uppercase tracking-wide text-muted'>
+                                    {t('Against the field')}
+                                </td>
+                                {slate.map((deck) => {
+                                    const total = matrix.totals[deck.deckId];
+
+                                    return (
+                                        <td
+                                            className='py-1 pr-2 font-semibold text-foreground'
+                                            key={deck.deckId}
+                                        >
+                                            {total
+                                                ? t('{{rate}} ({{games}})', {
+                                                      rate: pct(total.rate),
+                                                      games: total.games
+                                                  })
+                                                : '—'}
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </Panel>
+    );
+};
+
+VaultTourPanel.propTypes = {
+    vaultTour: PropTypes.object,
+    candidates: PropTypes.array,
+    onAdd: PropTypes.func,
+    onRemove: PropTypes.func,
+    busy: PropTypes.bool,
+    t: PropTypes.func
+};
+
 const ChampionsChallenge = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -795,6 +956,10 @@ const ChampionsChallenge = () => {
     const [withdraw, { isLoading: withdrawing }] = useWithdrawChampionsChallengeDeckMutation();
     const [saveGauntlet, { isLoading: savingGauntlet }] =
         useSaveChampionsChallengeGauntletMutation();
+    const [addVaultTourDeck, { isLoading: addingVaultTour }] = useEnrollVaultTourDeckMutation();
+    const [removeVaultTourDeck, { isLoading: removingVaultTour }] =
+        useWithdrawVaultTourDeckMutation();
+    const vaultTourBusy = addingVaultTour || removingVaultTour;
 
     const busy = enrolling || withdrawing || randomizing;
 
@@ -1098,6 +1263,37 @@ const ChampionsChallenge = () => {
                         )}
                     </Panel>
 
+                    <VaultTourPanel
+                        vaultTour={data?.vaultTour}
+                        candidates={candidates}
+                        busy={vaultTourBusy}
+                        t={t}
+                        onAdd={async (deckId) => {
+                            setActionError(null);
+
+                            try {
+                                await addVaultTourDeck(deckId).unwrap();
+                            } catch (error) {
+                                setActionError(
+                                    serverMessage(
+                                        error,
+                                        t('That deck could not be added to the Vault Tour.')
+                                    )
+                                );
+                            }
+                        }}
+                        onRemove={async (deckId) => {
+                            setActionError(null);
+
+                            try {
+                                await removeVaultTourDeck(deckId).unwrap();
+                            } catch (error) {
+                                setActionError(
+                                    serverMessage(error, t('That deck could not be withdrawn.'))
+                                );
+                            }
+                        }}
+                    />
                     <StylePanel personas={data?.personas} decks={data?.decks} t={t} />
                     <MatchupMatrix matchups={data?.matchups} t={t} />
                     <CardContribution cards={data?.cards} t={t} />
