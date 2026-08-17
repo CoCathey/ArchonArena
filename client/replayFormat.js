@@ -110,7 +110,7 @@ export function hydrateBoard(board, cards) {
  * @param {Array<{messageIndex: number, board?: object}>} snapshots
  * @param {number} step how far through the log the viewer is
  */
-export function boardAtStep(snapshots, step) {
+export function snapshotAtStep(snapshots, step) {
     let found = null;
 
     for (const snapshot of snapshots || []) {
@@ -121,5 +121,43 @@ export function boardAtStep(snapshots, step) {
         }
     }
 
-    return found ? found.board : null;
+    return found;
+}
+
+/** The board half of that frame, which is all most callers draw. */
+export function boardAtStep(snapshots, step) {
+    return snapshotAtStep(snapshots, step)?.board || null;
+}
+
+/**
+ * ARCHON (F3): the recorded hands at a step, drawable.
+ *
+ * A version 4 recording carries hands beside each frame (`snapshot.hands`),
+ * as references into its own `handCards` table - and only the hands this
+ * reader was allowed: the server serves a player their own alone, an admin
+ * both, and a share link none, so whatever arrives here is safe to draw.
+ * Returns a map of player name to cards; empty when this frame (or this
+ * recording, or this reader) has none.
+ *
+ * @param {Array<{messageIndex: number, hands?: object}>} snapshots
+ * @param {number} step how far through the log the viewer is
+ * @param {object[]} handCards the recording's hand-card table
+ * @returns {Object<string, object[]>}
+ */
+export function handsAtStep(snapshots, step, handCards) {
+    const hands = snapshotAtStep(snapshots, step)?.hands;
+
+    if (!hands || typeof hands !== 'object') {
+        return {};
+    }
+
+    const resolved = {};
+
+    for (const [name, entries] of Object.entries(hands)) {
+        if (Array.isArray(entries)) {
+            resolved[name] = hydratePile(entries, handCards, 'hand');
+        }
+    }
+
+    return resolved;
 }

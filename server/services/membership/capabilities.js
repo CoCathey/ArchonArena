@@ -179,11 +179,14 @@ const CAPABILITY_CATALOG = {
         // The line here has to keep saying what is NOT sold, because the
         // obvious reading of "advanced replays" is the replay viewer, and that
         // is free for everyone. What membership buys is the reading of a game
-        // rather than the watching of it - and above all the house-by-house
-        // record, which exists in no other table on the site.
+        // rather than the watching of it - the house-by-house record, which
+        // exists in no other table on the site, and (F3) the misplay review:
+        // your own recorded hand at every step of a replay, with the moments
+        // worth a second look flagged.
         learn:
             'Which house you call each turn and how you do when you call it, your amber per ' +
-            'turn, and the turn each game stopped changing hands. Watching replays is free ' +
+            'turn, and the turn each game stopped changing hands. See your own hand at every ' +
+            'step of a replay, with possible misplays flagged. Watching replays is free ' +
             'for everyone.',
         where: 'Any finished game → Replay, and Archon Intelligence → Replay Intelligence'
     },

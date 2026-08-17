@@ -16,14 +16,17 @@ import { hydrateBoard } from '../../replayFormat';
  *
  * The snapshot is captured from an AnonymousSpectator's perspective, so hands
  * are counts rather than contents here for the same reason they are hidden from
- * live spectators — a replay reveals no more than watching would have.
+ * live spectators — a replay reveals no more than watching would have. The one
+ * exception is `hands` (F3): the recorded hands the server decided this
+ * reader may see — their own, with the Archon tier — resolved by
+ * `handsAtStep` and drawn as a pile of their own.
  *
  * `perspective` names the player to show at the bottom, where your own side of
  * the table sits in the live game. It only reorders — a replay shows the same
  * information whichever way round it is read, because the snapshot itself is
  * spectator-safe.
  *
- * @param {{board?: object, cards?: object[], perspective?: string}} props
+ * @param {{board?: object, cards?: object[], hands?: object, perspective?: string}} props
  */
 
 /** The three key colours, in the order the live board shows them. */
@@ -106,7 +109,7 @@ BoardCard.propTypes = {
     onCardMouseOver: PropTypes.func
 };
 
-const ReplayBoard = ({ board, cards, perspective, onCardMouseOver, onCardMouseOut }) => {
+const ReplayBoard = ({ board, cards, hands, perspective, onCardMouseOver, onCardMouseOut }) => {
     const { t } = useTranslation();
     const resolved = hydrateBoard(board, cards);
 
@@ -188,6 +191,12 @@ const ReplayBoard = ({ board, cards, perspective, onCardMouseOver, onCardMouseOu
                     </div>
 
                     <div className='space-y-2'>
+                        {/* ARCHON (F3): the recorded hand - only ever present
+                            for hands this reader may see (their own, with the
+                            Archon tier; both, for an admin). The server
+                            strips the rest before it leaves, so presence here
+                            IS permission. */}
+                        {renderPile('Hand (recorded)', hands?.[player.name])}
                         {renderPile('In play', player.cardPiles?.cardsInPlay)}
                         {renderPile('Archives', player.cardPiles?.archives)}
                         {renderPile('Discard', player.cardPiles?.discard)}
@@ -202,6 +211,7 @@ const ReplayBoard = ({ board, cards, perspective, onCardMouseOver, onCardMouseOu
 ReplayBoard.propTypes = {
     board: PropTypes.object,
     cards: PropTypes.array,
+    hands: PropTypes.object,
     onCardMouseOut: PropTypes.func,
     onCardMouseOver: PropTypes.func,
     perspective: PropTypes.string

@@ -46,24 +46,54 @@ describe('replay board snapshots', function () {
             expect(cardAt(this.game, player1.cardPiles.cardsInPlay[0]).name).toBe('Flaxia');
         });
 
-        // The whole point: a replay must never reveal more than watching the
-        // game live would have. Asserted against the WHOLE recording, not just
-        // one snapshot: card names now live in the recording's card table, so
-        // checking a snapshot alone would pass without proving anything.
-        it('never exposes the contents of either hand', function () {
+        // The board half of the promise: the frames a spectator, a share link
+        // or the opponent can see must never reveal more than watching the
+        // game live would have. Hands ARE recorded since v4 - but beside the
+        // board (`snapshots[].hands`, indexing a separate `handCards` table),
+        // never inside it, and never in the public card table. Asserted
+        // against the serialised board frames and public table, not one
+        // snapshot: card names live in the tables, so checking a snapshot
+        // alone would pass without proving anything.
+        it('keeps both hands out of the board frames and the public card table', function () {
             this.game.recordBoardSnapshot();
 
             const snapshot = this.game.getBoardSnapshot();
-            const serialised = JSON.stringify(this.game.getReplay());
+            const replay = this.game.getReplay();
+            const publicHalf = JSON.stringify({
+                cards: replay.cards,
+                boards: replay.snapshots.map((frame) => frame.board)
+            });
 
-            expect(serialised).not.toContain('Troll');
-            expect(serialised).not.toContain('Groggins');
-            expect(serialised).not.toContain('Dust Pixie');
+            expect(publicHalf).not.toContain('Troll');
+            expect(publicHalf).not.toContain('Groggins');
+            expect(publicHalf).not.toContain('Dust Pixie');
 
             for (const player of snapshot.players) {
                 expect(player.cardPiles.hand).toBeUndefined();
                 expect(player.numHandCards).toBeGreaterThan(0);
             }
+        });
+
+        // The other half: the recording itself carries each player's hand for
+        // the misplay review, from the player's own perspective, in the
+        // separable side channel the serving layer strips for anyone who may
+        // not read it (replayPrivacy.spec.js proves the stripping).
+        it('records each hand beside the frame, in the hand-card table', function () {
+            // The capture self-throttles to log advances, and the fixture
+            // hands were placed after setup's last recorded frame.
+            this.game.addMessage('a fresh frame');
+            this.game.recordBoardSnapshot();
+
+            const replay = this.game.getReplay();
+            const frame = replay.snapshots[replay.snapshots.length - 1];
+            const names = (entries) => entries.map((entry) => replay.handCards[entry].name);
+
+            expect(names(frame.hands.player1)).toContain('Troll');
+            expect(names(frame.hands.player1)).toContain('Groggins');
+            expect(names(frame.hands.player2)).toContain('Dust Pixie');
+            // And only into the hand table - the entries are not indices into
+            // the public one.
+            expect(replay.cards.map((card) => card.name)).not.toContain('Troll');
         });
 
         it('does not carry the chat log or prompt state into every snapshot', function () {
@@ -79,9 +109,14 @@ describe('replay board snapshots', function () {
         // The reason the format changed. A snapshot of full card summaries came
         // to ~27 KB, which put a normal game's recording eight times over the
         // 2 MB store limit and got every one of them dropped on the way in.
+        // Measured as a frame is actually recorded - board plus hands - so the
+        // hand capture cannot quietly grow a frame past what the store takes.
         it('is small enough that a full recording fits the store limit', function () {
             const Game = require('../../server/game/game');
-            const bytes = JSON.stringify(this.game.getBoardSnapshot()).length;
+            const bytes = JSON.stringify({
+                board: this.game.getBoardSnapshot(),
+                hands: this.game.getHandsSnapshot()
+            }).length;
 
             expect(bytes * Game.MAX_REPLAY_SNAPSHOTS).toBeLessThan(2000 * 1000);
         });
@@ -184,7 +219,7 @@ describe('replay board snapshots', function () {
 
             const replay = this.game.getReplay();
 
-            expect(replay.version).toBe(3);
+            expect(replay.version).toBe(4);
             expect(replay.messages).toBeDefined();
             expect(replay.snapshots.length).toBe(1);
             expect(replay.players.length).toBe(2);

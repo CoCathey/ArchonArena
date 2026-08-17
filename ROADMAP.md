@@ -506,7 +506,11 @@ Replays are also the substrate for coaching, AI analysis, and streaming tools la
 -   [x] Snapshots are compact and **spectator-safe by construction**: rendered through the
         same `AnonymousSpectator` path that protects live spectators, so a replay can never
         reveal more than watching would have. Asserted by test — neither hand's contents
-        appear anywhere in a snapshot.
+        appear anywhere in a board frame or the public card table. (Since v4, the misplay
+        review (**F3**) records hands BESIDE the frames in a separable side channel; share
+        links are stripped of it in `GameService`, and a player is only ever served their
+        own — the board frames themselves stay spectator-safe, and the test now pins both
+        halves.)
 -   [x] Capture self-throttles to log advances (the state is broadcast far more often than
         anything visible changes) and stops at a hard cap, setting a `truncated` flag that
         the viewer surfaces rather than silently losing the tail.
@@ -1406,11 +1410,24 @@ reporting, per-club webhooks **(admin-config)**, rich presence.
 **Depends on:** N2 (event taxonomy), F1 (webhooks). **Acceptance:** a club's Discord receives
 pairings for its event without anyone copying anything by hand.
 
-#### F3 — Coaching and AI analysis
+#### F3 — Coaching and AI analysis _(misplay review shipped; the rest open)_
 
 Coaching profiles/marketplace with booking, shared replay review rooms (coach and student
 stepping through together), AI game analysis (blunder detection, alternative lines,
 win-probability per turn) over the replay event stream, AI deck insights in SAS context.
+
+**Shipped — the misplay review** (Archon+, under `advanced_replays`): recordings are
+version 4 — each player's hand is captured beside every board frame, from the player's own
+perspective, in a side channel the server strips for anyone who may not read it (share links
+always; each player sees their own hand only; admins both). The replay viewer draws your
+recorded hand at every step, and the analysis panel flags "moments worth a second look":
+house calls that had almost nothing to act on when another house was full, ready creatures
+of the called house left unused at end of main, playable cards held that displaced fresh
+draws, and a house clogging the hand across consecutive turns. Deliberately heuristic and
+deliberately phrased as questions - it is arithmetic over recorded state
+(`replayMisplays.js`), not a simulation; card text, restrictions and the player's plan are
+not in it. True "what would have happened" alternative lines and win-probability remain
+open, and would sit on the same v4 recordings.
 **Depends on:** N1 (board-state replays are the input). **Acceptance:** a coach and student
 step through the same replay in sync, and a finished game produces a win-probability graph.
 
