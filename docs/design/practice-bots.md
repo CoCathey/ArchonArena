@@ -39,10 +39,47 @@ decks it may play.
    Start button works too, and belongs to the player who joined.
 3. The bot plays a real game through the real engine: house calls, plays,
    reaps, fights, and answers to every card prompt. It answers instantly.
-4. The moment your game starts, a different bot opens a fresh table for the
+4. **Easy, Medium or Hard**, chosen from the pending screen before the game
+   starts (Medium by default). See below - it changes the bot's deck, not its
+   brain.
+5. The moment your game starts, a different bot opens a fresh table for the
    next player (up to an admin-configured number of concurrent games).
-5. Practice games are never persisted or rated - no Amber, no deck records,
-   no statistics, no replays.
+6. Practice games are recorded and replayable, and are never results - no
+   Amber, no deck records, no statistics, no rating.
+
+## Difficulty is the deck, not the brain
+
+A bot that plays worse on purpose teaches bad habits, and a bot that plays
+better on purpose needs a second brain nobody maintains. So every setting runs
+the same policy, and what changes is the deck it sits down with - the honest
+lever KeyForge already has, because a 50-ARI deck loses to a 110-ARI deck in
+anybody's hands.
+
+| Setting | ARI      |
+| ------- | -------- |
+| Easy    | 45 - 65  |
+| Medium  | 66 - 89  |
+| Hard    | 90 - 125 |
+
+ARI is the platform's own living deck rating (N19): seeded from SAS/AERC and
+moved by every rated and sparring game since, so a band means "decks this
+platform has watched perform like this" rather than "decks somebody's model
+once scored". The bands touch but do not overlap, and leave a gap at each end
+on purpose - below 45 is unpleasant to play against and above 125 is a wall.
+
+The pool is **every deck the site has ever imported**, counted once per deck
+rather than once per copy: a deck is 36 cards with a Master Vault uuid, not
+somebody's property, and the bot plays the cards. Nothing about whose
+collection a copy sits in reaches the table. That is what makes the settings
+mean anything - three bands per house need hundreds of decks to feel
+different, and no hand-stocked bot account was ever going to hold them. When a
+band genuinely has nothing in it (a young site, an unrated house) the table
+opens with an unbanded deck and says so in the log, because a table that opens
+beats a table that does not.
+
+Whoever joins the table owns the setting until the game starts; changing it
+re-deals the bot's deck. An unattended table opens at whatever an admin chose
+(`bots.defaultDifficulty`, Medium out of the box).
 
 ## Shape
 
@@ -59,7 +96,10 @@ server/gamerouter.js                         skips create/update/replay/rating f
 server/api/bots.js                           the Bot Settings API (isAdmin)
 client/pages/BotAdmin.jsx                    the Bot Settings screen, at /admin/bots
 server/db/schema/migrations/74 - Bots.sql    house -> account binding, per-bot on/off
+server/services/botgames/difficulty.js       Easy/Medium/Hard, as ARI bands
+server/services/DeckService.js               practiceDeckPool - the library, by house and band
 server/services/settings/registry.js         the `bots` section (edited on the bot screen)
+client/Components/Games/PendingGame.jsx      the difficulty toggle, beside Copy Game Link
 ```
 
 Six properties are worth keeping if this is ever extended.
@@ -73,14 +113,73 @@ table cannot disagree about what "candidate 3" means). A stronger champion is
 therefore a stronger opponent in the lobby, with no second brain to maintain
 and nothing to copy across.
 
-The list is deliberately conservative - exactly the moves the old hand-written
-heuristic could make - so the model reorders sound play rather than inventing
-unsound play, and End Turn is offered only once nothing else remains, which is
-what stops a young model discovering the strategy of doing nothing. When a card
-is clicked the reason is remembered, so the menu that opens next is answered
-with the move the model chose rather than by a fixed preference order. With no
-champion yet (a fresh site) or with the learned play switched off, the bots
-fall back to those heuristics and keep playing.
+The list is deliberately conservative - every move the engine would offer a
+human, less the one no sound player makes - so the model reorders sound play
+rather than inventing unsound play, and End Turn is offered only once nothing
+else remains, which is what stops a young model discovering the strategy of
+doing nothing. When a card is clicked the reason is remembered, so the menu
+that opens next is answered with the move the model chose rather than by a
+fixed preference order. With no champion yet (a fresh site) or with the
+learned play switched off, the bots fall back to the plain order below and
+keep playing.
+
+**The plain order has to be good, because most of the time it is what plays.**
+A site has no champion until the Challenge has run, so the fallback is the
+opponent people actually meet, and three of its habits came back from a real
+table as blunders:
+
+-   _It threw away cards it should have kept._ Discard is a legal action on
+    every card in hand, so an upgrade drawn before any creature looked like a
+    playable card whose only button was the bin. The move list no longer
+    offers a card whose sole legal action is Discard: nothing is lost by
+    holding it, and a move nobody can pick is a move no policy can get wrong.
+-   _It picked its play at random._ Literally - the fallback drew a hand card
+    out of a hat, which is how a targeted action got fired into an empty
+    board on the first play of a turn. Moves are now ranked: creatures,
+    upgrades, artifacts, actions, abilities, fights worth taking, reaps,
+    fights not worth taking. Building the board first is what gives the cards
+    that need targets something to point at. Randomness survives _inside_ a
+    rank, so two games from the same hand still differ - which is where the
+    lab's self-play gets its variety.
+-   _It fought at random too._ A fight is now scored from the same arithmetic
+    the engine resolves it with - power, armour, elusive, skirmish, assault,
+    hazardous, poison, ward - and taken only when it wins the exchange; the
+    target is the best creature the prompt will accept. It is an estimate,
+    since card abilities can change any of it, but it is the difference
+    between trading a giant for a token and not.
+
+All of that lives in the shared move module, so the lab's unmodelled games
+train on exactly the play a lobby opponent makes.
+
+**It plays the race, not just the board.** Two facts a KeyForge player reads
+first and the bot used to ignore entirely:
+
+-   _Are they about to forge?_ Amber sitting in the opponent's pool at or
+    above their key cost is a key already, unless it leaves before their turn
+    begins. So a move that takes their amber - a steal or a capture - is
+    ranked ahead of everything else, and the house call weighs a house that
+    can answer them far above a house with one more card in it. (A steal is
+    worth two of a reap in any case: one on, one off.)
+-   _Can I forge this turn?_ With enough ready creatures to reach the key
+    cost, reaping outranks even a fight the bot would win - a dead enemy
+    creature is worth less than the key - and the moment the amber is there
+    the order reverts by itself.
+
+"Does this card take amber" is answered by the platform's own card-knowledge
+index (F3's `cardKnowledge`, built from the canonical Master Vault packs),
+rather than by a second parser written for the bots. It is coarse by design: a
+conditional steal counts, because ordering one first costs nothing when the
+condition fails. The game node warms that index at startup - it parses nine
+megabytes synchronously, and the first bot decision of a game is the worst
+moment to spend a fifth of a second.
+
+**It knows its own deck.** The model's state now includes the composition of
+what this seat can still draw: how much of the remaining deck is creatures,
+how much bonus amber is left in it, how much amber control. A player knows
+their own decklist and has watched their own cards leave it, so that is fair
+information - and it is the difference between evaluating the board and
+evaluating the game. The deck's ORDER is never read, and neither is anything
+about the opponent's hand or deck.
 
 What both bots keep is the important part: answering from the buttons and
 selectable cards the prompt itself publishes, so any of the ~2,700 card
@@ -258,6 +357,20 @@ tick, so nothing needs a restart.
 -   Per-bot personality: a policy weighting per house, so Brobnar's bot
     fights and Logos' bot draws - the roster already gives each one an
     identity to hang that on.
--   Policy upgrades (fight/trade heuristics, key timing) - shared with the
-    Champion’s Challenge, so the lab's ratings sharpen with the same change.
+-   Policy upgrades - shared with the Champion’s Challenge, so the lab's
+    ratings sharpen with the same change. Key timing is the obvious next one:
+    the plain order reaps for amber but has no notion of racing to a key, and
+    no notion at all of holding a creature back to stop the other side
+    forging.
+-   **Train a champion.** The single biggest lever, and it needs no code: the
+    plain order is a floor, not a ceiling, and everything above is the bot
+    playing without a model. Run the Challenge (or the Gauntlet) until a
+    champion is crowned and the bots start scoring their moves with it.
+-   More crosses in `labFeatures`. Every candidate at one decision shares a
+    state, so state features cancel out of the ranking entirely and only the
+    action's own features can separate two moves. The kind is now crossed
+    with four coarse board contexts (`x:playAction:noBoard` and friends),
+    which is what lets a champion learn "not this, not here" - the mistake
+    that fired an action into an empty board. Each new context is another
+    column the Challenge has to fill with games, so add them deliberately.
 -   The tutorial's sparring partner (N11).

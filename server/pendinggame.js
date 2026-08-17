@@ -428,6 +428,10 @@ class PendingGame {
             // ARCHON (F9): lets the game list say this table is the Helper
             // Bot's practice table rather than an ordinary player's game.
             botGame: this.botGame || undefined,
+            // ARCHON (F9): which deck strength the bot brought. The joiner
+            // can change it until the game starts, so the pending screen
+            // needs to know what it currently is.
+            botDifficulty: this.botDifficulty || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
@@ -506,6 +510,7 @@ class PendingGame {
             // node's driver its turn cap); the bot seat itself travels on its
             // player record as `isBot`.
             botGame: this.botGame || undefined,
+            botDifficulty: this.botDifficulty || undefined,
             botMaxTurns: this.botMaxTurns,
             botThinkMs: this.botThinkMs,
             // ARCHON (N21): the learned model the bot plays with, or absent

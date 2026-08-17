@@ -9,6 +9,9 @@ const { chooseDecision } = require('./labPolicy');
 // did. See services/botplayer/decisions.
 const {
     INTENT_BUTTONS,
+    bestCandidates,
+    bestFightTarget,
+    houseScore,
     playableFromHand,
     usableInPlay,
     mainWindowCandidates
@@ -157,6 +160,8 @@ class SimulatedGame {
         this.fingerprints = [];
         // Which menu action a just-clicked in-play card should resolve to.
         this.pendingIntent = null;
+        // The creature sent to fight, held until the prompt asking whom.
+        this.attacker = null;
         // Set by the replay driver: inputs come from the log, not from choices.
         this.replaying = null;
     }
@@ -332,6 +337,7 @@ class SimulatedGame {
 
         if (title === MAIN_WINDOW_TITLE) {
             this.pendingIntent = null;
+            this.attacker = null;
 
             return await this.playFromMainWindow(game, player, buttons);
         }
@@ -354,7 +360,15 @@ class SimulatedGame {
             const doneIndex = buttons.findIndex((button) => textOf(button.text) === 'done');
 
             if (unselected.length && (doneIndex === -1 || !selected.length)) {
-                const index = Math.floor(this.rng() * unselected.length);
+                // Having sent a creature to fight, this is the engine asking
+                // whom - the one selection the bot can answer with judgement.
+                const target = bestFightTarget(this.attacker, unselected);
+
+                this.attacker = null;
+
+                const index = target
+                    ? unselected.indexOf(target)
+                    : Math.floor(this.rng() * unselected.length);
 
                 return this.clickCardAt(game, player, unselected, index, 'sel');
             }
@@ -466,6 +480,7 @@ class SimulatedGame {
 
         if (chosen.list === 'play') {
             this.pendingIntent = { kind: chosen.kind };
+            this.attacker = chosen.kind === 'fight' ? chosen.card : null;
 
             return this.clickCardAt(game, player, inPlay, chosen.index, 'play');
         }
@@ -500,16 +515,11 @@ class SimulatedGame {
             return candidates[Math.max(0, index)];
         }
 
-        // Heuristic order, as ever: play out the hand first, then use the
-        // board, preferring to reap.
-        const handCandidates = candidates.filter((candidate) => candidate.list === 'hand');
-
-        if (handCandidates.length) {
-            return handCandidates[Math.floor(this.rng() * handCandidates.length)];
-        }
-
-        const reaps = candidates.filter((candidate) => candidate.kind === 'reap');
-        const pool = reaps.length ? reaps : candidates;
+        // No model: the plain player's order, from the shared move module -
+        // the same order the practice bots fall back on, so an untrained lab
+        // trains on the play a lobby opponent actually makes. Random within
+        // the leading rank, which is where self-play gets its variety.
+        const pool = bestCandidates(player, candidates);
 
         return pool[Math.floor(this.rng() * pool.length)];
     }
@@ -553,12 +563,9 @@ class SimulatedGame {
             index = 0;
 
             for (let i = 0; i < buttons.length; i++) {
-                const house = textOf(buttons[i].text);
-                const inHand = player.hand.filter((card) => card.hasHouse(house)).length;
-                const ready = player.cardsInPlay.filter(
-                    (card) => card.hasHouse(house) && !card.exhausted
-                ).length;
-                const score = inHand + ready + this.rng() * 0.75;
+                // Shared with the practice bots: what the house can do this
+                // turn, plus what it can take off an opponent about to forge.
+                const score = houseScore(player, textOf(buttons[i].text)) + this.rng() * 0.75;
 
                 if (score > bestScore) {
                     bestScore = score;

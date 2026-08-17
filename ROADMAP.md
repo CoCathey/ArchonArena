@@ -2004,6 +2004,50 @@ commit to it, and run the engine as a continuous soak test.
         costs about a minute of compute per game. Deep thought at a live table wants seeded
         practice games and a logged input stream first — the bot-vs-bot showcase is where
         that pays off, since both seats are ours.
+-   [x] **The bots play sense without a model.** A player watched a bot open on a targeted
+        action with an empty board, and bin an upgrade it had drawn before any creature. Both
+        were real: Discard is a legal action on every card in hand, so a card whose only
+        button was the bin looked like a playable card — and with no champion trained the
+        fallback picked its play at RANDOM, which is every site until the Challenge has run.
+        The shared move list stopped offering discards, and the fallback became a ranked
+        order (creatures, upgrades, artifacts, actions, abilities, fights worth taking, reaps,
+        fights not worth taking) with randomness only inside a rank, so self-play keeps its
+        variety. Fights are scored from the engine's own combat arithmetic — power, armour,
+        elusive, skirmish, assault, hazardous, poison, ward — and only taken when they win the
+        exchange, against the best target the prompt allows. Because it all lives in
+        `services/botplayer/decisions.js`, the lab's unmodelled games train on exactly what a
+        lobby opponent plays. `test/server/services/botgames/botPlayQuality.spec.js`.
+-   [x] **The bots play the race, not just the board.** Two facts a KeyForge player reads
+        first and the bot ignored entirely. _Are they about to forge?_ Amber at or above the
+        opponent's key cost is a key already unless it leaves first, so a steal or capture is
+        ranked ahead of everything, and the house call weighs a house that can answer them far
+        above a house with one more card in it. _Can I forge this turn?_ With enough ready
+        creatures to reach the cost, reaping outranks even a won fight, and reverts by itself
+        the moment the amber is there. "Does this card take amber" comes from F3's
+        `cardKnowledge` index over the canonical packs — one answer platform-wide rather than
+        a second parser — warmed at game-node startup so no table pays for it mid-game.
+-   [x] **The bots know their own deck.** The model's state carries the composition of what
+        this seat can still draw: creatures, bonus amber and amber control as fractions of
+        the remaining deck. Fair information — a player built the deck and watched it leave —
+        and the deck's ORDER is never read, nor anything about the opponent's hand.
+-   [x] **Easy, Medium and Hard** (`bots.defaultDifficulty`), chosen from the pending screen
+        beside Copy Game Link and re-dealing the bot's deck until the game starts. Difficulty
+        is the DECK, not the brain: one policy plays every table and the setting picks the ARI
+        band it brings a deck from (45-65 / 66-89 / 90-125). The pool is every deck the site
+        has imported, counted once per Master Vault uuid rather than once per copy — the bot
+        plays the cards, and nothing about whose collection a copy sits in reaches the table.
+        An empty band opens the table with an unbanded deck and logs it.
+-   [x] **A bot always allows manual mode.** It was answering the request from the generic
+        "press something that is not Cancel" branch, which picks at random — so it allowed it
+        once and refused the next time. A bot has nothing to protect and no way to judge the
+        request; the only person who can want it is the one across the table.
+-   [x] **What a champion is allowed to notice.** Every candidate at one decision shares a
+        state, so state features contribute identically to all of them and cancel out of the
+        ranking — a model could learn "boards win games" but never "not this card, not here",
+        which is the mistake above. The action kind is now crossed with four coarse board
+        contexts (`x:playAction:noBoard`, `noEnemy`, `behind`, `keyReady`), giving the model
+        weights it can push negative per situation. Feature keys stay a contract: added,
+        never renamed.
 -   [x] **Practice games are recorded, and are never results.** A player wanted to find a bot
         game again and watch the replay back, so bot games are persisted and replayed like any
         other — with a `Games."BotGame"` flag (migration 77) that every aggregate excludes, and
@@ -2016,8 +2060,8 @@ commit to it, and run the engine as a continuous soak test.
         player's do — and are unenterable, house-keyed, and can never capture a real
         account's name.
 -   [x] Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics
-        aggregate — never persisted at all (the Champion’s Challenge doctrine, applied at
-        the router), and Quick Join never matches into a bot table. Asserted by
+        aggregate — by the `BotGame` flag every aggregate filters on, not by refusing to
+        record them — and Quick Join never matches into a bot table. Asserted by
         `test/server/gameRouterBotGames.spec.js`.
 -   A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends, and
     publishes it to the Watch hub as spectatable. (The node driver already plays both seats —

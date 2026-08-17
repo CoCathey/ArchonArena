@@ -22,6 +22,7 @@ const HealthServer = require('./healthserver.js');
 // event that can change game state. Attached to the game instance itself so
 // it lives and dies with the game.
 const BotDriver = require('./botdriver.js');
+const { rolesIndex: warmCardKnowledge } = require('../services/membership/cardKnowledge');
 
 class GameServer {
     constructor() {
@@ -34,6 +35,18 @@ class GameServer {
 
         this.games = {};
         this.protocol = 'https';
+
+        /**
+         * ARCHON (F9): read the card knowledge index now, not mid-game.
+         *
+         * The bots ask it "does this card take amber?" on every decision.
+         * Building it parses nine megabytes of card packs synchronously -
+         * a fifth of a second - and the first bot decision of a game is the
+         * worst possible moment to spend it, because a blocked event loop
+         * on this process is a table that visibly freezes. Once at startup,
+         * cached for the life of the node.
+         */
+        warmCardKnowledge();
 
         try {
             var privateKey = fs

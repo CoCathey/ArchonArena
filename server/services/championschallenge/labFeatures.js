@@ -9,15 +9,21 @@
  * means about as much as another.
  *
  * Everything here reads only what a seated player could see: own hand, both
- * boards, both amber pools, key states, pile SIZES. Never the opponent's
- * hand or either deck's order - the learned bot must stay a fair player,
- * because it is also the future practice opponent.
+ * boards, both amber pools, key states, pile SIZES, and the COMPOSITION of
+ * its own remaining deck - which a player knows, having built it and
+ * watched it. Never the opponent's hand and never either deck's ORDER: the
+ * learned bot must stay a player anyone would agree was playing fair,
+ * because it is also the practice opponent.
  *
  * Kept pure and dependency-free: features go into training rows as plain
  * objects, and a model trained yesterday must read today's features, so
  * KEYS ARE A CONTRACT - rename one and yesterday's model goes quietly
  * blind. Add, don't rename.
  */
+
+// ARCHON (F3): what a card does, from the canonical card data - the misplay
+// review's classifier, so "this card steals" has one answer platform-wide.
+const { ROLES, rolesFor } = require('../membership/cardKnowledge');
 
 /** Feature keys for a game state, from one player's seat. */
 function stateFeatures(game, player) {
@@ -57,7 +63,65 @@ function stateFeatures(game, player) {
         myHand: Math.min(1, player.hand.length / 10),
         oppHand: opponent ? Math.min(1, opponent.hand.length / 10) : 0,
         myArchives: Math.min(1, (player.archives || []).length / 6),
-        myDeck: Math.min(1, (player.deck || []).length / 36)
+        myDeck: Math.min(1, (player.deck || []).length / 36),
+        /**
+         * ARCHON: the opponent forges at the start of their next turn.
+         *
+         * `oppAmberToKey` already says how far away they are, but "at or
+         * past the cost" is a different fact from "two short": it is the
+         * one board state where taking a single amber changes what happens
+         * next. Worth its own weight, and worth crossing every action with
+         * (see ACTION_CONTEXTS) so the model can learn what to do about it
+         * rather than only that it is bad.
+         */
+        oppAtCheck: opponent && opponent.amber >= opponent.getCurrentKeyCost() ? 1 : 0,
+        // What is still to come, from a seat that is allowed to know it.
+        ...deckFeatures(player)
+    };
+}
+
+/**
+ * ARCHON: what this seat can still DRAW - the deck it built, minus what it
+ * has already seen.
+ *
+ * A player knows their own decklist and has watched their own cards leave
+ * it, so the composition of what remains is theirs to reason about; the
+ * ORDER of it is not, and nothing here touches that. "Half my deck is
+ * creatures and there is a lot of bonus amber left in it" is exactly the
+ * kind of thing a person plays around, and it is the difference between a
+ * bot that evaluates the board and one that evaluates the game.
+ *
+ * Fractions of the remaining deck rather than counts, so an early-game
+ * reading and a late-game one mean the same thing.
+ */
+function deckFeatures(player) {
+    const deck = player.deck || [];
+
+    if (!deck.length) {
+        return { deckCreatures: 0, deckAmber: 0, deckControl: 0 };
+    }
+
+    let creatures = 0;
+    let amber = 0;
+    let control = 0;
+
+    for (const card of deck) {
+        if (card.type === 'creature') {
+            creatures++;
+        }
+
+        amber += (card.cardData && card.cardData.amber) || 0;
+
+        if (rolesFor(card.id).has(ROLES.AMBER_CONTROL)) {
+            control++;
+        }
+    }
+
+    return {
+        deckCreatures: creatures / deck.length,
+        // Bonus amber per card left; two on one card is already unusual.
+        deckAmber: Math.min(1, amber / deck.length / 0.5),
+        deckControl: Math.min(1, control / deck.length / 0.25)
     };
 }
 
@@ -65,7 +129,13 @@ function clamp11(value) {
     return Math.max(-1, Math.min(1, value));
 }
 
-/** Action kinds the model learns weights for, one-hot. */
+/**
+ * Action kinds the model learns weights for, one-hot.
+ *
+ * `discard` no longer occurs: the shared move list stopped offering "throw
+ * a card away" once a bot was seen doing it. It stays in the contract
+ * because models trained before that carry a weight under this key.
+ */
 const ACTION_KINDS = [
     'playCreature',
     'playArtifact',
@@ -80,13 +150,54 @@ const ACTION_KINDS = [
 ];
 
 /**
+ * ARCHON: the board facts that change what a move is WORTH.
+ *
+ * Why these exist at all: every candidate at one decision shares the same
+ * state, so the state's contribution to Q is identical across them and
+ * cancels out of the ranking entirely. A model built from state features
+ * plus a per-kind weight can therefore learn "playing creatures tends to
+ * win games" but never "playing THIS action, HERE, is a waste" - the
+ * mistake that had a bot fire a targeted action into an empty board.
+ *
+ * Crossing the kind with a handful of coarse contexts is what makes that
+ * expressible: `x:playAction:noBoard` is a weight the model can push
+ * negative without touching `act:playAction`. Coarse and few on purpose -
+ * each one is a whole extra column per kind, and a column the Challenge
+ * has to fill with games before it means anything.
+ *
+ * Add contexts, never rename them: a model trained yesterday reads these
+ * keys today.
+ */
+const ACTION_CONTEXTS = {
+    /** No creatures of our own - most cards that need a target have none. */
+    noBoard: (player) => (player.creaturesInPlay || []).length === 0,
+    /** Nothing of theirs to point at either. */
+    noEnemy: (player) => !player.opponent || (player.opponent.creaturesInPlay || []).length === 0,
+    /** Out-bodied: the board is losing, and trades are worth more. */
+    behind: (player) =>
+        !!player.opponent &&
+        (player.opponent.creaturesInPlay || []).length > (player.creaturesInPlay || []).length,
+    /** Enough amber to forge now - one more is worth much less than a key. */
+    keyReady: (player) => player.amber >= player.getCurrentKeyCost(),
+    /**
+     * They forge at the start of their next turn. The context that decides
+     * whether a move is worth making at all: crossed with the kind, it is
+     * how the model can learn "when they are at check, THIS is what you
+     * do" - which is a thing about the position, not about the move.
+     */
+    oppAtCheck: (player) =>
+        !!player.opponent && player.opponent.amber >= player.opponent.getCurrentKeyCost()
+};
+
+/**
  * Features for one candidate action on top of a state.
  *
  * @param {object} params
  * @param {string} params.kind one of ACTION_KINDS
  * @param {object} [params.card] the engine card involved, if any
  * @param {string} [params.house] for house calls
- * @param {object} [params.player] for house calls: counts of that house
+ * @param {object} [params.player] the deciding seat: house counts, and the
+ *        contexts each action kind is crossed with
  * @returns {{features: Object<string, number>, cardId: string|null}}
  */
 function actionFeatures({ kind, card, house, player }) {
@@ -96,9 +207,32 @@ function actionFeatures({ kind, card, house, player }) {
         features[`act:${candidate}`] = candidate === kind ? 1 : 0;
     }
 
+    if (player) {
+        // Only the live crosses are emitted. The rest are absent rather than
+        // zero, which reads the same to the model and keeps a record small.
+        for (const [context, holds] of Object.entries(ACTION_CONTEXTS)) {
+            if (holds(player)) {
+                features[`x:${kind}:${context}`] = 1;
+            }
+        }
+    }
+
     if (card) {
         features['card:amber'] = Math.min(1, (card.cardData ? card.cardData.amber || 0 : 0) / 3);
         features['card:power'] = Math.min(1, (card.power || 0) / 10);
+
+        // ARCHON: this card takes amber off the opponent. The one card
+        // property worth naming beyond its numbers, because it is the only
+        // kind of move that answers a player about to forge - and crossed
+        // with that position, it is a weight the model can learn to reach
+        // for exactly then.
+        if (rolesFor(card.id).has(ROLES.AMBER_CONTROL)) {
+            features['card:takesAmber'] = 1;
+
+            if (player && ACTION_CONTEXTS.oppAtCheck(player)) {
+                features['x:takesAmber:oppAtCheck'] = 1;
+            }
+        }
     }
 
     if (kind === 'houseCall' && house && player) {
@@ -122,7 +256,10 @@ function actionFeatures({ kind, card, house, player }) {
 
 /** One decision record, as stored for training and consumed by the model. */
 function decisionRecord(game, player, action) {
-    const { features, cardId } = actionFeatures(action);
+    // The deciding seat is always the context for the crosses; house calls
+    // pass it themselves, and passing it here means every other kind gets
+    // it too.
+    const { features, cardId } = actionFeatures({ player, ...action });
 
     return {
         state: stateFeatures(game, player),
@@ -133,4 +270,10 @@ function decisionRecord(game, player, action) {
     };
 }
 
-module.exports = { stateFeatures, actionFeatures, decisionRecord, ACTION_KINDS };
+module.exports = {
+    stateFeatures,
+    actionFeatures,
+    decisionRecord,
+    ACTION_KINDS,
+    ACTION_CONTEXTS
+};

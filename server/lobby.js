@@ -25,6 +25,8 @@ const tournamentEvents = require('./services/tournament/tournamentEvents');
 const MatchmakingService = require('./services/matchmaking/MatchmakingService');
 // ARCHON (F9): the practice bots - one per house, always hosting a table
 const BotService = require('./services/botgames/BotService');
+const { difficultyBand, normalizeDifficulty } = require('./services/botgames/difficulty');
+const { houseLabel } = require('./services/botgames/roster');
 const { UNCHAINED_EXPANSION_ID } = require('./services/DeckService');
 const { filterText } = require('./services/moderation/contentFilter');
 const RatingService = require('./services/rating/RatingService');
@@ -855,7 +857,8 @@ class Lobby {
      * lists a bot table that is not ready for a joiner.
      */
     async createBotTable(config) {
-        const host = await this.botService.pickHost(this.seatedUsernames());
+        const difficulty = normalizeDifficulty(config.defaultDifficulty);
+        const host = await this.botService.pickHost(this.seatedUsernames(), difficulty);
 
         if (!host) {
             // Once an hour, not once a tick: this repeats until an admin
@@ -886,6 +889,10 @@ class Lobby {
 
         game.botGame = true;
         game.botHouse = bot.house;
+        // ARCHON (F9): the deck strength this table opened at. The joiner may
+        // change it from the pending screen until the game starts, which
+        // re-deals the bot's deck from the new band.
+        game.botDifficulty = difficulty;
         game.botMaxTurns = config.maxTurns;
         game.botThinkMs = config.thinkMs;
         // ARCHON (N21): the brain the bot plays with, resolved when the table
@@ -918,6 +925,88 @@ class Lobby {
         this.broadcastGameMessage('newgame', game);
 
         logger.info(`${botUser.username} (${bot.label}) opened practice table ${game.id}`);
+    }
+
+    /**
+     * ARCHON (F9): the player sets how hard the practice game should be.
+     *
+     * Difficulty is the bot's DECK, not its brain: one champion model plays
+     * every table, and the setting decides which ARI band it brings a deck
+     * from. So changing it means re-dealing the bot's deck, here, before the
+     * game starts - after that the deck is in play and the setting is spent.
+     *
+     * Anyone seated at the table may change it, which in practice means the
+     * one person who joined it. A spectator cannot, and neither can somebody
+     * who simply knows the game id.
+     */
+    async onSetBotDifficulty(socket, gameId, difficulty) {
+        const game = this.games[gameId];
+
+        if (!game || !game.botGame || game.started) {
+            return;
+        }
+
+        const seat = Object.values(game.getPlayers()).find(
+            (player) => !player.isBot && player.name === socket.user?.username
+        );
+
+        if (!seat) {
+            return;
+        }
+
+        const wanted = normalizeDifficulty(difficulty);
+
+        if (wanted === game.botDifficulty) {
+            return;
+        }
+
+        const bot = Object.values(game.getPlayers()).find((player) => player.isBot);
+
+        if (!bot || !game.botHouse) {
+            return;
+        }
+
+        let deck;
+
+        try {
+            deck = await this.botService.pickDeckSelection(
+                { house: game.botHouse, label: houseLabel(game.botHouse), user: bot.user },
+                wanted
+            );
+        } catch (err) {
+            logger.error(`Could not re-deal the practice bot's deck for game ${game.id}`, err);
+        }
+
+        if (!deck) {
+            socket.send('gameerror', 'The bot has no deck to play at that difficulty.');
+
+            return;
+        }
+
+        try {
+            await this.applyDeckSelection(game, bot.name, deck.deckId, deck.isStandalone);
+        } catch (err) {
+            logger.error(`The practice bot could not select a ${wanted} deck`, err);
+            socket.send('gameerror', 'The bot could not pick a deck at that difficulty.');
+
+            return;
+        }
+
+        game.botDifficulty = wanted;
+
+        const band = difficultyBand(wanted);
+
+        game.addMessage(
+            '{0} sets the practice difficulty to {1} - {2} brings a deck rated ARI {3}-{4}.',
+            seat.name,
+            band.label,
+            bot.name,
+            band.minAri,
+            band.maxAri
+        );
+
+        this.sendGameState(game);
+        this.broadcastGameMessage('updategame', game);
     }
 
     /** Retire an unstarted bot table, freeing anyone seated at it. */
@@ -1392,6 +1481,7 @@ class Lobby {
         socket.registerEvent('connectfailed', this.onConnectFailed.bind(this));
         socket.registerEvent('getnodestatus', this.onGetNodeStatus.bind(this));
         socket.registerEvent('getsealeddeck', this.onGetSealedDeck.bind(this));
+        socket.registerEvent('botdifficulty', this.onSetBotDifficulty.bind(this));
         socket.registerEvent('joingame', this.onJoinGame.bind(this));
         socket.registerEvent('joinqueue', this.onJoinQueue.bind(this));
         socket.registerEvent('leavegame', this.onLeaveGame.bind(this));

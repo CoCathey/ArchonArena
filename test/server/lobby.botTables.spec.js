@@ -43,6 +43,8 @@ describe('the practice bot table', function () {
     let db;
     let accounts;
     let houseDecks;
+    let deckRequests;
+    let emptyBands;
 
     /**
      * A database with every bot already bound to an account, so a sweep is
@@ -115,8 +117,10 @@ describe('the practice bot table', function () {
             maxTurns: 80
         };
         db = makeDb();
-        // Every bot owns exactly one deck of its house by default.
+        // One deck of every house is in the library, at every difficulty.
         houseDecks = new Map(BOT_ROSTER.map((entry, index) => [entry.house, 900 + index]));
+        deckRequests = [];
+        emptyBands = new Set();
 
         service = new BotService({
             userService: {
@@ -129,10 +133,25 @@ describe('the practice bot table', function () {
                 addUser: async (user) => user
             },
             deckService: {
-                getRandomDeckIdForUser: async (userId, { house } = {}) =>
-                    houseDecks.get(house) || null,
+                // ARCHON (F9): the bots draw from the platform's imported
+                // library, filtered to a house and a difficulty's ARI band.
+                // Every request is recorded so a test can assert which band
+                // was asked for, not just which deck came back.
+                getRandomPracticeDeckId: async ({ house, minAri, maxAri } = {}) => {
+                    deckRequests.push({ house, minAri, maxAri });
+
+                    if (!houseDecks.has(house)) {
+                        return null;
+                    }
+
+                    if (minAri !== undefined && emptyBands.has(minAri)) {
+                        return null;
+                    }
+
+                    return houseDecks.get(house);
+                },
                 getStandaloneDecks: async () => [],
-                countDecksForUserWithHouse: async (userId, house) => (houseDecks.has(house) ? 1 : 0)
+                countPracticeDecks: async ({ house } = {}) => (houseDecks.has(house) ? 1 : 0)
             },
             settingsService: { getSectionWithDefaults: () => config },
             db
@@ -423,6 +442,128 @@ describe('the practice bot table', function () {
             lobby.onStartGame(socket, game.id);
 
             expect(game.started).toBe(false);
+        });
+    });
+
+    /**
+     * ARCHON (F9): Easy, Medium and Hard.
+     *
+     * The bot's brain is the same at every setting - what changes is the deck
+     * it brings, drawn from an ARI band. So the whole feature is: the table
+     * opens at a default, whoever sits down can change it, and changing it
+     * re-deals the bot's deck. Everything below pins one of those.
+     */
+    describe('the practice difficulty', function () {
+        const seatHuman = (game, name = 'Ana') => {
+            const person = humanUser(name);
+            const socket = {
+                id: `socket-${name}`,
+                user: person,
+                joinChannel: () => {},
+                sent: [],
+                send: (...args) => socket.sent.push(args)
+            };
+
+            lobby.sockets[socket.id] = socket;
+            lobby.socketsByName[name] = socket;
+            game.join(socket.id, person);
+
+            return socket;
+        };
+
+        const bandsAsked = () =>
+            deckRequests
+                .filter((request) => request.minAri !== undefined)
+                .map((request) => `${request.minAri}-${request.maxAri}`);
+
+        it('opens a table at Medium, and brings a Medium deck', async function () {
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+
+            expect(game.botDifficulty).toBe('medium');
+            expect(bandsAsked()).toEqual(['66-89']);
+        });
+
+        it('opens at whatever the admin set instead', async function () {
+            config.defaultDifficulty = 'hard';
+
+            await lobby.runBotTableSweep();
+
+            expect(botGames()[0].botDifficulty).toBe('hard');
+            expect(bandsAsked()).toEqual(['90-125']);
+        });
+
+        it('re-deals the bot a deck from the band the joiner chose', async function () {
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+            const socket = seatHuman(game);
+
+            deckRequests = [];
+            houseDecks.set(game.botHouse, 4242);
+
+            await lobby.onSetBotDifficulty(socket, game.id, 'easy');
+
+            expect(game.botDifficulty).toBe('easy');
+            expect(bandsAsked()).toEqual(['45-65']);
+            expect(hostOf(game).deck.id).toBe(4242);
+        });
+
+        it('treats a setting it does not recognise as Medium', async function () {
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+            const socket = seatHuman(game);
+
+            await lobby.onSetBotDifficulty(socket, game.id, 'impossible');
+
+            expect(game.botDifficulty).toBe('medium');
+        });
+
+        it('cannot be changed by somebody who is not sitting at the table', async function () {
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+            const outsider = {
+                id: 'socket-Bob',
+                user: humanUser('Bob'),
+                sent: [],
+                send: (...args) => outsider.sent.push(args)
+            };
+
+            await lobby.onSetBotDifficulty(outsider, game.id, 'hard');
+
+            expect(game.botDifficulty).toBe('medium');
+        });
+
+        it('cannot be changed once the game has started', async function () {
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+            const socket = seatHuman(game);
+
+            game.started = true;
+
+            await lobby.onSetBotDifficulty(socket, game.id, 'hard');
+
+            expect(game.botDifficulty).toBe('medium');
+        });
+
+        it('opens the table anyway when a band has nothing rated in it', async function () {
+            // A young site can easily have no deck of a house rated 90-125.
+            // A table that opens with a slightly-wrong deck beats no table.
+            emptyBands.add(90);
+            config.defaultDifficulty = 'hard';
+
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+
+            expect(game.botDifficulty).toBe('hard');
+            expect(hostOf(game).deck.id).toBe(houseDecks.get(game.botHouse));
+            // Asked for the band, then asked again without it.
+            expect(deckRequests.map((request) => request.minAri)).toEqual([90, undefined]);
         });
     });
 });

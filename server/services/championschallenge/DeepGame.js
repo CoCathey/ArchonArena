@@ -316,6 +316,7 @@ async function forceAction(fork, player, index) {
 
     if (chosen.list === 'play') {
         fork.pendingIntent = { kind: chosen.kind };
+        fork.attacker = chosen.kind === 'fight' ? chosen.card : null;
 
         return fork.clickCardAt(fork.game, player, inPlay, chosen.index, 'play');
     }

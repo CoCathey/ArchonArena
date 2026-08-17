@@ -97,9 +97,11 @@ const makeService = ({ db, users = [], decks = {}, standalones = [] } = {}) => {
             }
         },
         deckService: {
-            getRandomDeckIdForUser: async (userId, { house } = {}) => decks[house] || null,
+            // The imported library, filtered to a house (and, at a real site,
+            // to the difficulty's ARI band).
+            getRandomPracticeDeckId: async ({ house } = {}) => decks[house] || null,
             getStandaloneDecks: async () => standalones,
-            countDecksForUserWithHouse: async (userId, house) => (decks[house] ? 1 : 0)
+            countPracticeDecks: async ({ house } = {}) => (decks[house] ? 1 : 0)
         },
         settingsService: { getSectionWithDefaults: () => ({ enabled: true }) },
         db: db || makeDb()
