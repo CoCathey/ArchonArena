@@ -1818,6 +1818,64 @@ genuine data-model bug rather than a store rule.
 -   [x] An iOS build contains no price, no checkout link and no route to one — enforced by a test
         that fails the build rather than by a reviewer noticing.
 
+#### N24 — The Gauntlet: your decks against the field, on their own node _(done)_
+
+**Why:** sparring against your own roster measures a deck against the company it keeps. A deck
+that wins 70% inside a weak collection and one that wins 70% against the world are not the
+same deck, and the mirror lab cannot tell them apart. The field already exists in this
+codebase — `CatalogService` walks Master Vault's global deck list, the same walk Decks of
+KeyForge uses to index every deck that exists — it just needed card lists and somewhere
+honest to put the results.
+
+**Tasks**
+
+-   [x] **The pool.** Catalog decks hydrated one Master Vault request at a time, parsed by
+        the member-facing importer's own parser (so a Gauntlet deck is not a second, subtly
+        different notion of "deck"), cached forever — a registered deck's contents never
+        change — and marked unplayable rather than retried when this server has no data for
+        a card. Grown only while somebody has the Gauntlet switched on. **(admin-config)**
+        for pool size, pace, and timeouts.
+-   [x] **Never your own, never a friend's.** The draw excludes any pool deck the member or
+        an accepted friend owns: a friend's deck is exactly the company-it-keeps problem the
+        Gauntlet exists to escape.
+-   [x] **Configurable field**: a share of games against the field (the rest stay mirror
+        games), sets, houses the opponent must contain, a SAS window, and strategies read off
+        the deck's AERC breakdown (amber control, board pressure, speed, artifact/disruption,
+        efficiency). Sets and houses are exact; SAS and strategy can only match enriched
+        decks, so the page reports how many decks the filters actually reach instead of
+        leaving a member wondering why every game is still a mirror.
+-   [x] **Reported separately, never averaged.** Field results live in their own table and
+        their own column, because "against my decks" and "against the field" are different
+        claims. They move ARI at the sim rate, count against the same daily budget, and give
+        a single-deck roster games the mirror lab never could.
+-   [x] **Deep Probe weighs more than win percentage.** Its ranking now combines ARI, the
+        player's win rate against the meta AS IT STANDS (per-house record weighted by
+        prevalence, with coverage stated), what their own record can actually support (95%
+        lower bound, not face value), and Champion's Challenge results — field games counting
+        double the mirror ones. Every term is shown, weights included; the page names the
+        best all-round deck and the best against the current meta, which are often different.
+-   [x] **A node of its own.** `npm run challenge` runs the sweep in a dedicated process, so
+        simulated games stop competing with the lobby's real players. Which node plays is
+        **(admin-config)** (`sweepOwner`: lobby / worker / any) and the right to sweep is a
+        database lease claimed in one atomic statement — two sweepers would quietly play every
+        deck twice its daily budget, invisibly. The worker needs Postgres and nothing else.
+-   Later: matchup matrices against named archetypes; the pool as a public meta sample;
+    field results feeding the ARI seed for decks nobody here owns.
+
+**Depends on:** N18/N19/N21 and **N22** (the Master Vault deck catalog, whose index is the field). **Feeds** Deep Probe and F3.
+**Acceptance criteria**
+
+-   [x] The draw never returns a deck the member or a friend owns, and the count the page
+        shows is built from the same clauses as the draw.
+-   [x] A hydrated deck this server cannot simulate is remembered as unplayable, so it never
+        costs a second Master Vault request.
+-   [x] Field games are recorded from the member's deck's point of view, never written to the
+        mirror table, and never summed with mirror results.
+-   [x] A 3-0 cannot outrank a 40-game record in Deep Probe's ranking, and a missing term
+        (no ARI, no Challenge games) renormalises the weights rather than counting as zero.
+-   [x] Two processes cannot both sweep: the lease is atomic, a database error means nobody
+        plays, and an unrecognised `sweepOwner` falls back to the lobby.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

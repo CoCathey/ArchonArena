@@ -387,6 +387,15 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
+        // ARCHON (N24): the Gauntlet - play the field, and which field.
+        saveChampionsChallengeGauntlet: builder.mutation({
+            query: (settings) => ({
+                url: '/champions-challenge/gauntlet',
+                method: 'POST',
+                body: settings
+            }),
+            invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
+        }),
         withdrawChampionsChallengeDeck: builder.mutation({
             query: (deckId) => ({
                 url: `/champions-challenge/decks/${deckId}`,
@@ -1292,6 +1301,7 @@ export const {
     useGetChampionsChallengeQuery,
     useEnrollChampionsChallengeDeckMutation,
     useEnrollRandomChampionsChallengeDeckMutation,
+    useSaveChampionsChallengeGauntletMutation,
     useWithdrawChampionsChallengeDeckMutation,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,

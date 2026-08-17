@@ -8,6 +8,9 @@ const crypto = require('node:crypto');
 
 const AriService = require('../rating/AriService');
 const BotPolicyService = require('./BotPolicyService');
+const GauntletService = require('./GauntletService');
+const DeckService = require('../DeckService');
+const DokService = require('../dok/DokService');
 const { cloneCard, getCardIndex } = require('./packCards');
 const { runSimulatedGame, PLAYER_ONE } = require('./SimulatedGame');
 const { runDeepGame } = require('./DeepGame');
@@ -71,6 +74,20 @@ class ChampionsChallengeService {
         this.ariService = new AriService(db);
         // ARCHON (N21): the learning loop's diary, candidates and champion.
         this.policyService = new BotPolicyService(configService, db, settingsService);
+        // ARCHON (N24): the Gauntlet - foreign decks drawn from the Master
+        // Vault catalog. Its hydrator parses Master Vault responses with the
+        // member-facing importer's own parser, handed a card index read from
+        // the pack files rather than Redis: the lab is the one workload with
+        // nobody waiting on it, so it must never compete for a shared cache.
+        this.gauntletService = new GauntletService(configService, db, settingsService, {
+            deckService: new DeckService(configService, {
+                getAllCards: async () => getCardIndex()
+            }),
+            // SAS and AERC for pool decks, which is what the SAS and strategy
+            // filters read. Optional: a server with no DoK key still plays the
+            // field, filtered by set and house.
+            dokService: new DokService(configService, db, settingsService)
+        });
         // Injectable for tests: specs replace these with stubs rather than
         // playing real games per assertion.
         this.runMatch = runSimulatedGame;
@@ -80,6 +97,91 @@ class ChampionsChallengeService {
     /** A fresh 32-bit seed for a deterministic, replayable sparring game. */
     newSeed() {
         return crypto.randomInt(0x7fffffff);
+    }
+
+    /**
+     * ARCHON (N24): claim the right to be the process that plays.
+     *
+     * Sparring is CPU, and CPU spent on sparring is CPU not spent on the real
+     * games somebody is waiting for - so the sweep can be run on a node of its
+     * own (server/challengeworker) instead of inside the lobby. Which means two
+     * processes can now both believe it is their job, and a doubled sweeper is
+     * not a harmless duplicate: every deck would quietly play twice its daily
+     * budget, invisibly, in results nobody can audit.
+     *
+     * So the right to sweep is a lease, taken in ONE statement - the upsert
+     * either wins or returns nothing, with no read-then-write window for a
+     * second process to slip through. A holder that dies costs one lease period
+     * of idleness; it can never cost a double-played roster.
+     *
+     * @param {string} owner this process's identity, for the operator's benefit
+     * @param {number} [leaseSeconds] how long a silent holder keeps the lease
+     * @returns {Promise<boolean>} whether this process may sweep now
+     */
+    async claimSweepLease(owner, leaseSeconds) {
+        const seconds = Math.max(30, parseInt(leaseSeconds, 10) || 120);
+
+        try {
+            const rows = await this.db.query(
+                'INSERT INTO "ChallengeSweepLease" ("Id", "Owner", "HeartbeatAt") ' +
+                    "VALUES (1, $1, now() AT TIME ZONE 'utc') " +
+                    'ON CONFLICT ("Id") DO UPDATE SET "Owner" = $1, ' +
+                    '"HeartbeatAt" = now() AT TIME ZONE \'utc\' ' +
+                    // Renew our own lease, or take one nobody has refreshed.
+                    'WHERE "ChallengeSweepLease"."Owner" = $1 ' +
+                    'OR "ChallengeSweepLease"."HeartbeatAt" < ' +
+                    "now() AT TIME ZONE 'utc' - ($2 || ' seconds')::interval " +
+                    'RETURNING "Owner"',
+                [owner, seconds]
+            );
+
+            return !!(rows && rows.length);
+        } catch (err) {
+            logger.error('Champion’s Challenge could not claim the sweep lease', err);
+
+            // Refuse rather than risk two sweepers: a quiet lab is recoverable,
+            // a doubled one corrupts the numbers the whole feature sells.
+            return false;
+        }
+    }
+
+    /**
+     * Whether this kind of process is the one configured to sweep.
+     *
+     * `sweepOwner` is the operator's answer to "where do the simulated games
+     * run": the lobby (the default, and how this shipped), a dedicated worker
+     * node, or whichever process gets there first.
+     *
+     * @param {'lobby'|'worker'} role
+     */
+    maySweepAs(role) {
+        const configured = this.getConfig().sweepOwner;
+        // An unrecognised value falls back to the lobby rather than to nobody: a
+        // typo in a setting should leave the lab working as it always has, not
+        // silently stop every member's games with no error anywhere.
+        const owner = ['lobby', 'worker', 'any'].includes(configured) ? configured : 'lobby';
+
+        return owner === 'any' || owner === role;
+    }
+
+    /**
+     * The entry point both hosts use: check this process is the configured
+     * host, take the lease, then sweep. Callers must not reach past this to
+     * `runSweep` - that is what would let two nodes play at once.
+     *
+     * @param {'lobby'|'worker'} role
+     * @param {string} owner process identity for the lease row
+     */
+    async runSweepAs(role, owner) {
+        if (!this.maySweepAs(role)) {
+            return { played: 0, abandoned: 0, skipped: 'not-this-node' };
+        }
+
+        if (!(await this.claimSweepLease(owner, this.getConfig().sweepLeaseSeconds))) {
+            return { played: 0, abandoned: 0, skipped: 'lease-held-elsewhere' };
+        }
+
+        return this.runSweep();
     }
 
     /** Admin-configurable knobs, defaults from the settings registry. */
@@ -342,6 +444,20 @@ class ChampionsChallengeService {
             (todayCounts || []).map((count) => [count.DeckId, count.GamesToday])
         );
 
+        // ARCHON (N24): field games count against the same daily budget. A
+        // deck's rest day is a rest day - otherwise turning the Gauntlet on
+        // would quietly double how hard every deck is worked.
+        const fieldToday = await this.db.query(
+            'SELECT "DeckId", COUNT(*)::int AS "GamesToday" FROM "GauntletGames" ' +
+                "WHERE \"FinishedAt\" >= date_trunc('day', now() AT TIME ZONE 'utc') " +
+                'GROUP BY "DeckId"',
+            []
+        );
+
+        for (const count of fieldToday || []) {
+            gamesToday.set(count.DeckId, (gamesToday.get(count.DeckId) || 0) + count.GamesToday);
+        }
+
         const rosters = new Map();
 
         for (const enrollment of enrollments) {
@@ -365,6 +481,8 @@ class ChampionsChallengeService {
         // sweep; budgets are re-read from `gamesToday` as it fills.
         const users = shuffle([...rosters.keys()]);
         const access = new Map();
+        // ARCHON (N24): each roster's Gauntlet configuration, read once.
+        const fieldSettings = new Map();
         let played = 0;
         let abandoned = 0;
         let progress = true;
@@ -395,6 +513,59 @@ class ChampionsChallengeService {
                         (deckId) =>
                             unlimited || (gamesToday.get(deckId) || 0) < config.gamesPerDeckPerDay
                     );
+
+                if (!eligible.length) {
+                    continue;
+                }
+
+                // ARCHON (N24): mirror game or field game? The member sets the
+                // share; the coin is flipped per game so both measurements
+                // accumulate together rather than in blocks.
+                if (!fieldSettings.has(userId)) {
+                    fieldSettings.set(userId, await this.gauntletService.settingsFor(userId));
+                }
+
+                const field = fieldSettings.get(userId);
+                const wantsField =
+                    field.enabled &&
+                    field.fieldSharePct > 0 &&
+                    crypto.randomInt(100) < field.fieldSharePct;
+
+                if (wantsField) {
+                    // A field game needs one deck of the member's, not two - so
+                    // a single-deck roster, which the mirror lab could never
+                    // give a game at all, plays here.
+                    const mine = shuffle(eligible).sort(
+                        (a, b) => (gamesToday.get(a) || 0) - (gamesToday.get(b) || 0)
+                    )[0];
+                    const outcome = await this.playFieldGame({
+                        userId,
+                        deckId: mine,
+                        settings: field,
+                        config,
+                        championModel,
+                        championVersion,
+                        learning,
+                        ariConfig,
+                        eloConfig
+                    });
+
+                    if (outcome === 'played') {
+                        gamesToday.set(mine, (gamesToday.get(mine) || 0) + 1);
+                        played++;
+                        progress = true;
+                        continue;
+                    }
+
+                    if (outcome === 'abandoned') {
+                        abandoned++;
+                        continue;
+                    }
+
+                    // 'no-opponent': the pool has nothing matching this
+                    // member's filters yet. Fall through to a mirror game
+                    // rather than spending their tick on nothing.
+                }
 
                 if (eligible.length < 2) {
                     continue;
@@ -538,7 +709,137 @@ class ChampionsChallengeService {
             }
         }
 
+        // ARCHON (N24): grow the field, after the games rather than before -
+        // hydration waits on Master Vault, and a member's games should not.
+        // Only while somebody actually plays the field: a pool nobody has asked
+        // for is not worth a single outbound request.
+        try {
+            if (await this.gauntletService.anyoneWantsField()) {
+                await this.gauntletService.hydratePool();
+                await this.gauntletService.enrichPool();
+            }
+        } catch (err) {
+            logger.error('Gauntlet: pool upkeep failed', err);
+        }
+
         return { played, abandoned };
+    }
+
+    /**
+     * ARCHON (N24): one Gauntlet game - a member's deck against a stranger's.
+     *
+     * The opponent is drawn from the hydrated Master Vault pool, filtered by
+     * the member's settings and never including their own or a friend's deck.
+     * The result is recorded as a field result (GauntletGames), kept apart from
+     * the mirror record because they answer different questions, and moves both
+     * decks' ARI at the sim rate - the same evidence a mirror game is, so it is
+     * weighed the same way.
+     *
+     * The member's deck always takes the alpha seat, which is what makes
+     * `winner === PLAYER_ONE` mean "mine won" without consulting the decks.
+     *
+     * @returns {Promise<'played'|'abandoned'|'no-opponent'>}
+     */
+    async playFieldGame({
+        userId,
+        deckId,
+        settings,
+        config,
+        championModel,
+        championVersion,
+        learning,
+        ariConfig,
+        eloConfig
+    }) {
+        const opponent = await this.gauntletService.drawOpponent(userId, settings);
+
+        if (!opponent) {
+            return 'no-opponent';
+        }
+
+        const mine = await this.loadEngineDeck(deckId);
+
+        if (mine.missing.length || mine.deck.houses.length !== 3) {
+            logger.warn(`Gauntlet skipped deck ${deckId} of user ${userId}: not simulatable`);
+
+            return 'abandoned';
+        }
+
+        let result;
+
+        try {
+            result = await this.runMatch(mine.deck, opponent.deck, {
+                seed: this.newSeed(),
+                maxTurns: config.maxTurnsPerGame,
+                policy: championModel,
+                temperature: 0.7,
+                recordDecisions: learning
+            });
+        } catch (err) {
+            logger.error(
+                `Gauntlet game failed for user ${userId} (deck ${deckId} vs ${opponent.uuid}):`,
+                err
+            );
+
+            return 'abandoned';
+        }
+
+        if (!result || !result.completed) {
+            logger.warn(
+                `Gauntlet abandoned a game for user ${userId} (deck ${deckId} vs ` +
+                    `${opponent.uuid}): ${result && result.reason}`
+            );
+
+            return 'abandoned';
+        }
+
+        const won = result.winner === PLAYER_ONE;
+
+        try {
+            await this.gauntletService.recordGame({ userId, deckId, opponent, won, result });
+            await this.gauntletService.noteOpponentPlayed(opponent.uuid);
+        } catch (err) {
+            logger.error('Gauntlet: could not record a field game', err);
+
+            return 'abandoned';
+        }
+
+        // The diary does not care whose deck was on the other side: a decision
+        // made against a stranger's deck is training data on the same terms.
+        if (learning && result.decisions && result.decisions.length) {
+            try {
+                const logged = await this.policyService.recordTrainingGame(
+                    {
+                        policyVersion: championVersion,
+                        winnerSide: result.winner,
+                        decisions: result.decisions
+                    },
+                    config.trainingGamesKept
+                );
+
+                if (logged % (config.trainEveryGames || 25) === 0) {
+                    await this.policyService.trainCandidate({
+                        batchGames: (config.trainEveryGames || 25) * 8
+                    });
+                }
+            } catch (err) {
+                logger.error('Challenge bot: failed to log training game', err);
+            }
+        }
+
+        await this.rotateRandomSlots(userId, [deckId]);
+
+        if (ariConfig.enabled) {
+            await this.ariService.applyGameResult({
+                winnerUuid: result.winnerDeck.uuid,
+                loserUuid: result.loserDeck.uuid,
+                k: ariConfig.simGameK,
+                sasWeight: eloConfig.sasWeight,
+                sim: true
+            });
+        }
+
+        return 'played';
     }
 
     /** How many deep showcase games this roster has had today (UTC). */
@@ -895,6 +1196,27 @@ class ChampionsChallengeService {
 
         const bot = await this.policyService.vitals().catch(() => null);
 
+        // ARCHON (N24): the field. Each deck's record against strangers' decks
+        // is attached BESIDE its mirror record, never folded into it - 60%
+        // against your own collection and 60% against the world are different
+        // claims, and their average answers neither.
+        const [fieldSettings, fieldRecords, fieldRecent] = await Promise.all([
+            this.gauntletService.settingsFor(userId),
+            this.gauntletService.recordsFor(userId),
+            this.gauntletService.recentGames(userId)
+        ]);
+        const poolStatus = await this.gauntletService.poolStatus(userId, fieldSettings);
+
+        for (const deck of decks) {
+            const record = fieldRecords[deck.deckId];
+
+            deck.field = record || { games: 0, wins: 0, losses: 0, winRate: null };
+            // Whether the field agrees with the mirror lab about this deck. A
+            // deck that beats your collection but not the world is the more
+            // common story, and the one worth telling.
+            deck.field.confident = deck.field.games >= MIN_CONFIDENT_GAMES;
+        }
+
         return {
             running: !!config.enabled,
             maxEnrolled: config.maxEnrolledPerUser,
@@ -914,7 +1236,17 @@ class ChampionsChallengeService {
             decks,
             findings: buildFindings(decks),
             showcase,
-            bot
+            bot,
+            gauntlet: {
+                ...fieldSettings,
+                pool: poolStatus,
+                recent: fieldRecent,
+                strategies: Object.entries(GauntletService.STRATEGIES).map(([key, strategy]) => ({
+                    key,
+                    label: strategy.label,
+                    description: strategy.description
+                }))
+            }
         };
     }
 

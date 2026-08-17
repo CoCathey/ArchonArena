@@ -108,6 +108,31 @@ module.exports.init = function (server) {
         })
     );
 
+    // ARCHON (N24): the Gauntlet's own settings - whether to play the field,
+    // how much of the time, and which decks count as the field.
+    server.post(
+        '/api/champions-challenge/gauntlet',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
+        wrapAsync(async (req, res) => {
+            const body = req.body || {};
+            const asList = (value) => (Array.isArray(value) ? value.slice(0, 40) : []);
+
+            const settings = await championsChallenge.gauntletService.saveSettings(req.user.id, {
+                enabled: !!body.enabled,
+                fieldSharePct: body.fieldSharePct,
+                sets: asList(body.sets),
+                houses: asList(body.houses),
+                strategies: asList(body.strategies),
+                minSas: body.minSas,
+                maxSas: body.maxSas
+            });
+            const pool = await championsChallenge.gauntletService.poolStatus(req.user.id, settings);
+
+            res.send({ success: true, gauntlet: { ...settings, pool } });
+        })
+    );
+
     server.post(
         '/api/champions-challenge/decks',
         passport.authenticate('jwt', { session: false }),
