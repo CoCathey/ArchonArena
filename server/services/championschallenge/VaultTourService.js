@@ -691,12 +691,47 @@ class VaultTourService {
         return { opponents: [...opponents.values()], cells, totals };
     }
 
+    /**
+     * The decks a member could put on the slate.
+     *
+     * Its own query rather than the roster's candidate list, which is wrong here
+     * three times over: it requires a SAS rating (the Vault Tour does not - it
+     * compares a deck with named opponents rather than with what its rating
+     * predicted), it excludes decks already in the eight (a deck may sit in
+     * both, by design), and it is ordered by SAS, so a member saw their eight
+     * highest-rated unenrolled decks and nothing else.
+     */
+    async candidatesFor(userId, { limit = 200 } = {}) {
+        try {
+            const rows = await this.db.query(
+                'SELECT d."Id", d."Name", ds."SasRating" FROM "Decks" d ' +
+                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                    'WHERE d."UserId" = $1 AND NOT COALESCE(d."Banned", false) ' +
+                    'AND NOT EXISTS (SELECT 1 FROM "VaultTourEntries" e ' +
+                    'WHERE e."UserId" = $1 AND e."DeckId" = d."Id") ' +
+                    'ORDER BY lower(d."Name") LIMIT $2',
+                [userId, Math.max(1, Math.min(1000, limit))]
+            );
+
+            return (rows || []).map((row) => ({
+                deckId: row.Id,
+                name: row.Name,
+                sas: row.SasRating
+            }));
+        } catch (err) {
+            logger.error('Vault Tour: could not list candidate decks', err);
+
+            return [];
+        }
+    }
+
     /** Everything the member's panel needs, in one read. */
     async reportFor(userId) {
-        const [slate, field, matrix] = await Promise.all([
+        const [slate, field, matrix, candidates] = await Promise.all([
             this.slateFor(userId),
             this.field(),
-            this.matrixFor(userId)
+            this.matrixFor(userId),
+            this.candidatesFor(userId)
         ]);
 
         return {
@@ -705,6 +740,7 @@ class VaultTourService {
             gamesPerDeckPerDay: this.gamesPerDeckPerDay(),
             placings: PLACINGS,
             slate,
+            candidates,
             // The member sees the field they are being measured against - a
             // matrix whose columns are unexplained is a wall of percentages -
             // but not WHY an entry is unplayable, which is the operator's
