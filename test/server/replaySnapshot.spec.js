@@ -121,6 +121,26 @@ describe('replay board snapshots', function () {
             expect(bytes * Game.MAX_REPLAY_SNAPSHOTS).toBeLessThan(2000 * 1000);
         });
 
+        // ARCHON (F3): so the misplay review can tell a forced call from a
+        // chosen one. Clipped to the deck's public houses - the available list
+        // also reads the hand, and an exotic foreign-house card there must
+        // never leak through it.
+        it('records which houses the active player could legally call', function () {
+            const snapshot = this.game.getBoardSnapshot();
+            const active = snapshot.players.find((p) => p.name === snapshot.activePlayer);
+            const other = snapshot.players.find((p) => p.name !== snapshot.activePlayer);
+
+            expect(Array.isArray(active.callableHouses)).toBe(true);
+            expect(active.callableHouses.length).toBeGreaterThan(0);
+
+            for (const house of active.callableHouses) {
+                expect(active.houses).toContain(house);
+            }
+
+            // Only the player whose choice it is carries the list.
+            expect(other.callableHouses).toBeUndefined();
+        });
+
         it('records live state on cards in play, not just their identity', function () {
             const flaxia = this.player1.player.cardsInPlay[0];
 
@@ -219,7 +239,7 @@ describe('replay board snapshots', function () {
 
             const replay = this.game.getReplay();
 
-            expect(replay.version).toBe(4);
+            expect(replay.version).toBe(5);
             expect(replay.messages).toBeDefined();
             expect(replay.snapshots.length).toBe(1);
             expect(replay.players.length).toBe(2);

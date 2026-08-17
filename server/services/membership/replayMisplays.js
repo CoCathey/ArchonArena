@@ -26,16 +26,35 @@ const Constants = require('../../constants');
  * for every six chains); creatures and artifacts enter play exhausted; a
  * ready creature of the active house could always have reaped for 1 amber.
  *
- * ## What the recording cannot see, and how that is handled
+ * ## Telling a good decision from a miss
  *
- * House-choice restrictions (Control the Weak and friends), use restrictions,
- * refill modifiers and every card's text are not in the frames. That is why
- * thresholds are conservative, why round one is skipped outright (the first
- * player's opening turn is rule-limited to one card), and why the last turn
- * of a decided game is not read at all - a game that ended mid-turn makes
- * "unused" meaningless. Thinned recordings (frames dropped to fit the store)
- * skip the end-of-turn checks entirely: the frame that proves what a turn
- * ended with may be one of the dropped ones.
+ * A review that second-guesses reasonable play gets closed and never opened
+ * again, so every check carries suppressions for the good reasons the
+ * recording can actually see. Two kinds:
+ *
+ * Recorded constraints. Version 5 frames carry the active player's legally
+ * callable houses, so a forced or restricted call (Control the Weak and
+ * friends) is never a "misplay"; and a stocked archive - facedown even to
+ * this review - disqualifies the house-call arithmetic outright rather than
+ * judging half a hand.
+ *
+ * Hindsight. The recording holds the whole game, so a choice that visibly
+ * worked is cleared: the thin call that forged mid-turn, out-earned the
+ * fuller house, or was followed by the checked opponent NOT forging; the
+ * held cards that got played within the player's next two turns (a save,
+ * executed - and a game that ended sooner gets the benefit of the doubt);
+ * the idle creatures on a turn the winner had already sealed; the clogged
+ * house that finally cashed out into a forge or a big amber turn.
+ *
+ * ## What the recording still cannot see, and how that is handled
+ *
+ * Use restrictions, refill modifiers and every card's text are not in the
+ * frames. That is why thresholds are conservative, why round one is skipped
+ * outright (the first player's opening turn is rule-limited to one card),
+ * and why the last turn of a decided game is not read at all - a game that
+ * ended mid-turn makes "unused" meaningless. Thinned recordings (frames
+ * dropped to fit the store) skip the end-of-turn checks entirely: the frame
+ * that proves what a turn ended with may be one of the dropped ones.
  *
  * Hands are hidden information even after the game, so the serving layer
  * (api/games.js) filters moments to the asking player's own - see
@@ -56,6 +75,8 @@ const HELD_CARDS_MIN_MISSED = 2;
 const CLOG_MIN_CARDS = 4;
 /** ...held across this many consecutive turns without being called. */
 const CLOG_MIN_TURNS = 3;
+/** A clog that resolves into a turn this good was assembly, not a clog. */
+const CLOG_PAYOFF_AMBER = 3;
 /** The printed refill target, before chains. */
 const HAND_REFILL = 6;
 
@@ -125,6 +146,44 @@ function playerIn(board, name) {
     return (board?.players || []).find((player) => player?.name === name) || null;
 }
 
+/** Forged keys in a frame's `stats.keys` - the engine's per-colour map. */
+function keyCount(keys) {
+    if (typeof keys === 'number') {
+        return Number.isFinite(keys) ? keys : 0;
+    }
+
+    if (!keys || typeof keys !== 'object') {
+        return 0;
+    }
+
+    return Object.values(keys).filter(Boolean).length;
+}
+
+/** One player's keys at a frame. */
+function keysAt(frame, name) {
+    return keyCount(playerIn(frame?.board, name)?.stats?.keys);
+}
+
+/** One player's amber at a frame. */
+function amberAt(frame, name) {
+    const amber = playerIn(frame?.board, name)?.stats?.amber;
+
+    return Number.isFinite(amber) ? amber : 0;
+}
+
+/** The player's next `count` turn runs after `index`, in order. */
+function laterRunsOf(runs, index, name, count) {
+    const later = [];
+
+    for (let position = index + 1; position < runs.length && later.length < count; position++) {
+        if (runs[position].player === name) {
+            later.push(runs[position]);
+        }
+    }
+
+    return later;
+}
+
 /** The recorded hand at a frame as identities, or null when not recorded. */
 function handAt(snapshot, name, handCards) {
     const entries = snapshot?.hands?.[name];
@@ -164,6 +223,7 @@ function buildTurnRuns(snapshots) {
 
     for (const run of runs) {
         run.opening = run.frames[0];
+        run.closing = run.frames[run.frames.length - 1];
         run.mainFrames = run.frames.filter((frame) => frame.board.phase === 'main');
         run.house = null;
 
@@ -175,6 +235,13 @@ function buildTurnRuns(snapshots) {
                 break;
             }
         }
+
+        // What the turn visibly produced, for the "it worked" suppressions:
+        // amber swing across the run and any key forged inside it (the
+        // opening frame sits after the start-of-turn forge, so a rise within
+        // the run is a mid-turn forge - a key cheat that came off).
+        run.amberGained = amberAt(run.closing, run.player) - amberAt(run.opening, run.player);
+        run.forgedDuring = keysAt(run.closing, run.player) > keysAt(run.opening, run.player);
     }
 
     return runs;
@@ -230,19 +297,19 @@ function findMisplays(replay) {
     const lastRun = runs[runs.length - 1];
     const moments = [];
 
-    for (const run of runs) {
+    for (const [index, run] of runs.entries()) {
         // A decided game's last turn ended when the game did, not when the
         // player chose to stop; nothing about how it ended is a choice to
         // second-guess.
         const cutShort = run === lastRun && !!replay.winner;
 
-        houseCallMoment(run, cards, handCards, moments);
+        houseCallMoment(run, index, runs, cards, handCards, moments);
 
         if (!thinned && !cutShort) {
-            unusedCreaturesMoment(run, cards, moments);
+            unusedCreaturesMoment(run, cards, replay.winner, moments);
 
             if (handsRecorded) {
-                heldCardsMoment(run, handCards, moments);
+                heldCardsMoment(run, index, runs, handCards, replay.winner, moments);
             }
         }
     }
@@ -261,10 +328,25 @@ function findMisplays(replay) {
  *
  * Potential is what a house call could have acted on at the moment of the
  * choice: cards of that house in hand, plus ready unstunned creatures of it
- * already on the board. Compared only across the deck's own three houses, and
- * only when the recording shows the pre-play hand.
+ * already on the board. Compared only across the houses that were actually
+ * callable, and only when the recording shows the pre-play hand.
+ *
+ * ## When a lopsided call is NOT flagged
+ *
+ * A thin call is often a good call, and the recording can recognise the
+ * common reasons by itself:
+ *
+ *   - the choice was forced or restricted (v5 records `callableHouses`, so
+ *     Control the Weak and friends stop being "misplays");
+ *   - the archives held cards (their contents are facedown even to this
+ *     review, so the potential arithmetic would be judging half a hand);
+ *   - it worked - the turn forged a key mid-run, or earned at least as much
+ *     amber as the fuller house had cards;
+ *   - the opponent sat at check, and after this turn they did NOT forge -
+ *     the call's job was denial, and denial is invisible to card counting.
+ *     (A game that ended before their next turn counts as denied.)
  */
-function houseCallMoment(run, cards, handCards, moments) {
+function houseCallMoment(run, index, runs, cards, handCards, moments) {
     if (run.round <= 1 || !run.house || !opensBeforePlay(run)) {
         return;
     }
@@ -276,12 +358,45 @@ function houseCallMoment(run, cards, handCards, moments) {
         return;
     }
 
-    const candidates = (active.houses || [])
+    // The archives are picked up on calling ANY house and are facedown to
+    // this review; two or more unseen cards make the count below a guess.
+    if ((active.cardPiles?.archives || []).length >= 2) {
+        return;
+    }
+
+    if (run.forgedDuring) {
+        // A key came out of the turn itself: the call produced the one thing
+        // that wins games, whatever its card count was.
+        return;
+    }
+
+    const candidates = (active.callableHouses || active.houses || [])
         .map((house) => String(house).toLowerCase())
         .filter((house) => HOUSES.has(house));
 
     if (candidates.length < 2 || !candidates.includes(run.house)) {
         return;
+    }
+
+    const opponent = (run.opening.board.players || []).find(
+        (player) => player?.name !== run.player
+    );
+
+    if (opponent) {
+        const opponentCost = Number.isFinite(opponent.stats?.keyCost) ? opponent.stats.keyCost : 6;
+
+        if ((opponent.stats?.amber ?? 0) >= opponentCost) {
+            // The opponent was at check, so this was an amber-control turn as
+            // much as a card-count one. Keep the flag only when the check
+            // came in anyway.
+            const next = laterRunsOf(runs, index, opponent.name, 1)[0];
+            const forgedAnyway =
+                next && keysAt(next.opening, opponent.name) > keysAt(run.opening, opponent.name);
+
+            if (!forgedAnyway) {
+                return;
+            }
+        }
     }
 
     const potential = Object.fromEntries(candidates.map((house) => [house, 0]));
@@ -316,6 +431,12 @@ function houseCallMoment(run, cards, handCards, moments) {
             null
         );
 
+    if (best !== null && run.amberGained >= potential[best]) {
+        // The thin call out-earned the fuller house's card count (pips,
+        // steals, reaps - the recording cannot tell, and does not need to).
+        return;
+    }
+
     if (
         best !== null &&
         called <= HOUSE_CALL_MAX_POTENTIAL &&
@@ -343,17 +464,43 @@ function houseCallMoment(run, cards, handCards, moments) {
  * and unstunned there was never used: creatures enter play exhausted, so a
  * just-played one cannot be mistaken for an idle one. Each was a reap - an
  * amber - the turn left on the table, barring an unrecorded restriction.
+ *
+ * Not flagged when the recording can see it did not matter: a creature that
+ * entered ready mid-turn (it did not have the whole turn), and the winner's
+ * turn that ended already at lethal - two keys forged, the third paid for -
+ * where surplus reaps changed nothing.
  */
-function unusedCreaturesMoment(run, cards, moments) {
+function unusedCreaturesMoment(run, cards, winner, moments) {
     if (run.round <= 1 || !run.house || run.mainFrames.length === 0) {
         return;
     }
 
     const last = run.mainFrames[run.mainFrames.length - 1];
     const active = playerIn(last.board, run.player);
+
+    if (!active) {
+        return;
+    }
+
+    if (
+        winner === run.player &&
+        keyCount(active.stats?.keys) === 2 &&
+        (active.stats?.amber ?? 0) >=
+            (Number.isFinite(active.stats?.keyCost) ? active.stats.keyCost : 6)
+    ) {
+        return;
+    }
+
+    // Only creatures that were on the board when the turn began had the whole
+    // turn in which to act.
+    const atStart = new Set(
+        (playerIn(run.opening.board, run.player)?.cardPiles?.cardsInPlay || [])
+            .map((entry) => entry?.uuid)
+            .filter(Boolean)
+    );
     const idle = [];
 
-    for (const entry of active?.cardPiles?.cardsInPlay || []) {
+    for (const entry of active.cardPiles?.cardsInPlay || []) {
         const card = inPlayCard(entry, cards);
 
         if (
@@ -361,7 +508,8 @@ function unusedCreaturesMoment(run, cards, moments) {
             card.identity.type === 'creature' &&
             !card.exhausted &&
             !card.stunned &&
-            housesOf(card.identity).has(run.house)
+            housesOf(card.identity).has(run.house) &&
+            (!entry.uuid || atStart.has(entry.uuid))
         ) {
             idle.push(card.identity.name);
         }
@@ -387,46 +535,111 @@ function unusedCreaturesMoment(run, cards, moments) {
  * Any card of the active house could have been played or at worst discarded;
  * one still in hand when the turn ended displaced a fresh draw whenever the
  * refill (6, less one per six chains) was not already met without it. Holding
- * is sometimes right - that is the player's call - but it should be a choice
- * they can see the price of.
+ * is sometimes right - and when it was, the recording usually shows it, so
+ * those holds are not flagged:
+ *
+ *   - the held cards left the hand within the player's next two turns. That
+ *     is what saving a card FOR something looks like; the plan ran, and the
+ *     draws were its price, not a mistake.
+ *   - the game ended before two more turns could happen. A plan cut short by
+ *     the game ending is unjudgeable, and gets the benefit of the doubt.
+ *   - the winner ended this turn already at lethal - the refill no longer
+ *     mattered.
+ *
+ * A hold that is still sitting in hand two turns later is the one that gets
+ * flagged: it cost the draws AND never became a play.
  */
-function heldCardsMoment(run, handCards, moments) {
+function heldCardsMoment(run, index, runs, handCards, winner, moments) {
     if (run.round <= 1 || !run.house || run.mainFrames.length === 0) {
         return;
     }
 
     const last = run.mainFrames[run.mainFrames.length - 1];
-    const hand = handAt(last, run.player, handCards);
+    const entries = last?.hands?.[run.player];
     const active = playerIn(last.board, run.player);
 
-    if (!hand || !active) {
+    if (!Array.isArray(entries) || !active) {
         return;
     }
 
-    const held = hand.filter((identity) => housesOf(identity).has(run.house));
+    if (
+        winner === run.player &&
+        keyCount(active.stats?.keys) === 2 &&
+        (active.stats?.amber ?? 0) >=
+            (Number.isFinite(active.stats?.keyCost) ? active.stats.keyCost : 6)
+    ) {
+        return;
+    }
+
+    // Held entries tracked by hand-table index, so the same cards can be
+    // recognised in later frames; duplicates are tracked by count.
+    const heldCounts = new Map();
+
+    for (const entry of entries) {
+        const identity = Number.isInteger(entry) ? handCards[entry] : null;
+
+        if (identity && housesOf(identity).has(run.house)) {
+            heldCounts.set(entry, (heldCounts.get(entry) || 0) + 1);
+        }
+    }
+
+    const held = [...heldCounts.entries()].flatMap(([entry, count]) =>
+        Array(count).fill(handCards[entry])
+    );
+    const handSize = entries.length;
     const chains = active.stats?.chains ?? 0;
     const refillTarget = Math.max(0, HAND_REFILL - Math.ceil(chains / 6));
-    const missedDraws = Math.max(
-        0,
-        Math.min(held.length, refillTarget - (hand.length - held.length))
-    );
+    const missedDraws = Math.max(0, Math.min(held.length, refillTarget - (handSize - held.length)));
 
-    if (missedDraws >= HELD_CARDS_MIN_MISSED) {
-        moments.push({
-            type: 'held-cards',
-            player: run.player,
-            round: run.round,
-            turn: playerTurnAt(last, run.player),
-            messageIndex: last.messageIndex,
-            house: run.house,
-            held: held.map((identity) => ({
-                id: identity.id,
-                name: identity.name,
-                house: identity.house
-            })),
-            missedDraws
-        });
+    if (missedDraws < HELD_CARDS_MIN_MISSED) {
+        return;
     }
+
+    // The plan test. No later turns to look at means the game ended first.
+    const later = laterRunsOf(runs, index, run.player, 2);
+
+    if (later.length === 0) {
+        return;
+    }
+
+    for (const laterRun of later) {
+        const frame = laterRun.mainFrames[laterRun.mainFrames.length - 1] || laterRun.closing;
+        const laterEntries = frame?.hands?.[run.player];
+
+        if (!Array.isArray(laterEntries)) {
+            // The trail goes cold (a thinned stretch, a hand not recorded):
+            // continuity cannot be claimed, so nothing is.
+            return;
+        }
+
+        const laterCounts = new Map();
+
+        for (const entry of laterEntries) {
+            laterCounts.set(entry, (laterCounts.get(entry) || 0) + 1);
+        }
+
+        for (const [entry, count] of heldCounts) {
+            if ((laterCounts.get(entry) || 0) < count) {
+                // Part of the hold got played or spent: it was a plan.
+                return;
+            }
+        }
+    }
+
+    moments.push({
+        type: 'held-cards',
+        player: run.player,
+        round: run.round,
+        turn: playerTurnAt(last, run.player),
+        messageIndex: last.messageIndex,
+        house: run.house,
+        held: held.map((identity) => ({
+            id: identity.id,
+            name: identity.name,
+            house: identity.house
+        })),
+        missedDraws
+    });
 }
 
 /**
@@ -490,7 +703,24 @@ function cloggedHandMoments(runs, handCards, moments) {
             const clogged = house !== run.house && (counts[house] || 0) >= CLOG_MIN_CARDS;
 
             if (!clogged) {
-                flush(streaks.get(key));
+                const streak = streaks.get(key);
+
+                // A streak that ends because the house finally got called is
+                // judged by what the call produced: a forge or a big amber
+                // turn means those cards were being assembled, not stuck -
+                // holding was the plan, and the plan paid. A weak resolution
+                // keeps the flag: the wait cost turns and bought nothing.
+                if (
+                    streak &&
+                    house === run.house &&
+                    (run.forgedDuring || run.amberGained >= CLOG_PAYOFF_AMBER)
+                ) {
+                    streaks.delete(key);
+
+                    continue;
+                }
+
+                flush(streak);
                 streaks.delete(key);
 
                 continue;

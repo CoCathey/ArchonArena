@@ -275,8 +275,12 @@ const Misplays = ({ misplays, onJump, t }) => {
 
             <p className='m-0 text-[11px] text-muted'>
                 {t(
-                    'Read from the recorded board and hands only — card text, restrictions and ' +
-                        'the plan you were on are not in it. These are questions, not verdicts.'
+                    'Read from the recorded board and hands only — card text and the plan you ' +
+                        'were on are not in it. Moments with a visible reason are dropped ' +
+                        'automatically: forced or restricted house calls, thin calls that forged ' +
+                        'or denied a check or out-earned the fuller house, holds that got played ' +
+                        'within two turns, and long holds that cashed out. What remains are still ' +
+                        'questions, not verdicts.'
                 )}
             </p>
         </div>

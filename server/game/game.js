@@ -2126,6 +2126,21 @@ class Game extends EventEmitter {
                     name: player.name,
                     activeHouse: player.activeHouse,
                     houses: player.houses,
+                    // ARCHON (F3): which houses the active player could
+                    // legally call, so the misplay review never second-guesses
+                    // a forced or restricted choice (Control the Weak and
+                    // friends). Clipped to the deck's own public houses:
+                    // getAvailableHouses also reads the hand, and an exotic
+                    // foreign-house card there must not leak through a list.
+                    // Restriction effects themselves are played openly, so
+                    // what remains is spectator-safe.
+                    ...(player === this.activePlayer
+                        ? {
+                              callableHouses: player
+                                  .getAvailableHouses()
+                                  .filter((house) => (player.houses || []).includes(house))
+                          }
+                        : {}),
                     stats: player.getStats(),
                     // ARCHON: the player's own turn counter, so analysis can
                     // talk about "your fourth turn" rather than about the
@@ -2251,12 +2266,14 @@ class Game extends EventEmitter {
     getReplay() {
         return {
             // v3 added the final winning snapshot, each player's deck name,
-            // houses and end state, and who went first. v4 adds each player's
+            // houses and end state, and who went first. v4 added each player's
             // hand beside every frame (`snapshots[].hands`, indexing into
-            // `handCards`) for the misplay review. Earlier recordings are
-            // still readable - the viewer and the analysis both treat
-            // everything added since as optional.
-            version: 4,
+            // `handCards`) for the misplay review. v5 adds the active player's
+            // legally callable houses per frame, so the review can tell a
+            // forced call from a chosen one. Earlier recordings are still
+            // readable - the viewer and the analysis both treat everything
+            // added since as optional.
+            version: 5,
             gameId: this.id,
             gameFormat: this.gameFormat,
             startedAt: this.startedAt,

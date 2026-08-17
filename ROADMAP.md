@@ -1363,9 +1363,15 @@ house calls that had almost nothing to act on when another house was full, ready
 of the called house left unused at end of main, playable cards held that displaced fresh
 draws, and a house clogging the hand across consecutive turns. Deliberately heuristic and
 deliberately phrased as questions - it is arithmetic over recorded state
-(`replayMisplays.js`), not a simulation; card text, restrictions and the player's plan are
-not in it. True "what would have happened" alternative lines and win-probability remain
-open, and would sit on the same v4 recordings.
+(`replayMisplays.js`), not a simulation; card text and the player's plan are not in it.
+Good decisions that merely look thin are recognised and dropped rather than flagged: v5
+recordings carry the active player's legally callable houses (so Control the Weak is never
+a "misplay"), a stocked archive disqualifies the house-call arithmetic outright, and
+hindsight over the rest of the recording clears a call that forged, out-earned the fuller
+house or denied a check, a hold that got played within two turns (or that the game ended
+too soon to judge), idle creatures already past the point of mattering, and a clog that
+cashed out into a big turn. True "what would have happened" alternative lines and
+win-probability remain open, and would sit on the same recordings.
 **Depends on:** N1 (board-state replays are the input). **Acceptance:** a coach and student
 step through the same replay in sync, and a finished game produces a win-probability graph.
 
