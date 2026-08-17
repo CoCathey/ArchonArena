@@ -19,6 +19,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 
 import Icon from '../Icon';
 import AlertPanel from '../Site/AlertPanel';
+import { visibleRows } from './tableRows';
 
 function getButtonVariant(color) {
     switch (color) {
@@ -63,8 +64,6 @@ const toQuerySort = (sortDescriptor) =>
         ? [{ id: sortDescriptor.column, desc: sortDescriptor.direction === 'descending' }]
         : [];
 
-const getRowId = (row, fallback = 0) => String(row?.id ?? row?.uuid ?? row?.key ?? fallback);
-
 const toHeaderNode = (value, context = {}) =>
     typeof value === 'function' ? value(context) : value || '';
 
@@ -89,38 +88,6 @@ const toCellNode = (column, rowData) => {
             id: rowData.__reactTableId || ''
         }
     });
-};
-
-const getColumnValue = (column, rowData) => {
-    if (typeof column?.accessorFn === 'function') {
-        return column.accessorFn(rowData);
-    }
-
-    if (column?.accessorKey) {
-        return rowData?.[column.accessorKey];
-    }
-
-    return rowData?.[column?.id];
-};
-
-const compareSortValues = (left, right) => {
-    if (left == null && right == null) {
-        return 0;
-    }
-
-    if (left == null) {
-        return -1;
-    }
-
-    if (right == null) {
-        return 1;
-    }
-
-    if (typeof left === 'number' && typeof right === 'number') {
-        return left - right;
-    }
-
-    return String(left).localeCompare(String(right), undefined, { sensitivity: 'base' });
 };
 
 const toLegacyRow = (value) => {
@@ -269,57 +236,20 @@ function ReactTable({
     const localRows = remote ? [] : data || [];
     const tableRows = remote ? remoteRows : localRows;
 
-    const normalizedRows = useMemo(() => {
-        const rows = (tableRows || [])
-            .filter((row) => {
-                if (remote) {
-                    return true;
-                }
-
-                return Object.entries(columnFilters).every(([columnId, value]) => {
-                    if (value === undefined || value === null || String(value).trim() === '') {
-                        return true;
-                    }
-
-                    const column = columnById[columnId];
-                    if (!column) {
-                        return true;
-                    }
-
-                    const cellValue = getColumnValue(column, row);
-                    if (cellValue === undefined || cellValue === null) {
-                        return false;
-                    }
-
-                    const next = String(cellValue).toLowerCase();
-                    return next.includes(String(value).toLowerCase());
-                });
-            })
-            .map((row, index) => ({
-                ...row,
-                __reactTableId: getRowId(row, index),
-                __reactTableIndex: index
-            }));
-
-        const sortedColumn = sortDescriptor?.column;
-        if (!sortedColumn) {
-            return rows;
-        }
-
-        const sortColumn = columnById[sortedColumn];
-        if (!sortColumn) {
-            return rows;
-        }
-
-        const direction = sortDescriptor?.direction === 'descending' ? -1 : 1;
-        return [...rows].sort(
-            (left, right) =>
-                compareSortValues(
-                    getColumnValue(sortColumn, left),
-                    getColumnValue(sortColumn, right)
-                ) * direction
-        );
-    }, [columnById, columnFilters, remote, sortDescriptor, tableRows]);
+    // Remote mode leaves the filtering, ordering and paging to the query - the
+    // sort and the filters are in `queryArgs` above for exactly that reason. See
+    // ./tableRows for why touching the order of a fetched page is not an option.
+    const normalizedRows = useMemo(
+        () =>
+            visibleRows({
+                rows: tableRows,
+                remote,
+                columnFilters,
+                columnById,
+                sortDescriptor
+            }),
+        [columnById, columnFilters, remote, sortDescriptor, tableRows]
+    );
 
     const totalCount = remote ? response?.totalCount || 0 : normalizedRows.length;
     const pageCount = Math.max(1, Math.ceil(totalCount / pageSize));

@@ -99,6 +99,29 @@ function effectiveAri(row) {
     return seedAri(row.SasRating, row.AercScore);
 }
 
+/**
+ * `effectiveAri`, written as SQL, for the one thing the function cannot do:
+ * let the database ORDER BY a deck's ARI.
+ *
+ * A query that decorates its rows with ARI in JavaScript can only sort the rows
+ * it fetched, which for a paginated list means sorting one page of an
+ * arbitrarily ordered collection - "highest ARI" becomes "highest ARI on page
+ * one". So the expression has to exist in both languages, and the two have to
+ * agree: a listing ordered by one definition and labelled with the other is
+ * worse than no sort at all, because it looks right.
+ *
+ * Assumes the caller's joins are aliased `da` (DeckAri) and `ds` (DeckSas),
+ * which is what every reader of these two tables already does. NULL when the
+ * deck has neither a stored rating nor a seed - so ORDER BY still needs its own
+ * NULLS LAST; a deck nobody has rated is not a deck rated zero.
+ */
+const EFFECTIVE_ARI_SQL =
+    `LEAST(${ARI_MAX}, GREATEST(${ARI_MIN}, COALESCE(da."Ari", ` +
+    'CASE WHEN ds."SasRating" IS NOT NULL AND ds."AercScore" IS NOT NULL ' +
+    'THEN (ds."SasRating" + ds."AercScore") / 2.0 ' +
+    'WHEN ds."SasRating" IS NOT NULL THEN ds."SasRating" ' +
+    'ELSE ds."AercScore" END)))';
+
 class AriService {
     constructor(db = require('../../db')) {
         this.db = db;
@@ -242,6 +265,7 @@ class AriService {
 module.exports = AriService;
 module.exports.seedAri = seedAri;
 module.exports.effectiveAri = effectiveAri;
+module.exports.EFFECTIVE_ARI_SQL = EFFECTIVE_ARI_SQL;
 module.exports.clampAri = clampAri;
 module.exports.ARI_MIN = ARI_MIN;
 module.exports.ARI_MAX = ARI_MAX;

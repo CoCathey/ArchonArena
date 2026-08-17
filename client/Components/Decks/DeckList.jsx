@@ -158,7 +158,10 @@ const DeckList = ({
                     </div>
                 ),
                 enableColumnFilter: false,
-                meta: { className: 'w-11', colWidth: '44px' }
+                // A card back is not an order. The header used to offer the sort
+                // anyway, and the query had no column for it, so it quietly
+                // ordered by date instead.
+                meta: { className: 'w-11', colWidth: '44px', sortable: false }
             },
             {
                 accessorKey: 'name',
@@ -216,7 +219,6 @@ const DeckList = ({
                             -
                         </span>
                     ),
-                sortingFn: (a, b) => (a.original.sasRating ?? -1) - (b.original.sasRating ?? -1),
                 enableColumnFilter: false,
                 meta: { className: 'text-center', colWidth: '64px' }
             },
@@ -244,7 +246,6 @@ const DeckList = ({
                             -
                         </span>
                     ),
-                sortingFn: (a, b) => (a.original.ari ?? -1) - (b.original.ari ?? -1),
                 enableColumnFilter: false,
                 meta: { className: 'text-center', colWidth: '64px' }
             },

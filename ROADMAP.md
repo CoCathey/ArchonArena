@@ -2898,6 +2898,19 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         mail → activate → login, with negative controls for tampered, expired, replayed and
         cross-account links.
 
+-   [x] **"My Decks" sorted one page, not the collection** — the deck list is paged by the
+        server, and the table re-sorted whichever fifteen rows it had been handed, so "highest
+        SAS" meant "highest SAS on this page" and looked identical to the real answer. Three
+        things caused it and all three are fixed: the ordering decision moved out of
+        `ReactTable`'s render into `tableRows.visibleRows`, where remote mode returns the
+        server's page in the server's order; ARI gained a SQL form (`EFFECTIVE_ARI_SQL`, the
+        twin of `effectiveAri`, seed included) so the database can order by the number the
+        column actually shows; and a sort column the query cannot express now logs instead of
+        silently becoming `LastUpdated`. Every ordering also ends `, "Id" ASC` — SAS, ARI, set
+        and win rate all repeat freely, and ties left unordered let a deck appear on two pages
+        while another appeared on none. The card-back column no longer offers a sort it never
+        had.
+
 ### Open, and currently true
 
 -   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The

@@ -2,7 +2,7 @@ const logger = require('../log');
 const util = require('../util');
 const db = require('../db');
 const { expand, flatten } = require('../Array');
-const { effectiveAri } = require('./rating/AriService');
+const { effectiveAri, EFFECTIVE_ARI_SQL } = require('./rating/AriService');
 const Constants = require('../constants');
 // ARCHON: game-deciding randomness comes from one place - see the module.
 const secureRandom = require('../game/secureRandom');
@@ -596,6 +596,10 @@ class DeckService {
                 'SELECT COUNT(*) AS "NumDecks" FROM "Decks" d ' +
                     'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
                     'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                    // DeckAri joined for the same reason: every column a filter
+                    // can name has to resolve in the count as well as in the
+                    // page, or the pager promises rows the page cannot show.
+                    'LEFT JOIN "DeckAri" da ON da."Uuid" = d."Uuid" ' +
                     'WHERE "UserId" = $1 ' +
                     filter,
                 params
@@ -625,9 +629,31 @@ class DeckService {
             case 'sasRating':
             case 'sas':
                 return '"SasRating"';
+            // ARCHON: ARI, and specifically the EFFECTIVE ARI - the stored
+            // rating when games have moved it, the SAS/AERC seed otherwise.
+            // Ordering by the stored column alone would bury every deck the
+            // engine has not touched yet behind decks it has, which is most of
+            // a collection and none of what the reader asked for.
+            //
+            // A sort runs outside the subquery, where the computed column is in
+            // scope; a filter would run inside it, where the joins are.
+            case 'ari':
+                return isSort ? '"EffectiveAri"' : EFFECTIVE_ARI_SQL;
             case 'isAlliance':
                 return '"IsAlliance"';
             default:
+                // A sort this query cannot express must not pass for one it can.
+                // Falling through to LastUpdated silently is exactly how "sort
+                // by ARI" came to mean "newest first, then reordered within
+                // whichever fifteen rows the page happened to hold" - an answer
+                // with no way for a reader to tell it was the wrong one.
+                if (column) {
+                    logger.warn(
+                        `Deck query asked to sort by "${column}", which has no column here; ` +
+                            'ordering by LastUpdated instead'
+                    );
+                }
+
                 return '"LastUpdated"';
         }
     }
@@ -736,7 +762,7 @@ class DeckService {
                     // ARCHON: "DeckCount" quoted. Unquoted, Postgres folds the
                     // alias to `deckcount`, so mapDeck's `deck.DeckCount` was
                     // undefined and every deck's usage level computed as 0.
-                    `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ds."AercScore" AS "AercScore", da."Ari" AS "Ari", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
+                    `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ds."AercScore" AS "AercScore", da."Ari" AS "Ari", ${EFFECTIVE_ARI_SQL} AS "EffectiveAri", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     // ARCHON: SAS joined HERE rather than attached to the page
@@ -759,7 +785,14 @@ class DeckService {
                     // NULLS LAST in both directions: an unscored deck is not a
                     // zero-SAS deck, and sorting ascending should not open with
                     // every deck DoK has never rated.
-                    `ORDER BY ${sortColumn} ${sortDir} NULLS LAST ` +
+                    //
+                    // "Id" breaks every tie, and it is not decoration: SAS, ARI,
+                    // set and win rate all repeat freely across a collection, and
+                    // an ORDER BY that leaves ties unordered lets Postgres return
+                    // them in a different order for each page - so a deck could
+                    // appear on page one AND page two while another appeared on
+                    // neither. Pagination is only coherent over a total order.
+                    `ORDER BY ${sortColumn} ${sortDir} NULLS LAST, "Id" ASC ` +
                     'LIMIT $2 ' +
                     'OFFSET $3',
                 params
