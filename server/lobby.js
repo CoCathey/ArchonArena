@@ -2684,6 +2684,103 @@ class Lobby {
         }
     }
 
+    /**
+     * ARCHON: everybody who can be seated at a rematch, worked out BEFORE
+     * anything is torn down.
+     *
+     * The rematch handlers used to remove the old game from `this.games` and
+     * broadcast `removegame` as their first two statements, and only then start
+     * checking whether a rematch was possible at all - six separate ways to
+     * bail out or silently half-build the replacement, every one of them after
+     * the point of no return. The node has already deleted its copy of the game
+     * and sent both players back to the lobby by the time this runs, so any of
+     * those exits left two people with no game and no table: "the rematch
+     * button kicked us both out and deleted the game".
+     *
+     * Several of those exits were reachable in ordinary play, and two were
+     * simply wrong:
+     *
+     *  - the fallback deck lookup read `oldGame.players[].deck`, which the
+     *    node's `getSaveState` fills with `deckData.identity` - a STRING. `.id`
+     *    on it is always undefined, so the fallback could only ever trigger the
+     *    bail-out it was written to prevent;
+     *  - a player whose socket or deck was missing was `continue`d past with a
+     *    log line, producing a one-player game that `launchGame` then refused in
+     *    silence.
+     *
+     * So the question is answered up front, and the caller destroys nothing
+     * until it has an answer it can act on.
+     *
+     * @param {import('./pendinggame')} game the table being replaced
+     * @param {object} [options]
+     * @param {boolean} [options.requireDecks] false when everyone is about to
+     * pick a new deck anyway
+     * @returns {{seats: object[], owner: object}|{error: string}}
+     */
+    rematchSeating(game, { requireDecks = true } = {}) {
+        const seats = [];
+
+        for (const player of Object.values(game.getPlayers())) {
+            if (player.left) {
+                continue;
+            }
+
+            const socket = this.socketsByName[player.name];
+
+            if (!socket) {
+                return { error: `${player.name} is no longer connected` };
+            }
+
+            // Only what the table itself holds. There is deliberately no
+            // fallback to the node's save state - see above, it carries deck
+            // identities rather than deck records and never worked.
+            if (requireDecks && !(player.deck && player.deck.id)) {
+                return { error: `${player.name} has no deck selected` };
+            }
+
+            seats.push({ player, socket, isOwner: player.name === game.owner.username });
+        }
+
+        if (seats.length < 2) {
+            return { error: 'both players need to still be here' };
+        }
+
+        const owner = seats.find((seat) => seat.isOwner);
+
+        if (!owner) {
+            return { error: 'the player who owns the table has gone' };
+        }
+
+        return { seats, owner };
+    }
+
+    /**
+     * ARCHON: the rematch cannot be built - give the players their table back.
+     *
+     * The node has already torn down its copy of the game, so a table still
+     * marked `started` is one nobody can enter and the lobby would show it as a
+     * game in progress forever. Putting it back to pending leaves both players
+     * sitting at the table they had, with their decks, one Start away from
+     * playing - which is the worst outcome a failed rematch should have.
+     *
+     * @param {import('./pendinggame')} game
+     * @param {string} reason
+     */
+    refuseRematch(game, reason) {
+        logger.warn(`Could not set up a rematch for game ${game.id}: ${reason}`);
+
+        game.started = false;
+        game.node = undefined;
+
+        game.addMessage(
+            'The rematch could not be set up ({0}), so here is your table back',
+            reason
+        );
+
+        this.sendGameState(game);
+        this.broadcastGameMessage('updategame', game);
+    }
+
     onGameRematch(oldGame) {
         let gameId = oldGame.gameId;
         let game = this.games[gameId];
@@ -2698,6 +2795,14 @@ class Lobby {
         // tracking must not disappear because a message arrived.
         if (game.tournament) {
             logger.warn(`Ignored a rematch request for tournament table ${gameId}`);
+
+            return;
+        }
+
+        const seating = this.rematchSeating(game);
+
+        if (seating.error) {
+            this.refuseRematch(game, seating.error);
 
             return;
         }
@@ -2722,86 +2827,44 @@ class Lobby {
         newGame.rematch = true;
         newGame.previousWinner = oldGame.winner;
 
-        let owner = game.getPlayerOrSpectator(game.owner.username);
-        if (!owner) {
-            logger.error("Tried to rematch but the owner wasn't in the game");
-            return;
-        }
-
-        let socket = this.socketsByName[owner.name];
-        if (!socket) {
-            logger.error("Tried to rematch but the owner's socket has gone away");
-            return;
-        }
-
         this.games[newGame.id] = newGame;
-        newGame.newGame(socket.id, socket.user);
 
-        socket.joinChannel(newGame.id);
-        this.sendGameState(newGame);
-        this.broadcastGameMessage('newgame', newGame);
+        // ARCHON: `join: true`. Every other newGame() call site passes it; both
+        // rematch handlers omitted it, so the owner - the one player guaranteed
+        // to be here - was never actually added to the game being built for
+        // them. It went unnoticed because a second bug covered for it: the loop
+        // below filtered on `owner.username`, and `owner` was a player record,
+        // which has `name` and no `username` at all, so the filter excluded
+        // nobody and the owner was seated by the loop instead. Two faults
+        // cancelling out, until anything perturbed the order.
+        newGame.newGame(seating.owner.socket.id, seating.owner.socket.user, undefined, true);
 
-        const ownerDeck =
-            owner.deck || (oldGame.players || []).find((x) => x.name === owner.name)?.deck;
+        const promises = [];
 
-        if (!ownerDeck || !ownerDeck.id) {
-            logger.error(`Tried to rematch but ${owner.name} has no deck selected`);
-            return;
-        }
-
-        let promises = [
-            this.onSelectDeck(
-                socket,
-                newGame.id,
-                ownerDeck.id,
-                ownerDeck.isStandalone || ownerDeck.is_standalone
-            )
-        ];
-
-        for (let player of Object.values(game.getPlayers()).filter(
-            (player) => player.name !== owner.username && !player.left
-        )) {
-            let socket = this.socketsByName[player.name];
-
-            if (!socket) {
-                logger.warn(
-                    `Tried to add ${player.name} to a rematch but couldn't find their socket`
-                );
-                continue;
+        for (const seat of seating.seats) {
+            if (!seat.isOwner) {
+                newGame.join(seat.socket.id, seat.player.user);
             }
 
-            const playerDeck =
-                player.deck || (oldGame.players || []).find((x) => x.name === player.name)?.deck;
+            // Everyone, not just the owner. Without this the opponent was never
+            // in the new game's channel, so if the launch did not go through
+            // they had no way to see the table they had been moved to.
+            seat.socket.joinChannel(newGame.id);
 
-            if (!playerDeck || !playerDeck.id) {
-                logger.warn(`Tried to rematch but ${player.name} has no deck selected`);
-                continue;
-            }
-
-            newGame.join(socket.id, player.user);
-            promises.push(
-                this.onSelectDeck(
-                    socket,
-                    newGame.id,
-                    playerDeck.id,
-                    playerDeck.isStandalone || playerDeck.is_standalone
-                )
-            );
-        }
-
-        for (let player of Object.values(game.getPlayers())) {
-            let oldPlayer = oldGame.players.find((x) => x.name === player.name);
+            const oldPlayer = (oldGame.players || []).find((x) => x.name === seat.player.name);
 
             if (oldPlayer && oldPlayer.wins) {
-                if (!newGame.players[player.name]) {
-                    logger.warn(
-                        `Tried to set ${player.name} wins but couldn't find them in the game`
-                    );
-                    continue;
-                }
-
-                newGame.players[player.name].wins = oldPlayer.wins;
+                newGame.players[seat.player.name].wins = oldPlayer.wins;
             }
+
+            promises.push(
+                this.onSelectDeck(
+                    seat.socket,
+                    newGame.id,
+                    seat.player.deck.id,
+                    seat.player.deck.isStandalone || seat.player.deck.is_standalone
+                )
+            );
         }
 
         for (let spectator of game.getSpectators()) {
@@ -2820,9 +2883,21 @@ class Lobby {
         // Set the password after everyone has joined, so we don't need to worry about overriding the password, or storing it unencrypted/hashed
         newGame.password = game.password;
 
-        Promise.all(promises).then(() => {
-            this.onStartGame(socket, newGame.id);
-        });
+        // After everybody is seated. Sent before, this reached nobody at all,
+        // because the game it described had no players in it yet.
+        this.sendGameState(newGame);
+        this.broadcastGameMessage('newgame', newGame);
+
+        Promise.all(promises)
+            .then(() => this.onStartGame(seating.owner.socket, newGame.id))
+            .catch((err) => {
+                // Unhandled, a rejection here skipped onStartGame - leaving the
+                // rematch pending and unexplained - and took the lobby process
+                // with it under Node's default unhandled-rejection policy.
+                logger.error(`Failed to set up the rematch of game ${gameId}`, err);
+
+                this.sendGameState(newGame);
+            });
     }
 
     onGameRematchWithNewDecks(oldGame) {
@@ -2839,6 +2914,17 @@ class Lobby {
         // tracking must not disappear because a message arrived.
         if (game.tournament) {
             logger.warn(`Ignored a rematch request for tournament table ${gameId}`);
+
+            return;
+        }
+
+        // Nobody needs a deck in hand here - the whole point is that everyone
+        // picks a new one - but the players and their sockets still have to be
+        // resolvable before the table they are standing at is deleted.
+        const seating = this.rematchSeating(game, { requireDecks: false });
+
+        if (seating.error) {
+            this.refuseRematch(game, seating.error);
 
             return;
         }
@@ -2863,77 +2949,47 @@ class Lobby {
         newGame.rematch = true;
         newGame.previousWinner = oldGame.winner;
 
-        let owner = game.getPlayerOrSpectator(game.owner.username);
-        if (!owner) {
-            logger.error("Tried to rematch but the owner wasn't in the game");
-            return;
-        }
-
-        let socket = this.socketsByName[owner.name];
-        if (!socket) {
-            logger.error("Tried to rematch but the owner's socket has gone away");
-            return;
-        }
-
         this.games[newGame.id] = newGame;
-        newGame.newGame(socket.id, socket.user);
 
-        socket.joinChannel(newGame.id);
-        this.sendGameState(newGame);
-        this.broadcastGameMessage('newgame', newGame);
+        // `join: true` - see the note in onGameRematch on why its absence went
+        // unnoticed for so long.
+        newGame.newGame(seating.owner.socket.id, seating.owner.socket.user, undefined, true);
+
+        for (const seat of seating.seats) {
+            if (!seat.isOwner) {
+                newGame.join(seat.socket.id, seat.player.user);
+            }
+
+            seat.socket.joinChannel(newGame.id);
+
+            const oldPlayer = (oldGame.players || []).find((x) => x.name === seat.player.name);
+
+            if (oldPlayer && oldPlayer.wins) {
+                newGame.players[seat.player.name].wins = oldPlayer.wins;
+            }
+        }
 
         // ARCHON: in a Lucky Dice game "new decks" means new ROLLS - nobody
         // picks, so the owner's old deck is not re-selected either. Everyone
         // starts deckless and the dice fall at start.
-        if (!newGame.luckyDice) {
-            const ownerDeck =
-                owner.deck || (oldGame.players || []).find((x) => x.name === owner.name)?.deck;
+        //
+        // Otherwise the owner keeps theirs on screen as a starting point. A
+        // missing deck is no longer fatal here: this is the flavour where
+        // everybody is about to choose one anyway, so there is nothing to
+        // abort - it just means there is nothing to pre-select.
+        const ownerDeck = seating.owner.player.deck;
 
-            if (!ownerDeck || !ownerDeck.id) {
-                logger.error(
-                    `Tried to rematch with new decks but ${owner.name} has no deck selected`
-                );
-                return;
-            }
-
-            this.onSelectDeck(
-                socket,
-                newGame.id,
-                ownerDeck.id,
-                ownerDeck.isStandalone || ownerDeck.is_standalone
+        if (!newGame.luckyDice && ownerDeck && ownerDeck.id) {
+            Promise.resolve(
+                this.onSelectDeck(
+                    seating.owner.socket,
+                    newGame.id,
+                    ownerDeck.id,
+                    ownerDeck.isStandalone || ownerDeck.is_standalone
+                )
+            ).catch((err) =>
+                logger.error(`Failed to carry ${seating.owner.player.name}'s deck over`, err)
             );
-        }
-
-        for (let player of Object.values(game.getPlayers()).filter(
-            (player) => player.name !== owner.username && !player.left
-        )) {
-            let socket = this.socketsByName[player.name];
-
-            if (!socket) {
-                logger.warn(
-                    `Tried to add ${player.name} to a rematch but couldn't find their socket`
-                );
-                continue;
-            }
-            player.deck = [];
-
-            newGame.join(socket.id, player.user);
-            socket.joinChannel(newGame.id);
-        }
-
-        for (let player of Object.values(game.getPlayers())) {
-            let oldPlayer = oldGame.players.find((x) => x.name === player.name);
-
-            if (oldPlayer && oldPlayer.wins) {
-                if (!newGame.players[player.name]) {
-                    logger.warn(
-                        `Tried to set ${player.name} wins but couldn't find them in the game`
-                    );
-                    continue;
-                }
-
-                newGame.players[player.name].wins = oldPlayer.wins;
-            }
         }
 
         for (let spectator of game.getSpectators()) {

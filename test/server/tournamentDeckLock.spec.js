@@ -114,6 +114,8 @@ describe('tournament deck lock', function () {
             onStartGame: Lobby.prototype.onStartGame,
             launchGame: Lobby.prototype.launchGame,
             rollLuckyDiceDecks: Lobby.prototype.rollLuckyDiceDecks,
+            rematchSeating: Lobby.prototype.rematchSeating,
+            refuseRematch: Lobby.prototype.refuseRematch,
             onGameRematch: Lobby.prototype.onGameRematch,
             onGameRematchWithNewDecks: Lobby.prototype.onGameRematchWithNewDecks
         };

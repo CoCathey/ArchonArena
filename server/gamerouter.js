@@ -225,6 +225,28 @@ class GameRouter extends EventEmitter {
         this.sendCommand(game.node.identity, 'CLOSEGAME', { gameId: game.id });
     }
 
+    /**
+     * ARCHON: write a game's final state away, and survive it failing.
+     *
+     * `gameService.update()` is a promise that rejects on any database fault.
+     * Four of the five places that called it did so bare - no await, no catch -
+     * which is an unhandled rejection, and under Node's default policy an
+     * unhandled rejection terminates the process. So a transient database
+     * problem while somebody pressed Rematch or left a game did not cost a
+     * database row; it took the lobby down and every game running on it with
+     * it. GAMEWIN was the only one written defensively.
+     *
+     * Losing the row is the correct failure here: the game is over either way,
+     * and the players' next action matters more than the record of their last.
+     *
+     * @param {object} game a save state from a game node
+     */
+    persistFinishedGame(game) {
+        Promise.resolve(this.gameService.update(game)).catch((err) =>
+            logger.error(`Failed to persist finished game ${game && game.gameId}`, err)
+        );
+    }
+
     // Events
     /**
      * @param {Error} err
@@ -354,7 +376,14 @@ class GameRouter extends EventEmitter {
                 this.emit('onGameWin', message.arg.game);
                 break;
             case 'REMATCH':
-                this.gameService.update(message.arg.game);
+                // ARCHON: the rejection handler GAMEWIN has and these three did
+                // not. `update()` rejects on any database fault, and an
+                // unhandled rejection terminates the process under Node's
+                // default policy - so a failed write here did not lose a game
+                // record, it took the whole lobby down, with every player in
+                // every game on it. Which looks, to the two people who pressed
+                // Rematch, exactly like the button ending their game.
+                this.persistFinishedGame(message.arg.game);
 
                 if (worker) {
                     worker.numGames--;
@@ -370,7 +399,7 @@ class GameRouter extends EventEmitter {
             // game and its worker is freed - but the lobby seats the players at
             // the event's next table rather than building a new game.
             case 'TOURNAMENTNEXTGAME':
-                this.gameService.update(message.arg.game);
+                this.persistFinishedGame(message.arg.game);
 
                 if (worker) {
                     worker.numGames--;
@@ -382,7 +411,7 @@ class GameRouter extends EventEmitter {
 
                 break;
             case 'REMATCHWITHNEWDECKS':
-                this.gameService.update(message.arg.game);
+                this.persistFinishedGame(message.arg.game);
 
                 if (worker) {
                     worker.numGames--;
@@ -407,7 +436,7 @@ class GameRouter extends EventEmitter {
                 break;
             case 'PLAYERLEFT':
                 if (!message.arg.spectator) {
-                    this.gameService.update(message.arg.game);
+                    this.persistFinishedGame(message.arg.game);
                 }
 
                 this.emit('onPlayerLeft', message.arg.gameId, message.arg.player);
