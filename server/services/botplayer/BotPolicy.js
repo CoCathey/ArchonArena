@@ -46,6 +46,7 @@ const { decisionRecord } = require('../championschallenge/labFeatures');
 const {
     INTENT_BUTTONS,
     bestCandidates,
+    bestFateCard,
     bestFightTarget,
     houseScore,
     mainWindowCandidates,
@@ -80,6 +81,11 @@ const MULLIGAN_TITLE = 'keep starting hand?';
 // The opponent's request to switch manual mode on. Matched loosely because
 // the title interpolates their name.
 const MANUAL_MODE_MARKER = 'manual mode';
+// Asked after the bot clicks one of its prophecies.
+const ACTIVATE_PROPHECY_TITLE = 'activate prophecy?';
+// "Choose a card from your hand to place under the prophecy" - the cost of
+// activating one, and a decision rather than a formality.
+const FATE_CARD_MARKER = 'under the prophecy';
 
 function pick(list, rng) {
     return list[Math.floor(rng() * list.length)];
@@ -147,6 +153,15 @@ class BotPolicy {
             return this.press(game, player, buttons, ['keep hand']);
         }
 
+        if (title === ACTIVATE_PROPHECY_TITLE) {
+            // This prompt exists only because the bot clicked the prophecy,
+            // and it clicked it because it chose to. Answering Yes here
+            // rather than from the intent alone also closes the one loop
+            // this move could form: a No leaves the prophecy activatable,
+            // and the main window would offer it again forever.
+            return this.press(game, player, buttons, ['yes']);
+        }
+
         // --- Manual mode: always yes -------------------------------------
         //
         // The person across the table asked to switch manual mode on and the
@@ -172,16 +187,18 @@ class BotPolicy {
             // Keep selecting while the prompt wants more; press Done once it
             // is offered and something is selected (or nothing CAN be).
             if (unselected.length && (!doneButton || !selected.length)) {
-                // The one prompt the bot can answer with judgement rather
-                // than a coin flip: having sent a creature to fight, this is
-                // the engine asking whom. Every other selection is a card
-                // ability's own question, and the bot has no business
-                // guessing at those.
-                const target = bestFightTarget(this.attacker, unselected);
+                // Two prompts the bot can answer with judgement rather than
+                // a coin flip: which creature to attack, having sent one to
+                // fight, and which card to bury under a prophecy it just
+                // activated. Every other selection is a card ability's own
+                // question, and the bot has no business guessing at those.
+                const chosen = title.includes(FATE_CARD_MARKER)
+                    ? bestFateCard(player, unselected)
+                    : bestFightTarget(this.attacker, unselected);
 
                 this.attacker = null;
 
-                game.cardClicked(player.name, (target || pick(unselected, this.rng)).uuid);
+                game.cardClicked(player.name, (chosen || pick(unselected, this.rng)).uuid);
 
                 return true;
             }
@@ -250,24 +267,38 @@ class BotPolicy {
      * stops a young model from discovering the strategy of doing nothing.
      */
     playFromMainWindow(game, player, buttons) {
-        const { hand, inPlay, candidates } = mainWindowCandidates(player);
+        const { hand, inPlay, prophecies, candidates } = mainWindowCandidates(player);
 
         if (!candidates.length) {
             return this.press(game, player, buttons, ['end turn']);
         }
 
         const chosen = this.chooseCandidate(game, player, candidates);
-        const list = chosen.list === 'hand' ? hand : inPlay;
-        const card = list[chosen.index];
+        const lists = { hand, play: inPlay, prophecy: prophecies };
+        const card = (lists[chosen.list] || [])[chosen.index];
 
         if (!card) {
             return this.press(game, player, buttons, ['end turn']);
         }
 
+        // A prophecy is not clicked the way a card is: it sits beside the
+        // board rather than in a zone, and the engine has its own entry
+        // point for it.
+        if (chosen.list === 'prophecy') {
+            this.pendingIntent = { kind: chosen.kind };
+            this.attacker = null;
+
+            game.clickProphecy(player.name, card.uuid);
+
+            return true;
+        }
+
         // Remember WHY this card was clicked: the menu that opens next is
         // answered with that move rather than by preference order, so a
-        // creature chosen to fight is not reaped on the way through.
-        this.pendingIntent = chosen.list === 'play' ? { kind: chosen.kind } : null;
+        // creature chosen to fight is not reaped on the way through - and a
+        // card chosen for the bin is not played instead, which is the whole
+        // point of enumerating the two separately.
+        this.pendingIntent = { kind: chosen.kind };
         this.attacker = chosen.kind === 'fight' ? card : null;
 
         game.cardClicked(player.name, card.uuid);

@@ -307,15 +307,20 @@ async function forceHouse(fork, player, buttons, index) {
  * guarantees the lists agree.
  */
 async function forceAction(fork, player, index) {
-    const { hand, inPlay, candidates } = fork.mainWindowCandidates(player);
+    const { hand, inPlay, prophecies, candidates } = fork.mainWindowCandidates(player);
     const chosen = candidates[index];
 
     if (!chosen) {
         return false;
     }
 
+    fork.pendingIntent = { kind: chosen.kind };
+
+    if (chosen.list === 'prophecy') {
+        return fork.clickProphecyAt(fork.game, player, prophecies, chosen.index);
+    }
+
     if (chosen.list === 'play') {
-        fork.pendingIntent = { kind: chosen.kind };
         fork.attacker = chosen.kind === 'fight' ? chosen.card : null;
 
         return fork.clickCardAt(fork.game, player, inPlay, chosen.index, 'play');

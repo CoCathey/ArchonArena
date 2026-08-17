@@ -2037,10 +2037,31 @@ commit to it, and run the engine as a continuous soak test.
         has imported, counted once per Master Vault uuid rather than once per copy — the bot
         plays the cards, and nothing about whose collection a copy sits in reaches the table.
         An empty band opens the table with an unbanded deck and logs it.
+-   [x] **A spec's declared timeout now survives the harness.** `integrationhelper` wrapped
+        `it(name, fn)` to bind jasmine-style `this` and dropped every argument after `fn` —
+        so `it('...', fn, 120000)` silently ran under vitest's 5s default. The deep game spec
+        had been asking for 120s and passing only because it happened to finish in 4.3s; any
+        machine under load failed it, and the failure pointed at the test rather than at the
+        wrapper. Forwarded for `it`, `it.skip` and `it.only`.
 -   [x] **A bot always allows manual mode.** It was answering the request from the generic
         "press something that is not Cancel" branch, which picks at random — so it allowed it
         once and refused the next time. A bot has nothing to protect and no way to judge the
         request; the only person who can want it is the one across the table.
+-   [x] **Binning a card is a move, not an accident.** Playing a card and discarding it are
+        enumerated separately and the bot chooses between them: you refill to your hand size
+        either way and the discard pile becomes the deck again, so binning a card you cannot
+        use swaps it for a fresh draw and loses nothing, while holding it is a permanently
+        smaller hand. The plain order bins only once the turn has nothing better left, and
+        never bins a card it could have used — including a board wipe it should not play,
+        which it bins rather than firing over its own board.
+-   [x] **The bots play prophecies.** Prophetic Visions was invisible to them, because a
+        prophecy is not a card click — it comes in through the engine's own `clickProphecy`,
+        which nothing in the bot called. Activating one is now a move in the list, ranked
+        immediately above the plain discard so the card the bot was going to bin buys a
+        prophecy on its way out; and the card it buries is the cheapest it holds — no Fate
+        ability first (Fate abilities are penalties), then nothing it could have played, then
+        a card of the house it is already spending. The lab logs the prophecy click as its
+        own input type so a deep fork replays it.
 -   [x] **What a champion is allowed to notice.** Every candidate at one decision shares a
         state, so state features contribute identically to all of them and cancel out of the
         ranking — a model could learn "boards win games" but never "not this card, not here",
@@ -2048,6 +2069,16 @@ commit to it, and run the engine as a continuous soak test.
         contexts (`x:playAction:noBoard`, `noEnemy`, `behind`, `keyReady`), giving the model
         weights it can push negative per situation. Feature keys stay a contract: added,
         never renamed.
+-   [x] **Ordering is learned, not listed.** Ordering is where the strategy in this game
+        lives and it turns on the whole position, so the plain order covers only what it can
+        justify out loud and the rest is the Challenge's to learn. Three more axes make that
+        possible: `creatureInHand` (the difference between the first half of a turn and the
+        second — a wipe played first versus over your own board) and `deepDiscard` join the
+        contexts; each of a card's ROLES is crossed with all of them, so what the model
+        learns about one board wipe it knows about every board wipe; and the card itself is
+        crossed with the two board facts play order turns on (`c:<card>:noBoard`,
+        `c:<card>:noEnemy`). Limited to two per card on purpose — card weights ride to the
+        game node with every table.
 -   [x] **Practice games are recorded, and are never results.** A player wanted to find a bot
         game again and watch the replay back, so bot games are persisted and replayed like any
         other — with a `Games."BotGame"` flag (migration 77) that every aggregate excludes, and

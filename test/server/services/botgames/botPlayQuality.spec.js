@@ -1,10 +1,14 @@
 const { BotPolicy } = require('../../../../server/services/botplayer/BotPolicy');
 const {
     bestCandidates,
+    bestFateCard,
     bestFightTarget,
+    hasFate,
     fightOutcome,
     houseScore,
     keyWithinReach,
+    wipeIsWorthIt,
+    wipesBoard,
     mainWindowCandidates,
     opponentAtCheck,
     takesAmber
@@ -22,8 +26,7 @@ const {
 /**
  * ARCHON (F9): the bots play sense, with or without a champion.
  *
- * Four blunders seen at a real table drive this spec, and each is a
- * different failure:
+ * What a real table reported, and each one a different failure:
  *
  *  - An upgrade drawn before any creature was thrown away. The engine
  *    offers Discard on every card in hand, so the move list called that
@@ -36,10 +39,14 @@ const {
  *  - A request to enable manual mode was allowed once and refused the next
  *    time - the same coin flip, reached through the generic branch that
  *    presses any button that is not Cancel or Concede.
+ *  - Prophecies were never touched at all, because a prophecy is not a
+ *    card click and nothing in the bot knew that.
  *
- * The play fixes live in the shared move module, so the lab and the lobby
- * get them together - and the last block covers the reason a trained
- * champion could not have learned its way out of the second one.
+ * The fixes live in the shared move module, so the lab and the lobby get
+ * them together. The order below is a FLOOR - it covers the handful of
+ * cases it can justify and nothing more, because ordering in this game
+ * turns on the whole position and that is the Challenge's to learn. The
+ * feature blocks are what make learning it possible at all.
  */
 
 /** A stand-in for an engine card: only what the bots actually read. */
@@ -104,33 +111,74 @@ const gameStub = () => {
 };
 
 describe('a bot deciding what to do with its hand', function () {
-    it('does not treat a card it can only discard as a move', function () {
-        // An upgrade with nothing to attach to: the engine allows Discard
-        // and nothing else, which is not a reason to play the card.
-        const stranded = card('helm', 'upgrade', ['Discard this card']);
+    const stranded = () => card('helm', 'upgrade', ['Discard this card']);
+    const wearable = () => card('helm', 'upgrade', ['Play this upgrade', 'Discard this card']);
 
-        expect(mainWindowCandidates(player({ hand: [stranded] })).candidates).toEqual([]);
+    it('offers playing a card and binning it as two different moves', function () {
+        // Both are legal and they are not the same move. Enumerating only
+        // the play is what got an upgrade binned by accident; enumerating
+        // only the play when the bin is better is the opposite mistake.
+        const { candidates } = mainWindowCandidates(player({ hand: [wearable()] }));
+
+        expect(candidates.map((entry) => entry.kind)).toEqual(['playUpgrade', 'discard']);
+        expect(candidates[1].playKind).toBe('playUpgrade');
     });
 
-    it('keeps that card and ends the turn rather than binning it', function () {
+    it('plays a card it can use rather than binning it', function () {
+        const seat = player({ hand: [wearable()] });
+
+        expect(
+            bestCandidates(seat, mainWindowCandidates(seat).candidates).map((entry) => entry.kind)
+        ).toEqual(['playUpgrade']);
+    });
+
+    it('bins a card it cannot use, rather than gumming up the hand with it', function () {
+        // An upgrade with nothing to attach to. Holding it costs a card
+        // every turn it sits there; binning it draws a fresh one and the
+        // discard pile becomes the deck again, so the card is not lost.
+        const seat = player({ hand: [stranded()] });
+        const { candidates } = mainWindowCandidates(seat);
+
+        expect(candidates.map((entry) => entry.kind)).toEqual(['discard']);
+        expect(bestCandidates(seat, candidates)).toEqual(candidates);
+    });
+
+    it('bins it only once the turn has nothing better left', function () {
+        // Everything that accomplishes something outranks the bin, so a
+        // dead card leaves at the end of the turn, not instead of a play.
+        const seat = player({
+            hand: [stranded(), card('soldier', 'creature', ['Play this creature'])],
+            inPlay: [creature('ranger')]
+        });
+        const ranks = bestCandidates(seat, mainWindowCandidates(seat).candidates);
+
+        expect(ranks.map((entry) => entry.card.id)).toEqual(['soldier']);
+    });
+
+    it('presses Discard, not Play, on the menu that opens', function () {
+        // The two moves share a card, so the click alone does not say which
+        // was chosen - the menu press does.
         const game = gameStub();
-        const pressed = [];
-        const seat = player({ hand: [card('helm', 'upgrade', ['Discard this card'])] });
+        const seat = player({ hand: [stranded()] });
+        const policy = new BotPolicy();
 
-        game.menuButton = (name, arg) => pressed.push(arg);
+        policy.playFromMainWindow(game, seat, []);
 
-        new BotPolicy().playFromMainWindow(game, seat, [{ text: 'End Turn', arg: 'endturn' }]);
+        expect(game.clicks).toEqual(['uuid-helm']);
+        expect(policy.pendingIntent).toEqual({ kind: 'discard' });
 
-        expect(game.clicks).toEqual([]);
-        expect(pressed).toEqual(['endturn']);
-    });
+        policy.respond(game, {
+            ...seat,
+            promptState: {
+                menuTitle: 'Choose an action',
+                buttons: [
+                    { text: 'Play this upgrade', arg: 'play', method: 'm' },
+                    { text: 'Discard this card', arg: 'discard', method: 'm' }
+                ]
+            }
+        });
 
-    it('still plays the upgrade once there is a creature to wear it', function () {
-        const wearable = card('helm', 'upgrade', ['Play this upgrade', 'Discard this card']);
-        const { candidates } = mainWindowCandidates(player({ hand: [wearable] }));
-
-        expect(candidates.length).toBe(1);
-        expect(candidates[0]).toMatchObject({ list: 'hand', index: 0, kind: 'playUpgrade' });
+        expect(game.answers).toEqual(['discard']);
     });
 });
 
@@ -360,6 +408,109 @@ describe('a bot watching the amber race', function () {
     });
 });
 
+/**
+ * ARCHON (F9): order is the game.
+ *
+ * "Some actions you want to play before you play any creatures because the
+ * outcome of that action would kill your creatures." Ordering is where
+ * KeyForge strategy actually lives, and it turns on the whole position -
+ * board, hand, discards - not on the card alone. The plain order below is a
+ * floor for the handful of cases it can justify; everything past that is for
+ * the Challenge to LEARN, which is why the features exist to express it.
+ */
+describe('a bot ordering its plays', function () {
+    // De-escalation: "Play: Destroy each creature."
+    const wipe = () => card('de-escalation', 'action', ['Play this action', 'Discard this card']);
+    const soldier = () => card('soldier', 'creature', ['Play this creature']);
+
+    it('knows a board wipe when it holds one', function () {
+        expect(wipesBoard(wipe())).toBe(true);
+        expect(wipesBoard(soldier())).toBe(false);
+    });
+
+    it('plays the wipe before the creatures, not over them', function () {
+        // Out-bodied two to nothing: the wipe is the play, and it has to
+        // come first or it destroys the board it was meant to rescue.
+        const seat = player({
+            hand: [wipe(), soldier()],
+            enemies: [enemy('brute'), enemy('giant', { power: 9 })]
+        });
+
+        expect(
+            bestCandidates(seat, mainWindowCandidates(seat).candidates).map(
+                (entry) => entry.card.id
+            )
+        ).toEqual(['de-escalation']);
+    });
+
+    it('will not wipe a board it is winning', function () {
+        const seat = player({
+            hand: [wipe(), soldier()],
+            inPlay: [creature('ranger'), creature('scout')],
+            enemies: []
+        });
+
+        expect(wipeIsWorthIt(seat)).toBe(false);
+        // The creature is the play; the wipe is not even second - the bot
+        // would rather bin it, and does once the creature is down.
+        expect(
+            bestCandidates(seat, mainWindowCandidates(seat).candidates).map(
+                (entry) => entry.card.id
+            )
+        ).toEqual(['soldier']);
+    });
+
+    it('bins the wipe it should not play rather than playing it', function () {
+        // A board of our own, nothing of theirs, and the turn's work done -
+        // the wipe would destroy our own creature for nothing, so it goes
+        // in the bin and comes back later when it might answer something.
+        const spent = creature('ranger', { exhausted: true, getLegalActions: () => [] });
+        const seat = player({ hand: [wipe()], inPlay: [spent], enemies: [] });
+        const chosen = bestCandidates(seat, mainWindowCandidates(seat).candidates);
+
+        expect(chosen.map((entry) => entry.kind)).toEqual(['discard']);
+    });
+
+    it('gives the model the position it would need to learn this itself', function () {
+        // The plain order handles one case from one role. What actually
+        // decides ordering is the whole position, so every move is crossed
+        // with it - including "are the creatures still to come", which is
+        // the difference between playing a card first and playing it last.
+        const holding = actionFeatures({
+            kind: 'playAction',
+            card: wipe(),
+            player: player({ hand: [soldier()], enemies: [enemy('brute')] })
+        }).features;
+
+        expect(holding['card:boardWipe']).toBe(1);
+        expect(holding['x:boardWipe:creatureInHand']).toBe(1);
+        expect(holding['c:de-escalation:noBoard']).toBe(1);
+
+        const committed = actionFeatures({
+            kind: 'playAction',
+            card: wipe(),
+            player: player({ inPlay: [creature('ranger')], enemies: [enemy('brute')] })
+        }).features;
+
+        // Same card, same move kind, different weights available - which is
+        // the whole point: one of these is a good play and one is not, and
+        // nothing about `act:playAction` could ever tell them apart.
+        expect(committed['x:boardWipe:creatureInHand']).toBe(undefined);
+        expect(committed['c:de-escalation:noBoard']).toBe(undefined);
+    });
+
+    it('reads the discard pile too, since half the game reads it back', function () {
+        const seat = player();
+
+        seat.discard = new Array(14).fill(soldier());
+
+        expect(stateFeatures({ round: 8 }, seat).myDiscard).toBeGreaterThan(0);
+        expect(actionFeatures({ kind: 'reap', player: seat }).features['x:reap:deepDiscard']).toBe(
+            1
+        );
+    });
+});
+
 describe('what a bot is allowed to know about its own deck', function () {
     const withDeck = (deck) => {
         const seat = player({ inPlay: [] });
@@ -425,6 +576,125 @@ describe('what a bot is allowed to know about its own deck', function () {
         expect(answering['x:playCreature:oppAtCheck']).toBe(1);
         expect(answering['card:takesAmber']).toBe(1);
         expect(answering['x:takesAmber:oppAtCheck']).toBe(1);
+    });
+});
+
+/**
+ * ARCHON (F9): prophecies, and what goes under them.
+ *
+ * Prophetic Visions sits two pairs of prophecy cards beside the board.
+ * Activating one costs a card from hand, buried face down beneath it; when
+ * the prophecy comes true it pays out and the buried card's Fate ability
+ * fires - and Fate abilities are penalties ("destroy the most powerful
+ * friendly creature", "lose 2"). So there are two decisions here, not one,
+ * and the bot used to make neither: it never clicked a prophecy at all,
+ * because a prophecy is not a card click.
+ */
+describe('a bot and its prophecies', function () {
+    // Embellish Imp carries "Fate: Destroy the most powerful friendly
+    // creature." Burying it means paying that when the prophecy lands.
+    const fateCard = () => card('embellish-imp', 'creature', ['Play this creature']);
+    const spare = () => card('helm', 'upgrade', ['Discard this card']);
+    const useful = () => card('soldier', 'creature', ['Play this creature']);
+
+    const withProphecy = (options = {}) => {
+        const seat = player(options);
+
+        seat.activeHouse = 'dis';
+        seat.prophecyCards = [card('stars-aligned', 'prophecy', [])];
+        seat.canActivateProphecy = (prophecy) => prophecy.id === 'stars-aligned';
+
+        return seat;
+    };
+
+    it('reads a Fate ability off the canonical card data', function () {
+        expect(hasFate(fateCard())).toBe(true);
+        expect(hasFate(useful())).toBe(false);
+    });
+
+    it('offers activating a prophecy as a move of its own', function () {
+        const seat = withProphecy({ hand: [spare()] });
+        const { prophecies, candidates } = mainWindowCandidates(seat);
+
+        expect(prophecies.map((entry) => entry.id)).toEqual(['stars-aligned']);
+        expect(candidates.some((entry) => entry.kind === 'activateProphecy')).toBe(true);
+    });
+
+    it('spends a card it was going to bin anyway', function () {
+        // The dead upgrade buys a prophecy on its way out - which is why
+        // activating sits immediately above the plain discard.
+        const seat = withProphecy({ hand: [spare()] });
+
+        expect(
+            bestCandidates(seat, mainWindowCandidates(seat).candidates).map((entry) => entry.kind)
+        ).toEqual(['activateProphecy']);
+    });
+
+    it('will not spend a card it could have played', function () {
+        const seat = withProphecy({ hand: [useful()] });
+
+        expect(
+            bestCandidates(seat, mainWindowCandidates(seat).candidates).map((entry) => entry.kind)
+        ).toEqual(['playCreature']);
+    });
+
+    it('clicks the prophecy and says yes to activating it', function () {
+        // A prophecy is not in a zone, so it is not a card click - which is
+        // exactly why the bots ignored prophecies entirely until now.
+        const seat = withProphecy({ hand: [spare()] });
+        const clicked = [];
+        const game = gameStub();
+        const policy = new BotPolicy();
+
+        game.clickProphecy = (name, uuid) => clicked.push(uuid);
+
+        policy.playFromMainWindow(game, seat, []);
+
+        expect(clicked).toEqual(['uuid-stars-aligned']);
+        expect(policy.pendingIntent).toEqual({ kind: 'activateProphecy' });
+
+        policy.respond(game, {
+            ...seat,
+            promptState: {
+                menuTitle: 'Activate prophecy?',
+                buttons: [
+                    { text: 'Yes', arg: 'yes', method: 'm' },
+                    { text: 'No', arg: 'no', method: 'm' }
+                ]
+            }
+        });
+
+        expect(game.answers).toEqual(['yes']);
+    });
+
+    it('buries a card that will not punish it later', function () {
+        const seat = withProphecy();
+        const hand = [fateCard(), useful(), spare()];
+
+        // No Fate ability, nothing it could have played, and of the house it
+        // is already spending: the cheapest card in the hand, in that order.
+        expect(bestFateCard(seat, hand).id).toBe('helm');
+        // Given only a Fate card and a playable one, the playable one goes -
+        // a penalty when the prophecy lands is worse than a card now.
+        expect(bestFateCard(seat, [fateCard(), useful()]).id).toBe('soldier');
+    });
+
+    it('answers the prompt asking which card to bury', function () {
+        const seat = withProphecy();
+        const hand = [fateCard(), spare()];
+        const game = gameStub();
+
+        new BotPolicy().respond(game, {
+            ...seat,
+            hand,
+            promptState: {
+                menuTitle: 'Choose a card from your hand to place under the prophecy',
+                selectCard: true,
+                selectableCards: hand
+            }
+        });
+
+        expect(game.clicks).toEqual(['uuid-helm']);
     });
 });
 

@@ -128,11 +128,18 @@ A site has no champion until the Challenge has run, so the fallback is the
 opponent people actually meet, and three of its habits came back from a real
 table as blunders:
 
--   _It threw away cards it should have kept._ Discard is a legal action on
-    every card in hand, so an upgrade drawn before any creature looked like a
-    playable card whose only button was the bin. The move list no longer
-    offers a card whose sole legal action is Discard: nothing is lost by
-    holding it, and a move nobody can pick is a move no policy can get wrong.
+-   _It threw away cards it should have kept, and kept cards it should have
+    thrown away._ Discard is a legal action on every card in hand, so an
+    upgrade drawn before any creature looked like a playable card whose only
+    button was the bin. Playing a card and binning it are now two separate
+    moves in the list, and the choice between them is a real one: you draw
+    back up to your hand size at end of turn either way, and your discard
+    pile becomes your deck again when the deck runs out - so binning a card
+    you cannot use swaps it for a fresh draw and loses nothing, while holding
+    it is a permanently smaller hand. The plain order bins a card only once
+    the turn has nothing better left, and never bins one whose play would
+    have accomplished something - which is a different test from "could be
+    played", and why a board wipe it should not fire goes in the bin.
 -   _It picked its play at random._ Literally - the fallback drew a hand card
     out of a hat, which is how a targeted action got fired into an empty
     board on the first play of a turn. Moves are now ranked: creatures,
@@ -179,7 +186,55 @@ how much bonus amber is left in it, how much amber control. A player knows
 their own decklist and has watched their own cards leave it, so that is fair
 information - and it is the difference between evaluating the board and
 evaluating the game. The deck's ORDER is never read, and neither is anything
-about the opponent's hand or deck.
+about the opponent's hand or deck. The discard pile is read too, because half
+the game reads it back.
+
+**It plays prophecies.** Prophetic Visions sits two pairs of prophecy cards
+beside the board; activating one costs a card from hand, buried face down
+beneath it, and when the prophecy comes true it pays out and the buried card's
+**Fate** ability fires - and Fate abilities are penalties ("destroy the most
+powerful friendly creature", "lose 2"). The bots ignored all of it, because a
+prophecy is not a card click: it comes in through the engine's own
+`clickProphecy`, which nothing in the bot called. Now it is a move in the list
+like any other, with two decisions attached. Activating sits immediately above
+the plain discard, so the card the bot was about to bin buys a prophecy on its
+way out instead - and the card it buries is the cheapest one it holds: no Fate
+ability first, then nothing it could have played, then a card of the house it
+is already spending.
+
+## Ordering is the game, and the order here is only a floor
+
+Every rule above is a floor, not a ceiling. Ordering is where KeyForge
+strategy actually lives, and what the right order is depends on the whole
+position - board, hand, discard pile, both amber pools, which house is up. No
+fixed list captures that, and this one does not try to: it covers the handful
+of cases it can justify out loud (take their amber, wipe before you commit
+creatures, reap for the key, bin what you cannot use) and leaves the rest to
+be _learned_.
+
+What makes learning it possible is the shape of the features rather than the
+number of them. Every candidate at one decision shares a state, so state
+features contribute identically to all of them and cancel out of the ranking
+entirely - which is why a model built from state plus a per-kind weight could
+learn "boards win games" but never "not this card, not here". So:
+
+-   the action kind is crossed with seven board contexts (`noBoard`,
+    `noEnemy`, `behind`, `keyReady`, `oppAtCheck`, `creatureInHand`,
+    `deepDiscard`),
+-   each of the card's **roles** is crossed with the same contexts, so what
+    the model learns about one board wipe it knows about every board wipe,
+-   and the card itself is crossed with the two board facts that decide play
+    order (`c:<card>:noBoard`, `c:<card>:noEnemy`), which is what lets a
+    champion learn that _this particular_ action wants to come down before
+    the creatures.
+
+`creatureInHand` is the ordering context specifically: it is the difference
+between the first half of a turn and the second, and therefore between a wipe
+played first and the same wipe played over your own board.
+
+Card weights ride to the game node with every table, so the per-card crosses
+are deliberately limited to two. Roles cost nothing by comparison, which is
+why they carry most of the generalization.
 
 What both bots keep is the important part: answering from the buttons and
 selectable cards the prompt itself publishes, so any of the ~2,700 card

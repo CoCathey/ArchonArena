@@ -9,7 +9,9 @@ const { chooseDecision } = require('./labPolicy');
 // did. See services/botplayer/decisions.
 const {
     INTENT_BUTTONS,
+    activatableProphecies,
     bestCandidates,
+    bestFateCard,
     bestFightTarget,
     houseScore,
     playableFromHand,
@@ -84,6 +86,9 @@ const MAIN_WINDOW_TITLE = 'choose a card to play, discard or use';
 const HOUSE_CHOICE_TITLE = 'choose which house you want to activate this turn';
 const END_TURN_CONFIRM_TITLE = 'are you sure you want to end your turn?';
 const MULLIGAN_TITLE = 'keep starting hand?';
+const ACTIVATE_PROPHECY_TITLE = 'activate prophecy?';
+// The cost of activating a prophecy: a card from hand, buried under it.
+const FATE_CARD_MARKER = 'under the prophecy';
 
 /** menuTitle / button.text can be a string or { text, values }. */
 function textOf(value) {
@@ -354,20 +359,29 @@ class SimulatedGame {
             return this.pressByText(game, player, buttons, ['keep hand']);
         }
 
+        // Only asked because the bot clicked the prophecy, and a No would
+        // leave it activatable for the main window to offer again forever.
+        if (title === ACTIVATE_PROPHECY_TITLE) {
+            return this.pressByText(game, player, buttons, ['yes']);
+        }
+
         if (state.selectCard && selectable.length) {
             const selected = state.selectedCards || [];
             const unselected = selectable.filter((card) => !selected.includes(card));
             const doneIndex = buttons.findIndex((button) => textOf(button.text) === 'done');
 
             if (unselected.length && (doneIndex === -1 || !selected.length)) {
-                // Having sent a creature to fight, this is the engine asking
-                // whom - the one selection the bot can answer with judgement.
-                const target = bestFightTarget(this.attacker, unselected);
+                // The two selections the bot can answer with judgement: whom
+                // a creature it sent to fight should attack, and which card
+                // to bury under a prophecy it just activated.
+                const chosen = title.includes(FATE_CARD_MARKER)
+                    ? bestFateCard(player, unselected)
+                    : bestFightTarget(this.attacker, unselected);
 
                 this.attacker = null;
 
-                const index = target
-                    ? unselected.indexOf(target)
+                const index = chosen
+                    ? unselected.indexOf(chosen)
                     : Math.floor(this.rng() * unselected.length);
 
                 return this.clickCardAt(game, player, unselected, index, 'sel');
@@ -464,7 +478,7 @@ class SimulatedGame {
      * discovering the strategy of never doing anything.
      */
     async playFromMainWindow(game, player, buttons) {
-        const { hand, inPlay, candidates } = this.mainWindowCandidates(player);
+        const { hand, inPlay, prophecies, candidates } = this.mainWindowCandidates(player);
 
         if (!candidates.length) {
             return this.pressByText(game, player, buttons, ['end turn']);
@@ -478,8 +492,17 @@ class SimulatedGame {
             );
         }
 
+        // The menu that opens next is answered with the move that was
+        // chosen - hand cards included, since a hand card's menu offers
+        // both a play and a discard and the choice between them was the
+        // decision.
+        this.pendingIntent = { kind: chosen.kind };
+
+        if (chosen.list === 'prophecy') {
+            return this.clickProphecyAt(game, player, prophecies, chosen.index);
+        }
+
         if (chosen.list === 'play') {
-            this.pendingIntent = { kind: chosen.kind };
             this.attacker = chosen.kind === 'fight' ? chosen.card : null;
 
             return this.clickCardAt(game, player, inPlay, chosen.index, 'play');
@@ -644,6 +667,28 @@ class SimulatedGame {
     }
 
     /**
+     * A prophecy is the third input the engine takes, and it needs its own
+     * log entry for the same reason the other two do: a fork replays by
+     * position, and "click the prophecy at index 0" is not something either
+     * of the others can express.
+     */
+    clickProphecyAt(game, player, list, index) {
+        const card = list[index];
+
+        if (!card) {
+            return false;
+        }
+
+        if (this.seed !== undefined && this.seed !== null && !this.replaying) {
+            this.inputLog.push({ p: player.name, t: 'p', i: index, id: card.id });
+        }
+
+        game.clickProphecy(player.name, card.uuid);
+
+        return true;
+    }
+
+    /**
      * A stable summary of the visible game state, for determinism proofs:
      * two runs (or a run and its replay) agree exactly when these agree.
      */
@@ -735,6 +780,17 @@ async function replayTo(deckAlpha, deckOmega, { seed, inputLog, upTo, rolloutSee
                 }
 
                 sim.game.menuButton(entry.p, button.arg, button.uuid, button.method);
+            } else if (entry.t === 'p') {
+                const prophecy = activatableProphecies(player)[entry.i];
+
+                if (!prophecy || prophecy.id !== entry.id) {
+                    throw new Error(
+                        `Fork determinism broke at input ${i}: expected prophecy "${entry.id}", ` +
+                            `found "${prophecy ? prophecy.id : 'nothing'}"`
+                    );
+                }
+
+                sim.game.clickProphecy(entry.p, prophecy.uuid);
             } else {
                 const list = resolveList(sim, player, entry.l);
                 const card = list[entry.i];

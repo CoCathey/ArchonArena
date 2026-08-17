@@ -64,6 +64,11 @@ function stateFeatures(game, player) {
         oppHand: opponent ? Math.min(1, opponent.hand.length / 10) : 0,
         myArchives: Math.min(1, (player.archives || []).length / 6),
         myDeck: Math.min(1, (player.deck || []).length / 36),
+        // The discard pile is not a bin: it becomes the deck again when the
+        // deck runs out, and plenty of cards read from it. How full it is
+        // says how far through the deck this seat is, which is most of what
+        // "late game" means here.
+        myDiscard: Math.min(1, (player.discard || []).length / 36),
         /**
          * ARCHON: the opponent forges at the start of their next turn.
          *
@@ -146,7 +151,10 @@ const ACTION_KINDS = [
     'useAbility',
     'discard',
     'endTurn',
-    'houseCall'
+    'houseCall',
+    // ARCHON (F9): activating a prophecy - a card out of hand now for a
+    // standing effect that pays later.
+    'activateProphecy'
 ];
 
 /**
@@ -186,7 +194,46 @@ const ACTION_CONTEXTS = {
      * do" - which is a thing about the position, not about the move.
      */
     oppAtCheck: (player) =>
-        !!player.opponent && player.opponent.amber >= player.opponent.getCurrentKeyCost()
+        !!player.opponent && player.opponent.amber >= player.opponent.getCurrentKeyCost(),
+    /**
+     * A creature of the active house is still in hand - so the board this
+     * turn is not finished yet.
+     *
+     * This is the ORDER context. Whether a card should be played before or
+     * after the creatures is the question every KeyForge turn asks, and
+     * "are the creatures still to come" is precisely what separates the two
+     * halves of a turn. A board wipe with this true is a wipe played first;
+     * the same card with it false is a wipe played over your own board.
+     */
+    creatureInHand: (player) =>
+        player.hand.some(
+            (card) =>
+                card.type === 'creature' &&
+                (!player.activeHouse || card.hasHouse(player.activeHouse))
+        ),
+    /** Late enough that the discard pile is a resource, not a bin. */
+    deepDiscard: (player) => (player.discard || []).length >= 12
+};
+
+/** Which of them hold right now. */
+function liveContexts(player) {
+    return Object.keys(ACTION_CONTEXTS).filter((context) => ACTION_CONTEXTS[context](player));
+}
+
+/**
+ * ARCHON: the card-knowledge roles, as feature keys.
+ *
+ * Short, stable names - these become weight keys, and a weight key is a
+ * contract with every model trained under it.
+ */
+const ROLE_KEYS = {
+    [ROLES.AMBER_CONTROL]: 'takesAmber',
+    [ROLES.BOARD_WIPE]: 'boardWipe',
+    [ROLES.KEY_CHEAT]: 'keyCheat',
+    [ROLES.CANNOT_REAP]: 'cannotReap',
+    // Carries a Fate ability, so burying it under a prophecy buys the
+    // prophecy AND a penalty when it comes true.
+    [ROLES.HAS_FATE]: 'hasFate'
 };
 
 /**
@@ -210,10 +257,8 @@ function actionFeatures({ kind, card, house, player }) {
     if (player) {
         // Only the live crosses are emitted. The rest are absent rather than
         // zero, which reads the same to the model and keeps a record small.
-        for (const [context, holds] of Object.entries(ACTION_CONTEXTS)) {
-            if (holds(player)) {
-                features[`x:${kind}:${context}`] = 1;
-            }
+        for (const context of liveContexts(player)) {
+            features[`x:${kind}:${context}`] = 1;
         }
     }
 
@@ -221,16 +266,46 @@ function actionFeatures({ kind, card, house, player }) {
         features['card:amber'] = Math.min(1, (card.cardData ? card.cardData.amber || 0 : 0) / 3);
         features['card:power'] = Math.min(1, (card.power || 0) / 10);
 
-        // ARCHON: this card takes amber off the opponent. The one card
-        // property worth naming beyond its numbers, because it is the only
-        // kind of move that answers a player about to forge - and crossed
-        // with that position, it is a weight the model can learn to reach
-        // for exactly then.
-        if (rolesFor(card.id).has(ROLES.AMBER_CONTROL)) {
-            features['card:takesAmber'] = 1;
+        /**
+         * ARCHON: what this card DOES, and when doing it is worth it.
+         *
+         * The kind ("play an action") is far too coarse to order cards
+         * against each other - some actions want to be played before any
+         * creature, because their effect would kill the creatures. The
+         * roles from the platform's card-knowledge index name that
+         * difference, and crossing each with the board contexts is what
+         * lets the model learn "a wipe, with a board of my own, is a
+         * mistake" as a weight rather than as a rule somebody wrote.
+         */
+        const live = player ? liveContexts(player) : [];
 
-            if (player && ACTION_CONTEXTS.oppAtCheck(player)) {
-                features['x:takesAmber:oppAtCheck'] = 1;
+        for (const role of rolesFor(card.id)) {
+            const key = ROLE_KEYS[role];
+
+            if (!key) {
+                continue;
+            }
+
+            features[`card:${key}`] = 1;
+
+            for (const context of live) {
+                features[`x:${key}:${context}`] = 1;
+            }
+        }
+
+        /**
+         * And the same question for THIS card specifically. The per-card
+         * weight (cardWeights) says what having played a card is worth on
+         * average; these say what it is worth with a board and without
+         * one, which is the axis card order actually turns on. Two keys
+         * per card at most - the model travels to the game node with every
+         * table, so its size is a running cost.
+         */
+        if (card.id && player) {
+            for (const context of ['noBoard', 'noEnemy']) {
+                if (ACTION_CONTEXTS[context](player)) {
+                    features[`c:${card.id}:${context}`] = 1;
+                }
             }
         }
     }
