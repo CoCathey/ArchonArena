@@ -157,6 +157,134 @@ const AmberChart = ({ turns, players, t }) => {
 
 AmberChart.propTypes = { players: PropTypes.array, t: PropTypes.func, turns: PropTypes.array };
 
+/**
+ * ARCHON (F3): one flagged moment, as a sentence a player can act on.
+ *
+ * The copy is composed here rather than on the server so it localises, and it
+ * is deliberately phrased as an observation - what the recording shows - not
+ * as a verdict. The caveat under the list says why.
+ */
+const momentText = (moment, t) => {
+    switch (moment.type) {
+        case 'house-call':
+            return t(
+                'Called {{house}} with {{potential}} card(s) to act on — {{bestHouse}} offered {{bestPotential}}.',
+                {
+                    house: t(moment.house),
+                    potential: moment.potential,
+                    bestHouse: t(moment.bestHouse),
+                    bestPotential: moment.bestPotential
+                }
+            );
+        case 'unused-creatures':
+            return t(
+                '{{count}} ready {{house}} creature(s) went unused ({{creatures}}) — a reap each, left on the table.',
+                {
+                    count: moment.count,
+                    house: t(moment.house),
+                    creatures: (moment.creatures || []).join(', ')
+                }
+            );
+        case 'held-cards':
+            return t(
+                'Ended the turn still holding {{held}} ({{count}} playable {{house}} card(s)) — {{missed}} fewer fresh card(s) drawn.',
+                {
+                    held: (moment.held || []).map((card) => card.name).join(', '),
+                    count: (moment.held || []).length,
+                    house: t(moment.house),
+                    missed: moment.missedDraws
+                }
+            );
+        case 'clogged-hand':
+            return t(
+                '{{house}} sat at {{peak}} cards in hand for {{turns}} straight turns without being called.',
+                {
+                    house: t(moment.house),
+                    peak: moment.peak,
+                    turns: moment.turnsHeld
+                }
+            );
+        default:
+            return null;
+    }
+};
+
+/**
+ * The misplay review: the moments worth a second look, each one a jump into
+ * the replay at the frame it was read from. Own-game replays only - the
+ * server never attaches this section to a shared replay's analysis.
+ */
+const Misplays = ({ misplays, onJump, t }) => {
+    if (!misplays || !misplays.available) {
+        return null;
+    }
+
+    const moments = (misplays.moments || []).filter((moment) => momentText(moment, t));
+
+    return (
+        <div className='space-y-2'>
+            <div className='text-xs uppercase tracking-wide text-muted'>
+                {t('Worth a second look')}
+            </div>
+
+            {moments.length === 0 ? (
+                <p className='m-0 text-sm text-muted'>
+                    {misplays.handsRecorded
+                        ? t('Nothing stood out — no turn left an obvious question behind.')
+                        : t(
+                              'This game was recorded before hands were captured, so only the ' +
+                                  'board could be checked — and nothing stood out there.'
+                          )}
+                </p>
+            ) : (
+                <ul className='m-0 list-none space-y-1.5 p-0'>
+                    {moments.map((moment, index) => (
+                        <li
+                            key={`${moment.type}-${moment.player}-${moment.messageIndex}-${index}`}
+                            className='rounded border border-border/55 bg-surface-secondary/40 px-2.5 py-1.5 text-sm'
+                        >
+                            <span className='text-muted'>
+                                {t('Turn {{round}}, {{player}}:', {
+                                    round: moment.round,
+                                    player: moment.player
+                                })}
+                            </span>{' '}
+                            <span className='text-foreground'>{momentText(moment, t)}</span>{' '}
+                            {onJump && (
+                                <button
+                                    className='underline decoration-dotted underline-offset-2 text-amber-300'
+                                    type='button'
+                                    onClick={() => onJump(moment.messageIndex)}
+                                >
+                                    {t('Look')}
+                                </button>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {misplays.thinned && (
+                <p className='m-0 text-[11px] text-muted'>
+                    {t(
+                        'This game was recorded at reduced resolution, so the end-of-turn checks ' +
+                            'were skipped.'
+                    )}
+                </p>
+            )}
+
+            <p className='m-0 text-[11px] text-muted'>
+                {t(
+                    'Read from the recorded board and hands only — card text, restrictions and ' +
+                        'the plan you were on are not in it. These are questions, not verdicts.'
+                )}
+            </p>
+        </div>
+    );
+};
+
+Misplays.propTypes = { misplays: PropTypes.object, onJump: PropTypes.func, t: PropTypes.func };
+
 const Analysis = ({ analysis, onJump, t }) => {
     const { players, turns, summary, decisive } = analysis;
 
@@ -266,6 +394,10 @@ const Analysis = ({ analysis, onJump, t }) => {
                     )}
                 </p>
             )}
+
+            {/* ARCHON (F3): the misplay review - your own side only, and only
+                on your own games; a shared replay's analysis never carries it. */}
+            <Misplays misplays={analysis.misplays} onJump={onJump} t={t} />
 
             {/* Turn by turn, and clicking a row moves the viewer to it. */}
             <div className='overflow-x-auto'>

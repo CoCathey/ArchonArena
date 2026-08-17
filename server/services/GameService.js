@@ -3,6 +3,7 @@ const _ = require('underscore');
 
 const logger = require('../log.js');
 const db = require('../db');
+const { stripReplayHands } = require('./replayPrivacy');
 
 class GameService {
     // ARCHON: db is injectable (defaults to the shared PG pool) so the
@@ -552,9 +553,12 @@ class GameService {
      * that serves a replay to an anonymous caller, and it can only ever return
      * a recording someone deliberately shared.
      *
-     * The recording is spectator-safe by construction (snapshots are rendered
-     * through AnonymousSpectator), so a share link cannot reveal more than
-     * watching the game would have.
+     * The recording's board frames are spectator-safe by construction
+     * (snapshots are rendered through AnonymousSpectator), and the one thing a
+     * version 4 recording holds beyond that - each player's hand, for the
+     * misplay review - is stripped HERE rather than in the route, so no future
+     * caller of this method can forget to. A share link cannot reveal more
+     * than watching the game would have.
      */
     async getReplayByShareToken(token) {
         if (!token || typeof token !== 'string') {
@@ -575,7 +579,11 @@ class GameService {
             return null;
         }
 
-        return { ...rows[0].Data, gameId: rows[0].GameId, shared: true };
+        return {
+            ...stripReplayHands(rows[0].Data),
+            gameId: rows[0].GameId,
+            shared: true
+        };
     }
 }
 

@@ -1,4 +1,5 @@
 const logger = require('../../log');
+const { findMisplays, filterMisplaysTo } = require('./replayMisplays');
 
 /**
  * ARCHON (N12): replay analysis - the Archon tier's `advanced_replays`.
@@ -427,6 +428,28 @@ class ReplayAnalysisService {
             logger.error('Replay analysis failed: %s', err.message);
 
             return UNAVAILABLE('This replay could not be analysed.');
+        }
+    }
+
+    /**
+     * ARCHON (F3): the misplay review over one recording, as one viewer may
+     * read it.
+     *
+     * The review reads the recorded hands (replayMisplays.js), so it is
+     * filtered to the asking player's own moments before it leaves the
+     * service; `null` is the admin read and keeps both sides. Same
+     * degrade-not-500 posture as `analyse`.
+     *
+     * @param {object} replay a recording as stored in `GameReplays."Data"`
+     * @param {string|null} viewerName
+     */
+    misplaysFor(replay, viewerName = null) {
+        try {
+            return filterMisplaysTo(findMisplays(replay), viewerName);
+        } catch (err) {
+            logger.error('Misplay review failed: %s', err.message);
+
+            return UNAVAILABLE('This replay could not be reviewed for misplays.');
         }
     }
 

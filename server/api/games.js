@@ -4,8 +4,10 @@ const GameService = require('../services/GameService.js');
 const RatingService = require('../services/rating/RatingService.js');
 const ConfigService = require('../services/ConfigService.js');
 const ReplayAnalysisService = require('../services/membership/ReplayAnalysisService.js');
-const { requireCapability } = require('./requireCapability');
+const { requireCapability, entitlementsForRequest } = require('./requireCapability');
+const { can } = require('../services/membership/entitlements');
 const { CAPABILITIES } = require('../services/membership/capabilities');
+const { stripReplayHands, replayPlayerNames } = require('../services/replayPrivacy');
 const { wrapAsync } = require('../util.js');
 const { rateLimit } = require('./rateLimit');
 
@@ -125,8 +127,25 @@ module.exports.init = function (server, options = {}) {
                     .send({ success: false, reason, message: 'Replay not found' });
             }
 
+            // ARCHON (F3): the recorded hands. Your own only, and only with
+            // the Archon tier's `advanced_replays` - watching the replay stays
+            // free, reading what you held while you watch is what membership
+            // buys. The opponent's hand is never served to a player: a
+            // finished game does not make what someone held public record.
+            // Admins read both, because a report about a game (or about how
+            // improbably well someone drew) cannot be investigated blind.
+            const keepHands = isAdmin
+                ? replayPlayerNames(replay)
+                : isParticipant && can(entitlementsForRequest(req), CAPABILITIES.ADVANCED_REPLAYS)
+                ? [req.user.username]
+                : [];
+
             // Sharing stays a participant's call even when an admin is reading.
-            res.send({ success: true, replay: replay, canShare: isParticipant });
+            res.send({
+                success: true,
+                replay: stripReplayHands(replay, keepHands),
+                canShare: isParticipant
+            });
         })
     );
 
@@ -165,7 +184,20 @@ module.exports.init = function (server, options = {}) {
                     .send({ success: false, reason, message: 'Replay not found' });
             }
 
-            res.send({ success: true, analysis: replayAnalysis.analyse(replay) });
+            // ARCHON (F3): the misplay review rides with the analysis, but
+            // it is computed over hidden information (the recorded hands), so
+            // a player is served their OWN moments only - what the opponent
+            // held, and what they failed to do with it, is not this account's
+            // to read. Admins see both sides, same reason they see the replay.
+            const viewer = req.user.permissions?.isAdmin ? null : req.user.username;
+
+            res.send({
+                success: true,
+                analysis: {
+                    ...replayAnalysis.analyse(replay),
+                    misplays: replayAnalysis.misplaysFor(replay, viewer)
+                }
+            });
         })
     );
 
@@ -176,6 +208,13 @@ module.exports.init = function (server, options = {}) {
     // capability. Without it, a member sent a game to look at would have to ask
     // the player to send them the game id as well before the tool they pay for
     // would work on it.
+    //
+    // No misplay review here, deliberately. The review reads the recorded
+    // hands, and sharing a replay shares the game as a spectator saw it - not
+    // either player's hidden information. getReplayByShareToken has already
+    // stripped the hands, so the hand-read moments could not be computed
+    // anyway; not attaching the section at all keeps the board-read ones from
+    // leaking judgements about a stranger's game to whoever holds a link.
     server.get(
         '/api/replays/shared/:token/analysis',
         passport.authenticate('jwt', { session: false }),

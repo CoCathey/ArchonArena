@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
+import { useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton } from '@heroui/react';
 import moment from 'moment';
@@ -9,8 +10,10 @@ import Messages from './Messages';
 import ReplayBoard from './ReplayBoard';
 import CardZoom from './CardZoom';
 import ReplayAnalysis from './ReplayAnalysis';
+import PremiumLock from '../Membership/PremiumLock';
+import { CAPABILITIES, hasCapability } from '../../membership';
 import { findKeyForges, findTurns } from '../../replayMarkers';
-import { boardAtStep } from '../../replayFormat';
+import { boardAtStep, handsAtStep } from '../../replayFormat';
 import { useShareReplayMutation, useUnshareReplayMutation } from '../../redux/api';
 
 /** How fast autoplay steps through the log, in log entries per second. */
@@ -44,6 +47,7 @@ const SPEEDS = [1, 2, 4, 8];
  */
 const ReplayViewer = ({ replay, gameId, canShare = false, shareToken: viaShareToken }) => {
     const { t } = useTranslation();
+    const user = useSelector((state) => state.account.user);
     const messages = useMemo(() => replay?.messages || [], [replay]);
     const snapshots = useMemo(() => replay?.snapshots || [], [replay]);
     const players = useMemo(() => replay?.players || [], [replay]);
@@ -143,6 +147,23 @@ const ReplayViewer = ({ replay, gameId, canShare = false, shareToken: viaShareTo
     // the current log position. Version 1 recordings have no frames at all, and
     // the viewer degrades to the log alone.
     const currentBoard = boardAtStep(snapshots, step);
+    // ARCHON (F3): the recorded hands at this point - only ever the ones the
+    // server let this reader have (their own, with the Archon tier; both, for
+    // an admin; none on a share link or an older recording).
+    const currentHands = handsAtStep(snapshots, step, replay?.handCards);
+    const handsRecorded = snapshots.some((snapshot) => snapshot?.hands);
+    // A participant whose recording HAS hands they are not being served is
+    // told what would unlock them; everyone else just sees no hand pile.
+    // Version 4 marks a recording that captured hands even after the server
+    // stripped them from this response - and the capability check keeps the
+    // hint from ever showing to a member on a recording that simply failed to
+    // capture.
+    const handsLocked =
+        canShare &&
+        !handsRecorded &&
+        (replay?.version || 0) >= 4 &&
+        !!replay?.snapshots?.length &&
+        !hasCapability(user, CAPABILITIES.ADVANCED_REPLAYS);
 
     const jumpTo = (messageIndex) => {
         setPlaying(false);
@@ -432,6 +453,19 @@ const ReplayViewer = ({ replay, gameId, canShare = false, shareToken: viaShareTo
                         </p>
                     )}
 
+                    {/* ARCHON (F3): this game recorded your hand, and the
+                        Archon tier is what reads it back. Shown only to a
+                        participant the server stripped hands for - never on
+                        share links, older recordings, or to members. */}
+                    {handsLocked && (
+                        <p className='mb-2 flex flex-wrap items-center gap-1.5 text-xs text-muted'>
+                            {t(
+                                'This game recorded the hand you held at every step, ready to replay.'
+                            )}
+                            <PremiumLock capability={CAPABILITIES.ADVANCED_REPLAYS} inline />
+                        </p>
+                    )}
+
                     {/* ARCHON (N1): read the board from either player's side.
                         Presentation only - the snapshot is spectator-safe, so
                         neither perspective reveals anything the other does not. */}
@@ -460,6 +494,7 @@ const ReplayViewer = ({ replay, gameId, canShare = false, shareToken: viaShareTo
                     <ReplayBoard
                         board={currentBoard}
                         cards={cards}
+                        hands={currentHands}
                         perspective={perspective}
                         onCardMouseOver={onCardMouseOver}
                         onCardMouseOut={onCardMouseOut}

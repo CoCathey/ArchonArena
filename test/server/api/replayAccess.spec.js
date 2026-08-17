@@ -233,6 +233,7 @@ describe('replay access', function () {
 describe('replay analysis access', function () {
     const participants = { 'game-mine': [7], 'game-theirs': [99] };
     const analysed = [];
+    const reviewed = [];
 
     const gameService = {
         isGameParticipant: async (gameId, userId) => (participants[gameId] || []).includes(userId),
@@ -247,6 +248,13 @@ describe('replay analysis access', function () {
             analysed.push(replay);
 
             return { available: true, turns: [] };
+        },
+        // ARCHON (F3): the misplay review. What matters at the route is WHO
+        // it was filtered to, so the stub records the viewer it was asked for.
+        misplaysFor: (replay, viewerName) => {
+            reviewed.push({ replay, viewerName });
+
+            return { available: true, moments: [], viewerName };
         }
     };
 
@@ -316,8 +324,14 @@ describe('replay analysis access', function () {
         return sent;
     };
 
-    const member = { id: 7, permissions: {}, capabilities: ['advanced_replays'], membership: {} };
-    const free = { id: 7, permissions: {}, capabilities: [], membership: {} };
+    const member = {
+        id: 7,
+        username: 'seven',
+        permissions: {},
+        capabilities: ['advanced_replays'],
+        membership: {}
+    };
+    const free = { id: 7, username: 'seven', permissions: {}, capabilities: [], membership: {} };
 
     it('analyses a member their own game', async function () {
         const response = await drive(
@@ -328,6 +342,31 @@ describe('replay analysis access', function () {
 
         expect(response.status).toBe(200);
         expect(response.body.analysis.available).toBe(true);
+    });
+
+    // ARCHON (F3): the misplay review rides with the analysis, filtered to
+    // the asking player - the opponent's moments read their hand.
+    it('serves a member the misplay review of their own side only', async function () {
+        const response = await drive(
+            '/api/games/:gameId/replay/analysis',
+            { gameId: 'game-mine' },
+            member
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.analysis.misplays).toBeDefined();
+        expect(reviewed[reviewed.length - 1].viewerName).toBe('seven');
+    });
+
+    it('serves an admin the misplay review of both sides', async function () {
+        const response = await drive(
+            '/api/games/:gameId/replay/analysis',
+            { gameId: 'game-mine' },
+            { id: 1, username: 'admin', permissions: { isAdmin: true } }
+        );
+
+        expect(response.status).toBe(200);
+        expect(reviewed[reviewed.length - 1].viewerName).toBe(null);
     });
 
     it('refuses a member a game they were not in', async function () {
@@ -365,6 +404,9 @@ describe('replay analysis access', function () {
 
         expect(response.status).toBe(200);
         expect(response.body.analysis.available).toBe(true);
+        // But never the misplay review: that reads the players' hands, and a
+        // share link shares the game as a spectator saw it.
+        expect(response.body.analysis.misplays).toBeUndefined();
     });
 
     it('refuses a shared replay analysis to a free account', async function () {
@@ -386,5 +428,147 @@ describe('replay analysis access', function () {
         );
 
         expect(response.status).toBe(404);
+    });
+});
+
+/**
+ * ARCHON (F3): who is served the recorded hands.
+ *
+ * A version 4 recording carries each player's hand for the misplay review.
+ * Three rules, and the shipped route enforces all of them: below the Archon
+ * tier the hands do not leave the server, at it a player is served their OWN
+ * hand and never the opponent's, and an admin is served both. The share-link
+ * path is not tested here because it never sees hands at all -
+ * GameService.getReplayByShareToken strips them before the route runs
+ * (replayPrivacy.spec.js proves the stripping itself).
+ */
+describe('recorded hands access', function () {
+    // seven (user 7) and rival played; seven is asking.
+    const recorded = () => ({
+        version: 4,
+        players: [{ name: 'seven' }, { name: 'rival' }],
+        cards: [],
+        handCards: [
+            { id: 'anger', name: 'Anger' },
+            { id: 'urchin', name: 'Urchin' }
+        ],
+        snapshots: [
+            {
+                messageIndex: 2,
+                board: { round: 1, activePlayer: 'seven', players: [] },
+                hands: { seven: [0], rival: [1] }
+            }
+        ]
+    });
+
+    const gameService = {
+        isGameParticipant: async (gameId, userId) => userId === 7,
+        getReplay: async () => recorded(),
+        describeMissingReplay: async () => 'not-recorded'
+    };
+
+    const routes = [];
+
+    beforeAll(function () {
+        const record =
+            (method) =>
+            (path, ...handlers) =>
+                routes.push({ method, path, handlers });
+
+        require('../../../server/api/games.js').init(
+            {
+                get: record('get'),
+                post: record('post'),
+                put: record('put'),
+                patch: record('patch'),
+                delete: record('delete'),
+                use: () => {}
+            },
+            { gameService }
+        );
+    });
+
+    const get = async (user) => {
+        const route = routes.find(
+            (entry) => entry.method === 'get' && entry.path === '/api/games/:gameId/replay'
+        );
+        const handler = route.handlers[route.handlers.length - 1];
+        const sent = {};
+
+        await handler(
+            { params: { gameId: 'game-mine' }, user },
+            {
+                status(code) {
+                    sent.status = code;
+
+                    return this;
+                },
+                send(body) {
+                    sent.status = sent.status || 200;
+                    sent.body = body;
+
+                    return this;
+                }
+            },
+            (err) => {
+                throw err;
+            }
+        );
+
+        return sent;
+    };
+
+    it('strips both hands for a participant below the Archon tier', async function () {
+        const response = await get({
+            id: 7,
+            username: 'seven',
+            permissions: {},
+            capabilities: [],
+            membership: {}
+        });
+
+        expect(response.status).toBe(200);
+        const serialised = JSON.stringify(response.body.replay);
+
+        expect(serialised).not.toContain('hands');
+        expect(serialised).not.toContain('Anger');
+        expect(serialised).not.toContain('Urchin');
+    });
+
+    it('serves an Archon participant their own hand and never the opponent’s', async function () {
+        const response = await get({
+            id: 7,
+            username: 'seven',
+            permissions: {},
+            capabilities: ['advanced_replays'],
+            membership: {}
+        });
+
+        expect(response.status).toBe(200);
+
+        const frame = response.body.replay.snapshots[0];
+
+        expect(frame.hands.seven).toBeDefined();
+        expect(frame.hands.rival).toBeUndefined();
+
+        const serialised = JSON.stringify(response.body.replay);
+
+        expect(serialised).toContain('Anger');
+        expect(serialised).not.toContain('Urchin');
+    });
+
+    it('serves an admin both hands, for investigations', async function () {
+        const response = await get({
+            id: 1,
+            username: 'admin',
+            permissions: { isAdmin: true }
+        });
+
+        expect(response.status).toBe(200);
+
+        const frame = response.body.replay.snapshots[0];
+
+        expect(frame.hands.seven).toBeDefined();
+        expect(frame.hands.rival).toBeDefined();
     });
 });

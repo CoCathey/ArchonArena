@@ -1989,34 +1989,59 @@ class Game extends EventEmitter {
     }
 
     /**
-     * The index of a card identity in the recording's card table, adding it if
-     * this is the first time it has been seen.
+     * The index of a card identity in one of the recording's card tables,
+     * adding it if this is the first time it has been seen.
      *
      * Keyed by the identity itself rather than by the card's uuid, so a card
      * whose identity changes mid-game (a token creature, anything under
      * `copyCard`) gets a second entry and the snapshots either side of the
      * change each point at the right one.
      */
+    indexReplayCardIn(table, keys, summary) {
+        const identity = Game.replayCardIdentity(summary);
+        const key = JSON.stringify(identity);
+        const existing = keys.get(key);
+
+        if (existing !== undefined) {
+            return existing;
+        }
+
+        const index = table.length;
+
+        table.push(identity);
+        keys.set(key, index);
+
+        return index;
+    }
+
+    /** The index of a card identity in the recording's public card table. */
     indexReplayCard(summary) {
         if (!this.replayCards) {
             this.replayCards = [];
             this.replayCardKeys = new Map();
         }
 
-        const identity = Game.replayCardIdentity(summary);
-        const key = JSON.stringify(identity);
-        const existing = this.replayCardKeys.get(key);
+        return this.indexReplayCardIn(this.replayCards, this.replayCardKeys, summary);
+    }
 
-        if (existing !== undefined) {
-            return existing;
+    /**
+     * ARCHON (F3): the index of a card identity in the recording's SEPARATE
+     * hand-card table.
+     *
+     * Hands are hidden information, and the public card table must stay free
+     * of them: an identity is only added to `cards` when a card shows up in an
+     * open zone, so even the set of entries in that table reveals nothing a
+     * live spectator would not have seen. Cards recorded in hands index into
+     * `handCards` instead, and the two are stripped together
+     * (`stripReplayHands`) whenever a reader may not see them.
+     */
+    indexReplayHandCard(summary) {
+        if (!this.replayHandCards) {
+            this.replayHandCards = [];
+            this.replayHandCardKeys = new Map();
         }
 
-        const index = this.replayCards.length;
-
-        this.replayCards.push(identity);
-        this.replayCardKeys.set(key, index);
-
-        return index;
+        return this.indexReplayCardIn(this.replayHandCards, this.replayHandCardKeys, summary);
     }
 
     /**
@@ -2122,6 +2147,34 @@ class Game extends EventEmitter {
     }
 
     /**
+     * ARCHON (F3): each player's hand at this moment, for the misplay review.
+     *
+     * NOT part of the board snapshot, on purpose. The board is rendered through
+     * an AnonymousSpectator so a recording can never show more than watching
+     * would have - and there is a test holding that door shut. Hands are the
+     * one thing a review of your own play cannot do without ("what could I
+     * have called instead?"), so they are captured alongside each frame from
+     * each player's OWN perspective, as references into a separate
+     * `handCards` table, and both travel under keys of their own that the
+     * serving layer strips for anyone who may not read them: share links
+     * always, and any account below the Archon tier.
+     *
+     * A card hidden even from its holder (facedown in hand) records as its
+     * facedown identity, exactly as the holder saw it.
+     */
+    getHandsSnapshot() {
+        const hands = {};
+
+        for (const player of this.getPlayers()) {
+            hands[player.name] = player
+                .getSummaryForCardList(player.hand, player, true)
+                .map((card) => this.indexReplayHandCard(card));
+        }
+
+        return hands;
+    }
+
+    /**
      * ARCHON: append a board snapshot to the in-memory recording, keyed to how
      * far the message log had got, so the viewer can show the board as it stood
      * at any point in the play-by-play.
@@ -2171,7 +2224,16 @@ class Game extends EventEmitter {
         }
 
         try {
-            this.replaySnapshots.push({ messageIndex, board: this.getBoardSnapshot() });
+            // The board first: it is the half that must never fail, and its
+            // capture populates the public card table before the hands touch
+            // their own. `hands` is a sibling of `board` rather than part of
+            // it, so thinning keeps the two aligned and stripping hidden
+            // information is the removal of one key.
+            this.replaySnapshots.push({
+                messageIndex,
+                board: this.getBoardSnapshot(),
+                hands: this.getHandsSnapshot()
+            });
         } catch {
             // A replay is never worth risking a live game over. The flag is
             // returned with the recording and surfaced in the viewer, so a
@@ -2188,11 +2250,13 @@ class Game extends EventEmitter {
      */
     getReplay() {
         return {
-            // v3 adds the final winning snapshot, each player's deck name,
-            // houses and end state, and who went first. A v2 recording is still
-            // readable - the viewer and the analysis both treat everything
-            // added here as optional.
-            version: 3,
+            // v3 added the final winning snapshot, each player's deck name,
+            // houses and end state, and who went first. v4 adds each player's
+            // hand beside every frame (`snapshots[].hands`, indexing into
+            // `handCards`) for the misplay review. Earlier recordings are
+            // still readable - the viewer and the analysis both treat
+            // everything added since as optional.
+            version: 4,
             gameId: this.id,
             gameFormat: this.gameFormat,
             startedAt: this.startedAt,
@@ -2223,6 +2287,11 @@ class Game extends EventEmitter {
             // The card table the snapshots' piles index into. Written once for
             // the whole recording rather than repeated in every frame.
             cards: this.replayCards || [],
+            // The table the recorded hands index into - separate from `cards`
+            // so hidden information never seeps into the public table, and so
+            // stripping the hands (share links, accounts below Archon) removes
+            // every trace of them at once.
+            handCards: this.replayHandCards || [],
             snapshots: this.replaySnapshots || [],
             truncated: !!this.replayTruncated,
             // The game outran the snapshot budget and the board is recorded at

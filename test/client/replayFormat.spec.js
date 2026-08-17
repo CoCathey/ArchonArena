@@ -1,4 +1,11 @@
-import { boardAtStep, hydrateBoard, hydrateCard, hydratePile } from '../../client/replayFormat';
+import {
+    boardAtStep,
+    handsAtStep,
+    hydrateBoard,
+    hydrateCard,
+    hydratePile,
+    snapshotAtStep
+} from '../../client/replayFormat';
 
 /**
  * ARCHON: reading a recording, whichever version wrote it.
@@ -146,6 +153,55 @@ describe('replay format', function () {
         it('copes with a recording that has no boards at all', function () {
             expect(boardAtStep([], 10)).toBe(null);
             expect(boardAtStep(undefined, 10)).toBe(null);
+        });
+    });
+
+    // ARCHON (F3): the recorded hands, resolved for the hand pile the viewer
+    // draws. Whatever the server let this reader have is what arrives here -
+    // their own hand, both for an admin, none on a share link - so the only
+    // jobs are picking the right frame and resolving the hand-card table.
+    describe('handsAtStep', function () {
+        const handCards = [
+            { id: 'anger', name: 'Anger', image: 'anger', house: 'brobnar', type: 'action' },
+            { id: 'troll', name: 'Troll', image: 'troll', house: 'brobnar', type: 'creature' }
+        ];
+        const snapshots = [
+            { messageIndex: 5, board: { round: 1 }, hands: { alice: [0, 1] } },
+            { messageIndex: 12, board: { round: 2 }, hands: { alice: [1] } },
+            // An older frame shape with no hands at all.
+            { messageIndex: 30, board: { round: 3 } }
+        ];
+
+        it('resolves the hand recorded at or before the position', function () {
+            const hands = handsAtStep(snapshots, 7, handCards);
+
+            expect(hands.alice.length).toBe(2);
+            expect(hands.alice[0].name).toBe('Anger');
+            expect(hands.alice[0].location).toBe('hand');
+            expect(handsAtStep(snapshots, 12, handCards).alice[0].name).toBe('Troll');
+        });
+
+        it('is empty before the first frame, and on frames with no hands', function () {
+            expect(handsAtStep(snapshots, 2, handCards)).toEqual({});
+            expect(handsAtStep(snapshots, 40, handCards)).toEqual({});
+            expect(handsAtStep(undefined, 10, handCards)).toEqual({});
+        });
+
+        it('drops a hand entry the table does not have rather than drawing a hole', function () {
+            const hands = handsAtStep(
+                [{ messageIndex: 1, hands: { alice: [0, 99] } }],
+                5,
+                handCards
+            );
+
+            expect(hands.alice.length).toBe(1);
+        });
+
+        it('snapshotAtStep hands the whole frame over, board and hands together', function () {
+            const frame = snapshotAtStep(snapshots, 12);
+
+            expect(frame.board.round).toBe(2);
+            expect(frame.hands.alice).toEqual([1]);
         });
     });
 });
