@@ -48,6 +48,7 @@ decks it may play.
 
 ```
 server/services/botgames/roster.js           the thirteen houses and their default names
+server/services/botplayer/decisions.js       the move list, shared with the lab
 server/services/botgames/BotService.js       accounts, admin edits, who hosts, which deck
 server/services/botplayer/BotPolicy.js       how a bot answers any prompt (shared)
 server/services/championschallenge/SimulatedGame.js  the lab's driver, delegating to BotPolicy
@@ -63,17 +64,43 @@ server/services/settings/registry.js         the `bots` section (edited on the b
 
 Six properties are worth keeping if this is ever extended.
 
-**One policy, every practice bot.** The prompt-answering policy started as
-the Champion's Challenge sparring partner and was extracted into `BotPolicy`,
-which all thirteen bots now drive. The lab has since grown a learned policy
-of its own (N21's `labPolicy`), so the two are siblings rather than one
-shared brain: the practice bots deliberately keep the plain baseline, which
-needs no seed, no decision log and no training diary. What both keep is the
-important part - answering from the buttons and selectable cards the prompt
-itself publishes, so any of the ~2,700 card implementations can be answered,
-and playing through `menuButton`/`cardClicked`, the same calls a browser
-click becomes, so a bot cannot cheat and upstream card fixes apply to it
-automatically.
+**They play what the lab learned.** The Champion's Challenge (N21) trains a
+model by playing thousands of games against itself and crowning a champion
+only when it can prove it is better. The practice bots score their moves with
+that same champion model, over the same enumerated move list
+(`services/botplayer/decisions`, shared with the lab so a fork and a live
+table cannot disagree about what "candidate 3" means). A stronger champion is
+therefore a stronger opponent in the lobby, with no second brain to maintain
+and nothing to copy across.
+
+The list is deliberately conservative - exactly the moves the old hand-written
+heuristic could make - so the model reorders sound play rather than inventing
+unsound play, and End Turn is offered only once nothing else remains, which is
+what stops a young model discovering the strategy of doing nothing. When a card
+is clicked the reason is remembered, so the menu that opens next is answered
+with the move the model chose rather than by a fixed preference order. With no
+champion yet (a fresh site) or with the learned play switched off, the bots
+fall back to those heuristics and keep playing.
+
+What both bots keep is the important part: answering from the buttons and
+selectable cards the prompt itself publishes, so any of the ~2,700 card
+implementations can be answered, and playing through `menuButton`/`cardClicked`
+
+-   the same calls a browser click becomes - so a bot cannot cheat and upstream
+    card fixes apply to it automatically.
+
+**What the deep planner does NOT do here.** The lab's deep bot plans by
+_forking_ the game: it replays a seeded input log into a copy, tries a
+candidate move there, rolls the copy forward and scores where it led. That
+needs two things a live table does not have - a seed the whole game ran under,
+and every input expressible in the replay log, including a person's clicks -
+and it costs roughly a minute of compute per game, which at a table is a
+minute of somebody's evening. So the practice bots take the learned model (all
+of the strength, none of the wait) and leave forking to the lab, where the
+opponent is another computer and nobody is waiting. Giving the live bots deep
+thought means seeding practice games and logging both seats' inputs; the
+place it would pay off first is the bot-vs-bot showcase, where both seats are
+already ours.
 
 **Termination has a human witness now.** The lab could abandon a wedged game
 and record nothing; at a real table somebody is sitting across from the bot.
@@ -148,6 +175,31 @@ button would otherwise belong to a player with no hands:
 re-checks everything and reports whether it started, so calling it from
 anywhere, repeatedly, is safe.
 
+**They think visibly.** The bot decides in microseconds, and a whole turn
+landing in one frame reads as a glitch rather than an opponent: cards appear
+already played and there is nothing to follow. So a pump plays ONE move and
+then waits (`bots.thinkMs`, jittered ±25% so the rhythm is not metronomic),
+pushing the board out between plays. It is still far faster than a person -
+this is legibility, not a handicap - and zero means instant, which is what
+bot-vs-bot games and the specs use.
+
+**They are players, not members.** Being an ordinary account is what lets a
+bot hold a seat, a deck and a picture with no second kind of player in the
+codebase - and the price is that surfaces about the _community_ have to say
+"people only" out loud. The member directory and its search do
+(`notABotSql`, defined once beside the sentinel email): a bot is found in the
+lobby, by playing it, not by browsing the people who play here.
+
+**A node outlives one bad game.** The node holds every live game in memory
+and nowhere else, so an uncaught throw - from a timer, a socket callback, or
+a promise nobody awaited - used to end every game on it at once: boards
+freeze, the connection drops, and there is nothing left to reconnect to.
+Errors raised while resolving a game are contained per-game
+(`runAndCatchErrors`), and now the escapes are too: the periodic sweep
+contains each game's work, the connection handler refuses one socket rather
+than the process, and last-resort `uncaughtException` / `unhandledRejection`
+guards log loudly and keep the node serving everybody else.
+
 **A bot never holds the node.** The engine is synchronous and the game node
 is single-threaded and shared, so a bot thinking inside one call is not "a
 slow bot": every other game on that node waits behind it, including the ping
@@ -176,7 +228,8 @@ Skyborn and Unfathomable need decks imported before those four can play.
 **Bot Settings** (`/admin/bots`, isAdmin) holds both halves: the roster - each
 bot's name, picture, profile, on/off switch and deck count - and the knobs
 that govern all of them (keep a table open at all, most concurrent games, the
-joiner grace period, spectators, the concede cap). The knobs are an ordinary
+joiner grace period, spectators, the pause between plays, whether they play
+the learned policy, the concede cap). The knobs are an ordinary
 settings section (`bots`) stored, validated and audited like every other; the
 registry's `page` field is what moves it off the general Site Settings screen
 and onto this one, next to the roster it governs. All of it is read per sweep

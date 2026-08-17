@@ -1,5 +1,10 @@
 const logger = require('../../log');
 const { BOT_ROSTER, botEmail, houseLabel, isBotHouse } = require('./roster');
+// ARCHON (N21/F9): the Champion's Challenge's reigning model. The practice
+// bots play what the lab learned rather than a second brain maintained
+// separately - and a site that has never trained one simply gets the
+// heuristics, which is what null means here.
+const BotPolicyService = require('../championschallenge/BotPolicyService');
 
 /**
  * ARCHON (F9): the practice bots - who they are, and which decks they play.
@@ -56,6 +61,9 @@ class BotService {
         this.db = db || require('../../db');
 
         this.lastEnsureFailureLogMs = {};
+        // Champion lookups are cached inside the policy service, so asking
+        // per table costs nothing worth avoiding.
+        this.policyService = new BotPolicyService(undefined, this.db, this.settingsService);
     }
 
     /** Admin-configurable knobs, defaults from the settings registry. */
@@ -198,6 +206,28 @@ class BotService {
                 'ON CONFLICT ("House") DO UPDATE SET "UserId" = EXCLUDED."UserId"',
             [house, userId]
         );
+    }
+
+    /**
+     * The model the practice bots play with, or null for the heuristics.
+     *
+     * Null is a perfectly good answer: it is what a site gets before the lab
+     * has crowned a champion, and what an admin gets when they switch the
+     * learned play off. A failure to read it is also null - a bot that plays
+     * a little worse beats a table that does not open.
+     */
+    async championModel() {
+        if (this.getConfig().useLearnedPolicy === false) {
+            return null;
+        }
+
+        try {
+            return await this.policyService.champion();
+        } catch (err) {
+            logger.warn('Could not read the champion bot policy; playing the heuristics', err);
+
+            return null;
+        }
     }
 
     /**

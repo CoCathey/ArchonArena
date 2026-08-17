@@ -35,6 +35,8 @@ class BotDriver {
      * @param {object} [options]
      * @param {number} [options.maxTurns] concede past this many rounds
      * @param {number} [options.maxInteractions] concede past this many inputs
+     * @param {object} [options.policy] the learned model to play with
+     * @param {number} [options.thinkMs] pause between plays; 0 plays instantly
      * @param {number} [options.maxPumpMs] event-loop budget for one pump
      * @param {function} [options.resume] continue a pump that ran out of budget
      * @param {function} [options.schedule] injectable timer, for tests
@@ -64,14 +66,64 @@ class BotDriver {
          * the loop back and finishes on a later tick.
          */
         this.maxPumpMs = Number.isFinite(options.maxPumpMs) ? options.maxPumpMs : 1000;
+        /**
+         * ARCHON (F9): the bot thinks visibly.
+         *
+         * It decides in microseconds, and a whole turn landing in one frame
+         * reads as a glitch rather than as an opponent: cards appear already
+         * played, and the person across the table cannot follow what
+         * happened to them. So each play waits a moment, with a little
+         * jitter so the rhythm is not metronomic.
+         *
+         * Zero means instantly, which is what the specs and any bot-vs-bot
+         * game want - nobody is watching those in real time.
+         */
+        this.thinkMs = Number.isFinite(options.thinkMs) ? Math.max(0, options.thinkMs) : 0;
         this.resume = options.resume || null;
-        this.schedule = options.schedule || ((callback) => setTimeout(callback, 0));
+        this.schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay || 0));
         this.now = options.now || (() => Date.now());
-        this.policy = new BotPolicy({ rng: options.rng });
+        this.policy = new BotPolicy({ rng: options.rng, policy: options.policy });
 
         this.interactions = 0;
         this.conceded = false;
         this.resumeScheduled = false;
+        // True only while a scheduled continuation is running: a pump that
+        // arrives any other way (a human's move, the sweep) is the start of
+        // a think, not the end of one.
+        this.resuming = false;
+    }
+
+    /** How long to pause before the next play. */
+    thinkDelay() {
+        if (this.thinkMs <= 0) {
+            return 0;
+        }
+
+        // +/- 25%, so a chain of plays does not tick like a clock.
+        return Math.round(this.thinkMs * (0.75 + this.rngValue() * 0.5));
+    }
+
+    rngValue() {
+        return this.policy && typeof this.policy.rng === 'function'
+            ? this.policy.rng()
+            : Math.random();
+    }
+
+    /** Has a seat this driver plays got something it could answer? */
+    botCanAct(game) {
+        return this.botNames.some((name) => {
+            const player = game.getPlayerByName(name);
+
+            if (!player || player.left) {
+                return false;
+            }
+
+            const state = player.promptState;
+            const buttons = (state && state.buttons) || [];
+            const selectable = (state && state.selectableCards) || [];
+
+            return buttons.some((button) => !button.disabled) || selectable.length > 0;
+        });
     }
 
     /**
@@ -91,6 +143,16 @@ class BotDriver {
         const deadline = this.now() + this.maxPumpMs;
         let acted = false;
         let idleContinues = 0;
+
+        // A pump that arrives from outside - the human moved, the game just
+        // started, the sweep came round - is the moment the bot starts
+        // thinking, not the moment it plays. The pause happens first so the
+        // opponent's move lands on screen alone, the way a person's does.
+        if (this.thinkMs > 0 && !this.resuming && this.botCanAct(game)) {
+            this.scheduleResume(game, this.thinkDelay());
+
+            return false;
+        }
 
         while (!game.winner) {
             // Budget first: whatever is left to do is picked up by the
@@ -126,6 +188,16 @@ class BotDriver {
                     this.interactions++;
                     game.notePlayerEvent(name);
                     game.continue();
+
+                    // One play, then think again - so a turn arrives as a
+                    // sequence a person can follow rather than as a single
+                    // finished position. The continuation pushes the board
+                    // out as it goes.
+                    if (this.thinkMs > 0) {
+                        this.scheduleResume(game, this.thinkDelay());
+
+                        return true;
+                    }
                 }
             }
 
@@ -151,7 +223,7 @@ class BotDriver {
      * (and answer the lobby's ping) in between. One continuation at a time:
      * the pump that resumes reschedules itself if it too runs out of budget.
      */
-    scheduleResume(game) {
+    scheduleResume(game, delayMs = 0) {
         if (this.resumeScheduled || !this.resume || game.winner) {
             return;
         }
@@ -160,8 +232,14 @@ class BotDriver {
 
         this.schedule(() => {
             this.resumeScheduled = false;
-            this.resume();
-        });
+            this.resuming = true;
+
+            try {
+                this.resume();
+            } finally {
+                this.resuming = false;
+            }
+        }, delayMs);
     }
 
     /**

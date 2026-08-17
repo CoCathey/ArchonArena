@@ -880,6 +880,13 @@ class Lobby {
         game.botGame = true;
         game.botHouse = bot.house;
         game.botMaxTurns = config.maxTurns;
+        game.botThinkMs = config.thinkMs;
+        // ARCHON (N21): the brain the bot plays with, resolved when the table
+        // opens rather than per move - it travels to the game node with the
+        // rest of the table, and the node has no database to ask. Null is
+        // fine and common: it means the heuristics, which is what a site
+        // plays until the lab crowns a champion.
+        game.botPolicy = await this.botService.championModel();
         // 'TBA' is the platform's existing "no socket" id: the lobby and the
         // node both already treat such a seat as connectionless, so the game
         // closes itself when the human is gone instead of waiting on the bot.

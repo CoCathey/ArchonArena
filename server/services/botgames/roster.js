@@ -72,6 +72,21 @@ function botEmail(house) {
     return `bot+${house}@${BOT_EMAIL_DOMAIN}`;
 }
 
+/**
+ * "This row is not a bot", for the queries that list PEOPLE.
+ *
+ * The bots are ordinary accounts so that every gameplay path treats them as
+ * players - which means the surfaces about the community have to say
+ * otherwise explicitly. A bot belongs in the lobby, where you can play it,
+ * and on its own profile, which an admin writes; it does not belong in the
+ * member directory or in a search for someone to friend.
+ *
+ * @param {string} alias the table alias holding "Email"
+ */
+function notABotSql(alias) {
+    return `${alias}."Email" NOT LIKE '%@${BOT_EMAIL_DOMAIN}'`;
+}
+
 /** Is this account one of ours? */
 function isBotEmail(email) {
     return typeof email === 'string' && email.toLowerCase().endsWith(`@${BOT_EMAIL_DOMAIN}`);
@@ -98,6 +113,7 @@ module.exports = {
     HOUSE_LABELS,
     botEmail,
     isBotEmail,
+    notABotSql,
     isBotHouse,
     houseLabel,
     defaultNameFor

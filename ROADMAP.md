@@ -1648,6 +1648,15 @@ commit to it, and run the engine as a continuous soak test.
         different character playing a different colour of deck. Games run on the real engine
         on the real game node, answering instantly; wedges end in an honest concede, never a
         hang, and a pump can never hold the node's event loop.
+-   [x] **The practice bots play the champion model.** The move list and the learned policy
+        are shared with the Champion's Challenge (`server/services/botplayer/decisions.js`,
+        N21's `labPolicy`), so the lab's training shows up in the lobby with no second brain
+        to maintain; a site with no champion yet plays the heuristics. **(admin-config)**
+        `bots.useLearnedPolicy`. The lab's DEEP planner stays in the lab: it plans by forking
+        a seeded replay, which a live table with a person clicking in it cannot provide, and
+        costs about a minute of compute per game. Deep thought at a live table wants seeded
+        practice games and a logged input stream first — the bot-vs-bot showcase is where
+        that pays off, since both seats are ours.
 -   [x] **Bot Settings** (`/admin/bots`, isAdmin): the roster with each bot's name, picture,
         profile, on/off switch and deck count, plus the knobs that govern all of them. Bots
         are ordinary accounts, so their pictures and profiles go through the same pipeline a

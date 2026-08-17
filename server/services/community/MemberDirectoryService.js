@@ -1,3 +1,5 @@
+const { notABotSql } = require('../botgames/roster');
+
 /**
  * Public member directory (Phase 9): privacy-safe search over accounts.
  * Only exposes what is already public site behaviour: username, joined
@@ -16,7 +18,12 @@ class MemberDirectoryService {
         const rows = await this.db.query(
             'SELECT COUNT(*) AS "Total", ' +
                 'COUNT(*) FILTER (WHERE "Registered" > now() AT TIME ZONE \'utc\' - interval \'24 hours\') AS "Joined24h" ' +
-                'FROM "Users" WHERE "Disabled" IS NOT TRUE AND "Verified" IS TRUE',
+                // ARCHON (F9): people only. The practice bots are real
+                // accounts - that is what lets them sit at a table - but a
+                // directory of the community is not where they belong, and
+                // the count has to match the list it describes.
+                `FROM "Users" u WHERE u."Disabled" IS NOT TRUE AND u."Verified" IS TRUE ` +
+                `AND ${notABotSql('u')}`,
             []
         );
 
@@ -31,7 +38,9 @@ class MemberDirectoryService {
         const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
 
         const params = [];
-        const conditions = ['u."Disabled" IS NOT TRUE', 'u."Verified" IS TRUE'];
+        // ARCHON (F9): a search for somebody to friend or look up should
+        // never turn up a bot. They are found in the lobby, by playing them.
+        const conditions = ['u."Disabled" IS NOT TRUE', 'u."Verified" IS TRUE', notABotSql('u')];
 
         if (query) {
             params.push(`%${query}%`);
