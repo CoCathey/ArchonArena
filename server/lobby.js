@@ -748,22 +748,54 @@ class Lobby {
             const recycleMs = Math.max(1, Number(config.pendingRecycleMinutes) || 10) * 60 * 1000;
 
             for (const game of pendingBotGames()) {
-                // A table hosted under a previous bot name is nobody's now.
-                if (game.owner.username !== botUser.username) {
-                    this.removeHelperBotGame(game);
-                    continue;
-                }
-
                 const humanSeated = Object.values(game.getPlayers()).some(
                     (player) => !player.isBot
                 );
 
+                // A table hosted under a previous bot name is nobody's now -
+                // but never one somebody is sitting at. Deleting a table out
+                // from under a player is worse than leaving a stray one up.
+                if (game.owner.username !== botUser.username) {
+                    if (!humanSeated) {
+                        this.removeHelperBotGame(game);
+                        continue;
+                    }
+                }
+
                 if (!humanSeated) {
                     game.helperBotHumanSince = undefined;
-                } else if (
-                    game.helperBotHumanSince &&
-                    Date.now() - game.helperBotHumanSince > recycleMs
-                ) {
+                    continue;
+                }
+
+                /**
+                 * ARCHON (F9): the heal, and the reason a bot table can never
+                 * sit there ready-but-idle.
+                 *
+                 * onSelectDeck starts the table the instant the human picks a
+                 * deck, and that is what players actually experience. But it
+                 * is one hook on one path, and a table nobody can start is a
+                 * dead end for the person sitting at it: the bot owns the
+                 * table, so the Start button belongs to a player with no
+                 * hands. Anything that costs us that single call - a game
+                 * node briefly unavailable, a deck applied down a path that
+                 * does not reach the hook, a rejected promise after the deck
+                 * was already seated - used to strand the table forever.
+                 *
+                 * So readiness is re-checked every tick from the lobby's own
+                 * state rather than trusted to an event. Costs one predicate
+                 * per table and removes the whole class of failure.
+                 */
+                if (this.startHelperBotGameIfReady(game)) {
+                    continue;
+                }
+
+                // A human who is still choosing needs a clock, whichever path
+                // seated them.
+                if (!game.helperBotHumanSince) {
+                    game.helperBotHumanSince = Date.now();
+                }
+
+                if (Date.now() - game.helperBotHumanSince > recycleMs) {
                     // Somebody sat down and never picked a deck. Free the
                     // table for the next player; the joiner just returns to
                     // the lobby.
@@ -872,16 +904,22 @@ class Lobby {
      * ARCHON (F9): a bot table starts itself the moment its human has a deck
      * - the mirror of startTournamentGameIfReady, for the same reason: the
      * owner seat (the bot) has no hand to press Start with.
+     *
+     * Safe to call repeatedly from anywhere: it re-derives everything from
+     * the table and does nothing unless the table is genuinely ready. The
+     * sweep leans on that, calling it every tick as the backstop.
+     *
+     * @returns {boolean} whether the game was started by this call
      */
     startHelperBotGameIfReady(game) {
         if (!game || game.started || !game.botGame) {
-            return;
+            return false;
         }
 
         const players = Object.values(game.getPlayers());
 
         if (players.length < 2 || players.some((player) => !player.deck)) {
-            return;
+            return false;
         }
 
         const gameNode = this.router.startGame(game);
@@ -900,11 +938,18 @@ class Lobby {
                 }
             }
 
-            return;
+            return false;
         }
 
         game.node = gameNode;
         game.started = true;
+
+        logger.info(
+            `Helper Bot game ${game.id} started against ${players
+                .filter((player) => !player.isBot)
+                .map((player) => player.name)
+                .join(', ')}`
+        );
 
         this.broadcastGameMessage('updategame', game);
 
@@ -923,6 +968,8 @@ class Lobby {
 
             this.sendHandoff(socket, gameNode, game.id);
         }
+
+        return true;
     }
 
     /**
@@ -1757,6 +1804,29 @@ class Lobby {
             return;
         }
 
+        // ARCHON (F9): the Helper Bot owns its table but has no hands to
+        // press Start with, so ownership cannot be what gates starting one -
+        // the player who joined it may. Selecting a deck normally starts the
+        // table before anybody reaches for the button; this is what makes the
+        // button in front of them real rather than decorative.
+        if (game.botGame) {
+            const seat = game.getPlayerByName(socket.user.username);
+
+            if (!seat) {
+                return;
+            }
+
+            if (!seat.deck) {
+                socket.send('gameerror', 'Select a deck before starting the game');
+
+                return;
+            }
+
+            this.startHelperBotGameIfReady(game);
+
+            return;
+        }
+
         if (!game.isOwner(socket.user.username)) {
             return;
         }
@@ -2203,6 +2273,15 @@ class Lobby {
                 }
 
                 logger.info(err);
+
+                // ARCHON (F9): the deck is seated before the parts of
+                // selection that can fail late (the SAS attach, a state
+                // push), so a table can be perfectly ready and still arrive
+                // here. Ask anyway - it refuses unless everything is really
+                // in place, and the alternative is a table nobody can start.
+                if (game.botGame) {
+                    this.startHelperBotGameIfReady(game);
+                }
 
                 return;
             });

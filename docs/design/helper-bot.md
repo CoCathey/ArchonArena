@@ -80,12 +80,35 @@ re-reads the admin config (the off switch works without a restart), ensures
 the account, and re-establishes the invariant: one open table while under
 the concurrency cap. A table whose joiner sat down and never picked a deck
 is recycled after a grace period; a table hosted under a previous bot name
-is cleared; a table lost to a node death or lobby restart is simply
-re-hosted. Rematch is the one deliberate detour: the bot holds no socket, so
-the ordinary rematch flow returns the table with both decks still held -
-re-picking a deck starts the next game - and the recycle clock is refreshed
-so the sweep does not sweep it out from under someone who just asked to
-keep playing.
+is cleared — unless somebody is sitting at it, because deleting a table out
+from under a player is worse than leaving a stray one up; a table lost to a
+node death or lobby restart is simply re-hosted. Rematch is the one
+deliberate detour: the bot holds no socket, so the ordinary rematch flow
+returns the table with both decks still held - re-picking a deck starts the
+next game - and the recycle clock is refreshed so the sweep does not sweep
+it out from under someone who just asked to keep playing.
+
+**A ready table cannot sit idle, and is never a dead end.** Starting is
+reachable three ways, because the bot owning the table means the Start
+button would otherwise belong to a player with no hands:
+
+1. **Deck selection starts it** (`onSelectDeck`) — what a player actually
+   experiences, immediate. The deck is seated before the parts of selection
+   that can fail late (the SAS attach, a state push), so the failure path
+   asks to start too rather than stranding a table that is genuinely ready.
+2. **The sweep heals it** (≤15s). Readiness is re-derived every tick from
+   the lobby's own state instead of being trusted to a single event, so a
+   game node that was briefly unavailable, a deck applied down a path that
+   does not reach the hook, or a lost callback costs a few seconds rather
+   than the table.
+3. **The joiner can press Start** (`onStartGame`, and `canClickStart` in the
+   client). Ownership cannot be the gate at a bot table, so the seated
+   player holds the button; a joiner with no deck is told to pick one rather
+   than clicking into silence.
+
+`startHelperBotGameIfReady` is the one launcher behind all three: it
+re-checks everything and reports whether it started, so calling it from
+anywhere, repeatedly, is safe.
 
 ## The deck
 

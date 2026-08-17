@@ -265,6 +265,134 @@ describe('the Helper Bot table', function () {
         expect(botGames().length).toBe(0);
     });
 
+    /**
+     * The bug this section exists to prevent: a table sitting ready and
+     * unstarted with somebody at it. The bot owns the table, so before this
+     * the Start button belonged to a player with no hands, and any tick that
+     * cost us the deck-selection hook stranded the joiner permanently.
+     */
+    describe('a ready table always starts', function () {
+        const seatHumanWithDeck = async (game, name = 'Ana') => {
+            const person = humanUser(name);
+            const socket = {
+                id: `socket-${name}`,
+                user: person,
+                joinChannel: () => {},
+                sent: [],
+                send: (...args) => socket.sent.push(args)
+            };
+
+            lobby.sockets[socket.id] = socket;
+            lobby.socketsByName[name] = socket;
+            game.join(socket.id, person);
+            await lobby.applyDeckSelection(game, name, 7, false);
+
+            return socket;
+        };
+
+        it('is healed by the sweep when the deck-selection hook never fired', async function () {
+            await lobby.runHelperBotSweep();
+
+            const [game] = botGames();
+
+            // Both seats decked, nobody started it - whatever went wrong on
+            // the selection path (a node briefly gone, a late rejection).
+            await seatHumanWithDeck(game);
+            expect(game.started).toBe(false);
+
+            await lobby.runHelperBotSweep();
+
+            expect(game.started).toBe(true);
+            expect(lobby.handoffs).toEqual([{ user: 'Ana', gameId: game.id }]);
+        });
+
+        it('is started by the joiner pressing Start, though the bot owns the table', async function () {
+            await lobby.runHelperBotSweep();
+
+            const [game] = botGames();
+            const socket = await seatHumanWithDeck(game);
+
+            // The bot is the owner, so the ordinary owner gate would refuse.
+            expect(game.isOwner('Ana')).toBe(false);
+
+            lobby.onStartGame(socket, game.id);
+
+            expect(game.started).toBe(true);
+            expect(lobby.handoffs).toEqual([{ user: 'Ana', gameId: game.id }]);
+        });
+
+        it('tells a joiner with no deck to pick one rather than doing nothing', async function () {
+            await lobby.runHelperBotSweep();
+
+            const [game] = botGames();
+            const person = humanUser('Ana');
+            const socket = {
+                id: 'socket-Ana',
+                user: person,
+                joinChannel: () => {},
+                sent: [],
+                send: (...args) => socket.sent.push(args)
+            };
+
+            lobby.sockets[socket.id] = socket;
+            game.join(socket.id, person);
+
+            lobby.onStartGame(socket, game.id);
+
+            expect(game.started).toBe(false);
+            expect(socket.sent).toEqual([['gameerror', 'Select a deck before starting the game']]);
+        });
+
+        it('cannot be started by somebody who is not sitting at it', async function () {
+            await lobby.runHelperBotSweep();
+
+            const [game] = botGames();
+
+            await seatHumanWithDeck(game);
+            game.started = false;
+
+            const stranger = humanUser('Bob');
+            const socket = {
+                id: 'socket-Bob',
+                user: stranger,
+                sent: [],
+                send: (...args) => socket.sent.push(args)
+            };
+
+            lobby.onStartGame(socket, game.id);
+
+            expect(game.started).toBe(false);
+        });
+
+        it('is never deleted out from under a seated player', async function () {
+            await lobby.runHelperBotSweep();
+
+            const [game] = botGames();
+            const person = humanUser('Ana');
+
+            game.join('socket-ana', person);
+            game.helperBotHumanSince = Date.now();
+
+            // The admin renamed the bot: the table is hosted under a name
+            // that is no longer the bot's, but somebody is sitting at it.
+            config.botUsername = 'ArenaBot';
+            service.cachedUser = null;
+            service.userService.getUserByUsername = async () =>
+                new User({
+                    id: 100,
+                    username: 'ArenaBot',
+                    email: 'bot+arenabot@helper-bot.invalid',
+                    settings: {},
+                    permissions: {},
+                    blockList: []
+                });
+
+            await lobby.runHelperBotSweep();
+
+            expect(lobby.games[game.id]).toBe(game);
+        });
+    });
+
     it('falls back to a standalone deck when the bot owns none', async function () {
         service.deckService = {
             getRandomDeckIdForUser: async () => null,
