@@ -1,5 +1,6 @@
 const logger = require('../../log');
 const { BOT_ROSTER, botEmail, houseLabel, isBotHouse } = require('./roster');
+const { DEFAULT_DIFFICULTY, difficultyBand } = require('./difficulty');
 // ARCHON (N21/F9): the Champion's Challenge's reigning model. The practice
 // bots play what the lab learned rather than a second brain maintained
 // separately - and a site that has never trained one simply gets the
@@ -325,18 +326,25 @@ class BotService {
         return bots;
     }
 
-    /** How many decks of this bot's house it can choose from. */
+    /**
+     * How many decks of this bot's house it can choose from.
+     *
+     * The imported library, counted per deck rather than per owner - the pool
+     * the bot actually draws from, so the number an admin reads is the number
+     * of options the bot has. Falls back to the standalone decks, which is
+     * what a site with nothing imported is really playing.
+     */
     async countPlayableDecks(bot) {
-        let owned = 0;
+        let imported = 0;
 
         try {
-            owned = await this.deckService.countDecksForUserWithHouse(bot.user.id, bot.house);
+            imported = await this.deckService.countPracticeDecks({ house: bot.house });
         } catch (err) {
             logger.error(`Failed to count decks for the ${bot.label} bot`, err);
         }
 
-        if (owned > 0) {
-            return owned;
+        if (imported > 0) {
+            return imported;
         }
 
         const standalones = await this.standaloneDecksForHouse(bot.house);
@@ -447,8 +455,9 @@ class BotService {
      * an empty table. Returns `{ bot, deck }` or null when nobody can host.
      *
      * @param {string[]} [busyUsernames] accounts already seated somewhere
+     * @param {string} [difficulty] the ARI band to bring a deck from
      */
-    async pickHost(busyUsernames = []) {
+    async pickHost(busyUsernames = [], difficulty = DEFAULT_DIFFICULTY) {
         const busy = new Set(busyUsernames.map((name) => String(name).toLowerCase()));
         const roster = await this.ensureRoster();
         const candidates = roster.filter(
@@ -456,7 +465,7 @@ class BotService {
         );
 
         for (const bot of this.shuffle(candidates)) {
-            const deck = await this.pickDeckSelection(bot);
+            const deck = await this.pickDeckSelection(bot, difficulty);
 
             if (deck) {
                 return { bot, deck };
@@ -467,26 +476,53 @@ class BotService {
     }
 
     /**
-     * A random deck for this bot to play: one of its own containing its
-     * house, or - so a fresh site has working bots with no setup at all - a
-     * standalone deck containing it.
+     * A random deck for this bot to play, at the strength the table asked for.
      *
+     * Where the deck comes from, in order:
+     *
+     *  1. The platform's imported library, filtered to the bot's house and
+     *     the difficulty's ARI band. This is the pool that makes the settings
+     *     mean something - every deck the site has ever imported from Master
+     *     Vault, counted once per deck rather than once per owner.
+     *  2. The same library with the band dropped. A young site may have
+     *     nothing rated in a band at all, and a table that opens with a
+     *     slightly-wrong deck beats a table that does not open.
+     *  3. A standalone deck containing the house - the zero-setup fallback,
+     *     so a site with no imported decks whatsoever still has bots.
+     *
+     * @param {object} bot a roster entry
+     * @param {string} [difficulty]
      * @returns {Promise<{deckId: number, isStandalone: boolean} | null>}
      */
-    async pickDeckSelection(bot) {
-        let ownDeckId = null;
+    async pickDeckSelection(bot, difficulty = DEFAULT_DIFFICULTY) {
+        const band = difficultyBand(difficulty);
 
-        try {
-            ownDeckId = await this.deckService.getRandomDeckIdForUser(bot.user.id, {
-                isAlliance: false,
-                house: bot.house
-            });
-        } catch (err) {
-            logger.error(`The ${bot.label} bot could not pick from its collection`, err);
-        }
+        for (const banded of [true, false]) {
+            let deckId = null;
 
-        if (ownDeckId) {
-            return { deckId: ownDeckId, isStandalone: false };
+            try {
+                deckId = await this.deckService.getRandomPracticeDeckId({
+                    house: bot.house,
+                    minAri: banded ? band.minAri : undefined,
+                    maxAri: banded ? band.maxAri : undefined
+                });
+            } catch (err) {
+                logger.error(`The ${bot.label} bot could not pick a deck`, err);
+            }
+
+            if (deckId) {
+                if (!banded) {
+                    this.logOnce(
+                        `band:${band.key}`,
+                        `No imported ${bot.label} deck is rated between ARI ${band.minAri} and ` +
+                            `${band.maxAri}, so the ${band.label} practice table is playing an ` +
+                            'unbanded deck. Import more decks, or let the rating engine see ' +
+                            'more games.'
+                    );
+                }
+
+                return { deckId, isStandalone: false };
+            }
         }
 
         const standalones = await this.standaloneDecksForHouse(bot.house);

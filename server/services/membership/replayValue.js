@@ -113,7 +113,10 @@ function seatViewFromFrame(player, cards) {
         artifacts,
         hand: player.numHandCards || 0,
         archives: (player.cardPiles?.archives || []).length,
-        deck: player.numDeckCards || 0
+        deck: player.numDeckCards || 0,
+        // The discard pile is public and recorded, so this side knows it too -
+        // which is the test every field here has to pass.
+        discard: (player.cardPiles?.discard || []).length
     };
 }
 

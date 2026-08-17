@@ -436,6 +436,11 @@ class PendingGame {
             // picker at all.
             botStyle: this.botStyle || undefined,
             botStyles: this.botGame ? this.botStyles : undefined,
+            // ARCHON (F9): and how hard it is - the ARI band its deck came
+            // from. The same window applies for the same reason: style is how
+            // the bot plays, difficulty is what it brought to play with, and
+            // both are settled before the first card is dealt.
+            botDifficulty: this.botDifficulty || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
@@ -514,6 +519,7 @@ class PendingGame {
             // node's driver its turn cap); the bot seat itself travels on its
             // player record as `isBot`.
             botGame: this.botGame || undefined,
+            botDifficulty: this.botDifficulty || undefined,
             botMaxTurns: this.botMaxTurns,
             botThinkMs: this.botThinkMs,
             // ARCHON (N21): the learned model the bot plays with, or absent

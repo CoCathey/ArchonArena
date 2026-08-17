@@ -9,6 +9,11 @@ const { chooseDecision } = require('./labPolicy');
 // did. See services/botplayer/decisions.
 const {
     INTENT_BUTTONS,
+    activatableProphecies,
+    bestCandidates,
+    bestFateCard,
+    bestFightTarget,
+    houseScore,
     playableFromHand,
     usableInPlay,
     mainWindowCandidates
@@ -81,6 +86,9 @@ const MAIN_WINDOW_TITLE = 'choose a card to play, discard or use';
 const HOUSE_CHOICE_TITLE = 'choose which house you want to activate this turn';
 const END_TURN_CONFIRM_TITLE = 'are you sure you want to end your turn?';
 const MULLIGAN_TITLE = 'keep starting hand?';
+const ACTIVATE_PROPHECY_TITLE = 'activate prophecy?';
+// The cost of activating a prophecy: a card from hand, buried under it.
+const FATE_CARD_MARKER = 'under the prophecy';
 
 /** menuTitle / button.text can be a string or { text, values }. */
 function textOf(value) {
@@ -157,6 +165,8 @@ class SimulatedGame {
         this.fingerprints = [];
         // Which menu action a just-clicked in-play card should resolve to.
         this.pendingIntent = null;
+        // The creature sent to fight, held until the prompt asking whom.
+        this.attacker = null;
         // Set by the replay driver: inputs come from the log, not from choices.
         this.replaying = null;
     }
@@ -332,6 +342,7 @@ class SimulatedGame {
 
         if (title === MAIN_WINDOW_TITLE) {
             this.pendingIntent = null;
+            this.attacker = null;
 
             return await this.playFromMainWindow(game, player, buttons);
         }
@@ -346,6 +357,12 @@ class SimulatedGame {
 
         if (title === MULLIGAN_TITLE) {
             return this.pressByText(game, player, buttons, ['keep hand']);
+        }
+
+        // Only asked because the bot clicked the prophecy, and a No would
+        // leave it activatable for the main window to offer again forever.
+        if (title === ACTIVATE_PROPHECY_TITLE) {
+            return this.pressByText(game, player, buttons, ['yes']);
         }
 
         if (state.selectCard && selectable.length) {
@@ -455,7 +472,7 @@ class SimulatedGame {
      * discovering the strategy of never doing anything.
      */
     async playFromMainWindow(game, player, buttons) {
-        const { hand, inPlay, candidates } = this.mainWindowCandidates(player);
+        const { hand, inPlay, prophecies, candidates } = this.mainWindowCandidates(player);
 
         if (!candidates.length) {
             return this.pressByText(game, player, buttons, ['end turn']);
@@ -469,8 +486,18 @@ class SimulatedGame {
             );
         }
 
+        // The menu that opens next is answered with the move that was
+        // chosen - hand cards included, since a hand card's menu offers
+        // both a play and a discard and the choice between them was the
+        // decision.
+        this.pendingIntent = { kind: chosen.kind };
+
+        if (chosen.list === 'prophecy') {
+            return this.clickProphecyAt(game, player, prophecies, chosen.index);
+        }
+
         if (chosen.list === 'play') {
-            this.pendingIntent = { kind: chosen.kind };
+            this.attacker = chosen.kind === 'fight' ? chosen.card : null;
 
             return this.clickCardAt(game, player, inPlay, chosen.index, 'play');
         }
@@ -521,6 +548,12 @@ class SimulatedGame {
         }
 
         const policy = this.policyFor(player);
+        const attacker = this.attacker;
+
+        // A selection resolves whatever the bot clicked for, so the reason it
+        // clicked does not survive past this prompt either way.
+        this.attacker = null;
+
         let index;
 
         if (policy) {
@@ -530,7 +563,20 @@ class SimulatedGame {
 
             index = Math.max(0, chooseDecision(policy, records, this.temperature, this.rng));
         } else {
-            index = Math.floor(this.rng() * unselected.length);
+            /**
+             * ARCHON (F9): the two selections a plain player can answer
+             * without a model - whom a creature it sent to fight should
+             * attack, and which card to bury under a prophecy it just
+             * activated. Everything else is a card ability's own question,
+             * and a bot with no model has no business guessing at those.
+             */
+            const chosen = prompt.includes(FATE_CARD_MARKER)
+                ? bestFateCard(player, unselected)
+                : bestFightTarget(attacker, unselected);
+
+            index = chosen
+                ? unselected.indexOf(chosen)
+                : Math.floor(this.rng() * unselected.length);
         }
 
         this.noteDecision(game, player, { kind: 'select', card: unselected[index], prompt });
@@ -572,16 +618,11 @@ class SimulatedGame {
             return candidates[Math.max(0, index)];
         }
 
-        // Heuristic order, as ever: play out the hand first, then use the
-        // board, preferring to reap.
-        const handCandidates = candidates.filter((candidate) => candidate.list === 'hand');
-
-        if (handCandidates.length) {
-            return handCandidates[Math.floor(this.rng() * handCandidates.length)];
-        }
-
-        const reaps = candidates.filter((candidate) => candidate.kind === 'reap');
-        const pool = reaps.length ? reaps : candidates;
+        // No model: the plain player's order, from the shared move module -
+        // the same order the practice bots fall back on, so an untrained lab
+        // trains on the play a lobby opponent actually makes. Random within
+        // the leading rank, which is where self-play gets its variety.
+        const pool = bestCandidates(player, candidates);
 
         return pool[Math.floor(this.rng() * pool.length)];
     }
@@ -625,12 +666,9 @@ class SimulatedGame {
             index = 0;
 
             for (let i = 0; i < buttons.length; i++) {
-                const house = textOf(buttons[i].text);
-                const inHand = player.hand.filter((card) => card.hasHouse(house)).length;
-                const ready = player.cardsInPlay.filter(
-                    (card) => card.hasHouse(house) && !card.exhausted
-                ).length;
-                const score = inHand + ready + this.rng() * 0.75;
+                // Shared with the practice bots: what the house can do this
+                // turn, plus what it can take off an opponent about to forge.
+                const score = houseScore(player, textOf(buttons[i].text)) + this.rng() * 0.75;
 
                 if (score > bestScore) {
                     bestScore = score;
@@ -704,6 +742,28 @@ class SimulatedGame {
         }
 
         game.cardClicked(player.name, card.uuid);
+
+        return true;
+    }
+
+    /**
+     * A prophecy is the third input the engine takes, and it needs its own
+     * log entry for the same reason the other two do: a fork replays by
+     * position, and "click the prophecy at index 0" is not something either
+     * of the others can express.
+     */
+    clickProphecyAt(game, player, list, index) {
+        const card = list[index];
+
+        if (!card) {
+            return false;
+        }
+
+        if (this.seed !== undefined && this.seed !== null && !this.replaying) {
+            this.inputLog.push({ p: player.name, t: 'p', i: index, id: card.id });
+        }
+
+        game.clickProphecy(player.name, card.uuid);
 
         return true;
     }
@@ -800,6 +860,17 @@ async function replayTo(deckAlpha, deckOmega, { seed, inputLog, upTo, rolloutSee
                 }
 
                 sim.game.menuButton(entry.p, button.arg, button.uuid, button.method);
+            } else if (entry.t === 'p') {
+                const prophecy = activatableProphecies(player)[entry.i];
+
+                if (!prophecy || prophecy.id !== entry.id) {
+                    throw new Error(
+                        `Fork determinism broke at input ${i}: expected prophecy "${entry.id}", ` +
+                            `found "${prophecy ? prophecy.id : 'nothing'}"`
+                    );
+                }
+
+                sim.game.clickProphecy(entry.p, prophecy.uuid);
             } else {
                 const list = resolveList(sim, player, entry.l);
                 const card = list[entry.i];

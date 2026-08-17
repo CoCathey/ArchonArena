@@ -21,6 +21,20 @@ import { Constants } from '../../constants';
 import PlayerJoinedMp3 from '../../assets/sound/player-joined.mp3';
 import PlayerJoinedOgg from '../../assets/sound/player-joined.ogg';
 
+/**
+ * ARCHON (F9): how hard the practice bot should be.
+ *
+ * Difficulty is the DECK the bot brings, not its brain - the ARI band it
+ * draws from. Mirrored from `server/services/botgames/difficulty`; the
+ * server normalises anything it does not recognise to Medium, so the two
+ * lists drifting apart cannot break a table.
+ */
+const BOT_DIFFICULTIES = [
+    { key: 'easy', label: 'Easy', range: '45-65' },
+    { key: 'medium', label: 'Medium', range: '66-89' },
+    { key: 'hard', label: 'Hard', range: '90-125' }
+];
+
 function showNotification(notification) {
     if (!window.Notification || Notification.permission !== 'granted') {
         return;
@@ -149,6 +163,9 @@ const PendingGame = () => {
     const isSeatedHere = Object.values(currentGame.players || {}).some(
         (player) => player.name === user?.username
     );
+    const botDifficulty = currentGame.botDifficulty || 'medium';
+    const selectedDifficulty =
+        BOT_DIFFICULTIES.find((option) => option.key === botDifficulty) || BOT_DIFFICULTIES[1];
 
     const canClickStart = () => {
         if (!user || !currentGame || connecting) {
@@ -518,6 +535,45 @@ const PendingGame = () => {
                         <Button variant='tertiary' onPress={handleCopyGameLink}>
                             <Trans>Copy Game Link</Trans>
                         </Button>
+                        {/* ARCHON (F9): the practice difficulty, for whoever
+                            joined the bot's table. It re-deals the BOT's deck
+                            from a different ARI band, so it only means
+                            anything until the game starts. */}
+                        {isBotTable && isSeatedHere && !currentGame.started && (
+                            <div
+                                className='flex items-center gap-1'
+                                role='group'
+                                aria-label={t('Practice difficulty')}
+                            >
+                                <span className='me-1 text-xs text-foreground/65 dark:text-muted'>
+                                    {t('Difficulty')}
+                                </span>
+                                {BOT_DIFFICULTIES.map((option) => (
+                                    <Button
+                                        key={option.key}
+                                        size='sm'
+                                        variant={
+                                            botDifficulty === option.key ? 'primary' : 'tertiary'
+                                        }
+                                        aria-pressed={botDifficulty === option.key}
+                                        onPress={() =>
+                                            dispatch(
+                                                lobbySendMessage(
+                                                    'botdifficulty',
+                                                    currentGame.id,
+                                                    option.key
+                                                )
+                                            )
+                                        }
+                                    >
+                                        {t(option.label)}
+                                    </Button>
+                                ))}
+                                <span className='ms-1 text-xs text-foreground/65 dark:text-muted'>
+                                    {t('ARI {{range}}', { range: selectedDifficulty.range })}
+                                </span>
+                            </div>
+                        )}
                         <span className='ms-auto text-xs text-foreground/65 dark:text-muted'>
                             {getStartHint()}
                         </span>
