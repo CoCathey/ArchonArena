@@ -215,6 +215,34 @@ const REGISTRY = {
                         min: 0,
                         max: 64,
                         default: 4
+                    },
+                    // ARCHON (N34): the two K values above are what a SETTLED
+                    // deck gets. A deck with little evidence moves faster,
+                    // decaying to those numbers as it plays - so a new deck
+                    // finds its level in a few dozen games instead of creeping
+                    // away from its card-math seed one twitch at a time, and an
+                    // established deck stops being shoved about by single
+                    // results it has already outweighed.
+                    settlingGames: {
+                        type: 'number',
+                        label: 'Games for a deck’s rating to half-settle',
+                        min: 1,
+                        max: 500,
+                        default: 30
+                    },
+                    simGameWeight: {
+                        type: 'number',
+                        label: 'What one sparring game counts for, against one real game',
+                        min: 0,
+                        max: 1,
+                        default: 0.25
+                    },
+                    stalenessDays: {
+                        type: 'number',
+                        label: 'Days idle before a deck’s rating is treated as loose again',
+                        min: 7,
+                        max: 3650,
+                        default: 240
                     }
                 }
             }

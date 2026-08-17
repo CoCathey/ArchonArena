@@ -2269,6 +2269,47 @@ carry inflated ARI for the decks involved until enough honest games outweigh it.
 targeted undo — `RatingHistory` is the official record and the lab is forbidden from touching
 it, which is exactly the separation that makes this recoverable at all.
 
+#### N34 — ARI: how sure, and where in the field _(done)_
+
+**Why:** ARI's update was already comparative — Elo against the opponent's ARI, so beating a
+stronger deck moved more than beating a weaker one. Two things were missing, and both made the
+number less useful than the arithmetic behind it deserved.
+
+**Tasks**
+
+-   [x] **A provisional rating moves; a settled one holds.** K was fixed regardless of evidence,
+        so a deck three games in moved exactly as fast as one three hundred games in — wrong in
+        both directions at once. The new deck crept away from its card-math seed one twitch at a
+        time while its results argued otherwise, and the established deck was still shoved about
+        by single games it had long outweighed. `ariConfidence` scales K by a deviation that falls
+        with evidence, and the two sides of a game scale by their OWN deviations: a new deck
+        beating a veteran moves a long way while the veteran barely notices.
+-   [x] **The configured K is what a SETTLED deck gets**, so an operator's tuning of `gameK` means
+        exactly what it meant before this existed. The multiplier decays to one, never below.
+-   [x] **Sparring counts for less** (`simGameWeight`, 0.25): the lab plays hundreds of games a
+        night, and a deck must not be made established by a sweep no human took part in.
+-   [x] **Certainty decays** (`stalenessDays`): a deck rated in one meta and shelved for a year is
+        not still known to that precision, and the game counters can only ever grow. Bounded at
+        the seed — a deck can never become less certain than one nobody has played.
+-   [x] **Where in the field**: `AriDistribution`, a bucketed snapshot of every deck's effective
+        ARI refreshed half-hourly, turns a rating into a ranking — percentile and rank out of the
+        rated field, on the deck list under the ARI and in its tooltip. Snapshotted, not computed
+        per request: the question is asked once per deck row of every deck list, and answering it
+        with a window function over every rated deck is a table scan per page.
+-   Later: the distribution as a curve on the deck page, showing where this deck sits; per-set and
+    per-house fields, since "top 10% of decks" and "top 10% of Mars decks" are different claims.
+
+**Not done, deliberately:** this is not Glicko-2. There is no volatility term, no rating period,
+no posterior — the deviation is a plain function of evidence and recency. It is called a
+deviation because that is what it approximates and what it is used for. Anything needing a real
+confidence interval should not read it.
+
+**Acceptance criteria**
+
+-   [x] A deck with no record moves several times as far as a veteran on the same result.
+-   [x] A deck with an enormous record moves at the configured K, to within a rounding step.
+-   [x] A deck whose rating cannot be placed says so, rather than claiming the middle.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
