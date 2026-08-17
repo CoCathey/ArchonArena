@@ -167,7 +167,12 @@ class RatingService {
             return 'keys';
         }
 
-        if (winReason === 'concede') {
+        // ARCHON: 'abandoned' is a concession the loser never got round to
+        // typing - they closed the site instead. Rated identically on purpose:
+        // the reason is kept distinct only so the match history can say what
+        // actually happened. Without this it would fall through to the 'keys'
+        // default below and a walkout would swing the ladder like a real game.
+        if (winReason === 'concede' || winReason === 'abandoned') {
             return 'concede';
         }
 

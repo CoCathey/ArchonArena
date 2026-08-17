@@ -14,10 +14,10 @@ describe('Game.leave (abandonment rating)', function () {
         this.game.leave(this.player1.player.name);
 
         expect(this.game.winner).toBe(this.player1.player);
-        expect(this.game.winReason).toBe('concede');
+        expect(this.game.winReason).toBe('abandoned');
         expect(this.game.router.gameWon).toHaveBeenCalledWith(
             this.game,
-            'concede',
+            'abandoned',
             this.player1.player
         );
     });
@@ -30,7 +30,7 @@ describe('Game.leave (abandonment rating)', function () {
 
         this.game.leave(this.player1.player.name);
         expect(this.game.winner).toBe(this.player1.player);
-        expect(this.game.winReason).toBe('concede');
+        expect(this.game.winReason).toBe('abandoned');
     });
 
     it('does not record a winner when the opponent is still present (client concede handles that)', function () {

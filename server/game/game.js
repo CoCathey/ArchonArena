@@ -139,6 +139,10 @@ class Game extends EventEmitter {
         this.inactivityThresholdMs = 5 * 60 * 1000; // 5 minutes
         this.forcePassCount = 0; // how many times force-pass has been used
         this.forcePassAvailable = false; // non-blocking flag exposed in game state
+
+        // ARCHON: how long a player's socket may stay gone before the game is
+        // scored against them. See checkAbandonment.
+        this.abandonmentTimeoutMs = 2 * 60 * 1000; // 2 minutes
     }
 
     /*
@@ -1375,8 +1379,107 @@ class Game extends EventEmitter {
         const opponent = opponents[0];
 
         if (opponent.left || opponent.disconnectedAt) {
-            this.recordWinner(leaver, 'concede');
+            this.recordWinner(leaver, 'abandoned');
         }
+    }
+
+    /**
+     * ARCHON: score a game whose loser walked away and never came back.
+     *
+     * Quitting by closing the tab used to cost nothing. `disconnect()` only
+     * marks the player away and waits - nothing here ever decided the game on
+     * its own, so the result depended entirely on the OPPONENT going back into
+     * the game and pressing Leave. If they instead closed their own tab
+     * (reasonable: their opponent had vanished), or wandered off, or simply
+     * assumed the win was already theirs, the game sat until `isEmpty()` swept
+     * it up 30 seconds later and `closeGame` fired GAMECLOSED - which, unlike
+     * GAMEWIN and PLAYERLEFT, never calls `gameService.update`. No winner, no
+     * FinishedAt, no rating, and since the record counts only rows with both
+     * ("WHERE g.FinishedAt IS NOT NULL AND g.WinnerId IS NOT NULL"), the game
+     * had never happened. Rage-quitting was strictly better than conceding.
+     *
+     * So the decision moves here, where nobody has to be watching for it. Two
+     * shapes, and both are about a socket that closed rather than a button that
+     * was pressed:
+     *
+     *  - **One player gone, past the timeout.** They abandoned it; the player
+     *    still sitting at the board wins.
+     *  - **Both gone, and the game is being destroyed** (`closing`). Last
+     *    chance to record anything, so the one who went FIRST loses - the same
+     *    rule `recordAbandonmentResultOnLeave` already applies to leaving.
+     *
+     * ## What this deliberately does not touch
+     *
+     * Only `disconnectedAt` counts as abandonment. An explicit Leave does not,
+     * because two paths already cover it honestly and a third would contradict
+     * them: the client sends `concede` before `leavegame` whenever the opponent
+     * is live, and `recordAbandonmentResultOnLeave` awards the game to somebody
+     * leaving an opponent who is already gone. More to the point,
+     * `checkInactivity` promises in chat that a player facing a 5-minute-idle
+     * opponent "may ... leave the game without recording a loss" - forfeiting
+     * them here on a timer would break that promise silently.
+     *
+     * The timeout is generous on purpose. A dropped connection and a quit look
+     * identical from here, so it has to be long enough to lose a browser and
+     * come back: the opponent may still take the win by hand at any point, and
+     * this only decides the games where nobody does.
+     *
+     * @param {object} [options]
+     * @param {Date} [options.now]
+     * @param {boolean} [options.closing] the game is about to be destroyed
+     * @returns {boolean} whether a result was recorded
+     */
+    checkAbandonment({ now = new Date(), closing = false } = {}) {
+        if (this.winner || !this.started) {
+            return false;
+        }
+
+        const players = this.getPlayers().filter((player) => player.id !== 'TBA');
+
+        if (players.length !== 2) {
+            return false;
+        }
+
+        const away = players
+            .filter((player) => player.disconnectedAt && !player.left && !player.connectFailed)
+            .sort((first, second) => first.disconnectedAt - second.disconnectedAt);
+
+        if (away.length === 1) {
+            const [quitter] = away;
+            const opponent = players.find((player) => player !== quitter);
+
+            // Somebody who left of their own accord is not owed the game.
+            if (opponent.left) {
+                return false;
+            }
+
+            if (!closing && now - quitter.disconnectedAt < this.abandonmentTimeoutMs) {
+                return false;
+            }
+
+            this.addAlert('info', '{0} abandoned the game.', quitter);
+            this.recordWinner(opponent, 'abandoned');
+
+            return true;
+        }
+
+        if (away.length !== 2 || !closing) {
+            return false;
+        }
+
+        const [quitter, opponent] = away;
+
+        // Both sockets closing within moments of each other is far more likely
+        // to be the network than two independent decisions to quit, and there
+        // is no honest way to say who abandoned whom. Record nothing.
+        if (opponent.disconnectedAt - quitter.disconnectedAt < 10 * 1000) {
+            return false;
+        }
+
+        this.addAlert('info', '{0} abandoned the game.', quitter);
+        this.recordWinner(opponent, 'abandoned');
+
+        return true;
     }
 
     disconnect(playerName) {
@@ -1394,11 +1497,20 @@ class Game extends EventEmitter {
             delete this.playersAndSpectators[playerName];
         } else {
             const opponent = this.getPlayers().find((p) => p !== player);
+
+            // ARCHON: the old wording ("after 30 seconds may leave without
+            // recording a loss") was wrong twice over. Leaving an opponent who
+            // has already gone does not merely avoid a loss, it wins the game -
+            // recordAbandonmentResultOnLeave does that, and immediately, with
+            // no 30-second wait anywhere in it. And it said nothing about the
+            // case that actually matters: that waiting is now safe, because
+            // checkAbandonment awards the game whether or not anybody acts.
             this.addAlert(
                 'info',
-                '{0} has disconnected. {1} may wait for them to reconnect, or after 30 seconds may leave without recording a loss.',
+                '{0} has disconnected. {1} may leave now to take the win, or wait - if {0} has not come back in {2} minutes the game is awarded to {1}.',
                 player,
-                opponent
+                opponent,
+                Math.round(this.abandonmentTimeoutMs / 60000)
             );
 
             player.disconnectedAt = new Date();
@@ -1474,6 +1586,16 @@ class Game extends EventEmitter {
 
             player.disconnectedAt = new Date();
 
+            // ARCHON: this is not somebody walking out - the client reports
+            // `connectfailed` only when it NEVER reached the game node, so they
+            // have not seen the board at all. It writes the same
+            // `disconnectedAt` a quitter does, so checkAbandonment needs the
+            // distinction to avoid charging a loss to a player whose network
+            // could not get here in the first place. There is nothing to abuse:
+            // reaching this state means never connecting, and you cannot quit a
+            // game you were never in.
+            player.connectFailed = true;
+
             if (!this.finishedAt) {
                 this.finishedAt = new Date();
             }
@@ -1489,6 +1611,7 @@ class Game extends EventEmitter {
         player.id = socket.id;
         player.socket = socket;
         player.disconnectedAt = undefined;
+        player.connectFailed = false;
 
         this.jsonForUsers[player.name] = undefined;
 

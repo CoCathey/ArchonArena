@@ -220,6 +220,12 @@ class GameServer {
      * @param {import("../game/game")} game
      */
     closeGame(game) {
+        // ARCHON: the last moment at which this game can be recorded at all -
+        // after this it is deleted from memory and only GAMECLOSED goes to the
+        // lobby, which (unlike GAMEWIN and PLAYERLEFT) persists nothing. A game
+        // both players walked out on is decided here or never.
+        this.runAndCatchErrors(game, () => game.checkAbandonment({ closing: true }));
+
         // ARCHON (N1): deliver anything a broadcast delay is still holding
         // before the sockets go, so a delayed spectator sees the end of the
         // game rather than the board freezing a minute short of it.
@@ -265,6 +271,19 @@ class GameServer {
                     this.sendGameState(game);
                 });
             }
+        }
+
+        // ARCHON: award games whose loser closed the site and never came back.
+        // Runs on every sweep rather than only at close, so the win lands while
+        // the remaining player is still at the board to see it - and, more to
+        // the point, so it does not depend on them doing anything at all.
+        for (const game of Object.values(this.games)) {
+            this.runAndCatchErrors(game, () => {
+                if (game.checkAbandonment()) {
+                    game.continue();
+                    this.sendGameState(game);
+                }
+            });
         }
     }
 
@@ -702,7 +721,23 @@ class GameServer {
             return;
         }
 
+        // ARCHON: the same last chance to record a result that closeGame takes.
+        // This path does not go through it - the lobby forces a close here when
+        // every player has escaped over the lobby socket - so without this the
+        // node would drop an abandoned game on the floor.
+        this.runAndCatchErrors(game, () => game.checkAbandonment({ closing: true }));
+
         for (let player of Object.values(game.getPlayersAndSpectators())) {
+            // ARCHON: a disconnected player has no socket - `disconnect()` sets
+            // it to undefined. Unguarded, this threw a TypeError before the
+            // game was deleted or GAMECLOSED was sent, which leaked the game on
+            // this node and left the lobby waiting for a reply that never came.
+            // The games that reach here are precisely the ones somebody walked
+            // out of, so the missing case was the only case.
+            if (!player.socket) {
+                continue;
+            }
+
             player.socket.send('cleargamestate');
             player.socket.leaveChannel(game.id);
         }
