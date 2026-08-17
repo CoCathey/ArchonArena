@@ -43,6 +43,59 @@ function wilsonLowerBound(wins, games, z = 1.96) {
 }
 
 /**
+ * ARCHON (N25): the sequential probability ratio test - "have we seen enough?"
+ *
+ * A fixed-N test has to decide its sample size before it knows anything, so it
+ * spends the same 400 games on a candidate that is plainly stronger as on one
+ * that is a coin flip. Wald's test instead accumulates the log-likelihood ratio
+ * of two hypotheses and stops the moment the evidence crosses a bound in EITHER
+ * direction - which is why engine-testing frameworks (fishtest and its
+ * descendants) run on it. Here it means a clearly better bot takes the title in
+ * tens of games instead of hundreds, a clearly worse one retires just as fast,
+ * and only genuinely borderline candidates cost the full window.
+ *
+ * H0: the candidate is no better than the champion (`p0`, an even split).
+ * H1: it is better by a margin worth having (`p1`).
+ *
+ * `p1` is the design decision here, and 0.60 is deliberate. Chess frameworks
+ * test hypotheses a couple of Elo apart, because engines a decade into
+ * refinement differ by that much - and they pay for it in tens of thousands of
+ * games. A candidate here has just been trained on a fresh diary and is either
+ * meaningfully better or not worth crowning, so the test is asked to prove a
+ * meaningful edge: at 0.60 a 73% record over fifty games takes the title, where
+ * proving "better than 55%" would still be waiting at game 150.
+ *
+ * The cost of a wide margin is honest and small: a candidate that is genuinely
+ * but only slightly better retires as unproven. It is not lost - the diary keeps
+ * growing and its successor is trained from more evidence - and the alternative
+ * is spending hundreds of games per candidate to bank a fraction of a percent.
+ *
+ * Errors are bounded by construction, not by sample size: `alpha` is the chance
+ * of crowning a candidate that is not better, `beta` the chance of retiring one
+ * that is.
+ *
+ * @param {number} wins candidate wins
+ * @param {number} losses candidate losses
+ * @param {object} [options]
+ * @returns {{llr: number, lower: number, upper: number,
+ *           verdict: 'better'|'no-better'|'unproven'}}
+ */
+function sprt(wins, losses, { p0 = 0.5, p1 = 0.6, alpha = 0.05, beta = 0.05 } = {}) {
+    // Each win multiplies the odds by p1/p0, each loss by (1-p1)/(1-p0); in log
+    // space that is a running sum, which is what makes the test sequential.
+    const llr = (wins || 0) * Math.log(p1 / p0) + (losses || 0) * Math.log((1 - p1) / (1 - p0));
+    const lower = Math.log(beta / (1 - alpha));
+    const upper = Math.log((1 - beta) / alpha);
+
+    return {
+        llr,
+        lower,
+        upper,
+        verdict: llr >= upper ? 'better' : llr <= lower ? 'no-better' : 'unproven'
+    };
+}
+
+/**
  * What SAS says this game should have been: the site's own rating model
  * (EloCalculator.expectedScore) evaluated with equal ratings, so the SAS
  * handicap term is the only input. With the default sasWeight of 4, 25
@@ -184,6 +237,7 @@ module.exports = {
     MIN_CONFIDENT_GAMES,
     MIN_OPENING_GAMES,
     wilsonLowerBound,
+    sprt,
     sasExpectedScore,
     isHiddenGem,
     buildFindings,

@@ -28,7 +28,44 @@ const sigmoid = (z) => 1 / (1 + Math.exp(-z));
 
 /** A fresh, know-nothing model. */
 function emptyModel() {
-    return { version: 0, weights: {}, cardWeights: {}, trainedGames: 0 };
+    return {
+        version: 0,
+        weights: {},
+        cardWeights: {},
+        // ARCHON (N25): two weights per distinct prompt (pick mine / pick
+        // theirs), which is what separates "choose a creature to destroy" from
+        // "choose a creature to heal" - see labFeatures.promptKey.
+        promptWeights: {},
+        // How many examples each sparse weight has actually seen. A weight
+        // trained on two observations is noise, and there are ~2,700 card ids;
+        // counts are what let scoring shrink the unproven ones toward zero
+        // instead of trusting them equally (see shrink).
+        cardCounts: {},
+        promptCounts: {},
+        trainedGames: 0
+    };
+}
+
+/**
+ * Empirical-Bayes shrinkage: a sparse weight counts for how much evidence
+ * stands behind it.
+ *
+ * A card seen twice contributes about a tenth of its learned weight, one seen a
+ * hundred times contributes nearly all of it. Without this, a card that
+ * happened to appear in three winning games outranks one measured over
+ * thousands - which is the same mistake the hidden-gem badge refuses to make
+ * with decks, applied to the model's own parameters.
+ */
+const SHRINK_PRIOR = 20;
+
+function shrink(weight, count) {
+    if (!weight) {
+        return 0;
+    }
+
+    const seen = count || 0;
+
+    return weight * (seen / (seen + SHRINK_PRIOR));
 }
 
 /**
@@ -50,7 +87,14 @@ function scoreDecision(model, decision) {
     }
 
     if (decision.cardId) {
-        z += model.cardWeights[decision.cardId] || 0;
+        z += shrink(model.cardWeights[decision.cardId], (model.cardCounts || {})[decision.cardId]);
+    }
+
+    if (decision.promptKey) {
+        z += shrink(
+            (model.promptWeights || {})[decision.promptKey],
+            (model.promptCounts || {})[decision.promptKey]
+        );
     }
 
     return sigmoid(z);
@@ -65,6 +109,43 @@ function scoreState(model, state) {
 }
 
 /**
+ * ARCHON (N25): what a decision is trained toward.
+ *
+ * Three sources of truth, in order of how much they know:
+ *
+ *  1. **A search target.** The deep bot forked this decision, played the move,
+ *     rolled the future forward and measured where it led. That number is worth
+ *     more than any label derived from the final score, and training the fast
+ *     policy toward it is how a minute of thinking becomes permanent knowledge
+ *     (see DeepGame's lessons).
+ *  2. **The outcome, blended with what came next.** Labelling every decision
+ *     with the final result is Monte Carlo credit assignment at its bluntest: a
+ *     good play on turn 3 of a game thrown away on turn 20 trains the model
+ *     AGAINST itself. So the label leans partly on the value of the position
+ *     the same seat found itself in at its next decision - a TD-style target,
+ *     which keeps the outcome as the anchor while letting a strong position
+ *     defend a move the game later wasted.
+ *  3. **The outcome alone**, for the last decision of a game (nothing came
+ *     next) and whenever bootstrapping is switched off.
+ *
+ * `valueOf` is evaluated with the PRE-TRAINING model, frozen for the batch, so
+ * targets do not chase the weights they are updating.
+ */
+function decisionTarget(decision, nextDecision, outcome, lambda, valueOf) {
+    if (typeof decision.target === 'number') {
+        return Math.max(0, Math.min(1, decision.target));
+    }
+
+    if (!lambda || !nextDecision) {
+        return outcome;
+    }
+
+    const bootstrapped = valueOf(nextDecision.state);
+
+    return (1 - lambda) * outcome + lambda * bootstrapped;
+}
+
+/**
  * Fold one batch of finished games into a COPY of the model.
  *
  * @param {object} model the current model (not mutated)
@@ -73,20 +154,64 @@ function scoreState(model, state) {
  * @param {number} [options.learningRate]
  * @param {number} [options.epochs]
  * @param {number} [options.l2] weight decay, keeps card weights from memorizing
+ * @param {number} [options.lambda] how far to lean on the next state's value
+ *        (0 = pure outcome, the pre-N25 behaviour)
  * @returns {object} the trained model
  */
-function trainModel(model, games, { learningRate = 0.05, epochs = 2, l2 = 1e-4 } = {}) {
+function trainModel(
+    model,
+    games,
+    { learningRate = 0.05, epochs = 2, l2 = 1e-4, lambda = 0.5 } = {}
+) {
     const next = {
         version: (model.version || 0) + 1,
         weights: { ...model.weights },
         cardWeights: { ...model.cardWeights },
+        promptWeights: { ...(model.promptWeights || {}) },
+        cardCounts: { ...(model.cardCounts || {}) },
+        promptCounts: { ...(model.promptCounts || {}) },
         trainedGames: (model.trainedGames || 0) + games.length
     };
+    // Frozen for the whole batch: a bootstrapped target computed from the
+    // weights currently being updated would chase its own tail.
+    const frozen = {
+        weights: { ...model.weights },
+        cardWeights: { ...model.cardWeights },
+        promptWeights: { ...(model.promptWeights || {}) },
+        cardCounts: { ...(model.cardCounts || {}) },
+        promptCounts: { ...(model.promptCounts || {}) }
+    };
+    const valueOf = (state) => scoreState(frozen, state);
+
+    // Counts are evidence, not iterations: one pass over the batch, however
+    // many epochs the gradient takes.
+    for (const game of games) {
+        for (const decision of game.decisions || []) {
+            if (decision.cardId) {
+                next.cardCounts[decision.cardId] = (next.cardCounts[decision.cardId] || 0) + 1;
+            }
+
+            if (decision.promptKey) {
+                next.promptCounts[decision.promptKey] =
+                    (next.promptCounts[decision.promptKey] || 0) + 1;
+            }
+        }
+    }
 
     for (let epoch = 0; epoch < epochs; epoch++) {
         for (const game of games) {
-            for (const decision of game.decisions || []) {
-                const label = decision.side === game.winnerSide ? 1 : 0;
+            const decisions = game.decisions || [];
+
+            for (let i = 0; i < decisions.length; i++) {
+                const decision = decisions[i];
+                const outcome = decision.side === game.winnerSide ? 1 : 0;
+                // The same seat's NEXT decision - not simply the next record,
+                // which usually belongs to the opponent and whose value is
+                // therefore the wrong way up.
+                const nextForSide = decisions
+                    .slice(i + 1)
+                    .find((entry) => entry.side === decision.side);
+                const label = decisionTarget(decision, nextForSide, outcome, lambda, valueOf);
                 const predicted = scoreDecision(next, decision);
                 // Logistic loss gradient: (p - y) times each feature.
                 const gradient = predicted - label;
@@ -114,6 +239,12 @@ function trainModel(model, games, { learningRate = 0.05, epochs = 2, l2 = 1e-4 }
                 if (decision.cardId) {
                     next.cardWeights[decision.cardId] =
                         (next.cardWeights[decision.cardId] || 0) * (1 - learningRate * l2) -
+                        learningRate * gradient;
+                }
+
+                if (decision.promptKey) {
+                    next.promptWeights[decision.promptKey] =
+                        (next.promptWeights[decision.promptKey] || 0) * (1 - learningRate * l2) -
                         learningRate * gradient;
                 }
             }
@@ -172,4 +303,13 @@ function chooseDecision(model, decisions, temperature, rng) {
     return weights.length - 1;
 }
 
-module.exports = { emptyModel, scoreDecision, scoreState, trainModel, chooseDecision, sigmoid };
+module.exports = {
+    emptyModel,
+    scoreDecision,
+    scoreState,
+    trainModel,
+    chooseDecision,
+    shrink,
+    sigmoid,
+    SHRINK_PRIOR
+};

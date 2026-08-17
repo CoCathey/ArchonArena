@@ -457,12 +457,52 @@ const REGISTRY = {
                 max: 50000,
                 default: 4000
             },
+            // ARCHON (N25): how adventurously the fast bot plays, and how fast
+            // that settles. A young model must try second-best moves to learn
+            // they were best; a mature one is mostly being made worse by the
+            // noise. The floor stays above zero so a policy can still notice the
+            // day its habits stopped working.
+            explorationTemperature: {
+                type: 'number',
+                label: 'Starting exploration temperature',
+                min: 0,
+                max: 3,
+                default: 0.7
+            },
+            explorationFloor: {
+                type: 'number',
+                label: 'Exploration temperature it settles toward',
+                min: 0,
+                max: 1,
+                default: 0.15
+            },
+            explorationHalfLife: {
+                type: 'number',
+                label: 'Trained games that halve the exploration bonus',
+                min: 100,
+                max: 1000000,
+                default: 20000
+            },
+            trainingLambda: {
+                type: 'number',
+                // 0 restores the pre-N25 behaviour: every decision labelled by
+                // the final result, however little the result had to do with it.
+                label: 'How far training leans on the next position’s value (0-1)',
+                min: 0,
+                max: 1,
+                default: 0.5
+            },
             arenaMinGames: {
                 type: 'number',
-                label: 'Arena games before a candidate may take the title',
-                min: 20,
+                // ARCHON (N25): a floor under the sequential test, not a sample
+                // size. The test decides when the evidence is enough; this only
+                // stops a short streak from taking the title, so it is
+                // deliberately small - a large minimum would throw away exactly
+                // the early stopping it is guarding.
+                label: 'Arena games before a candidate may take the title at all',
+                min: 10,
                 max: 2000,
-                default: 150
+                default: 30
             },
             arenaDecideGames: {
                 type: 'number',

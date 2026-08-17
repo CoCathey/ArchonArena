@@ -354,7 +354,12 @@ class SimulatedGame {
             const doneIndex = buttons.findIndex((button) => textOf(button.text) === 'done');
 
             if (unselected.length && (doneIndex === -1 || !selected.length)) {
-                const index = Math.floor(this.rng() * unselected.length);
+                // ARCHON (N25): the target is CHOSEN now, not rolled for. This
+                // is the prompt that asks "destroy which creature", "steal from
+                // whom", "return which card" - most of what one KeyForge player
+                // does to another - and it used to be answered by picking a
+                // selectable card at random.
+                const index = await this.chooseSelection(game, player, unselected, state.menuTitle);
 
                 return this.clickCardAt(game, player, unselected, index, 'sel');
             }
@@ -471,6 +476,73 @@ class SimulatedGame {
         }
 
         return this.clickCardAt(game, player, hand, chosen.index, 'hand');
+    }
+
+    /**
+     * ARCHON (N25): pick a target - planner, learned policy, or a roll.
+     *
+     * The candidates are the selectable cards themselves, described by whose
+     * they are, what they are worth and where they stand (labFeatures), plus a
+     * weight for this particular prompt so the model can learn that the answer
+     * to "choose a creature to destroy" is the opponent's biggest and the answer
+     * to "choose a creature to heal" is not.
+     *
+     * Falls back to a roll when there is no model, which is exactly what every
+     * selection used to be - so a site that has never trained one plays no worse
+     * than it did.
+     *
+     * @returns {Promise<number>} index into `unselected`
+     */
+    async chooseSelection(game, player, unselected, promptTitle) {
+        if (unselected.length === 1) {
+            return 0;
+        }
+
+        const prompt = textOf(promptTitle);
+
+        if (this.analyzer) {
+            const analyzed = await this.analyzer({
+                sim: this,
+                game,
+                player,
+                kind: 'select',
+                candidates: unselected.map((card) => ({ kind: 'select', card, prompt }))
+            });
+
+            if (analyzed !== null && analyzed !== undefined && unselected[analyzed]) {
+                this.noteDecision(game, player, {
+                    kind: 'select',
+                    card: unselected[analyzed],
+                    prompt
+                });
+
+                return analyzed;
+            }
+        }
+
+        const policy = this.policyFor(player);
+        let index;
+
+        if (policy) {
+            const records = unselected.map((card) =>
+                decisionRecord(game, player, { kind: 'select', card, prompt })
+            );
+
+            index = Math.max(0, chooseDecision(policy, records, this.temperature, this.rng));
+        } else {
+            index = Math.floor(this.rng() * unselected.length);
+        }
+
+        this.noteDecision(game, player, { kind: 'select', card: unselected[index], prompt });
+
+        return index;
+    }
+
+    /** Keep a decision for training, when this game is recording. */
+    noteDecision(game, player, action) {
+        if (this.recordDecisions) {
+            this.decisions.push(decisionRecord(game, player, action));
+        }
     }
 
     /** Pick among main-window candidates: planner, learned policy, or the old order. */

@@ -181,4 +181,124 @@ describe('SimulatedGame', function () {
             expect(result.decisions[0].side).toBeDefined();
         }, 30000);
     });
+
+    /**
+     * ARCHON (N25): targeting.
+     *
+     * "Choose a creature to destroy", "steal from whom", "return which card" -
+     * most of what one KeyForge player does to another arrives as a selection
+     * prompt, and every one of them used to be answered by picking a selectable
+     * card at random. They are decisions now.
+     */
+    describe('targeting', function () {
+        it('logs targets as decisions, with the prompt that asked for one', async function () {
+            const result = await runSimulatedGame(alphaDeck, omegaDeck, {
+                seed: 2468,
+                recordDecisions: true
+            });
+
+            expect(result.completed).toBe(true);
+
+            const targets = result.decisions.filter(
+                (decision) => decision.action['act:select'] === 1
+            );
+
+            // A real game asks for targets - if this is ever zero the feature is
+            // wired to a prompt that no longer happens.
+            expect(targets.length).toBeGreaterThan(0);
+
+            for (const target of targets) {
+                // The prompt is what separates "destroy" from "heal", so a
+                // target without one is a target the model cannot learn from.
+                expect(typeof target.promptKey).toBe('string');
+                expect(target.promptKey).toMatch(/\|(mine|theirs)$/);
+                // And it knows whose card it is.
+                const ownership =
+                    target.action['sel:myCard'] === 1 || target.action['sel:theirCard'] === 1;
+
+                expect(ownership).toBe(true);
+            }
+        }, 60000);
+
+        // Driven directly rather than through a game: what must be proved is
+        // that the MODEL decides, and in a real game any given target choice is
+        // buried under two hundred others.
+        it('takes the target the model rates highest', async function () {
+            const sim = new SimulatedGame(alphaDeck, omegaDeck, { seed: 1 });
+            const game = { round: 5 };
+            const me = {
+                name: PLAYER_ONE,
+                hand: [],
+                cardsInPlay: [],
+                creaturesInPlay: [],
+                archives: [],
+                deck: [],
+                amber: 0,
+                getForgedKeys: () => 0,
+                getCurrentKeyCost: () => 6,
+                opponent: null
+            };
+            const target = (id, power) => ({
+                id,
+                name: id,
+                power,
+                armor: 0,
+                exhausted: false,
+                stunned: false,
+                type: 'creature',
+                location: 'play area',
+                tokens: {},
+                cardData: {},
+                controller: { name: 'them' }
+            });
+            const cards = [target('small', 1), target('big', 11)];
+
+            // A model that likes power in an opponent's card: the big one wins.
+            sim.policy = { ...emptyModel(), weights: { 'a:sel:theirPower': 6 } };
+            sim.temperature = 0;
+
+            expect(await sim.chooseSelection(game, me, cards, 'choose a creature to destroy')).toBe(
+                1
+            );
+
+            // Flip the weight and the same board yields the other answer, which
+            // is what proves the choice is the model's and not the list order.
+            sim.policy = { ...emptyModel(), weights: { 'a:sel:theirPower': -6 } };
+
+            expect(await sim.chooseSelection(game, me, cards, 'choose a creature to destroy')).toBe(
+                0
+            );
+        });
+
+        it('is a roll when there is no model, as it always was', async function () {
+            const sim = new SimulatedGame(alphaDeck, omegaDeck, { seed: 7 });
+            const game = { round: 1 };
+            const me = {
+                name: PLAYER_ONE,
+                hand: [],
+                cardsInPlay: [],
+                creaturesInPlay: [],
+                archives: [],
+                deck: [],
+                amber: 0,
+                getForgedKeys: () => 0,
+                getCurrentKeyCost: () => 6,
+                opponent: null
+            };
+            const cards = [1, 2, 3, 4].map((n) => ({
+                id: `c${n}`,
+                power: n,
+                type: 'creature',
+                location: 'play area',
+                tokens: {},
+                cardData: {},
+                controller: { name: 'them' }
+            }));
+
+            const picked = await sim.chooseSelection(game, me, cards, 'choose a card');
+
+            expect(picked).toBeGreaterThanOrEqual(0);
+            expect(picked).toBeLessThan(cards.length);
+        });
+    });
 });

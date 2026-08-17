@@ -1,6 +1,6 @@
 const logger = require('../../log');
 const { emptyModel, trainModel } = require('./labPolicy');
-const { wilsonLowerBound } = require('./labMath');
+const { sprt } = require('./labMath');
 
 /**
  * ARCHON (N21): the learning loop's bookkeeping - training diary, candidate
@@ -9,10 +9,13 @@ const { wilsonLowerBound } = require('./labMath');
  * The loop this service turns: sparring games log their decisions here;
  * every `trainEveryGames` logged games, the current champion's model is
  * folded over the fresh diary into a CANDIDATE; the candidate then plays
- * the champion in arena games on neutral decks; and only when its record is
- * good enough that the 95% Wilson lower bound clears 50% does it take the
- * title. A candidate that cannot prove itself inside `arenaDecideGames`
- * retires with its record kept. The bot can therefore get provably
+ * the champion in arena games on neutral decks; and it takes the title only
+ * when a sequential probability ratio test says its record is evidence of
+ * real improvement (N25 - it was a fixed-N Wilson bound before, which spent
+ * the same few hundred games on every candidate however obvious the answer
+ * was). A candidate the test rules against retires at once; one it cannot
+ * separate from the champion retires when `arenaDecideGames` closes the
+ * window. Records are kept either way. The bot can therefore get provably
  * stronger, and can never quietly get worse - the same conservatism the
  * hidden-gem badge applies to decks, applied to the bot's own brain.
  *
@@ -99,7 +102,7 @@ class BotPolicyService {
      *
      * @returns {Promise<object|null>} the new candidate row, or null
      */
-    async trainCandidate({ batchGames = 200 } = {}) {
+    async trainCandidate({ batchGames = 200, lambda } = {}) {
         if (await this.candidate()) {
             return null;
         }
@@ -119,7 +122,9 @@ class BotPolicyService {
             decisions: row.Decisions || []
         }));
         const base = (await this.champion()) || emptyModel();
-        const trained = trainModel(base, games);
+        // lambda: how far a label leans on the value of what came next rather
+        // than on the final result alone (labPolicy.decisionTarget).
+        const trained = trainModel(base, games, lambda === undefined ? {} : { lambda });
 
         const versions = await this.db.query(
             'SELECT COALESCE(MAX("Version"), 0)::int AS "Version" FROM "BotPolicies"'
@@ -146,13 +151,17 @@ class BotPolicyService {
     }
 
     /**
-     * Score one arena game and settle the title if the record now decides
-     * it. Promotion demands proof (Wilson lower bound above 50%); failure to
-     * prove within the window retires the candidate.
+     * Score one arena game and settle the title if the record now decides it.
+     *
+     * `minGames` is a FLOOR, not a sample size: the sequential test does the
+     * deciding, and the floor exists only so a streak of ten cannot crown a
+     * candidate. That is why it is far smaller than the fixed-N window this
+     * replaced - a test that stops early and a large minimum are the same thing
+     * as a test that never stops early.
      *
      * @returns {Promise<'promoted'|'retired'|'fighting'>}
      */
-    async recordArenaResult(candidateId, candidateWon, { minGames = 150, decideGames = 400 } = {}) {
+    async recordArenaResult(candidateId, candidateWon, { minGames = 30, decideGames = 400 } = {}) {
         const rows = await this.db.query(
             'UPDATE "BotPolicies" SET ' +
                 (candidateWon
@@ -168,8 +177,18 @@ class BotPolicyService {
         }
 
         const games = row.ArenaWins + row.ArenaLosses;
+        // ARCHON (N25): the sequential test decides, with a floor under it.
+        //
+        // Fixed-N Wilson spent the same few hundred games on every candidate,
+        // however obvious the answer was. SPRT stops as soon as the evidence
+        // crosses a bound in either direction, so a plainly stronger bot is
+        // crowned in tens of games and a plainly worse one retires in tens -
+        // which, since arena games are pure overhead, is the difference between
+        // the bot improving weekly and improving hourly. `minGames` keeps a
+        // small-sample fluke from taking the title on the strength of a streak.
+        const evidence = sprt(row.ArenaWins, row.ArenaLosses);
 
-        if (games >= minGames && wilsonLowerBound(row.ArenaWins, games) > 0.5) {
+        if (games >= minGames && evidence.verdict === 'better') {
             await this.db.query(
                 'UPDATE "BotPolicies" SET "Status" = \'retired\' WHERE "Status" = \'champion\''
             );
@@ -181,19 +200,24 @@ class BotPolicyService {
             this.championCache = { model: null, at: 0 };
             logger.info(
                 `Challenge bot: candidate v${row.Version} PROMOTED to champion ` +
-                    `(${row.ArenaWins}-${row.ArenaLosses})`
+                    `(${row.ArenaWins}-${row.ArenaLosses}, llr ${evidence.llr.toFixed(2)})`
             );
 
             return 'promoted';
         }
 
-        if (games >= decideGames) {
+        // Retire on proof of no improvement, or when the window closes on a
+        // candidate the test could not separate from the champion either way.
+        if ((games >= minGames && evidence.verdict === 'no-better') || games >= decideGames) {
             await this.db.query('UPDATE "BotPolicies" SET "Status" = \'retired\' WHERE "Id" = $1', [
                 candidateId
             ]);
             logger.info(
                 `Challenge bot: candidate v${row.Version} retired ` +
-                    `(${row.ArenaWins}-${row.ArenaLosses}) - the champion holds`
+                    `(${row.ArenaWins}-${row.ArenaLosses}, llr ${evidence.llr.toFixed(2)}) - ` +
+                    (evidence.verdict === 'no-better'
+                        ? 'no better than the champion'
+                        : 'unproven inside the window')
             );
 
             return 'retired';

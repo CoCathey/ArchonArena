@@ -475,6 +475,153 @@ describe('ChampionsChallengeService', function () {
             });
         });
 
+        /**
+         * ARCHON (N25): PAIRED SEEDS.
+         *
+         * One seed, played twice with the seats swapped, so both brains face the
+         * same shuffles and the same first-player advantage - once from each
+         * side. A coin flip per game (which is what this was) leaves deck and
+         * draw luck in the record, and that noise is most of the reason a title
+         * fight used to need hundreds of games to say anything.
+         */
+        describe('the arena', function () {
+            const arenaConfig = () => ({
+                ...config,
+                maxTurnsPerGame: 80,
+                arenaMinGames: 30,
+                arenaDecideGames: 400
+            });
+
+            const stubFight = (verdicts = ['fighting', 'fighting']) => {
+                let call = 0;
+
+                service.policyService.candidate = vi
+                    .fn()
+                    .mockResolvedValue({ Id: 5, Version: 3, Model: { version: 3 } });
+                service.policyService.champion = vi.fn().mockResolvedValue({ version: 2 });
+                service.policyService.recordArenaResult = vi
+                    .fn()
+                    .mockImplementation(async () => verdicts[call++] || 'fighting');
+                service.runMatch = vi.fn().mockResolvedValue({
+                    completed: true,
+                    winner: 'challenger-alpha',
+                    winnerDeck: { uuid: 'a' },
+                    loserDeck: { uuid: 'b' },
+                    winnerKeys: 3,
+                    loserKeys: 1,
+                    turns: 20,
+                    winnerWentFirst: true,
+                    durationMs: 100
+                });
+            };
+
+            it('plays each pairing twice on one seed, seats swapped', async function () {
+                stubFight();
+
+                await service.runArenaStep(arenaConfig());
+
+                expect(service.runMatch).toHaveBeenCalledTimes(2);
+
+                const [first, second] = service.runMatch.mock.calls.map(([, , options]) => options);
+
+                // The same future for both halves - that is the whole point.
+                expect(first.seed).toBe(second.seed);
+                // And the brains change seats between them.
+                expect(first.policies.alpha).toBe(second.policies.omega);
+                expect(first.policies.omega).toBe(second.policies.alpha);
+                // Both halves are scored.
+                expect(service.policyService.recordArenaResult).toHaveBeenCalledTimes(2);
+            });
+
+            it('scores each half from the candidate’s point of view', async function () {
+                stubFight();
+
+                await service.runArenaStep(arenaConfig());
+
+                const [firstResult, secondResult] =
+                    service.policyService.recordArenaResult.mock.calls.map(([, won]) => won);
+
+                // Alpha won both games, and the candidate sat in alpha exactly
+                // once - so exactly one half is a candidate win.
+                expect([firstResult, secondResult].filter(Boolean)).toHaveLength(1);
+            });
+
+            it('stops mid-pair when the title changes hands', async function () {
+                stubFight(['promoted']);
+
+                await service.runArenaStep(arenaConfig());
+
+                // The second half would be scored against a row that no longer
+                // holds the crown it was contesting.
+                expect(service.runMatch).toHaveBeenCalledTimes(1);
+            });
+
+            it('drops the whole pair when a half cannot be played', async function () {
+                stubFight();
+                service.runMatch = vi
+                    .fn()
+                    .mockResolvedValue({ completed: false, reason: 'turn-cap' });
+
+                await service.runArenaStep(arenaConfig());
+
+                // Half a pair is an unpaired game, which is the noise pairing
+                // exists to remove.
+                expect(service.policyService.recordArenaResult).not.toHaveBeenCalled();
+            });
+
+            it('does nothing when no candidate is in training', async function () {
+                stubFight();
+                service.policyService.candidate = vi.fn().mockResolvedValue(null);
+
+                await service.runArenaStep(arenaConfig());
+
+                expect(service.runMatch).not.toHaveBeenCalled();
+            });
+        });
+
+        // ARCHON (N25): exploration anneals with the champion's experience.
+        describe('exploration', function () {
+            it('starts adventurous and settles toward the floor', function () {
+                const settings = {
+                    explorationTemperature: 0.8,
+                    explorationFloor: 0.2,
+                    explorationHalfLife: 1000
+                };
+                const young = service.explorationTemperature(settings, { trainedGames: 0 });
+                const middling = service.explorationTemperature(settings, { trainedGames: 1000 });
+                const veteran = service.explorationTemperature(settings, { trainedGames: 100000 });
+
+                expect(young).toBeCloseTo(0.8, 6);
+                // One half-life in, half the bonus over the floor is gone.
+                expect(middling).toBeCloseTo(0.5, 6);
+                // Far out, it settles ON the floor and never below it.
+                expect(veteran).toBeCloseTo(0.2, 6);
+                expect(veteran).toBeGreaterThanOrEqual(0.2);
+            });
+
+            it('never reaches zero, so a stale policy can still notice', function () {
+                const floor = service.explorationTemperature(
+                    { explorationTemperature: 1, explorationFloor: 0.15, explorationHalfLife: 10 },
+                    { trainedGames: 10000000 }
+                );
+
+                expect(floor).toBeGreaterThan(0);
+            });
+
+            it('treats a heuristics-only site as brand new', function () {
+                expect(
+                    service.explorationTemperature(
+                        {
+                            explorationTemperature: 0.7,
+                            explorationFloor: 0.15,
+                            explorationHalfLife: 20000
+                        },
+                        null
+                    )
+                ).toBeCloseTo(0.7, 6);
+            });
+        });
+
         it('fills several randomizer slots in one call, never the same deck twice', async function () {
             // The draw sees the roster: each enrollment is committed before
             // the next candidate query, so a deck already taken cannot come

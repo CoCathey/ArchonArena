@@ -1876,6 +1876,60 @@ honest to put the results.
 -   [x] Two processes cannot both sweep: the lease is atomic, a database error means nobody
         plays, and an unrecognised `sweepOwner` falls back to the lobby.
 
+#### N25 — Sharpening the bot: targeting, honest search, better credit _(done)_
+
+**Why:** four things were wrong with how the Champion's Challenge bot learned, and every one of
+them was invisible in the output — a bot that targets at random and a bot that targets well both
+produce a tidy win-rate table. Each fix makes every number the lab reports, every ARI it moves
+and every Deep Probe ranking that reads it more truthful.
+
+**Tasks**
+
+-   [x] **Targeting.** Selections — "choose a creature to destroy", "steal from whom", most of
+        what one KeyForge player does to another — were answered by a dice roll over the
+        selectable cards. They are decisions now, with ownership-gated features (a big creature
+        is a good thing to destroy and a bad thing to sacrifice, which one weight cannot say),
+        amber-on-card, readiness, location, and two learned weights per distinct prompt so
+        "destroy" and "heal" can be told apart when the board looks identical.
+-   [x] **Common random numbers in the search.** The rollout seed mixed in the candidate index,
+        so roads were compared under different futures and a move could win for having been
+        dealt a better deck. Futures are shared across candidates at a decision — a search bug,
+        not a tuning choice: it made the deep bot report deck luck as insight.
+-   [x] **Credit assignment.** Labelling every decision with the final result trained the model
+        against strong plays in games thrown away twenty turns later. Labels now lean partly on
+        the value of the position the same seat reached next, with the value model frozen for the
+        batch. **(admin-config)** `trainingLambda`; 0 restores the old behaviour exactly.
+-   [x] **Distillation.** The deep bot's rollouts measure what a move is worth and those numbers
+        only fed the showcase panel. They are training targets now — the rejected roads included,
+        which are the only negative examples the loop ever gets — so a minute of forking becomes
+        knowledge that costs nothing to reuse.
+-   [x] **Cheaper, faster title fights.** A sequential probability ratio test replaces fixed-N
+        Wilson (a 73% record over fifty games takes the title; an even one is ruled out in about
+        seventy), and arena pairings are paired: one seed played twice with the seats swapped, so
+        deck and draw luck cancel. `arenaMinGames` is a floor under the test now rather than a
+        sample size, hence its default falling from 150 to 30.
+-   [x] **Evidence weighed.** Sparse weights shrink toward zero by observation count, so a card
+        seen twice cannot outrank one measured over hundreds; exploration anneals toward a floor
+        that stays above zero; dropped forks are counted and logged rather than silently thinning
+        the search.
+-   Later: feature crosses for the key race; a value model over real replays (F3's
+    win-probability graph); per-deck card contribution in the member's report.
+
+**Depends on:** N21. **Feeds** F9 (the practice bots play this policy), F3 and Deep Probe.
+**Acceptance criteria**
+
+-   [x] A real game logs targeting decisions carrying the prompt that asked for them, and a model
+        weight change flips which target is taken.
+-   [x] Candidates at one decision are rolled out under identical futures, pinned on the seed
+        derivation itself because the effect is otherwise only visible as noise.
+-   [x] A strong follow-up position lifts the label of a move the game later wasted, and a
+        position strong for the OPPONENT does not.
+-   [x] A measured search target outranks the outcome-derived label; a deep game returns lessons
+        for roads it rejected as well as the one it took.
+-   [x] Three lucky games do not outweigh three hundred measured ones.
+-   [x] Each arena pairing is played twice on one seed with the seats swapped, and a title
+        settled mid-pair stops the second half.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

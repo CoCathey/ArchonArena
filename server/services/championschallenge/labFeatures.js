@@ -76,7 +76,12 @@ const ACTION_KINDS = [
     'useAbility',
     'discard',
     'endTurn',
-    'houseCall'
+    'houseCall',
+    // ARCHON (N25): a target for a prompt that is asking for one - destroy
+    // this, steal from that, damage the other. These used to be answered by
+    // picking a selectable card at random, which is to say the bot played the
+    // whole of KeyForge's interaction layer by coin flip.
+    'select'
 ];
 
 /**
@@ -112,6 +117,35 @@ function actionFeatures({ kind, card, house, player }) {
         );
     }
 
+    // ARCHON (N25): what makes one target better than another.
+    //
+    // Magnitudes are OWNERSHIP-GATED - `sel:theirPower` and `sel:myPower` are
+    // separate keys rather than one power feature plus a "mine" flag - because a
+    // linear model cannot otherwise learn that a big creature is a good thing to
+    // destroy and a bad thing to sacrifice. Splitting the key gives each side of
+    // that its own weight, which is the cheapest possible way to express the
+    // interaction that matters most here.
+    if (kind === 'select' && card) {
+        const mine = !!(player && card.controller && card.controller.name === player.name);
+        const side = mine ? 'my' : 'their';
+        const power = Math.min(1, (card.power || 0) / 12);
+        const amberOn = Math.min(1, ((card.tokens && card.tokens.amber) || 0) / 4);
+
+        features[`sel:${side}Card`] = 1;
+        features[`sel:${side}Power`] = power;
+        features[`sel:${side}Armor`] = Math.min(1, (card.armor || 0) / 4);
+        // Amber sitting on a creature decides who reaps and who steals; it is
+        // the single most target-relevant quantity on a KeyForge board.
+        features[`sel:${side}AmberOn`] = amberOn;
+        features[`sel:${side}Ready`] = card.exhausted ? 0 : 1;
+        features[`sel:${side}Stunned`] = card.stunned ? 1 : 0;
+        features[`sel:${side}Creature`] = card.type === 'creature' ? 1 : 0;
+        features[`sel:${side}Artifact`] = card.type === 'artifact' ? 1 : 0;
+        // Where the card is standing changes what selecting it can mean: a hand
+        // card is being discarded or played, a discard-pile card returned.
+        features[`sel:in:${normalizeLocation(card.location)}`] = 1;
+    }
+
     return {
         features,
         // The per-card learned weight is keyed separately so 2,700 cards do
@@ -120,17 +154,61 @@ function actionFeatures({ kind, card, house, player }) {
     };
 }
 
+/** Card locations, collapsed to the handful the model can learn from. */
+function normalizeLocation(location) {
+    const known = ['play area', 'hand', 'discard', 'archives', 'deck', 'purged'];
+
+    return known.includes(location) ? String(location).replace(' ', '-') : 'other';
+}
+
+/**
+ * The prompt a selection is answering, normalized into a learnable key.
+ *
+ * Ownership features alone cannot tell "choose a creature to destroy" from
+ * "choose a creature to heal" - the board looks identical, and the right target
+ * is the opposite one. The prompt's own title is the missing signal, so it gets
+ * two weights per prompt (one for picking your own card, one for the
+ * opponent's), which is bounded, cheap, and exactly the distinction needed.
+ */
+function promptKey(title, mine) {
+    const normalized = String(title || 'unknown')
+        .toLowerCase()
+        .replace(/[^a-z ]/g, '')
+        .trim()
+        .slice(0, 60);
+
+    return `${normalized}|${mine ? 'mine' : 'theirs'}`;
+}
+
 /** One decision record, as stored for training and consumed by the model. */
 function decisionRecord(game, player, action) {
-    const { features, cardId } = actionFeatures(action);
-
-    return {
+    const { features, cardId } = actionFeatures({ ...action, player: action.player || player });
+    const record = {
         state: stateFeatures(game, player),
         action: features,
         cardId,
         side: player.name,
         turn: game.round || 0
     };
+
+    // Only selections carry a prompt: it is what tells "destroy" from "heal".
+    if (action.kind === 'select') {
+        const mine = !!(
+            action.card &&
+            action.card.controller &&
+            action.card.controller.name === player.name
+        );
+
+        record.promptKey = promptKey(action.prompt, mine);
+    }
+
+    return record;
 }
 
-module.exports = { stateFeatures, actionFeatures, decisionRecord, ACTION_KINDS };
+module.exports = {
+    stateFeatures,
+    actionFeatures,
+    decisionRecord,
+    promptKey,
+    ACTION_KINDS
+};

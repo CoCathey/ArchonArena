@@ -473,6 +473,13 @@ class ChampionsChallengeService {
         const learning = config.learningEnabled !== false;
         const championModel = learning ? await this.policyService.champion() : null;
         const championVersion = championModel ? championModel.version : null;
+        // ARCHON (N25): exploration ANNEALS. A young model needs to try
+        // second-best moves to find out they were best; a model trained on
+        // fifty thousand games is mostly being made worse by the noise. The
+        // temperature decays with the champion's experience toward a floor that
+        // never quite reaches zero, because a policy that stops exploring
+        // entirely can never discover it has grown wrong.
+        const temperature = this.explorationTemperature(config, championModel);
 
         // Rosters are visited round-robin in a shuffled order - one game per
         // member per pass - so one member's full queue cannot starve
@@ -609,6 +616,11 @@ class ChampionsChallengeService {
                               seed: this.newSeed(),
                               policy: championModel,
                               maxTurns: config.maxTurnsPerGame,
+                              // ARCHON (N25): a showcase game is also the best
+                              // training data the site produces, so it goes in
+                              // the diary like any other - and its SEARCH goes
+                              // in too, as lessons.
+                              recordDecisions: learning,
                               maxAnalyzedDecisions: config.deepMaxAnalyzedDecisions,
                               candidatesCap: config.deepCandidates,
                               samplesPerCandidate: config.deepSamples,
@@ -621,7 +633,7 @@ class ChampionsChallengeService {
                               // Exploration keeps the diary honest: a bot
                               // that never tries second-best moves can never
                               // learn which ones were actually best.
-                              temperature: 0.7,
+                              temperature,
                               recordDecisions: learning
                           });
                 } catch (err) {
@@ -659,13 +671,21 @@ class ChampionsChallengeService {
 
                         if (logged % (config.trainEveryGames || 25) === 0) {
                             await this.policyService.trainCandidate({
-                                batchGames: (config.trainEveryGames || 25) * 8
+                                batchGames: (config.trainEveryGames || 25) * 8,
+                                lambda: config.trainingLambda
                             });
                         }
                     } catch (err) {
                         logger.error('Challenge bot: failed to log training game', err);
                     }
                 }
+
+                // ARCHON (N25): the deep bot's search, kept. Every road it
+                // rolled out is a decision whose value was measured, and the
+                // fast policy trains toward those numbers directly - which is
+                // how a minute of forking becomes knowledge that costs nothing
+                // to use afterwards.
+                await this.recordDeepLessons(result, config);
 
                 // The randomizer: a random slot that has served its games
                 // swaps for a fresh random deck.
@@ -842,6 +862,75 @@ class ChampionsChallengeService {
         return 'played';
     }
 
+    /**
+     * ARCHON (N25): store what a deep game's search measured.
+     *
+     * The lessons go into the diary as a row whose decisions carry explicit
+     * targets - the win probability the rollouts found for each road, taken or
+     * not. `trainModel` prefers a target over any outcome-derived label, so the
+     * next candidate is trained partly on positions whose value was established
+     * by playing them out rather than inferred from who eventually won.
+     *
+     * The rejected roads matter as much as the chosen one: they are the only
+     * negative examples the loop ever gets. Outcome-labelled play can say "this
+     * move appeared in a won game"; only the search can say "this move was
+     * worth 0.62 and that one 0.41 from the same position".
+     *
+     * Best effort - a diary write that fails must never cost the game.
+     */
+    async recordDeepLessons(result, config) {
+        if (!result || !result.deep || !result.lessons || !result.lessons.length) {
+            return;
+        }
+
+        try {
+            await this.policyService.recordTrainingGame(
+                {
+                    policyVersion: null,
+                    // Every decision here carries its own target, so the winner
+                    // is not what labels them - but the row keeps it, because a
+                    // lesson row is still a record of a real game.
+                    winnerSide: result.winner,
+                    decisions: result.lessons
+                },
+                config.trainingGamesKept
+            );
+
+            if (result.forksFailed && result.forksFailed > result.forksPlayed / 4) {
+                // A deep bot quietly running on a quarter of its samples looks
+                // exactly like a deep bot that is thinking hard.
+                logger.warn(
+                    `Challenge deep bot: ${result.forksFailed} of ${result.forksPlayed} forks ` +
+                        'could not be played - the search is running on fewer samples than budgeted'
+                );
+            }
+        } catch (err) {
+            logger.error('Challenge bot: failed to store deep lessons', err);
+        }
+    }
+
+    /**
+     * ARCHON (N25): how adventurously the fast bot plays, given how much the
+     * champion has already seen.
+     *
+     * Decays from `explorationTemperature` toward `explorationFloor` on the
+     * champion's trained-game count, halving every `explorationHalfLife` games.
+     * The floor is deliberately above zero: a policy that stops exploring cannot
+     * notice the day its own habits stopped working, which is exactly what
+     * happens when the card pool changes underneath it.
+     */
+    explorationTemperature(config, championModel) {
+        const start = Number(config.explorationTemperature);
+        const floor = Number(config.explorationFloor);
+        const halfLife = Number(config.explorationHalfLife);
+        const top = Number.isFinite(start) ? start : 0.7;
+        const bottom = Number.isFinite(floor) ? floor : 0.15;
+        const half = Number.isFinite(halfLife) && halfLife > 0 ? halfLife : 20000;
+        const seen = (championModel && championModel.trainedGames) || 0;
+
+        return bottom + (top - bottom) * Math.pow(0.5, seen / half);
+    }
+
     /** How many deep showcase games this roster has had today (UTC). */
     async deepGamesToday(userId) {
         const rows = await this.db.query(
@@ -869,35 +958,53 @@ class ChampionsChallengeService {
 
         const champion = await this.policyService.champion();
         const [deckA, deckB] = this.neutralArenaDecks();
-        // Seats flipped by coin so neither brain owns the stronger arena
-        // deck or the first-player advantage across the fight.
-        const candidateIsAlpha = crypto.randomInt(2) === 0;
+        // ARCHON (N25): PAIRED SEEDS. One seed, played twice, seats swapped -
+        // so both brains face the same shuffles, the same draws and the same
+        // first-player advantage, once from each side.
+        //
+        // A coin flip per game (which is what this was) leaves deck and draw
+        // luck in the record, and that noise is most of why a title fight
+        // needed hundreds of games to say anything. Pairing cancels it: what
+        // survives a pair is the difference between the two players, which is
+        // the only thing being measured.
+        const seed = this.newSeed();
+        const halves = [true, false];
 
-        const result = await this.runMatch(deckA, deckB, {
-            seed: this.newSeed(),
-            maxTurns: config.maxTurnsPerGame,
-            // A genuine head-to-head: one brain per seat. A null champion is
-            // the heuristics - exactly the baseline the first candidate has
-            // to dethrone.
-            policies: candidateIsAlpha
-                ? { alpha: candidate.Model, omega: champion }
-                : { alpha: champion, omega: candidate.Model },
-            temperature: 0,
-            recordDecisions: false
-        });
+        for (const candidateIsAlpha of halves) {
+            const result = await this.runMatch(deckA, deckB, {
+                seed,
+                maxTurns: config.maxTurnsPerGame,
+                // A genuine head-to-head: one brain per seat. A null champion is
+                // the heuristics - exactly the baseline the first candidate has
+                // to dethrone.
+                policies: candidateIsAlpha
+                    ? { alpha: candidate.Model, omega: champion }
+                    : { alpha: champion, omega: candidate.Model },
+                temperature: 0,
+                recordDecisions: false
+            });
 
-        if (!result || !result.completed) {
-            return;
+            if (!result || !result.completed) {
+                // Drop the whole pair: half a pair is an unpaired game, which
+                // is the noise this is here to remove.
+                return;
+            }
+
+            const candidateWon = candidateIsAlpha
+                ? result.winner === PLAYER_ONE
+                : result.winner !== PLAYER_ONE;
+            const verdict = await this.policyService.recordArenaResult(candidate.Id, candidateWon, {
+                minGames: config.arenaMinGames,
+                decideGames: config.arenaDecideGames
+            });
+
+            // Settled mid-pair: the title has changed hands or the candidate is
+            // gone, and the second half would be scored against a row that no
+            // longer holds the crown it was contesting.
+            if (verdict === 'promoted' || verdict === 'retired') {
+                return;
+            }
         }
-
-        const candidateWon = candidateIsAlpha
-            ? result.winner === PLAYER_ONE
-            : result.winner !== PLAYER_ONE;
-
-        await this.policyService.recordArenaResult(candidate.Id, candidateWon, {
-            minGames: config.arenaMinGames,
-            decideGames: config.arenaDecideGames
-        });
     }
 
     /**

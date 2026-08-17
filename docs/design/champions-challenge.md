@@ -213,3 +213,64 @@ The worker needs **Postgres and nothing else**: the lab reads card data from
 the pack files on disk rather than the Redis-backed `CardService`, talks to no
 game node, and serves no HTTP. It does make outbound requests to Master Vault
 and Decks of KeyForge while the Gauntlet pool is growing.
+
+## Sharpening the bot (N25)
+
+Four things were wrong with how the bot learned, and they are worth naming
+because each was invisible in the output — a bot that targets at random and a
+bot that targets well both produce a tidy win-rate table.
+
+**It targeted at random.** Every "choose a creature to destroy", "steal from
+whom", "return which card" — most of what one KeyForge player does to another —
+was answered by picking a selectable card with a dice roll. Targets are
+decisions now, with features for whose the card is, what it is worth, whether
+it is ready, how much amber is sitting on it and where it stands. Magnitudes
+are ownership-gated (`sel:theirPower` and `sel:myPower` are separate weights)
+because a linear model cannot otherwise learn that a big creature is a good
+thing to destroy and a bad thing to sacrifice. Each distinct prompt also gets
+two weights of its own, which is what lets "destroy" and "heal" be learned
+apart when the board looks identical.
+
+**The deep bot compared candidates under different futures.** The rollout seed
+mixed in the candidate index, so road A and road B were played out against
+different draws and a move could win the comparison for having been dealt a
+better deck. Futures are now shared across candidates at a decision — common
+random numbers — which removes that noise for free. This was a search bug, not
+a tuning choice: it made the search report deck luck as insight.
+
+**Credit was assigned by the final score alone.** Every decision in a lost game
+was labelled a loss, so a strong play on turn 3 of a game thrown away on turn
+20 trained the model against itself. Labels now lean partly on the value of the
+position the same seat reached at its next decision — a TD-style target, with
+the outcome still the anchor and the value model frozen for the batch so
+targets cannot chase the weights they are updating. `trainingLambda` is
+**(admin-config)**; 0 restores the old behaviour exactly.
+
+**The deep bot's thinking was thrown away.** Its rollouts measure what a move
+is actually worth, and those numbers only fed the showcase panel. They are
+recorded as training targets now — the taken road and the rejected ones, which
+are the only negative examples the loop ever gets — and `trainModel` prefers a
+measured target over any outcome-derived label. A minute of forking becomes
+knowledge that costs nothing to use again.
+
+Two supporting changes:
+
+**Title fights stop when the answer is clear.** Fixed-N Wilson spent the same
+few hundred arena games on an obvious candidate as on a coin flip. A sequential
+probability ratio test now decides — the same instrument chess engine testing
+runs on — against a deliberately wide margin (H1 = 60%), so a 73% record over
+fifty games takes the title and an even one is ruled out in about seventy.
+Arena pairings are also **paired**: one seed played twice with the seats
+swapped, so deck and draw luck cancel and what survives is the difference
+between the two players. `arenaMinGames` is now a floor under the test rather
+than a sample size, which is why its default fell from 150 to 30.
+
+**Evidence is weighed.** A per-card weight learned from two observations is
+noise, and there are ~2,700 card ids; weights are shrunk toward zero by
+observation count (`count/(count+20)`) when scored — the small-sample rule the
+hidden-gem badge lives by, applied to the model's own parameters. Exploration
+temperature also anneals with the champion's experience toward a floor that
+stays above zero, because a policy that stops exploring cannot notice the day
+its habits stopped working. Dropped forks are counted and logged, so a deep bot
+quietly running on a quarter of its samples no longer looks exactly like a deep
+bot thinking hard.

@@ -58,7 +58,13 @@ class DeepGame {
 
         this.analyzed = 0;
         this.forksPlayed = 0;
+        this.forksFailed = 0;
         this.annotations = [];
+        // ARCHON (N25): what the search learned, as training targets. Each
+        // entry is a decision record plus the win probability the rollouts
+        // measured for it - the deep bot's whole point, in a form the fast
+        // policy can be trained on (labPolicy.decisionTarget).
+        this.lessons = [];
     }
 
     /**
@@ -90,7 +96,9 @@ class DeepGame {
             ...result,
             deep: true,
             forksPlayed: this.forksPlayed,
-            annotations: this.annotations
+            forksFailed: this.forksFailed,
+            annotations: this.annotations,
+            lessons: this.lessons
         };
     }
 
@@ -142,6 +150,31 @@ class DeepGame {
         const best = scored.reduce((a, b) => (b.winProb > a.winProb ? b : a));
         const worst = scored.reduce((a, b) => (b.winProb < a.winProb ? b : a));
 
+        // ARCHON (N25): the lesson. Every road that was actually rolled out is a
+        // decision whose value was MEASURED rather than guessed at, chosen or
+        // not - so the rejected roads teach as much as the taken one, which is
+        // the part outcome-labelled play can never supply. The fast policy is
+        // trained toward these directly (labPolicy.decisionTarget), which is how
+        // a minute of forking becomes knowledge it keeps for nothing.
+        for (const entry of scored) {
+            const candidate = candidates[entry.index];
+
+            if (!candidate) {
+                continue;
+            }
+
+            this.lessons.push({
+                ...decisionRecord(game, player, {
+                    kind: candidate.kind,
+                    card: candidate.card,
+                    house: candidate.house,
+                    prompt: candidate.prompt,
+                    player
+                }),
+                target: entry.winProb
+            });
+        }
+
         this.annotations.push({
             turn: game.round || 0,
             side: player.name,
@@ -170,6 +203,11 @@ class DeepGame {
         const opponent = player.opponent;
         const near = (side) => side && side.amber >= Math.max(0, side.getCurrentKeyCost() - 3);
 
+        // ARCHON (N25): targets get the treatment on the same terms as board
+        // decisions - which creature you destroy in a key race decides key
+        // races - but never simply because a prompt appeared: a game asks for
+        // dozens of selections, and analyzing all of them would spend the
+        // budget on which card to discard from a full hand.
         return near(player) || near(opponent) || (game.round || 0) <= 2;
     }
 
@@ -211,8 +249,14 @@ class DeepGame {
         this.forksPlayed++;
 
         try {
-            const rolloutSeed =
-                (this.seed ^ (this.analyzed * 2654435761) ^ (index * 40503) ^ (sample * 923)) >>> 0;
+            // ARCHON (N25): COMMON RANDOM NUMBERS. The future a road is tried
+            // under depends on the decision and the sample - never on WHICH road
+            // it is - so every candidate at this decision faces the same set of
+            // futures. Mixing the candidate index in here (as this did) meant
+            // road A and road B were rolled out under different draws, and a
+            // move could win the comparison for having been dealt a better deck.
+            // Sharing the futures cancels that noise entirely, for free.
+            const rolloutSeed = (this.seed ^ (this.analyzed * 2654435761) ^ (sample * 923)) >>> 0;
             const { sim: fork } = await replayTo(this.deckAlpha, this.deckOmega, {
                 seed: this.seed,
                 inputLog: prefix,
@@ -234,6 +278,10 @@ class DeepGame {
                 );
 
                 if (!(await forceHouse(fork, forkPlayer, buttons, index))) {
+                    return null;
+                }
+            } else if (kind === 'select') {
+                if (!(await forceSelect(fork, forkPlayer, index))) {
                     return null;
                 }
             } else if (!(await forceAction(fork, forkPlayer, index))) {
@@ -260,7 +308,11 @@ class DeepGame {
                 : heuristicValue(fork.game, horizonPlayer);
         } catch (err) {
             // The tripwire: determinism broke, or a fork hit an engine edge.
-            // Drop the sample; the live game is untouched.
+            // Drop the sample; the live game is untouched. Counted, because a
+            // deep bot quietly running on half its samples looks exactly like a
+            // deep bot that is thinking - see `forksFailed` on the result.
+            this.forksFailed++;
+
             return null;
         }
     }
@@ -323,6 +375,25 @@ async function forceAction(fork, player, index) {
     return fork.clickCardAt(fork.game, player, hand, chosen.index, 'hand');
 }
 
+/**
+ * Dispatch a specific selection on a fork.
+ *
+ * The unselected list is recomputed from the fork's own prompt state, which
+ * determinism guarantees matches the live game's - so "target 2" names the same
+ * card in both worlds.
+ */
+async function forceSelect(fork, player, index) {
+    const state = player.promptState;
+    const selected = state.selectedCards || [];
+    const unselected = (state.selectableCards || []).filter((card) => !selected.includes(card));
+
+    if (!unselected[index]) {
+        return false;
+    }
+
+    return fork.clickCardAt(fork.game, player, unselected, index, 'sel');
+}
+
 /** A model-free fallback horizon score: the amber-and-keys race, roughly. */
 function heuristicValue(game, player) {
     const opponent = player.opponent;
@@ -339,6 +410,12 @@ function describeCandidate(candidate) {
 
     if (candidate.kind === 'houseCall' || candidate.house) {
         return `call ${candidate.house}`;
+    }
+
+    if (candidate.kind === 'select') {
+        const name = candidate.card ? candidate.card.name || candidate.card.id : 'a card';
+
+        return `target ${name}`;
     }
 
     const verbs = {
