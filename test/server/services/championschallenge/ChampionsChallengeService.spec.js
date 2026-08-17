@@ -207,7 +207,15 @@ describe('ChampionsChallengeService', function () {
             expect(service.runMatch).toHaveBeenCalledTimes(1);
             // The engine decks carry their db ids so results can be recorded.
             expect(service.runMatch.mock.calls[0][0].dbId).toBeDefined();
-            expect(service.runMatch.mock.calls[0][2]).toEqual({ maxTurns: 80 });
+
+            // ARCHON (N21): sparring games are seeded (replayable), explore
+            // at a softmax temperature, and log their decisions for training.
+            const options = service.runMatch.mock.calls[0][2];
+
+            expect(options.maxTurns).toBe(80);
+            expect(Number.isFinite(options.seed)).toBe(true);
+            expect(options.temperature).toBeGreaterThan(0);
+            expect(options.recordDecisions).toBe(true);
 
             const [insert] = queriesMatching('INSERT INTO "ProvingGroundsGames"');
             const params = insert[1];
@@ -234,6 +242,91 @@ describe('ChampionsChallengeService', function () {
 
             expect(result.played).toBe(0);
             expect(service.runMatch).not.toHaveBeenCalled();
+        });
+
+        it('exempts a site admin’s decks from the daily budget', async function () {
+            answer([
+                [
+                    'SELECT "UserId", "DeckId" FROM "ProvingGroundsDecks"',
+                    [
+                        { UserId: USER, DeckId: 1 },
+                        { UserId: USER, DeckId: 2 }
+                    ]
+                ],
+                [
+                    "date_trunc('day'",
+                    [
+                        { DeckId: 1, GamesToday: 999 },
+                        { DeckId: 2, GamesToday: 999 }
+                    ]
+                ],
+                // The admin override needs no membership row at all.
+                ['FROM "UserRoles"', [{ IsAdmin: true }]],
+                ['FROM "Memberships"', []],
+                ['FROM "DeckCards"', deckCardRows],
+                ['FROM "DeckHouses"', deckHouseRows],
+                [
+                    'FROM "Decks" d WHERE d."Id"',
+                    (sql, params) => [{ Id: params[0], Name: `Deck ${params[0]}`, Uuid: 'u' }]
+                ]
+            ]);
+            config.gamesPerSweep = 1;
+            service.runMatch = vi.fn().mockResolvedValue(fakeResult(1, 2));
+
+            const result = await service.runSweep();
+
+            expect(result.played).toBe(1);
+        });
+
+        it('rotates a random slot that has served its games', async function () {
+            sweepAnswers({
+                enrollments: [
+                    { UserId: USER, DeckId: 1 },
+                    { UserId: USER, DeckId: 2 }
+                ],
+                membership: vaultMasterRow
+            });
+            config.gamesPerSweep = 1;
+            service.runMatch = vi.fn().mockResolvedValue(fakeResult(1, 2));
+
+            // Layer the randomizer's queries onto the sweep's: deck 1 is a
+            // random slot at its target, and deck 9 is the fresh draw.
+            const base = db.query.getMockImplementation();
+
+            db.query.mockImplementation(async (sql, params) => {
+                if (sql.includes('e."Random" = true')) {
+                    return [
+                        {
+                            DeckId: 1,
+                            RandomGamesTarget: 20,
+                            EnrolledAt: new Date(),
+                            PlayedSince: 20
+                        }
+                    ];
+                }
+
+                if (sql.includes('ORDER BY random()')) {
+                    return [{ Id: 9 }];
+                }
+
+                return base(sql, params);
+            });
+
+            const result = await service.runSweep();
+
+            expect(result.played).toBe(1);
+
+            // The served slot was withdrawn...
+            const withdrawals = queriesMatching('DELETE FROM "ProvingGroundsDecks"');
+
+            expect(withdrawals.some(([, deleteParams]) => deleteParams[1] === 1)).toBe(true);
+
+            // ...and its successor enrolled as a random slot with the same target.
+            const enrolls = queriesMatching('"Random", "RandomGamesTarget"');
+
+            expect(
+                enrolls.some(([, insertParams]) => insertParams[1] === 9 && insertParams[2] === 20)
+            ).toBe(true);
         });
 
         it('respects the per-deck daily budget', async function () {

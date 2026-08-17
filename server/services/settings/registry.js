@@ -434,6 +434,80 @@ const REGISTRY = {
                 min: 20,
                 max: 200,
                 default: 80
+            },
+            // ARCHON (N21): the learning bot. Off switches the sparring
+            // partner back to the fixed heuristics and stops all training,
+            // arena play and deep games in one move.
+            learningEnabled: {
+                type: 'boolean',
+                label: 'Learning bot: train from games and play with the champion model',
+                default: true
+            },
+            trainEveryGames: {
+                type: 'number',
+                label: 'Train a new candidate every (logged games)',
+                min: 10,
+                max: 1000,
+                default: 25
+            },
+            trainingGamesKept: {
+                type: 'number',
+                label: 'Training games kept (older pruned)',
+                min: 100,
+                max: 50000,
+                default: 4000
+            },
+            arenaMinGames: {
+                type: 'number',
+                label: 'Arena games before a candidate may take the title',
+                min: 20,
+                max: 2000,
+                default: 150
+            },
+            arenaDecideGames: {
+                type: 'number',
+                label: 'Arena games before an unproven candidate retires',
+                min: 50,
+                max: 5000,
+                default: 400
+            },
+            // The deep planner: fewer, slower, annotated showcase games. A
+            // deep game costs seconds-to-minutes of CPU where a fast one
+            // costs half a second - these knobs are the leash.
+            deepGamesPerDay: {
+                type: 'number',
+                label: 'Deep showcase games per roster per day (0 = none)',
+                min: 0,
+                max: 20,
+                default: 2
+            },
+            deepMaxAnalyzedDecisions: {
+                type: 'number',
+                label: 'Decisions analyzed per deep game',
+                min: 2,
+                max: 40,
+                default: 10
+            },
+            deepCandidates: {
+                type: 'number',
+                label: 'Candidate moves tried per analyzed decision',
+                min: 2,
+                max: 12,
+                default: 5
+            },
+            deepSamples: {
+                type: 'number',
+                label: 'Sampled futures per candidate move',
+                min: 1,
+                max: 8,
+                default: 2
+            },
+            deepRolloutTurns: {
+                type: 'number',
+                label: 'Turns each sampled future is played forward',
+                min: 2,
+                max: 20,
+                default: 5
             }
         }
     },
