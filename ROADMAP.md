@@ -1994,7 +1994,7 @@ indistinguishable from working.
 
 **Tasks**
 
--   [x] **Every ask is stamped**, answered or not (`GauntletDecks."SasAskedAt"`, migration 77),
+-   [x] **Every ask is stamped**, answered or not (`GauntletDecks."SasAskedAt"`, migration 78),
         ordered never-asked-first and re-asked only after `gauntletEnrichRetryDays` (30) — long,
         because "DoK does not rate this deck" does not change week to week. The stamp is written
         _before_ the request, so a timeout still counts as having spent it.
@@ -2046,7 +2046,7 @@ spot. ARI is built on those games, so the bias went straight into the platform's
         the pilot rotates between games instead. Showcase games and arena games stay unstyled —
         one is meant to be the best play the site can produce, the other measures brains.
 -   [x] **The pilot is part of the record** (`Persona` on the mirror games, the field games and
-        the diary, migration 78), because a game whose pilot went unrecorded can never be
+        the diary, migration 79), because a game whose pilot went unrecorded can never be
         attributed afterwards.
 -   [x] **Per-style records on the page**, with intervals, blank below `MIN_STYLE_GAMES` — and
         the spread, which is the interesting number: a wide spread means the deck cares what the
@@ -2197,6 +2197,12 @@ commit to it, and run the engine as a continuous soak test.
         costs about a minute of compute per game. Deep thought at a live table wants seeded
         practice games and a logged input stream first — the bot-vs-bot showcase is where
         that pays off, since both seats are ours.
+-   [x] **Practice games are recorded, and are never results.** A player wanted to find a bot
+        game again and watch the replay back, so bot games are persisted and replayed like any
+        other — with a `Games."BotGame"` flag (migration 77) that every aggregate excludes, and
+        a spec that reads the source to prove none of the thirty finished-game queries forgets.
+        Listings show them; numbers do not count them; ratings never see one (the router
+        declines, and the rating engine re-checks).
 -   [x] **Bot Settings** (`/admin/bots`, isAdmin): the roster with each bot's name, picture,
         profile, on/off switch and deck count, plus the knobs that govern all of them. Bots
         are ordinary accounts, so their pictures and profiles go through the same pipeline a

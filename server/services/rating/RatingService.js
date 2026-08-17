@@ -221,6 +221,7 @@ class RatingService {
 
         const rows = await this.db.query(
             'SELECT g."Id" AS "GameDbId", g."GameFormat", g."WinnerId", g."WinReason", ' +
+                'g."BotGame", ' +
                 'gp."PlayerId", gp."Keys", d."Uuid" AS "DeckUuid", ds."SasRating", ' +
                 'ds."AercScore", da."Ari" ' +
                 'FROM "Games" g ' +
@@ -231,6 +232,15 @@ class RatingService {
                 'WHERE g."GameId" = $1',
             [gameUuid]
         );
+
+        // ARCHON (F9): a practice game against a bot is recorded and
+        // replayable, and is never rated. The router already declines to call
+        // this for one; the guard is repeated here because this is the
+        // function that MOVES somebody's Amber, and the cost of being wrong
+        // once is a rating nobody can explain.
+        if (rows && rows[0] && rows[0].BotGame) {
+            return;
+        }
 
         if (!rows || rows.length !== 2) {
             return; // solo games, aborted setups, >2p variants: never rated
@@ -1300,7 +1310,7 @@ class RatingService {
         }
 
         const rows = await this.db.query(
-            'SELECT g."Id", g."WinnerId", g."WinReason", g."FinishedAt", ' +
+            'SELECT g."Id", g."WinnerId", g."WinReason", g."FinishedAt", g."BotGame", ' +
                 '(SELECT count(*) FROM "GamePlayers" gp WHERE gp."GameId" = g."Id") AS "Players" ' +
                 'FROM "Games" g WHERE g."GameId" = $1',
             [gameUuid]
@@ -1311,6 +1321,14 @@ class RatingService {
             // The result row is written by the same handler that triggers
             // rating, so a game that is not in the table yet is still in flight.
             return { pending: true };
+        }
+
+        // ARCHON (F9): a practice game is never rated, and the panel must be
+        // told so straight away. Reported as settled rather than pending -
+        // "Rating this game..." that resolves to nothing after fifteen
+        // seconds is worse than an honest answer immediately.
+        if (game.BotGame) {
+            return { pending: false, reason: 'Practice games against a bot are not rated.' };
         }
 
         if (!game.FinishedAt) {

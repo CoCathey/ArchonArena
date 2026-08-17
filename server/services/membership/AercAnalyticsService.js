@@ -49,7 +49,8 @@ const { parseSets, setPredicate } = require('./setFilter');
  */
 
 /** Only decided games are results. */
-const DECIDED = 'g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL';
+const DECIDED =
+    'g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL';
 
 /**
  * The AERC traits, in DoK's own order. Keys must match the JSON keys in

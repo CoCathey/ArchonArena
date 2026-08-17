@@ -62,10 +62,13 @@ class BotDriver {
          * bot turn is not "the bot is slow", it is every player on the node
          * losing their game.
          *
-         * A pump therefore runs on a budget and, if it needs longer, hands
-         * the loop back and finishes on a later tick.
+         * A pump therefore runs on a quarter-second budget and, if it needs
+         * longer, hands the loop back and finishes on a later tick. A quarter
+         * second is far more than one play needs and far less than any
+         * timeout that matters, so the node stays answerable even if a bot
+         * somehow finds a position it wants to think very hard about.
          */
-        this.maxPumpMs = Number.isFinite(options.maxPumpMs) ? options.maxPumpMs : 1000;
+        this.maxPumpMs = Number.isFinite(options.maxPumpMs) ? options.maxPumpMs : 250;
         /**
          * ARCHON (F9): the bot thinks visibly.
          *

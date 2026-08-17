@@ -1,15 +1,18 @@
 const GameRouter = require('../../server/gamerouter.js');
 
 /**
- * ARCHON (F9): Helper Bot practice games are invisible to the rest of the
- * platform - the Champion’s Challenge doctrine, applied to the router. Every
- * official statistic filters only on FinishedAt/WinnerId, so one bot row in
- * "Games" would be a real result in thirty queries at once; and rating reads
- * the rows persistence writes, so keeping the row out keeps the ladder clean.
+ * ARCHON (F9): a practice game is recorded, and is never a result.
  *
- * What these specs pin is that every path a finished game can take to the
- * database checks the flag: creation at start, GAMEWIN, and the
- * persistFinishedGame paths (REMATCH / PLAYERLEFT / TOURNAMENTNEXTGAME).
+ * The two halves are separate on purpose, and this is where they part:
+ *
+ *  - **Recorded.** The row is written and the replay is saved, because a
+ *    player wants to find the game again, watch it back, and show somebody
+ *    the turn that won it. A game that was never written down can do none of
+ *    that.
+ *  - **Never a result.** The rating engine is never called for it, so no
+ *    Amber moves and no record changes. The row carries `botGame` so every
+ *    aggregate can exclude it (see botGamesAreNotResults.spec.js, which
+ *    reads the source to prove none of them forgets).
  */
 const buildRouter = () => {
     const calls = { create: 0, update: 0, saveReplay: 0, processGame: 0, commands: [] };
@@ -26,13 +29,15 @@ const buildRouter = () => {
             calls.update++;
             calls.updatedWith = game;
         },
-        saveReplay: async () => {
+        saveReplay: async (gameId) => {
             calls.saveReplay++;
+            calls.replayFor = gameId;
         }
     };
     router.ratingService = {
-        processGame: async () => {
+        processGame: async (gameId) => {
             calls.processGame++;
+            calls.ratedGame = gameId;
         }
     };
     router.emit = () => {};
@@ -54,24 +59,26 @@ const pendingGame = (botGame) => ({
 });
 
 describe('bot games and the router', function () {
-    it('creates a database row when an ordinary game starts', function () {
-        const { router, calls } = buildRouter();
-
-        const node = router.startGame(pendingGame(false));
-
-        expect(node).toBeDefined();
-        expect(calls.create).toBe(1);
-        expect(calls.commands.map((entry) => entry.command)).toEqual(['STARTGAME']);
-    });
-
-    it('creates no row when a bot game starts, but still starts it', function () {
+    it('records a bot game like any other, carrying the flag', function () {
         const { router, calls } = buildRouter();
 
         const node = router.startGame(pendingGame(true));
 
         expect(node).toBeDefined();
-        expect(calls.create).toBe(0);
+        expect(calls.create).toBe(1);
+        // The flag rides with the row, which is what lets every aggregate
+        // leave it out later.
+        expect(calls.createdWith.botGame).toBe(true);
         expect(calls.commands.map((entry) => entry.command)).toEqual(['STARTGAME']);
+    });
+
+    it('records an ordinary game with no flag at all', function () {
+        const { router, calls } = buildRouter();
+
+        router.startGame(pendingGame(false));
+
+        expect(calls.create).toBe(1);
+        expect(calls.createdWith.botGame).toBeUndefined();
     });
 
     it('persists, replays and rates an ordinary GAMEWIN', async function () {
@@ -92,7 +99,7 @@ describe('bot games and the router', function () {
         expect(calls.processGame).toBe(1);
     });
 
-    it('neither persists, replays nor rates a bot GAMEWIN', async function () {
+    it('persists and replays a bot GAMEWIN, but never rates it', async function () {
         const { router, calls } = buildRouter();
         let announced = null;
 
@@ -110,19 +117,20 @@ describe('bot games and the router', function () {
         );
         await settle();
 
-        expect(calls.update).toBe(0);
-        expect(calls.saveReplay).toBe(0);
+        // Findable and watchable...
+        expect(calls.update).toBe(1);
+        expect(calls.saveReplay).toBe(1);
+        expect(calls.replayFor).toBe('uuid-1');
+        // ...and it moved nobody's Amber.
         expect(calls.processGame).toBe(0);
 
-        // The lobby still hears about it - closing tables and tournament
-        // bookkeeping listen to onGameWin, and both no-op safely for bots.
         expect(announced).toEqual({
             event: 'onGameWin',
             game: { gameId: 'uuid-1', botGame: true }
         });
     });
 
-    it('persistFinishedGame skips bot games on every departure path', async function () {
+    it('records a bot game that ended by rematch or a player leaving', async function () {
         const { router, calls } = buildRouter();
 
         for (const command of ['REMATCH', 'TOURNAMENTNEXTGAME', 'REMATCHWITHNEWDECKS']) {
@@ -146,20 +154,9 @@ describe('bot games and the router', function () {
         );
         await settle();
 
-        expect(calls.update).toBe(0);
-
-        // And the guard is the flag, not the path: the same messages for an
-        // ordinary game all reach the database.
-        router.onMessage(
-            JSON.stringify({
-                identity: 'worker-1',
-                command: 'PLAYERLEFT',
-                arg: { gameId: 'uuid-2', player: 'somebody', game: { gameId: 'uuid-2' } }
-            }),
-            'nodemessage'
-        );
-        await settle();
-
-        expect(calls.update).toBe(1);
+        // A game somebody walked out of is still a game they played.
+        expect(calls.update).toBe(4);
+        // And still not a result: the rating engine was never asked.
+        expect(calls.processGame).toBe(0);
     });
 });

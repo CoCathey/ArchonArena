@@ -27,8 +27,13 @@ class GameService {
 
         try {
             let newGame = await this.db.query(
-                'INSERT INTO "Games" ("GameId", "GameFormat", "StartedAt") VALUES ($1, $2, $3) RETURNING "Id"',
-                [game.gameId, game.gameFormat, game.startedAt]
+                // ARCHON (F9): practice games are recorded so a player can
+                // find them again and watch the replay - and flagged, because
+                // a recorded game is not a result. Every aggregate on this
+                // site excludes the flagged ones.
+                'INSERT INTO "Games" ("GameId", "GameFormat", "StartedAt", "BotGame") ' +
+                    'VALUES ($1, $2, $3, $4) RETURNING "Id"',
+                [game.gameId, game.gameFormat, game.startedAt, !!game.botGame]
             );
 
             if (!newGame || newGame.length === 0) {

@@ -156,15 +156,15 @@ class StatisticsService {
                 // players-level avg keys from double-counting the game rows).
                 this.db.query(
                     'SELECT ' +
-                        '(SELECT COUNT(*) FROM "Games" WHERE "FinishedAt" IS NOT NULL) AS "finishedGames", ' +
-                        '(SELECT COUNT(*) FROM "Games" WHERE "FinishedAt" IS NOT NULL ' +
+                        '(SELECT COUNT(*) FROM "Games" WHERE "FinishedAt" IS NOT NULL AND "BotGame" IS NOT TRUE) AS "finishedGames", ' +
+                        '(SELECT COUNT(*) FROM "Games" WHERE "FinishedAt" IS NOT NULL AND "BotGame" IS NOT TRUE ' +
                         'AND "WinnerId" IS NOT NULL) AS "decidedGames", ' +
                         '(SELECT AVG(EXTRACT(EPOCH FROM ("FinishedAt" - "StartedAt"))) FROM "Games" ' +
-                        'WHERE "FinishedAt" IS NOT NULL AND "StartedAt" IS NOT NULL ' +
+                        'WHERE "FinishedAt" IS NOT NULL AND "BotGame" IS NOT TRUE AND "StartedAt" IS NOT NULL ' +
                         'AND "FinishedAt" > "StartedAt") AS "avgDurationSec", ' +
                         '(SELECT AVG(gp."Keys") FROM "GamePlayers" gp ' +
                         'JOIN "Games" g ON g."Id" = gp."GameId" ' +
-                        'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL) AS "avgKeys"'
+                        'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL) AS "avgKeys"'
                 ),
                 // Win rate per house: every deck contributes its three houses to
                 // the games it played, won or lost.
@@ -176,13 +176,13 @@ class StatisticsService {
                         'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                         'JOIN "DeckHouses" dh ON dh."DeckId" = d."Id" ' +
                         'JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
-                        'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                        'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL ' +
                         'GROUP BY h."Name"'
                 ),
                 // Format distribution (one row per game, so count Games directly).
                 this.db.query(
                     'SELECT "GameFormat" AS "format", COUNT(*) AS "games" ' +
-                        'FROM "Games" WHERE "FinishedAt" IS NOT NULL ' +
+                        'FROM "Games" WHERE "FinishedAt" IS NOT NULL AND "BotGame" IS NOT TRUE ' +
                         'GROUP BY "GameFormat" ORDER BY COUNT(*) DESC'
                 ),
                 // Win rate by deck-power band (joined to DeckSas via deck Uuid).
@@ -195,7 +195,7 @@ class StatisticsService {
                         'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
                         'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                         'JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
-                        'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                        'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL ' +
                         'AND ds."SasRating" IS NOT NULL ' +
                         'GROUP BY "band"'
                 ),
@@ -210,7 +210,7 @@ class StatisticsService {
                         'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
                         'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                         'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
-                        'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                        'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL ' +
                         'GROUP BY e."Name", e."ExpansionId"'
                 ),
                 // ARCHON (N3): the house-vs-house matchup matrix.
@@ -232,7 +232,7 @@ class StatisticsService {
                         'JOIN "Decks" od ON od."Id" = ogp."DeckId" ' +
                         'JOIN "DeckHouses" odh ON odh."DeckId" = od."Id" ' +
                         'JOIN "Houses" oh ON oh."Id" = odh."HouseId" ' +
-                        'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                        'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL ' +
                         'GROUP BY h."Name", oh."Name"'
                 )
             ]);
@@ -334,7 +334,7 @@ class StatisticsService {
                     'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" AND gp."PlayerId" = $1 ' +
                     'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                     'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
-                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                    'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL ' +
                     'GROUP BY d."Id", d."Name", d."Identity", ds."SasRating" ' +
                     'ORDER BY COUNT(*) DESC',
                 [user.Id]
@@ -350,7 +350,7 @@ class StatisticsService {
                     'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
                     'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                     'JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
-                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                    'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL ' +
                     'AND ds."SasRating" IS NOT NULL GROUP BY "band"'
             ),
             // ARCHON (N3): this player's record against each opposing house -
@@ -365,7 +365,7 @@ class StatisticsService {
                     'JOIN "Decks" od ON od."Id" = ogp."DeckId" ' +
                     'JOIN "DeckHouses" odh ON odh."DeckId" = od."Id" ' +
                     'JOIN "Houses" oh ON oh."Id" = odh."HouseId" ' +
-                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                    'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL ' +
                     'GROUP BY oh."Name"',
                 [user.Id]
             )
@@ -503,7 +503,7 @@ class StatisticsService {
                     'AS "avgDurationSec" ' +
                     'FROM "Games" g ' +
                     'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" AND gp."PlayerId" = $1 ' +
-                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL',
+                    'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL',
                 [userId]
             ),
             this.db.query(
@@ -511,7 +511,7 @@ class StatisticsService {
                     'COUNT(*) FILTER (WHERE g."WinnerId" = $1) AS "wins" ' +
                     'FROM "Games" g ' +
                     'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" AND gp."PlayerId" = $1 ' +
-                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                    'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL ' +
                     'GROUP BY g."GameFormat"',
                 [userId]
             ),
@@ -523,7 +523,7 @@ class StatisticsService {
                     'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                     'JOIN "DeckHouses" dh ON dh."DeckId" = d."Id" ' +
                     'JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
-                    'WHERE g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                    'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL ' +
                     'GROUP BY h."Name"',
                 [userId]
             )
