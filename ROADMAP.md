@@ -2006,7 +2006,7 @@ commit to it, and run the engine as a continuous soak test.
         that pays off, since both seats are ours.
 -   [x] **Practice games are recorded, and are never results.** A player wanted to find a bot
         game again and watch the replay back, so bot games are persisted and replayed like any
-        other — with a `Games."BotGame"` flag (migration 76) that every aggregate excludes, and
+        other — with a `Games."BotGame"` flag (migration 77) that every aggregate excludes, and
         a spec that reads the source to prove none of the thirty finished-game queries forgets.
         Listings show them; numbers do not count them; ratings never see one (the router
         declines, and the rating engine re-checks).
