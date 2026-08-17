@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS public."GauntletDecks"
     "Playable" boolean NOT NULL DEFAULT false,
     -- Why it is unplayable, for the operator: the missing card ids.
     "MissingCards" text COLLATE pg_catalog."default",
+    -- ARCHON (N30): what the deck is trying to do, read from the card list above
+    -- (deckProfile.js) - printed amber, creature power and armour, plus
+    -- clause-level keyword counts, on their own scale and deliberately not
+    -- called AERC or SAS. This is what makes the strategy filters work on a
+    -- server with no Decks of KeyForge key; DoK's numbers still win for any deck
+    -- that has them. Costs no outbound request: the cards are already here.
+    "Profile" jsonb,
     "FetchedAt" timestamp without time zone NOT NULL,
     -- Spreads the draw across the pool instead of favouring whatever postgres
     -- hands back first; also shows the operator that the pool is being used.

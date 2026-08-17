@@ -180,6 +180,28 @@ strategy or SAS filter narrows the pool to enriched decks, and the page says
 how many decks the filters actually reach rather than letting a member wonder
 why every game is still a mirror.
 
+**Reading the deck instead of asking about it (N30).** Every strategy filter used
+to be computed from DoK's AERC breakdown, which made the most configurable part
+of the Gauntlet depend on somebody else's key: no key, no enrichment, no strategy
+filter, and a pool that answered every strategy with "no opponents" while looking
+perfectly healthy. The card list is already stored, so `deckProfile.js` reads it
+— printed amber, creature power and armour, plus clause-level keyword counts on
+the same axes. **Clause** level because "destroy a friendly creature" and
+"destroy an enemy creature" are opposite facts and card-level matching cannot
+tell them apart.
+
+It is not AERC and not SAS, lives on its own scale under its own names, and never
+feeds ARI — a rating built partly on a keyword count would be a worse rating
+wearing the same clothes. Each strategy therefore carries two sets of bars, and a
+deck is judged by DoK where DoK has rated it and by the local reading where it
+has not: "either passes" would silently loosen the filter for exactly the decks
+we know most about. The local bars are calibrated so each strategy admits roughly
+a fifth to a third of randomly assembled decks, and the spec re-measures that
+against the real card pool — a filter that matches everything and one that
+matches nothing fail identically from the outside. Profiling is pure CPU over
+cards already stored, so it runs before enrichment and costs no request at all.
+The SAS window still means DoK's SAS.
+
 **Asking DoK about the pool, politely (N27).** Enrichment runs a few decks per
 sweep — never-asked first, and within those the most played, because a deck the
 draw keeps picking is the one whose stats the report most needs. Two rules keep

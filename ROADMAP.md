@@ -2099,6 +2099,45 @@ which is true of a pool that is filling and false of one that never will.
 -   [x] The panel reports a parked crawl as parked.
 -   [x] The crawl button is admin-only and cannot enable a disabled crawl.
 
+#### N30 — Reading a deck instead of asking about it _(done)_
+
+**Why:** every Gauntlet strategy filter was computed from Decks of KeyForge's AERC breakdown, so
+the most configurable part of the feature depended on somebody else's API and somebody else's
+key. With no key there was no enrichment, so there was no strategy filter at all: the pool
+answered every strategy with "no opponents" while looking perfectly healthy.
+
+**Tasks**
+
+-   [x] **`deckProfile.js`** — a deck read from its own card list: printed amber, creature power
+        and armour, plus **clause-level** keyword counts on the same axes. Clause level because
+        "destroy a friendly creature" and "destroy an enemy creature" are opposite facts about a
+        deck and card-level matching cannot tell them apart.
+-   [x] **Stored on the pool** (`GauntletDecks."Profile"`, migration 80): computed at hydration
+        while the cards are in hand, and backfilled a batch per sweep from cards already stored.
+        Pure CPU — no Master Vault, no DoK, nobody's rate limit — so it runs before enrichment.
+-   [x] **Two scales, never mixed.** Each strategy carries `thresholds` (DoK's curated per-card
+        dataset, single digits) and `localThresholds` (a keyword count over 36 cards). A deck DoK
+        has rated is judged by DoK; the local reading only answers for decks it has not. "Either
+        passes" would silently loosen the filter for exactly the decks we know most about.
+-   [x] **Calibrated, and re-measured by the spec.** The local bars admit roughly a fifth to a
+        third of decks assembled from the real card pool. A filter that matches everything and
+        one that matches nothing are equally useless and fail identically from the outside, so
+        the test asserts the share rather than the arithmetic.
+-   [x] **Never called AERC or SAS, and never feeds ARI.** It exists to make the filters work
+        without a key, not to replace a rating: a rating built partly on a keyword count would be
+        a worse rating wearing the same clothes. The SAS window still means DoK's SAS, and the
+        panel says which filters are exact, which are estimated, and which need a key.
+-   Later: weight the keyword counts by how often each phrase actually predicts the axis, using
+    the decks DoK HAS rated as labels — the site would then be learning its own AERC from the
+    overlap rather than guessing at one.
+
+**Depends on:** N24 (the pool), N27 (enrichment). **Acceptance criteria**
+
+-   [x] A strategy filter matches decks on a server with no DoK key at all.
+-   [x] Every strategy admits a minority of real decks, not all and not none.
+-   [x] Destroying your own creature is not counted as removal, and the opponent drawing is not
+        counted as your efficiency.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

@@ -234,6 +234,20 @@ const LabHealth = () => {
                             hydrated: (health.gauntlet.hydrated || 0).toLocaleString()
                         })}
                     />
+                    {/* ARCHON (N30): the strategy filters read this, and it needs
+                        no key and no outbound request - so on a healthy server it
+                        should track the playable pool. SAS below is the part that
+                        still depends on Decks of KeyForge. */}
+                    <Row
+                        label={t('Read from their cards')}
+                        tone={
+                            health.gauntlet.profiled >= health.gauntlet.playable
+                                ? 'good'
+                                : undefined
+                        }
+                        value={(health.gauntlet.profiled || 0).toLocaleString()}
+                        hint={t('strategy filters')}
+                    />
                     <Row
                         label={t('SAS on the pool')}
                         tone={health.gauntlet.rated > 0 ? 'good' : undefined}

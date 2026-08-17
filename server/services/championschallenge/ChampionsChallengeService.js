@@ -787,6 +787,11 @@ class ChampionsChallengeService {
         try {
             if (await this.gauntletService.anyoneWantsField()) {
                 await this.gauntletService.hydratePool();
+                // ARCHON (N30): read the decks before asking anyone about them.
+                // Profiling is pure CPU over cards already stored, so it costs
+                // nothing and is what the strategy filters fall back to; DoK
+                // enrichment is the outbound request, and it is bounded.
+                await this.gauntletService.profilePool();
                 await this.gauntletService.enrichPool();
             }
         } catch (err) {
@@ -1615,6 +1620,12 @@ class ChampionsChallengeService {
                         'COUNT(*) FILTER (WHERE g."Playable" AND ds."Uuid" IS NOT NULL)::int AS "Rated", ' +
                         'COUNT(*) FILTER (WHERE g."Playable" AND ds."Uuid" IS NULL ' +
                         'AND g."SasAskedAt" IS NOT NULL)::int AS "Unrated", ' +
+                        // ARCHON (N30): how much of the pool the strategy filters
+                        // can reach with no DoK key at all - read from each deck's
+                        // own cards, so this is the number that should approach
+                        // the playable pool on any server.
+                        'COUNT(*) FILTER (WHERE g."Playable" AND g."Profile" IS NOT NULL)::int ' +
+                        'AS "Profiled", ' +
                         'MAX(g."FetchedAt") AS "LastFetch" FROM "GauntletDecks" g ' +
                         'LEFT JOIN "DeckSas" ds ON ds."Uuid" = g."Uuid"'
                 ),
@@ -1712,6 +1723,8 @@ class ChampionsChallengeService {
                 // number is a ceiling on the first, not a fault.
                 rated: (pool && pool[0] && pool[0].Rated) || 0,
                 unrated: (pool && pool[0] && pool[0].Unrated) || 0,
+                // Read from their own cards, which needs no key and no request.
+                profiled: (pool && pool[0] && pool[0].Profiled) || 0,
                 // What the pool could NOT play, grouped - an operator seeing one
                 // card id at the top of this list has learned something
                 // actionable about their card data.

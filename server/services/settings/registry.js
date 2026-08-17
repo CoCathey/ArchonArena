@@ -631,6 +631,17 @@ const REGISTRY = {
                 max: 60000,
                 default: 10000
             },
+            // ARCHON (N30): reading a pool deck's own cards to work out what it
+            // is built to do. Pure CPU over cards already stored - no outbound
+            // request, nobody's rate limit - so this is only about not stalling a
+            // sweep tick on a pool of thousands.
+            gauntletProfilePerRun: {
+                type: 'number',
+                label: 'Pool decks read from their own cards per sweep',
+                min: 1,
+                max: 500,
+                default: 50
+            },
             gauntletEnrichPerRun: {
                 type: 'number',
                 label: 'Pool decks sent for SAS/AERC enrichment per sweep',

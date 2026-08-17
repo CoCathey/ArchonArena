@@ -222,6 +222,38 @@ describe('GauntletService', function () {
             expect(draw[1]).toContain(STRATEGIES.amber.thresholds.amberControl);
         });
 
+        /**
+         * ARCHON (N30): a strategy filter that works with no DoK key.
+         *
+         * The filter used to read AERC out of the cached DoK payload and nothing
+         * else, so on a server with no key it matched no decks at all - the most
+         * configurable part of the Gauntlet, silently inert.
+         */
+        it('falls back to the deck’s own cards where DoK has not rated it', async function () {
+            answer([['FROM "GauntletDecks" g', [poolRow]]]);
+
+            await service.drawOpponent(USER, {
+                sets: [],
+                houses: [],
+                strategies: ['amber'],
+                minSas: null,
+                maxSas: null
+            });
+
+            const [draw] = queriesMatching('FROM "GauntletDecks" g');
+
+            // DoK's number when the deck has one...
+            expect(draw[0]).toContain('ds."RawData" IS NOT NULL');
+            expect(draw[0]).toContain("ds.\"RawData\" -> 'deck' ->> 'amberControl'");
+            // ...the local reading when it does not. Not "either passes": a deck
+            // DoK has rated is judged by DoK, or the filter silently loosens for
+            // exactly the decks we know most about.
+            expect(draw[0]).toContain('g."Profile" ->> \'amberControl\'');
+            expect(draw[0]).not.toMatch(/RawData[^C]*OR[^C]*Profile/);
+            expect(draw[1]).toContain(STRATEGIES.amber.thresholds.amberControl);
+            expect(draw[1]).toContain(STRATEGIES.amber.localThresholds.amberControl);
+        });
+
         it('counts matches with the same clauses it draws with', async function () {
             answer([['FROM "GauntletDecks" g', [{ Count: 12 }]]]);
 
@@ -434,6 +466,53 @@ describe('GauntletService', function () {
             const [query] = queriesMatching('ds."Uuid" IS NULL');
 
             expect(query[0]).toContain('g."Playable" = true');
+        });
+
+        /**
+         * ARCHON (N30): reading the pool costs nothing but CPU - the cards are
+         * already stored - which is why it runs before enrichment and why a
+         * server with no DoK key is not a server with no strategy filters.
+         */
+        it('reads stored decks from their own cards, with no outbound request', async function () {
+            const realFetchDuringProfile = global.fetch;
+
+            global.fetch = vi.fn();
+            answer([
+                [
+                    'WHERE "Playable" = true AND "Profile" IS NULL',
+                    [
+                        {
+                            Uuid: 'u-1',
+                            Cards: JSON.stringify([{ id: 'anger', count: 3 }])
+                        }
+                    ]
+                ]
+            ]);
+
+            expect(await service.profilePool()).toBe(1);
+            expect(global.fetch).not.toHaveBeenCalled();
+
+            const [update] = queriesMatching('SET "Profile"');
+            const stored = JSON.parse(update[1][1]);
+
+            expect(update[1][0]).toBe('u-1');
+            // Three copies of a one-amber card: the printed facts, multiplied.
+            expect(stored.expectedAmber).toBe(3);
+            expect(Object.keys(stored)).toContain('creatureControl');
+
+            global.fetch = realFetchDuringProfile;
+        });
+
+        it('skips a stored deck whose cards it cannot read', async function () {
+            answer([
+                [
+                    'WHERE "Playable" = true AND "Profile" IS NULL',
+                    [{ Uuid: 'u-2', Cards: JSON.stringify([{ id: 'not-a-card' }]) }]
+                ]
+            ]);
+
+            expect(await service.profilePool()).toBe(0);
+            expect(queriesMatching('SET "Profile"')).toHaveLength(0);
         });
 
         it('does nothing when the server has no DoK key', async function () {

@@ -1,5 +1,6 @@
 const logger = require('../../log');
-const { cloneCard } = require('./packCards');
+const { cloneCard, getCardIndex } = require('./packCards');
+const { profileDeck } = require('./deckProfile');
 
 /**
  * ARCHON (N24): the Gauntlet - the Champion's Challenge against the field.
@@ -26,11 +27,13 @@ const { cloneCard } = require('./packCards');
  *
  * What the member controls
  * ------------------------
- * Sets, houses, a SAS window, and strategies. The first three are exact,
- * because the catalog and the SAS cache already know them. Strategies are read
- * off the deck's AERC breakdown, which only exists for decks Decks of KeyForge
- * has been asked about - so a strategy filter narrows the pool to enriched
- * decks, and the report says so rather than quietly ignoring the filter.
+ * Sets, houses, a SAS window, and strategies. Sets and houses are exact, because
+ * the catalog knows them. A SAS window narrows the pool to decks Decks of
+ * KeyForge has been asked about, because SAS is DoK's number and nothing here is
+ * a substitute for it - and the report says so rather than quietly ignoring the
+ * filter. Strategies used to have that same dependency; since N30 they are read
+ * from the deck's own cards (deckProfile.js) for any deck DoK has not rated, so
+ * they reach the whole pool on a server with no key at all.
  *
  * What it refuses to do
  * ---------------------
@@ -56,7 +59,7 @@ const MV_DECK_URL = 'https://www.keyforgegame.com/api/decks/';
 const SAS_RETRY_DAYS = 30;
 
 /**
- * The strategy filters, expressed over Decks of KeyForge's AERC components.
+ * The strategy filters, on two scales.
  *
  * AERC scores a deck on the things a KeyForge deck can be good at, and those
  * components ARE the strategies - a deck with high amber control fights the
@@ -64,6 +67,21 @@ const SAS_RETRY_DAYS = 30;
  * are deliberately generous: this asks "does the deck do this well", not "is
  * this the only thing it does", because a member picking `aggro` wants
  * board-focused opponents rather than a single archetype.
+ *
+ * ARCHON (N30): every one of those numbers comes from Decks of KeyForge, which
+ * made the most configurable part of the Gauntlet depend on somebody else's key
+ * - no key, no enrichment, no strategy filter, and a pool that answers every
+ * strategy with "no opponents" while looking perfectly healthy. So each strategy
+ * now carries a second set of bars, read against the local profile computed from
+ * the deck's own cards (deckProfile.js).
+ *
+ * The two scales are NOT interchangeable and must never be compared to each
+ * other: AERC's components are a curated per-card dataset in single digits, the
+ * local profile is a keyword count over 36 cards. `thresholds` is only ever
+ * applied to DoK's numbers and `localThresholds` only ever to ours. The local
+ * bars were calibrated so each strategy selects roughly a fifth to a third of
+ * randomly assembled decks - a filter that matches everything and one that
+ * matches nothing are equally useless - and the spec re-measures that.
  *
  * Keys are a contract - they are stored in GauntletSettings.Strategies. Add,
  * don't rename.
@@ -76,31 +94,36 @@ const STRATEGIES = {
         // effectivePower is on a different scale (raw power, tens) from the
         // other AERC components (single digits), so each field carries its own
         // bar rather than sharing one.
-        thresholds: { creatureControl: 3, effectivePower: 15 }
+        thresholds: { creatureControl: 3, effectivePower: 15 },
+        localThresholds: { creatureControl: 12, effectivePower: 85 }
     },
     amber: {
         label: 'Amber control',
         description: 'Attacks the amber race - steals, denial and taxes',
         fields: ['amberControl'],
-        thresholds: { amberControl: 6 }
+        thresholds: { amberControl: 6 },
+        localThresholds: { amberControl: 8 }
     },
     speed: {
         label: 'Speed',
         description: 'Races to forge - high expected amber',
         fields: ['expectedAmber'],
-        thresholds: { expectedAmber: 18 }
+        thresholds: { expectedAmber: 18 },
+        localThresholds: { expectedAmber: 17 }
     },
     control: {
         label: 'Artifact and disruption',
         description: 'Answers artifacts and disrupts the opponent’s turn',
         fields: ['artifactControl', 'disruption'],
-        thresholds: { artifactControl: 1.5, disruption: 2 }
+        thresholds: { artifactControl: 1.5, disruption: 2 },
+        localThresholds: { artifactControl: 1, disruption: 3 }
     },
     efficiency: {
         label: 'Efficiency',
         description: 'Draws and cycles - gets more turns out of the deck',
         fields: ['efficiency'],
-        thresholds: { efficiency: 5 }
+        thresholds: { efficiency: 5 },
+        localThresholds: { efficiency: 9 }
     }
 };
 
@@ -371,16 +394,23 @@ class GauntletService {
 
         await this.db.query(
             'INSERT INTO "GauntletDecks" ' +
-                '("Uuid", "Name", "Expansion", "Houses", "Cards", "Playable", "FetchedAt") ' +
-                "VALUES ($1, $2, $3, $4, $5, true, now() AT TIME ZONE 'utc') " +
+                '("Uuid", "Name", "Expansion", "Houses", "Cards", "Profile", "Playable", ' +
+                '"FetchedAt") ' +
+                "VALUES ($1, $2, $3, $4, $5, $6, true, now() AT TIME ZONE 'utc') " +
                 'ON CONFLICT ("Uuid") DO UPDATE SET "Cards" = EXCLUDED."Cards", ' +
-                '"Playable" = true, "MissingCards" = NULL, "FetchedAt" = EXCLUDED."FetchedAt"',
+                '"Profile" = EXCLUDED."Profile", "Playable" = true, "MissingCards" = NULL, ' +
+                '"FetchedAt" = EXCLUDED."FetchedAt"',
             [
                 Uuid,
                 parsed.name || Name,
                 parsed.expansion || Expansion,
                 houses.join(','),
-                JSON.stringify(cards)
+                JSON.stringify(cards),
+                // ARCHON (N30): read the deck while its cards are in hand. This
+                // is what the strategy filters fall back to when Decks of
+                // KeyForge has never been asked about the deck - which, on a
+                // server with no key, is every deck.
+                JSON.stringify(profileDeck(cards, getCardIndex()))
             ]
         );
 
@@ -507,6 +537,53 @@ class GauntletService {
         return outcome;
     }
 
+    /**
+     * ARCHON (N30): read the pool decks hydrated before profiles existed.
+     *
+     * Pure CPU over cards already stored - no Master Vault, no Decks of KeyForge,
+     * nobody's rate limit - so the only reason it is batched is that a sweep tick
+     * should not stall on a pool of thousands. Whatever it does not reach this
+     * pass it reaches on the next.
+     *
+     * Never throws.
+     *
+     * @returns {Promise<number>} decks profiled
+     */
+    async profilePool({ decksPerRun } = {}) {
+        const config = this.getConfig();
+        const perRun = Math.max(1, parseInt(decksPerRun ?? config.gauntletProfilePerRun, 10) || 50);
+        let profiled = 0;
+
+        try {
+            const rows = await this.db.query(
+                'SELECT "Uuid", "Cards" FROM "GauntletDecks" ' +
+                    'WHERE "Playable" = true AND "Profile" IS NULL AND "Cards" IS NOT NULL ' +
+                    'LIMIT $1',
+                [perRun]
+            );
+            const index = getCardIndex();
+
+            for (const row of rows || []) {
+                const cards = typeof row.Cards === 'string' ? JSON.parse(row.Cards) : row.Cards;
+                const profile = profileDeck(cards, index);
+
+                if (!profile) {
+                    continue;
+                }
+
+                await this.db.query('UPDATE "GauntletDecks" SET "Profile" = $2 WHERE "Uuid" = $1', [
+                    row.Uuid,
+                    JSON.stringify(profile)
+                ]);
+                profiled++;
+            }
+        } catch (err) {
+            logger.error('Gauntlet: pool profiling failed', err);
+        }
+
+        return profiled;
+    }
+
     /** Does anyone have the Gauntlet switched on? The pool grows only if so. */
     async anyoneWantsField() {
         try {
@@ -586,11 +663,26 @@ class GauntletService {
 
             for (const field of strategy.fields) {
                 params.push(strategy.thresholds[field]);
-                // AERC components live in the cached DoK payload. ->> yields
-                // text, so cast; a missing component fails the comparison,
-                // which is the conservative outcome.
+
+                const dok = params.length;
+
+                params.push(strategy.localThresholds[field]);
+
+                // ARCHON (N30): DoK's number where the deck has one, the local
+                // profile where it does not.
+                //
+                // Not "either passes": a deck DoK has rated is judged by DoK,
+                // full stop. Letting the local estimate rescue a deck DoK scores
+                // low would mean the filter silently loosens for exactly the
+                // decks we know the most about, and two scales would be OR'd
+                // together as if they measured the same thing.
+                //
+                // ->> yields text, so cast; a missing component fails its
+                // comparison, which is the conservative outcome.
                 conditions.push(
-                    `(ds."RawData" -> 'deck' ->> '${field}')::numeric >= $${params.length}`
+                    `CASE WHEN ds."RawData" IS NOT NULL ` +
+                        `THEN (ds."RawData" -> 'deck' ->> '${field}')::numeric >= $${dok} ` +
+                        `ELSE (g."Profile" ->> '${field}')::numeric >= $${params.length} END`
                 );
             }
         }
@@ -808,13 +900,13 @@ class GauntletService {
                 // an opponent - so the panel needs to know which kind of nothing
                 // this is rather than promising decks that are not coming.
                 catalogEmpty: !(await this.hasCatalogDecks()),
-                // Whether the filters depend on enrichment, which is what makes
-                // `matching` smaller than a member might expect.
-                needsEnrichment: !!(
-                    filters.strategies.length ||
-                    filters.minSas != null ||
-                    filters.maxSas != null
-                )
+                // ARCHON (N30): only the SAS window needs enrichment now. SAS is
+                // Decks of KeyForge's number and nothing computed here is a
+                // substitute for it, so a SAS window still narrows the pool to
+                // decks DoK has been asked about - but a strategy is read from
+                // the deck's own cards, so it reaches the whole pool.
+                needsEnrichment: filters.minSas != null || filters.maxSas != null,
+                usesProfiles: filters.strategies.length > 0
             };
         } catch (err) {
             logger.error('Gauntlet: could not read pool status', err);

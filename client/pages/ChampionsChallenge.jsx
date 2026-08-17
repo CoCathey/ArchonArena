@@ -306,9 +306,23 @@ const GauntletPanel = ({ gauntlet, onSave, saving, t }) => {
                             <>
                                 {' '}
                                 {t(
-                                    'A SAS window or a strategy can only match decks whose ' +
-                                        'SAS and AERC have been fetched, so this number grows ' +
-                                        'as the pool is enriched.'
+                                    'A SAS window can only match decks whose SAS has been ' +
+                                        'fetched from Decks of KeyForge, so this number grows as ' +
+                                        'the pool is enriched.'
+                                )}
+                            </>
+                        )}
+                        {/* ARCHON (N30): strategies are read from the deck's own
+                            cards now, so they reach the whole pool - but the
+                            reading is a coarse one and the panel says so rather
+                            than implying an archetype classifier. */}
+                        {pool.usesProfiles && (
+                            <>
+                                {' '}
+                                {t(
+                                    'Strategies are read from each deck’s own cards, so they ' +
+                                        'reach the whole pool — it is a rough reading of what a ' +
+                                        'deck is built to do, not a verdict on how good it is.'
                                 )}
                             </>
                         )}
