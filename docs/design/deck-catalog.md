@@ -24,9 +24,30 @@ has no DoK key at all.
 
 ## The crawl
 
-`GET /api/decks/v2?page=N&page_size=P&ordering=date` against
+`GET /api/decks/v2/?page=N&page_size=P&ordering=date` against
 `www.keyforgegame.com`, oldest registration first, with the cursor persisted in
-`DeckCatalogState`.
+`DeckCatalogState`. The endpoint is **resolved, not assumed**: candidate spellings are
+tried in order (an operator's `catalog.mvApiUrl` override first) until one answers with a
+deck list, and the winner is remembered for the process. That exists because Master Vault
+is a Django service, and Django answers the same HTTP 404 for three different questions —
+each of which this crawl has met:
+
+-   **No trailing slash.** `/api/decks/v2?page=1` is a 404; `/api/decks/v2/?page=1` is the
+    deck list.
+-   **Page 0.** Django's pages are numbered **from 1**, and an invalid page number gets the
+    same 404 as a wrong path. The cursor starts at page 1 (`crawlOnce` clamps anything
+    lower), because a cursor at 0 once pinned the crawl to a page that cannot exist —
+    every candidate URL "404ed", and the breaker parked a crawler whose endpoint was
+    healthy the whole time.
+-   **The page past the tail.** When the list's length is an exact multiple of the page
+    size, the cursor steps past the last page and the next fetch 404s. From the endpoint
+    that has been answering, that is checked with a probe of page 1: if page 1 is still a
+    deck list, the 404 means "caught up, the next page has not been registered yet" and is
+    recorded as an empty page rather than a failure.
+
+A candidate behind an auth wall (401/403) or withdrawn (410) is likewise "not this
+address, try the next spelling" — but a 429 or a 5xx is Master Vault itself answering, and
+stops the walk rather than retrying the same origin under a different name.
 
 `ordering=date` ascending is the load-bearing choice. Under any other ordering — by name,
 by newest first, by anything Master Vault computes — page N holds different decks

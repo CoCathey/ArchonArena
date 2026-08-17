@@ -189,7 +189,9 @@ describe('a Gauntlet nobody has switched on', function () {
             const health = await service.labHealth();
 
             expect(health.catalog.enabled).toBe(true);
-            expect(health.catalog.page).toBe(0);
+            // Page 1, not 0: Master Vault's pages count from 1, and page 0 is
+            // the invalid page this crawl once spent weeks asking for.
+            expect(health.catalog.page).toBe(1);
         });
     });
 

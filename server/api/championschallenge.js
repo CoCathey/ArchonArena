@@ -148,6 +148,13 @@ module.exports.init = function (server) {
      * an operator's decision made deliberately on the settings page, not a side
      * effect of pressing a button on a diagnostics panel - so with the crawl
      * disabled this says so and sends nothing.
+     *
+     * It DOES run while the circuit breaker has the scheduled crawl parked.
+     * The breaker stops a timer from hammering a failing service; an operator
+     * pressing the button is one deliberate, watched pass - almost always to
+     * learn whether the thing that tripped the breaker is fixed - and a
+     * recovery button that silently does nothing for the length of the pause
+     * reads as "still broken" no matter what was deployed.
      */
     server.post(
         '/api/champions-challenge/catalog/crawl',
@@ -170,7 +177,7 @@ module.exports.init = function (server) {
                 });
             }
 
-            const result = await catalogService.crawlOnce();
+            const result = await catalogService.crawlOnce({ ignorePause: true });
 
             res.send({
                 success: true,
