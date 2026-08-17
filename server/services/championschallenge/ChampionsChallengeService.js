@@ -455,6 +455,23 @@ class ChampionsChallengeService {
         );
 
         if (!enrollments || !enrollments.length) {
+            // ARCHON (N32): the Vault Tour has its OWN slate, so it must not
+            // depend on anybody having roster decks. Returning here left a site
+            // where nobody had enrolled with an unseeded field, and a member
+            // reading "no tournament decks have been entered yet" about a field
+            // that ships with the code.
+            try {
+                await this.runVaultTourStep(config, {
+                    championModel:
+                        config.learningEnabled !== false
+                            ? await this.policyService.champion()
+                            : null,
+                    styling: this.personaStyling(config, null)
+                });
+            } catch (err) {
+                logger.error('Vault Tour: sweep step failed', err);
+            }
+
             return { played: 0, abandoned: 0 };
         }
 
@@ -977,6 +994,9 @@ class ChampionsChallengeService {
 
         const entries = await this.vaultTourService.rosters();
 
+        // Cards are fetched for a field somebody intends to play. The seed above
+        // is free and always runs, so an admin sees the field the moment the lab
+        // ticks; the requests wait for a slate.
         if (!entries.length) {
             return 0;
         }

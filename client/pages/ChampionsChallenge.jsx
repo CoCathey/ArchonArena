@@ -792,12 +792,25 @@ StylePanel.propTypes = {
  * Kept visibly separate from the roster above it, because it is separate: three
  * slots not eight, its own twelve games a day, and no effect on ARI at all.
  */
-const VaultTourPanel = ({ vaultTour, candidates, onAdd, onRemove, busy, t }) => {
+const VaultTourPanel = ({ vaultTour, onAdd, onRemove, busy, t }) => {
+    const [filter, setFilter] = useState('');
+
     if (!vaultTour || !vaultTour.enabled) {
         return null;
     }
 
-    const { slate = [], field = [], matrix = { opponents: [], cells: {}, totals: {} } } = vaultTour;
+    const {
+        slate = [],
+        field = [],
+        matrix = { opponents: [], cells: {}, totals: {} },
+        // Its own list, not the roster's: no SAS requirement, and a deck already
+        // in the eight may sit here too.
+        candidates = []
+    } = vaultTour;
+    const needle = filter.trim().toLowerCase();
+    const offered = needle
+        ? candidates.filter((deck) => deck.name.toLowerCase().includes(needle))
+        : candidates;
     const slots = `${slate.length}/${vaultTour.slateSize}`;
     const opponents = matrix.opponents || [];
 
@@ -823,13 +836,47 @@ const VaultTourPanel = ({ vaultTour, candidates, onAdd, onRemove, busy, t }) => 
                         {deck.name} ×
                     </Chip>
                 ))}
-                {slate.length < vaultTour.slateSize &&
-                    (candidates || []).slice(0, 8).map((deck) => (
-                        <Chip disabled={busy} key={deck.deckId} onClick={() => onAdd(deck.deckId)}>
-                            + {deck.name}
-                        </Chip>
-                    ))}
             </div>
+
+            {slate.length < vaultTour.slateSize && (
+                <div className='pb-2'>
+                    {/* A collection runs to hundreds of decks, so the list is
+                        searched rather than scrolled - and it says how many are
+                        not being shown instead of quietly truncating. */}
+                    <input
+                        className='mb-1.5 w-full max-w-sm rounded border border-border/70 bg-surface-secondary/60 px-2 py-1 text-sm text-foreground'
+                        onChange={(e) => setFilter(e.target.value)}
+                        placeholder={t('Find a deck to add…')}
+                        value={filter}
+                    />
+                    <div className='flex flex-wrap items-center gap-1.5'>
+                        {offered.slice(0, 12).map((deck) => (
+                            <Chip
+                                disabled={busy}
+                                key={deck.deckId}
+                                onClick={() => onAdd(deck.deckId)}
+                                title={deck.sas ? t('SAS {{sas}}', { sas: deck.sas }) : undefined}
+                            >
+                                + {deck.name}
+                            </Chip>
+                        ))}
+                        {offered.length > 12 && (
+                            <span className='text-[11px] text-muted'>
+                                {t('and {{count}} more — type to narrow', {
+                                    count: offered.length - 12
+                                })}
+                            </span>
+                        )}
+                        {offered.length === 0 && (
+                            <span className='text-[11px] text-muted'>
+                                {candidates.length
+                                    ? t('No deck of yours matches that.')
+                                    : t('No decks of yours are available to add.')}
+                            </span>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {field.length === 0 ? (
                 <p className='m-0 text-[11px] text-muted'>
@@ -840,11 +887,22 @@ const VaultTourPanel = ({ vaultTour, candidates, onAdd, onRemove, busy, t }) => 
                 </p>
             ) : opponents.length === 0 ? (
                 <p className='m-0 text-[11px] text-muted'>
-                    {t(
-                        '{{count}} decks in the field, waiting on games. Put a deck on the slate ' +
-                            'and the lab starts playing it through them.',
-                        { count: field.length }
-                    )}
+                    {/* The gap between "in the field" and "playable" is a few
+                        sweeps of Master Vault fetches, and looks like a stall if
+                        nothing names it. */}
+                    {vaultTour.playableField === 0
+                        ? t(
+                              '{{count}} decks in the field, none with their cards yet — the lab ' +
+                                  'fetches a few per sweep from Master Vault. Games start as soon ' +
+                                  'as the first one lands.',
+                              { count: field.length }
+                          )
+                        : t(
+                              '{{playable}} of {{count}} field decks are ready to play, waiting ' +
+                                  'on games. Put a deck on the slate and the lab starts playing ' +
+                                  'it through them.',
+                              { playable: vaultTour.playableField, count: field.length }
+                          )}
                 </p>
             ) : (
                 <div className='overflow-x-auto'>
@@ -930,7 +988,6 @@ const VaultTourPanel = ({ vaultTour, candidates, onAdd, onRemove, busy, t }) => 
 
 VaultTourPanel.propTypes = {
     vaultTour: PropTypes.object,
-    candidates: PropTypes.array,
     onAdd: PropTypes.func,
     onRemove: PropTypes.func,
     busy: PropTypes.bool,
@@ -1265,7 +1322,6 @@ const ChampionsChallenge = () => {
 
                     <VaultTourPanel
                         vaultTour={data?.vaultTour}
-                        candidates={candidates}
                         busy={vaultTourBusy}
                         t={t}
                         onAdd={async (deckId) => {

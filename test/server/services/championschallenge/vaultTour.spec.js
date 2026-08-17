@@ -250,6 +250,46 @@ describe('the Vault Tour', function () {
         });
     });
 
+    describe('the decks a member may add', function () {
+        /**
+         * Its own query, not the roster's candidate list. That list is wrong here
+         * three times over - it requires a SAS rating, it hides decks already in
+         * the eight, and it is ordered by SAS - so a member saw their eight
+         * highest-rated unenrolled decks and concluded the picker was broken.
+         */
+        it('offers decks with no SAS, and decks already on the roster', async function () {
+            answer([
+                [
+                    'FROM "Decks" d',
+                    [
+                        { Id: 1, Name: 'Unrated', SasRating: null },
+                        { Id: 2, Name: 'Also In The Eight', SasRating: 74 }
+                    ]
+                ]
+            ]);
+
+            const candidates = await service.candidatesFor(USER);
+
+            expect(candidates.map((deck) => deck.deckId)).toEqual([1, 2]);
+
+            const [query] = queriesMatching('FROM "Decks" d');
+
+            expect(query[0]).not.toContain('ds."SasRating" IS NOT NULL');
+            expect(query[0]).not.toContain('ProvingGroundsDecks');
+            // Only what is already on the slate is excluded.
+            expect(query[0]).toContain('"VaultTourEntries"');
+            expect(query[0]).toContain('ORDER BY lower(d."Name")');
+        });
+
+        it('is part of the member report, so the picker has its own list', async function () {
+            answer([['FROM "Decks" d', [{ Id: 1, Name: 'Mine', SasRating: null }]]]);
+
+            const report = await service.reportFor(USER);
+
+            expect(report.candidates).toEqual([{ deckId: 1, name: 'Mine', sas: null }]);
+        });
+    });
+
     describe('the matrix', function () {
         it('is this deck against that deck, both records', async function () {
             answer([
@@ -392,6 +432,24 @@ describe('the Vault Tour', function () {
 
             expect(await lab.runVaultTourStep(config, { championModel: null, styling })).toBe(0);
             expect(lab.runMatch).not.toHaveBeenCalled();
+        });
+
+        /**
+         * The field ships with the code and seeds itself, so a site where nobody
+         * has enrolled roster decks must still get one - otherwise an admin
+         * reads "no tournament decks have been entered yet" about a field that
+         * is sitting in the repository.
+         */
+        it('still seeds the field when nobody has roster decks', async function () {
+            lab.db.query = vi.fn().mockResolvedValue([]);
+            lab.policyService.champion = vi.fn().mockResolvedValue(null);
+            lab.vaultTourService.seedDefaults = vi.fn().mockResolvedValue(23);
+            lab.vaultTourService.rosters = vi.fn().mockResolvedValue([]);
+
+            const result = await lab.runSweep();
+
+            expect(result.played).toBe(0);
+            expect(lab.vaultTourService.seedDefaults).toHaveBeenCalled();
         });
 
         it('is off when the operator switches it off', async function () {

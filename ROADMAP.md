@@ -2197,6 +2197,12 @@ and that field cannot be sampled — winning decks are a list, not a distributio
 -   [x] **From Deep Probe**, where deck choice is being made: a panel offering the Vault Tour,
         pointing a member without Vault Master at the tier and a member with it straight at the
         feature.
+-   [x] **Reachable, and offering the whole collection.** Three defects a screenshot found and no
+        spec would have: `/admin/analytics` had a route since N8 and had never been in a menu, so
+        the field editor could only be reached by typing the URL; the sweep returned before the
+        Vault Tour step when nobody had roster decks, so a site with no enrollments never seeded
+        the field; and the slate picker borrowed the roster's candidate query, which requires a
+        SAS rating and sorts by it, so a member saw eight decks instead of their collection.
 -   Later: per-event columns rather than per-deck when a field grows past a screenful; the same
     matrix against a club's decks.
 

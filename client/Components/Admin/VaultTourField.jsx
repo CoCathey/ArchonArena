@@ -33,8 +33,17 @@ const VaultTourField = () => {
     const [eventDate, setEventDate] = useState('');
     const [message, setMessage] = useState(null);
 
+    // Not `return null`: an admin who cannot see the panel cannot tell a broken
+    // endpoint from a feature that was never built, and the whole point of this
+    // screen is being the place where the field is entered.
     if (isError) {
-        return null;
+        return (
+            <Panel title={t('Vault Tour field')}>
+                <p className='m-0 text-sm text-red-300'>
+                    {t('The Vault Tour field could not be loaded.')}
+                </p>
+            </Panel>
+        );
     }
 
     const field = data?.field || [];
