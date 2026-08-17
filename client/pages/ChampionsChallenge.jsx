@@ -265,7 +265,11 @@ const GauntletPanel = ({ gauntlet, onSave, saving, t }) => {
                     {t('Strategies — what the opponent should be good at')}
                 </div>
                 <div className='flex flex-wrap gap-1.5'>
-                    {(gauntlet?.strategies || []).map((strategy) => (
+                    {/* The menu comes from `strategyOptions`; `strategies` is
+                        this member's choice. They were once the same field, so
+                        the chips compared a list of objects against a key and
+                        nothing was ever shown as chosen. */}
+                    {(gauntlet?.strategyOptions || []).map((strategy) => (
                         <Chip
                             active={current.strategies.includes(strategy.key)}
                             key={strategy.key}

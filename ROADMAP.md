@@ -3104,6 +3104,14 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         while another appeared on none. The card-back column no longer offers a sort it never
         had.
 
+-   [x] **The Gauntlet's strategy filter never showed what you had chosen, and saving wiped it**
+        — `getLabReport` spread the member's settings (whose `strategies` is their choice) and
+        then set `strategies` to the CATALOGUE, silently overwriting it. The panel therefore
+        compared a list of option objects against a key, so a saved strategy never lit up; and
+        pressing Save posted the catalogue back as the choice, where the server dropped every
+        entry as unrecognised and the filter was cleared. The menu is `strategyOptions` now and
+        the choice stays `strategies`. Found by screenshotting the page.
+
 ### Open, and currently true
 
 -   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The

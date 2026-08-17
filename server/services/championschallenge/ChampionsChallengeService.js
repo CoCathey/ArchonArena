@@ -1565,11 +1565,20 @@ class ChampionsChallengeService {
                 ...fieldSettings,
                 pool: poolStatus,
                 recent: fieldRecent,
-                strategies: Object.entries(GauntletService.STRATEGIES).map(([key, strategy]) => ({
-                    key,
-                    label: strategy.label,
-                    description: strategy.description
-                }))
+                // ARCHON: the catalogue under its OWN name. It used to be sent as
+                // `strategies`, which is also what fieldSettings calls the
+                // member's saved choice - so the spread was overwritten and the
+                // panel read the menu as the selection. Two consequences, both
+                // silent: a saved strategy never showed as chosen, and saving any
+                // other setting posted the whole catalogue back as the choice,
+                // where it was filtered out as unrecognised and wiped.
+                strategyOptions: Object.entries(GauntletService.STRATEGIES).map(
+                    ([key, strategy]) => ({
+                        key,
+                        label: strategy.label,
+                        description: strategy.description
+                    })
+                )
             }
         };
     }

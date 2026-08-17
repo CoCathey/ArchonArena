@@ -1052,6 +1052,42 @@ describe('ChampionsChallengeService', function () {
             expect(report.findings[0].text).toContain('Gem');
         });
 
+        /**
+         * ARCHON: the member's chosen strategies and the menu of them are two
+         * different lists, and they used to share one name.
+         *
+         * `getLabReport` spread the member's settings (whose `strategies` is
+         * their choice: ['amber']) and then set `strategies` to the CATALOGUE,
+         * silently overwriting it. The panel read that as the selection, so a
+         * saved strategy never showed as chosen - and saving any other setting
+         * posted the catalogue back as the choice, where the server dropped every
+         * entry as unrecognised and the member's filter was wiped.
+         */
+        it('sends the member’s chosen strategies and the menu under separate names', async function () {
+            reportAnswers();
+            service.gauntletService.settingsFor = vi.fn().mockResolvedValue({
+                enabled: true,
+                fieldSharePct: 50,
+                sets: [],
+                houses: [],
+                strategies: ['amber'],
+                minSas: null,
+                maxSas: null
+            });
+
+            const report = await service.getLabReport(USER);
+
+            // The choice, as keys - which is what the save endpoint accepts back.
+            expect(report.gauntlet.strategies).toEqual(['amber']);
+            // The menu, as labelled options.
+            expect(report.gauntlet.strategyOptions.map((option) => option.key)).toContain('amber');
+            expect(
+                report.gauntlet.strategyOptions.every(
+                    (option) => option.label && option.description
+                )
+            ).toBe(true);
+        });
+
         it('tracks openings per deck from each side of the result', async function () {
             reportAnswers();
 
