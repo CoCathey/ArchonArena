@@ -329,6 +329,95 @@ describe('ChampionsChallengeService', function () {
             ).toBe(true);
         });
 
+        it('fills several randomizer slots in one call, never the same deck twice', async function () {
+            // The draw sees the roster: each enrollment is committed before
+            // the next candidate query, so a deck already taken cannot come
+            // back. The mock models that with a growing taken-set.
+            const taken = new Set();
+
+            answer([
+                [
+                    'ORDER BY random()',
+                    (sql, params) => {
+                        const excluded = new Set([...(params[1] || []), ...taken]);
+
+                        return [11, 12, 13, 14]
+                            .filter((id) => !excluded.has(id))
+                            .map((id) => ({ Id: id }));
+                    }
+                ],
+                ['FROM "DeckCards"', deckCardRows],
+                ['FROM "DeckHouses"', deckHouseRows],
+                [
+                    'FROM "Decks" d WHERE d."Id"',
+                    (sql, params) => [{ Id: params[0], Name: `Deck ${params[0]}`, Uuid: 'u' }]
+                ],
+                [
+                    '"Random", "RandomGamesTarget"',
+                    (sql, params) => {
+                        taken.add(params[1]);
+
+                        return [];
+                    }
+                ]
+            ]);
+
+            const enrolled = await service.enrollRandomDecks(USER, 30, 3);
+
+            expect(enrolled).toEqual([11, 12, 13]);
+            expect(new Set(enrolled).size).toBe(3);
+
+            const inserts = queriesMatching('"Random", "RandomGamesTarget"');
+
+            expect(inserts).toHaveLength(3);
+            // Every slot carries the requested swap cadence.
+            expect(inserts.every(([, params]) => params[2] === 30)).toBe(true);
+        });
+
+        it('returns what it could draw when the collection runs dry', async function () {
+            const taken = new Set();
+
+            answer([
+                [
+                    'ORDER BY random()',
+                    (sql, params) => {
+                        const excluded = new Set([...(params[1] || []), ...taken]);
+
+                        return [21, 22].filter((id) => !excluded.has(id)).map((id) => ({ Id: id }));
+                    }
+                ],
+                ['FROM "DeckCards"', deckCardRows],
+                ['FROM "DeckHouses"', deckHouseRows],
+                [
+                    'FROM "Decks" d WHERE d."Id"',
+                    (sql, params) => [{ Id: params[0], Name: `Deck ${params[0]}`, Uuid: 'u' }]
+                ],
+                [
+                    '"Random", "RandomGamesTarget"',
+                    (sql, params) => {
+                        taken.add(params[1]);
+
+                        return [];
+                    }
+                ]
+            ]);
+
+            // Asked for five, owns two eligible: a partial fill is the answer,
+            // not an error.
+            expect(await service.enrollRandomDecks(USER, 20, 5)).toEqual([21, 22]);
+        });
+
+        it('never fills more slots than the roster holds', async function () {
+            answer([['ORDER BY random()', []]]);
+
+            await service.enrollRandomDecks(USER, 20, 999);
+
+            // maxEnrolledPerUser is 8, so the loop cannot run 999 times.
+            expect(queriesMatching('ORDER BY random()').length).toBeLessThanOrEqual(
+                config.maxEnrolledPerUser
+            );
+        });
+
         it('respects the per-deck daily budget', async function () {
             sweepAnswers({
                 enrollments: [

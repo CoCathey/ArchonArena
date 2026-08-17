@@ -139,5 +139,8 @@ seconds-to-minutes, which is why the fast bot keeps the volume and the deep
 bot plays the showcases the page renders.
 
 **The randomizer.** 🎲 slots draw a random eligible deck and rotate it out
-after a member-chosen number of games — the collection-wide gem hunt.
+after a member-chosen number of games — the collection-wide gem hunt. Several
+slots can be filled at once; asking for more decks than there are free slots
+(or than the collection can supply) fills what fits and reports how many
+landed, because a partial fill is a real answer rather than an error.
 Admin-owned decks skip the daily cap so the operator can flood their own lab.

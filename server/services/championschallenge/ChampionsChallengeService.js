@@ -686,6 +686,37 @@ class ChampionsChallengeService {
     }
 
     /**
+     * Fill several randomizer slots in one go, stopping early when the roster
+     * runs out of room or the collection runs out of eligible decks - a
+     * partial fill is a real answer here ("I asked for five, I own three"),
+     * so the caller gets the list and decides what to say about it.
+     *
+     * Each deck is enrolled before the next is drawn, and the draw excludes
+     * anything already on the roster, so one call cannot pick the same deck
+     * twice.
+     *
+     * @returns {Promise<number[]>} the enrolled deck ids, in the order drawn
+     */
+    async enrollRandomDecks(userId, gamesTarget, count) {
+        const wanted = Math.max(1, Math.min(this.getConfig().maxEnrolledPerUser, count || 1));
+        const enrolled = [];
+
+        for (let slot = 0; slot < wanted; slot++) {
+            const deckId = await this.enrollRandomDeck(userId, gamesTarget, {
+                exclude: enrolled
+            });
+
+            if (!deckId) {
+                break;
+            }
+
+            enrolled.push(deckId);
+        }
+
+        return enrolled;
+    }
+
+    /**
      * Enroll a random eligible deck into a randomizer slot: owned, rated,
      * simulatable, not already on the roster, not excluded. A handful of
      * candidates are drawn and tried in random order, because "simulatable"

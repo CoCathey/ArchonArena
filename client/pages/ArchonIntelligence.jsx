@@ -11,6 +11,7 @@ import SetFilter from '../Components/Site/SetFilter';
 import { CAPABILITIES, hasCapability } from '../membership';
 import {
     useGetAercIntelligenceQuery,
+    useGetDeckComparisonQuery,
     useGetDeckIntelligenceQuery,
     useGetPlayerIntelligenceQuery,
     useGetMetaIntelligenceQuery,
@@ -47,6 +48,10 @@ const pct = (value) =>
     value === null || value === undefined ? '—' : `${Math.round(value * 100)}%`;
 const num = (value, digits = 1) =>
     value === null || value === undefined ? '—' : Number(value).toFixed(digits);
+const signed = (value, digits = 0) =>
+    value === null || value === undefined
+        ? '—'
+        : `${value >= 0 ? '+' : ''}${Number(value).toFixed(digits)}`;
 const duration = (seconds) => {
     if (!seconds && seconds !== 0) {
         return '—';
@@ -535,6 +540,303 @@ const DeckIntelligence = ({ decks, t }) => {
 };
 
 DeckIntelligence.propTypes = { decks: PropTypes.array, t: PropTypes.func };
+
+/** Up to this many decks side by side - the same limit the Deep Probe uses. */
+const MAX_COMPARED = 4;
+
+/**
+ * ARCHON: Deck comparison - the `deck_comparison` promise, delivered on the
+ * page whose questions it answers.
+ *
+ * Pick two to four of your decks and read them as columns: record, rating
+ * movement, keys, length, turn order, and how each fares against every house
+ * you have met with it. Everything is your own games. The single-deck panel
+ * above is where one deck's full breakdown lives; the Deep Probe is this
+ * comparison scoped to an event's sets.
+ *
+ * Like the Deep Probe, it refuses to recommend. What it adds instead is the
+ * confidence marker: two records can only be weighed against each other by
+ * someone who knows which of them to believe, so a thin sample is named
+ * rather than ranked as if it were a forty-game record.
+ */
+const DeckComparison = ({ decks, t }) => {
+    const [selected, setSelected] = useState([]);
+
+    // The picker is the page's (set-filtered) rankings, so narrowing the
+    // filter can strand a selection. Filtering at use rather than in state
+    // means a stranded deck is never quietly compared - and comes back on its
+    // own if the filter widens again before the picker is next touched.
+    const offered = decks.slice(0, 12);
+    const active = selected.filter((deckId) => offered.some((deck) => deck.deckId === deckId));
+
+    const { data, isFetching } = useGetDeckComparisonQuery(active, { skip: active.length < 2 });
+
+    // Writes the pruned list back, so the cap always counts real chips.
+    const toggle = (deckId) =>
+        setSelected(
+            active.includes(deckId)
+                ? active.filter((id) => id !== deckId)
+                : active.length >= MAX_COMPARED
+                ? active
+                : [...active, deckId]
+        );
+
+    if (!decks.length) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {t('Play a few games with two of your decks and you can compare them here.')}
+            </div>
+        );
+    }
+
+    const compared = active.length >= 2 ? data?.decks || [] : [];
+
+    // The union of every opposing house any compared deck has met, widest
+    // sample first - the rows of the matchup half of the table.
+    const houseTotals = new Map();
+
+    for (const deck of compared) {
+        for (const row of deck.byOpposingHouse?.rows || []) {
+            const entry = houseTotals.get(row.house) || {
+                house: row.house,
+                houseName: row.houseName,
+                games: 0
+            };
+
+            entry.games += row.games;
+            houseTotals.set(row.house, entry);
+        }
+    }
+
+    const houses = [...houseTotals.values()].sort((a, b) => b.games - a.games);
+
+    /** One matchup cell: the record where there is one, coloured only when
+        there is enough of it to mean something. */
+    const matchupCell = (deck, house) => {
+        const row = (deck.byOpposingHouse?.rows || []).find(
+            (candidate) => candidate.house === house.house
+        );
+
+        if (!row) {
+            return <span className='text-muted'>—</span>;
+        }
+
+        return (
+            <span
+                className={
+                    row.games < 3
+                        ? 'text-muted'
+                        : row.winRate >= 0.5
+                        ? 'text-emerald-300'
+                        : 'text-red-300'
+                }
+            >
+                {pct(row.winRate)} <span className='text-muted'>({row.games}g)</span>
+            </span>
+        );
+    };
+
+    const thin = compared.filter((deck) => !deck.confident);
+
+    const metricRows = [
+        {
+            label: t('Games'),
+            render: (deck) => <span className='text-muted'>{deck.overview?.games ?? 0}</span>
+        },
+        {
+            label: t('Record'),
+            render: (deck) =>
+                deck.overview?.available ? `${deck.overview.wins}–${deck.overview.losses}` : '—'
+        },
+        {
+            label: t('Win rate'),
+            render: (deck) => <span className='font-semibold'>{pct(deck.overview?.winRate)}</span>
+        },
+        {
+            label: t('Rating swing'),
+            render: (deck) => (
+                <span
+                    className={
+                        deck.rating?.available
+                            ? deck.rating.netSwing >= 0
+                                ? 'text-emerald-300'
+                                : 'text-red-300'
+                            : 'text-muted'
+                    }
+                >
+                    {deck.rating?.available ? signed(deck.rating.netSwing) : '—'}
+                </span>
+            )
+        },
+        {
+            label: t('vs expected'),
+            render: (deck) => (
+                <span
+                    className={
+                        deck.rating?.available && deck.rating.vsExpectation !== null
+                            ? deck.rating.vsExpectation >= 0
+                                ? 'text-emerald-300'
+                                : 'text-red-300'
+                            : 'text-muted'
+                    }
+                >
+                    {deck.rating?.available && deck.rating.vsExpectation !== null
+                        ? signed(deck.rating.vsExpectation, 1)
+                        : '—'}
+                </span>
+            )
+        },
+        {
+            label: t('SAS'),
+            render: (deck) => <span className='text-muted'>{deck.sas ?? '—'}</span>
+        },
+        { label: t('Avg keys at end'), render: (deck) => num(deck.overview?.avgKeysAtEnd) },
+        { label: t('Avg length'), render: (deck) => duration(deck.overview?.avgSeconds) },
+        {
+            label: t('Going first'),
+            render: (deck) =>
+                deck.byTurnOrder?.available ? pct(deck.byTurnOrder.first.winRate) : '—'
+        },
+        {
+            label: t('Going second'),
+            render: (deck) =>
+                deck.byTurnOrder?.available ? pct(deck.byTurnOrder.second.winRate) : '—'
+        }
+    ];
+
+    return (
+        <div className='space-y-3 p-1'>
+            <div className='flex flex-wrap gap-1.5'>
+                {offered.map((deck) => {
+                    const isOn = active.includes(deck.deckId);
+                    const atLimit = !isOn && active.length >= MAX_COMPARED;
+
+                    return (
+                        <button
+                            className={[
+                                'rounded-full border px-2.5 py-1 text-xs transition',
+                                isOn
+                                    ? 'border-amber-500/60 bg-amber-500/15 text-amber-200'
+                                    : 'border-border/70 bg-surface-secondary/60 text-foreground hover:border-border',
+                                atLimit ? 'cursor-not-allowed opacity-40' : ''
+                            ].join(' ')}
+                            disabled={atLimit}
+                            key={deck.deckId}
+                            onClick={() => toggle(deck.deckId)}
+                            type='button'
+                        >
+                            {deck.deckName}
+                            <span className='ml-1.5 text-muted'>{deck.games}g</span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            {isFetching && <div className='text-sm text-muted'>{t('Comparing…')}</div>}
+
+            {active.length < 2 && (
+                <div className='rounded border border-dashed border-border/70 p-4 text-center text-sm text-muted'>
+                    {t('Pick at least two decks to put them side by side — up to {{max}}.', {
+                        max: MAX_COMPARED
+                    })}
+                </div>
+            )}
+
+            {compared.length >= 2 && (
+                <>
+                    <div className='overflow-x-auto'>
+                        <table className='w-full min-w-[480px] text-sm'>
+                            <thead>
+                                <tr className='border-b border-border/70 text-left'>
+                                    <th className='py-1.5 pr-2 font-medium text-muted'> </th>
+                                    {compared.map((deck) => (
+                                        <th
+                                            className='py-1.5 pr-2 font-semibold text-foreground'
+                                            key={deck.deckId}
+                                        >
+                                            <div className='truncate' title={deck.deckName}>
+                                                {deck.deckName}
+                                            </div>
+                                            <div
+                                                className='text-[11px] font-normal text-muted'
+                                                title={deck.set?.name}
+                                            >
+                                                {deck.set?.code || '—'}
+                                            </div>
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {metricRows.map((metric) => (
+                                    <tr className='border-b border-border/40' key={metric.label}>
+                                        <td className='py-1.5 pr-2 text-xs uppercase tracking-wide text-muted'>
+                                            {metric.label}
+                                        </td>
+                                        {compared.map((deck) => (
+                                            <td
+                                                className='py-1.5 pr-2 text-foreground'
+                                                key={deck.deckId}
+                                            >
+                                                {metric.render(deck)}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+
+                                {houses.length > 0 && (
+                                    <tr>
+                                        <td
+                                            className='pb-1 pt-3 text-[11px] uppercase tracking-wide text-muted'
+                                            colSpan={compared.length + 1}
+                                        >
+                                            {t('Against decks containing')}
+                                        </td>
+                                    </tr>
+                                )}
+                                {houses.map((house) => (
+                                    <tr className='border-b border-border/40' key={house.house}>
+                                        <td className='py-1.5 pr-2 text-xs text-foreground'>
+                                            {house.houseName || house.house}
+                                        </td>
+                                        {compared.map((deck) => (
+                                            <td className='py-1.5 pr-2' key={deck.deckId}>
+                                                {matchupCell(deck, house)}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {thin.length > 0 && (
+                        <div className='rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300'>
+                            {t(
+                                '{{decks}}: under {{min}} games — a record this thin is shown, not ranked. {{min}}+ is a usable sample.',
+                                {
+                                    decks: thin.map((deck) => deck.deckName).join(', '),
+                                    min: data?.minConfidentGames ?? 10
+                                }
+                            )}
+                        </div>
+                    )}
+
+                    <p className='m-0 text-[11px] text-muted'>
+                        {t(
+                            'Your own games only, across each deck’s whole record. Matchup cells are ' +
+                                'coloured only from 3 games; a house a deck has never met shows a dash. ' +
+                                'Picking a deck for a specific event is the Deep Probe’s job — it scopes ' +
+                                'this same comparison to the sets an event allows.'
+                        )}
+                    </p>
+                </>
+            )}
+        </div>
+    );
+};
+
+DeckComparison.propTypes = { decks: PropTypes.array, t: PropTypes.func };
 
 /**
  * ARCHON (N12): Replay Intelligence.
@@ -1397,6 +1699,17 @@ const ArchonIntelligence = () => {
                                   )}
                         </div>
                     )}
+                </PremiumLock>
+            </Panel>
+
+            {/* ---- Deck comparison: which of these serves me better? ---- */}
+            <Panel type='default' compactHeader title={t('Deck Intelligence — compare your decks')}>
+                <PremiumLock
+                    capability={CAPABILITIES.DECK_COMPARISON}
+                    preview={<SamplePanel />}
+                    minHeight={220}
+                >
+                    <DeckComparison decks={rankings} t={t} />
                 </PremiumLock>
             </Panel>
 
