@@ -204,6 +204,7 @@ const PlayerName = ({
     tierName,
     role,
     cosmetics,
+    isNew,
     link = false,
     plain = false,
     className = '',
@@ -216,6 +217,9 @@ const PlayerName = ({
     const effectiveTier = tier !== undefined ? tier : looked && looked.tier;
     const effectiveName = tierName !== undefined ? tierName : looked && looked.tierName;
     const effectiveRole = role !== undefined ? role : looked && looked.role;
+    // ARCHON (N20): the New pill for fresh accounts, from the payload when it
+    // carries one and the badge lookup otherwise.
+    const effectiveIsNew = isNew !== undefined ? isNew : looked && looked.isNew;
     // ARCHON (N12): the badge lookup carries these for pages whose payload does
     // not, so a leaderboard gets them without its own query. Only members ever
     // have one, and the server drops it from the badge once a pledge lapses -
@@ -255,6 +259,7 @@ const PlayerName = ({
             )}
             <PlayerBadge
                 cosmetics={effectiveCosmetics}
+                isNew={!!effectiveIsNew}
                 tier={effectiveTier}
                 tierName={effectiveName}
             />
@@ -268,6 +273,7 @@ PlayerName.propTypes = {
     children: PropTypes.node,
     className: PropTypes.string,
     cosmetics: PropTypes.object,
+    isNew: PropTypes.bool,
     link: PropTypes.bool,
     plain: PropTypes.bool,
     role: PropTypes.string,

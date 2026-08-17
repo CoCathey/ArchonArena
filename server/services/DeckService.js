@@ -2,6 +2,7 @@ const logger = require('../log');
 const util = require('../util');
 const db = require('../db');
 const { expand, flatten } = require('../Array');
+const { effectiveAri } = require('./rating/AriService');
 const Constants = require('../constants');
 // ARCHON: game-deciding randomness comes from one place - see the module.
 const secureRandom = require('../game/secureRandom');
@@ -693,7 +694,7 @@ class DeckService {
                     // ARCHON: "DeckCount" quoted. Unquoted, Postgres folds the
                     // alias to `deckcount`, so mapDeck's `deck.DeckCount` was
                     // undefined and every deck's usage level computed as 0.
-                    `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
+                    `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ds."AercScore" AS "AercScore", da."Ari" AS "Ari", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
                     '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     // ARCHON: SAS joined HERE rather than attached to the page
@@ -708,6 +709,8 @@ class DeckService {
                     'JOIN "Users" u ON u."Id" = "UserId" ' +
                     'JOIN "Expansions" e on e."Id" = d."ExpansionId" ' +
                     'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                    // ARCHON (N19): ARI beside SAS on every deck row.
+                    'LEFT JOIN "DeckAri" da ON da."Uuid" = d."Uuid" ' +
                     'WHERE "UserId" = $1 ' +
                     filter +
                     ') sq ' +
@@ -1993,7 +1996,11 @@ class DeckService {
             globalWinRate: deck.GlobalWinRate,
             // Present when the row came from a query that joins DeckSas.
             // attachStats fills this in for the paths that do not.
-            sasRating: deck.SasRating != null ? deck.SasRating : undefined
+            sasRating: deck.SasRating != null ? deck.SasRating : undefined,
+            // ARCHON (N19): the Archon Rating Index - stored when any game
+            // has moved it, the SAS/AERC seed otherwise, undefined on paths
+            // that did not join (attachStats decorates those).
+            ari: effectiveAri(deck) ?? undefined
         };
     }
 }

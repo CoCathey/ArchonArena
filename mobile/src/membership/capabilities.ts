@@ -41,7 +41,8 @@ export const CAPABILITIES = Object.freeze({
     BETA_FEATURES: 'beta_features',
     ENHANCED_COSMETICS: 'enhanced_cosmetics',
     ORGANIZER_TOOLS: 'organizer_tools',
-    PRIORITY_ACCESS: 'priority_access'
+    PRIORITY_ACCESS: 'priority_access',
+    CHAMPIONS_CHALLENGE: 'champions_challenge'
 });
 
 export type Capability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES];

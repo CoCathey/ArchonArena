@@ -262,6 +262,89 @@ describe('entitlements', function () {
         });
     });
 
+    // ARCHON (N20): every new account's first fortnight runs on the Archon
+    // tier's tools. The trial is resolved, never stored, so these pin the
+    // date arithmetic that IS the feature.
+    describe('the new-player trial', function () {
+        const newPlayer = (daysSinceRegistering, permissions = {}) => ({
+            username: 'alice',
+            permissions,
+            registered: earlier(daysSinceRegistering)
+        });
+
+        it('gives a fresh account the Archon tier, marked as the trial', function () {
+            const result = resolveEntitlements({ user: newPlayer(3), now: NOW });
+
+            expect(result.tierId).toBe(TIER_IDS.ARCHON);
+            expect(result.source).toBe('new-player-trial');
+            expect(result.complimentary).toBe(true);
+            // Ends exactly 15 days after registration, not 15 days from now.
+            expect(result.expiresAt).toBe(later(12).toISOString());
+            expect(can(result, CAPABILITIES.ARCHON_INTELLIGENCE)).toBe(true);
+            // Archon, not Vault Master: the trial stops one tier short.
+            expect(can(result, CAPABILITIES.CHAMPIONS_CHALLENGE)).toBe(false);
+        });
+
+        it('ends on day fifteen, to the millisecond', function () {
+            const result = resolveEntitlements({ user: newPlayer(15), now: NOW });
+
+            expect(result.tierId).toBe(TIER_IDS.FREE);
+            expect(can(result, CAPABILITIES.ARCHON_INTELLIGENCE)).toBe(false);
+        });
+
+        it('never downgrades a new player who already pays for more', function () {
+            const result = resolveEntitlements({
+                user: newPlayer(2),
+                membership: {
+                    provider: 'patreon',
+                    tier: TIER_IDS.VAULT_MASTER,
+                    status: 'active',
+                    expiresAt: later(30)
+                },
+                now: NOW
+            });
+
+            expect(result.tierId).toBe(TIER_IDS.VAULT_MASTER);
+            expect(result.source).toBe('patreon');
+        });
+
+        it('outranks a paid Supporter until it lapses back to what they pay for', function () {
+            const supporter = {
+                provider: 'patreon',
+                tier: TIER_IDS.SUPPORTER,
+                status: 'active',
+                expiresAt: later(90)
+            };
+
+            const during = resolveEntitlements({
+                user: newPlayer(5),
+                membership: supporter,
+                now: NOW
+            });
+
+            expect(during.tierId).toBe(TIER_IDS.ARCHON);
+            expect(during.source).toBe('new-player-trial');
+
+            const after = resolveEntitlements({
+                user: newPlayer(20),
+                membership: supporter,
+                now: NOW
+            });
+
+            expect(after.tierId).toBe(TIER_IDS.SUPPORTER);
+            expect(after.source).toBe('patreon');
+        });
+
+        it('grants nothing from a registration date it cannot read', function () {
+            const result = resolveEntitlements({
+                user: { username: 'alice', permissions: {}, registered: 'not a date' },
+                now: NOW
+            });
+
+            expect(result.tierId).toBe(TIER_IDS.FREE);
+        });
+    });
+
     describe('can()', function () {
         it('refuses an unknown capability loudly outside production', function () {
             // A mistyped gate would otherwise lock a feature for everyone and

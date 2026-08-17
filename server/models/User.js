@@ -117,7 +117,9 @@ class User {
             // against the same entitlements the tier comes from inside
             // publicBadge, so a lapsed membership stops rendering its nameplate
             // on exactly the day it stops unlocking features.
-            cosmetics: this.userData.cosmetics
+            cosmetics: this.userData.cosmetics,
+            // ARCHON (N20): the New pill for fresh accounts.
+            registered: this.userData.registered
         });
     }
 
@@ -232,6 +234,11 @@ class User {
             settings: this.userData.settings,
             permissions: this.userData.permissions,
             verified: this.userData.verified,
+            // ARCHON (N20): carried so an entitlement re-resolution from the
+            // wire user (requireCapability's fallback for older tokens) still
+            // sees the new-player trial. Not sensitive - profiles already
+            // show when a member joined.
+            registered: this.userData.registered,
             // ARCHON: drives the first-run wizard redirect (Phase 9)
             onboarded: !!this.userData.onboarded,
             // ARCHON: linked Decks of KeyForge account (prefills bulk import)
@@ -268,7 +275,10 @@ class User {
             // the lobby. Already absent when nothing is set - publicBadge omits
             // it - which matters on a message sent to every client on every
             // lobby update.
-            cosmetics: badge.cosmetics
+            cosmetics: badge.cosmetics,
+            // ARCHON (N20): the New pill, for the same reason again. Omitted
+            // by publicBadge for everyone past their first fortnight.
+            isNew: badge.isNew
         };
     }
 

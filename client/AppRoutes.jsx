@@ -53,7 +53,9 @@ import Patreon from './pages/Patreon';
 // ARCHON (N12): premium membership
 import Membership from './pages/Membership';
 import ArchonIntelligence from './pages/ArchonIntelligence';
-import TournamentLab from './pages/TournamentLab';
+import DeepProbe from './pages/DeepProbe';
+// ARCHON (N18): the Champion’s Challenge - Vault Master background deck testing
+import ChampionsChallenge from './pages/ChampionsChallenge';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import Watch from './pages/Watch';
@@ -165,7 +167,8 @@ const AppRoutes = ({ currentGame, user }) => {
                 what makes them an upgrade moment instead of a dead end. */}
             <Route path='/membership' element={<Membership />} />
             <Route path='/intelligence' element={<ArchonIntelligence />} />
-            <Route path='/tournament-lab' element={<TournamentLab />} />
+            <Route path='/deep-probe' element={<DeepProbe />} />
+            <Route path='/champions-challenge' element={<ChampionsChallenge />} />
             {/* ARCHON (N12): Patreon's OAuth callback. `state` is checked
                 server-side against a signed cookie; `error` is set when the
                 player declined on Patreon's consent screen. */}

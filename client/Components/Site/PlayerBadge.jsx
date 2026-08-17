@@ -76,18 +76,37 @@ KeyGlyph.propTypes = {
 };
 
 /**
+ * ARCHON (N20): the mark on a brand-new account. A pill rather than a key on
+ * purpose - the key is a claim about money, and this is a welcome, not a
+ * tier. It reads "be nice, they just got here" in any list, and disappears
+ * on its own when the new-player window closes server-side.
+ */
+const NewPill = ({ t }) => (
+    <span
+        aria-label={t('New player')}
+        className='inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/15 px-1 text-[0.62em] font-semibold uppercase tracking-wide text-emerald-300'
+        title={t('New to Archon Arena')}
+    >
+        {t('New')}
+    </span>
+);
+
+NewPill.propTypes = { t: PropTypes.func };
+
+/**
  * @param {object} props
- * @param {string} [props.tier] tier id; anything not a paid tier renders nothing
+ * @param {string} [props.tier] tier id; anything not a paid tier renders no key
  * @param {string} [props.tierName] display name, used for the tooltip
  * @param {object} [props.cosmetics] chosen cosmetics; only the key finish is read
+ * @param {boolean} [props.isNew] ARCHON (N20): within the new-player window
  * @param {boolean} [props.withLabel] also show the tier name in words
  */
-const PlayerBadge = ({ tier, tierName, cosmetics, withLabel = false }) => {
+const PlayerBadge = ({ tier, tierName, cosmetics, isNew = false, withLabel = false }) => {
     const { t } = useTranslation();
     const style = TIER_STYLE[tier];
 
     if (!style) {
-        return null;
+        return isNew ? <NewPill t={t} /> : null;
     }
 
     // ARCHON (N12): the chosen finish is applied ON TOP of the tier's colour and
@@ -101,14 +120,17 @@ const PlayerBadge = ({ tier, tierName, cosmetics, withLabel = false }) => {
     const description = t('{{tier}} member', { tier: label });
 
     return (
-        <span
-            className={`inline-flex items-center gap-1 ${style.className} ${finish}`.trim()}
-            title={description}
-            aria-label={description}
-            role='img'
-        >
-            <KeyGlyph fill={style.fill} ring={style.ring} />
-            {withLabel && <span className='text-[0.8em] font-medium'>{label}</span>}
+        <span className='inline-flex items-center gap-1'>
+            <span
+                className={`inline-flex items-center gap-1 ${style.className} ${finish}`.trim()}
+                title={description}
+                aria-label={description}
+                role='img'
+            >
+                <KeyGlyph fill={style.fill} ring={style.ring} />
+                {withLabel && <span className='text-[0.8em] font-medium'>{label}</span>}
+            </span>
+            {isNew && <NewPill t={t} />}
         </span>
     );
 };
@@ -117,6 +139,7 @@ PlayerBadge.displayName = 'PlayerBadge';
 
 PlayerBadge.propTypes = {
     cosmetics: PropTypes.object,
+    isNew: PropTypes.bool,
     tier: PropTypes.string,
     tierName: PropTypes.string,
     withLabel: PropTypes.bool

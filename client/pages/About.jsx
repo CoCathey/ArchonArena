@@ -125,10 +125,10 @@ const About = () => {
                                             'with worldwide and regional leaderboards.'
                                     )}
                                 </FeatureCard>
-                                <FeatureCard title={t('Clubs and friends')}>
+                                <FeatureCard title={t('The Grand Alliance Council')}>
                                     {t(
-                                        'Find people to play, join a club, and keep a friends list for ' +
-                                            'games you actually want.'
+                                        'Find people to play, join a club through the Council, and keep ' +
+                                            'a friends list for games you actually want.'
                                     )}
                                 </FeatureCard>
                                 <FeatureCard title={t('Deck intelligence')}>
@@ -366,7 +366,7 @@ const About = () => {
                                     {
                                         term: t('Archon'),
                                         description: t(
-                                            'Archon Intelligence and the Tournament Lab: matchup ' +
+                                            'Archon Intelligence and the Deep Probe: matchup ' +
                                                 'analysis, personal deck rankings, deck comparison, ' +
                                                 'meta analytics, and AERC analysis — your record read ' +
                                                 'by what decks are actually good at rather than by one ' +
@@ -376,11 +376,12 @@ const About = () => {
                                     {
                                         term: t('Vault Master'),
                                         description: t(
-                                            'Everything above, plus the preview programme — ' +
-                                                'experimental and beta tools as they are built, and ' +
-                                                'every preview on the day it opens — nameplate and ' +
-                                                'badge cosmetics other players can see, and ' +
-                                                'spreadsheet exports for the events you run.'
+                                            'Everything above, plus the Champion’s Challenge — a computer ' +
+                                                'plays your decks against each other in the background ' +
+                                                'and finds the hidden gems — the preview programme with ' +
+                                                'every preview on the day it opens, nameplate and badge ' +
+                                                'cosmetics other players can see, and spreadsheet ' +
+                                                'exports for the events you run.'
                                         )
                                     }
                                 ]}

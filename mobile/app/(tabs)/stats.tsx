@@ -333,7 +333,7 @@ function MyStatsSection(props: { username?: string }) {
                         onPress={() => router.push('/tournament-lab')}
                         style={styles.intelCard}
                     >
-                        <Text style={styles.intelTitle}>Tournament Lab</Text>
+                        <Text style={styles.intelTitle}>Deep Probe</Text>
                         <Text style={styles.intelHint}>
                             Compare your decks before you pick one for an event.
                         </Text>

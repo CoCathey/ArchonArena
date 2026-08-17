@@ -10,10 +10,12 @@ import AlertPanel from '../Components/Site/AlertPanel';
 import PremiumLock from '../Components/Membership/PremiumLock';
 import SetFilter from '../Components/Site/SetFilter';
 import { CAPABILITIES, hasCapability } from '../membership';
+// The endpoint keeps its working name - the API path is a contract the
+// released phone builds also call.
 import { useGetTournamentLabQuery } from '../redux/api';
 
 /**
- * ARCHON (N12): the Tournament Lab.
+ * ARCHON (N12): the Deep Probe.
  *
  * "Which of my decks should I bring?" - answered from the player's own results
  * rather than from a rating anybody could look up. Pick up to four decks, see
@@ -196,7 +198,7 @@ const DeckColumn = ({ deck, t }) => (
 
 DeckColumn.propTypes = { deck: PropTypes.object, t: PropTypes.func };
 
-const TournamentLab = () => {
+const DeepProbe = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
     const unlocked = hasCapability(user, CAPABILITIES.TOURNAMENT_LAB);
@@ -243,12 +245,12 @@ const TournamentLab = () => {
                 <AlertPanel
                     type='info'
                     message={t(
-                        'The Tournament Lab compares your own decks using your own results. Sign in to use it.'
+                        'The Deep Probe compares your own decks using your own results. Sign in to use it.'
                     )}
                 />
                 <div className='mt-3'>
                     <Link className='text-sm text-accent hover:underline' to='/membership'>
-                        {t('See what the Tournament Lab does')}
+                        {t('See what the Deep Probe does')}
                     </Link>
                 </div>
             </div>
@@ -261,7 +263,7 @@ const TournamentLab = () => {
 
     return (
         <div className='mx-auto max-w-6xl space-y-3 p-3'>
-            <Panel type='default' compactHeader title={t('Tournament Lab')}>
+            <Panel type='default' compactHeader title={t('Deep Probe')}>
                 <p className='m-0 text-sm text-muted'>
                     {t(
                         'Which of your decks should you bring? Pick up to {{max}} and compare them on ' +
@@ -444,6 +446,6 @@ const TournamentLab = () => {
     );
 };
 
-TournamentLab.displayName = 'TournamentLab';
+DeepProbe.displayName = 'DeepProbe';
 
-export default TournamentLab;
+export default DeepProbe;

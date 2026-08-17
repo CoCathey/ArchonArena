@@ -89,7 +89,7 @@ export const SidebarMenu = [
         landingPath: '/play',
         childItems: [
             { path: '/play', title: 'Play Online' },
-            { path: '/play-irl', title: 'Play IRL' },
+            { path: '/play-irl', title: 'Into the Fray' },
             // 'My Decks' lives in its own top-level tab below (for signed-in
             // players); keeping it out of this submenu avoids Play also
             // lighting up on /decks.
@@ -127,7 +127,12 @@ export const SidebarMenu = [
         landingPath: '/membership',
         childItems: [
             { path: '/intelligence', title: 'Archon Intelligence', showOnlyWhenLoggedIn: true },
-            { path: '/tournament-lab', title: 'Tournament Lab', showOnlyWhenLoggedIn: true },
+            { path: '/deep-probe', title: 'Deep Probe', showOnlyWhenLoggedIn: true },
+            {
+                path: '/champions-challenge',
+                title: 'Champion’s Challenge',
+                showOnlyWhenLoggedIn: true
+            },
             { path: '/membership', title: 'Membership' }
         ]
     },
@@ -136,7 +141,7 @@ export const SidebarMenu = [
         landingPath: '/community/members',
         childItems: [
             { path: '/community/friends', title: 'Friends' },
-            { path: '/community/clubs', title: 'Clubs' },
+            { path: '/community/clubs', title: 'Grand Alliance Council' },
             { path: '/community/members', title: 'Members' },
             { path: '/community/news', title: 'News', pageKey: 'news' },
             { path: '/community/articles', title: 'Articles', pageKey: 'articles' },

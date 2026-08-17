@@ -2,7 +2,8 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import classNames from 'classnames';
 
-import IdentityDefault from '../../assets/img/idbacks/identity.jpg';
+// ARCHON: the generic KeyForge archon-card back, not TCO's branded one.
+import IdentityDefault from '../../assets/img/idbacks/idback_blanks/cardback_1.png';
 
 function CardSizeOption(props) {
     let { name, label, selected, onSelect } = props;

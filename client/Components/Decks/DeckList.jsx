@@ -221,6 +221,34 @@ const DeckList = ({
                 meta: { className: 'text-center', colWidth: '64px' }
             },
             {
+                // ARCHON (N19): ARI, the Archon Rating Index - the platform's
+                // own living deck rating, seeded from SAS/AERC and moved by
+                // the deck's results in rated games and the Champion's
+                // Challenge. It is the deck-strength term Amber actually uses,
+                // so it earns the column next to the number it supersedes.
+                accessorKey: 'ari',
+                header: t('ARI'),
+                cell: ({ row }) =>
+                    row.original.ari != null ? (
+                        <span
+                            className='text-center font-bold text-accent'
+                            title={t(
+                                'Archon Rating Index: starts from SAS and AERC, then moves with ' +
+                                    'this deck’s real and sparring results.'
+                            )}
+                        >
+                            {Math.round(row.original.ari)}
+                        </span>
+                    ) : (
+                        <span className='text-center text-muted' title={t('ARI not available yet')}>
+                            -
+                        </span>
+                    ),
+                sortingFn: (a, b) => (a.original.ari ?? -1) - (b.original.ari ?? -1),
+                enableColumnFilter: false,
+                meta: { className: 'text-center', colWidth: '64px' }
+            },
+            {
                 accessorKey: 'lastUpdated',
                 header: t('Added'),
                 cell: ({ row }) => (

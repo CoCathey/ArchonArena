@@ -1,4 +1,4 @@
-const { resolveEntitlements } = require('./entitlements');
+const { resolveEntitlements, newPlayerTrialEndsAt } = require('./entitlements');
 const { TIER_IDS } = require('./tiers');
 const { publicCosmetics } = require('./cosmetics');
 
@@ -41,6 +41,7 @@ const ROLE_BY_PRIORITY = [
  * @property {string} role     admin | winner | previouswinner | contributor | supporter | user
  * @property {string} tier     the tier id, 'free' when there is nothing to show
  * @property {string|null} tierName its display name, or null at free
+ * @property {boolean} [isNew] ARCHON (N20): within the new-player window
  * @property {object} [cosmetics] chosen cosmetic slots the account may still use
  */
 
@@ -49,6 +50,7 @@ const ROLE_BY_PRIORITY = [
  * @param {object} [params.permissions] mapped permissions (UserService.mapPermissions shape)
  * @param {object} [params.membership] the Memberships row, already camelCased
  * @param {object} [params.cosmetics] the account's stored cosmetic choices
+ * @param {string|Date} [params.registered] when the account was created
  * @param {Date} [params.now]
  * @returns {PublicBadge}
  */
@@ -56,15 +58,25 @@ function publicBadge({
     permissions = {},
     membership = null,
     cosmetics = null,
+    registered = null,
     now = new Date()
 } = {}) {
     // eslint-disable-next-line no-unused-vars
     const { isAdmin, ...withoutAdmin } = permissions || {};
+    // ARCHON (N20): registered is deliberately NOT passed into this
+    // resolution. The trial unlocks Archon's tools, but the TIER badge is a
+    // claim about money - same doctrine as the admin strip above - so a
+    // trial account wears the New pill below, never a patron's key.
     const entitlements = resolveEntitlements({
         user: { permissions: withoutAdmin },
         membership,
         now
     });
+
+    // The pill is about being new, not about the trial's tools: a new player
+    // who pays on day one is still new, and still gets the welcome.
+    const trialEndsAt = newPlayerTrialEndsAt(registered);
+    const isNew = !!(trialEndsAt && trialEndsAt.getTime() > now.getTime());
 
     const paid = entitlements.tierId && entitlements.tierId !== TIER_IDS.FREE;
 
@@ -101,8 +113,10 @@ function publicBadge({
         role,
         tier: paid ? entitlements.tierId : TIER_IDS.FREE,
         tierName: paid ? entitlements.tierName : null,
-        // Omitted entirely rather than sent as an empty object: this rides on a
-        // batched public lookup that already drops accounts with nothing to say.
+        // Both omitted rather than sent as false/empty: this rides on a
+        // batched public lookup that already drops accounts with nothing to
+        // say.
+        ...(isNew ? { isNew: true } : {}),
         ...(visible ? { cosmetics: visible } : {})
     };
 }
