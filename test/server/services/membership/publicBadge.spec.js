@@ -92,6 +92,48 @@ describe('publicBadge', function () {
         });
     });
 
+    // ARCHON (F9): the practice bots are ordinary accounts, so the badge is
+    // where "this is not a person" gets said. It is also where the welcome
+    // gets withheld: a bot is days old by construction, and "be nice, they
+    // just got here" is advice about a person.
+    describe('the Bot pill', function () {
+        const NOW = new Date('2026-06-01T00:00:00Z');
+        const daysAgo = (days) => new Date(NOW.getTime() - days * 86400000);
+
+        it('marks a bot account, and never as new', function () {
+            const badge = publicBadge({
+                email: 'bot+logos@archon-bots.invalid',
+                registered: daysAgo(1),
+                now: NOW
+            });
+
+            expect(badge.isBot).toBe(true);
+            expect('isNew' in badge).toBe(false);
+            expect(badge.tier).toBe(TIER_IDS.FREE);
+        });
+
+        it('leaves a person alone, however similar their address looks', function () {
+            const badge = publicBadge({
+                email: 'bot+logos@archon-bots.invalid.example.com',
+                registered: daysAgo(1),
+                now: NOW
+            });
+
+            expect('isBot' in badge).toBe(false);
+            expect(badge.isNew).toBe(true);
+        });
+
+        it('is omitted, not false, for everybody else', function () {
+            const badge = publicBadge({
+                email: 'someone@example.com',
+                registered: daysAgo(16),
+                now: NOW
+            });
+
+            expect(badge).toEqual({ role: 'user', tier: TIER_IDS.FREE, tierName: null });
+        });
+    });
+
     it('drops the badge when a comped grant expires', function () {
         const expired = {
             grantedTier: TIER_IDS.VAULT_MASTER,
@@ -188,6 +230,26 @@ describe('BadgeService', function () {
         expect(badges.rookie).toBeDefined();
         expect(badges.rookie.isNew).toBe(true);
         expect(badges.rookie.tier).toBe(TIER_IDS.FREE);
+    });
+
+    // ARCHON (F9): a bot has nothing else to say and still must say this one.
+    // Dropped here, a bot would be indistinguishable from a person everywhere
+    // a name is rendered.
+    it('keeps a badge-less bot for the Bot pill', async function () {
+        const badges = await service([
+            {
+                Username: 'Snudge',
+                Roles: [],
+                Tier: null,
+                Status: null,
+                Email: 'bot+dis@archon-bots.invalid',
+                Registered: new Date('2020-01-01T00:00:00Z')
+            }
+        ]).getBadges(['snudge']);
+
+        expect(badges.snudge).toBeDefined();
+        expect(badges.snudge.isBot).toBe(true);
+        expect('isNew' in badges.snudge).toBe(false);
     });
 
     it('asks for nothing when given no names', async function () {

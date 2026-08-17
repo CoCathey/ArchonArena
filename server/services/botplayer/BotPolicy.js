@@ -36,6 +36,14 @@
  *    loops; the policy itself only ever answers the prompt in front of it.
  */
 
+// ARCHON (N21/F9): the learned play. The move list is the one every bot
+// enumerates, and the model that ranks it is the Champion's Challenge's
+// reigning champion - so the opponent in the lobby plays what the lab
+// learned, rather than a second, worse bot maintained separately.
+const { chooseDecision } = require('../championschallenge/labPolicy');
+const { decisionRecord } = require('../championschallenge/labFeatures');
+const { INTENT_BUTTONS, mainWindowCandidates, textOf } = require('./decisions');
+
 // Buttons the bot must never press while any alternative exists. Concede and
 // rematch protect the game; manual-mode toggles protect the bot's honesty.
 const NEVER_PRESS = ['cancel', 'concede'];
@@ -62,15 +70,6 @@ const HOUSE_CHOICE_TITLE = 'choose which house you want to activate this turn';
 const END_TURN_CONFIRM_TITLE = 'are you sure you want to end your turn?';
 const MULLIGAN_TITLE = 'keep starting hand?';
 
-/** menuTitle / button.text can be a string or { text, values }. */
-function textOf(value) {
-    if (!value) {
-        return '';
-    }
-
-    return String(typeof value === 'object' ? value.text || '' : value).toLowerCase();
-}
-
 function pick(list, rng) {
     return list[Math.floor(rng() * list.length)];
 }
@@ -78,10 +77,18 @@ function pick(list, rng) {
 class BotPolicy {
     /**
      * @param {object} [options]
+     * @param {object} [options.policy] the Champion's Challenge model; absent
+     *        falls back to the plain heuristics, which is also what a site
+     *        that has never trained one gets
      * @param {function} [options.rng] injectable for reproducible tests
      */
     constructor(options = {}) {
         this.rng = options.rng || Math.random;
+        this.policy = options.policy || null;
+        // Set when a card is clicked for a specific reason, so the menu that
+        // opens next is answered with the move that was intended rather than
+        // by a fixed preference order.
+        this.pendingIntent = null;
 
         // How each seat has played, keyed by player name and filled lazily so
         // the policy serves any table, not just the lab's fixed seat names.
@@ -102,6 +109,10 @@ class BotPolicy {
 
         // --- The main action window -------------------------------------
         if (title === MAIN_WINDOW_TITLE) {
+            // Back at the main window means the last card's menu is closed,
+            // whatever became of it.
+            this.pendingIntent = null;
+
             return this.playFromMainWindow(game, player, buttons);
         }
 
@@ -144,9 +155,23 @@ class BotPolicy {
 
         // --- Any other prompt: press something sensible -------------------
         if (buttons.length) {
-            // A card's action menu is answered by preference - play beats
-            // reap beats fight beats discard - so a card clicked to be
-            // played is not then discarded on a coin flip.
+            // The menu that follows a card click is answered with the move
+            // the choice was made for - a creature picked to fight is not
+            // reaped on the way through. Cleared either way, so a stale
+            // intent cannot steer a later, unrelated prompt.
+            if (this.pendingIntent) {
+                const wanted = INTENT_BUTTONS[this.pendingIntent.kind] || [];
+
+                this.pendingIntent = null;
+
+                if (wanted.length && this.press(game, player, buttons, wanted)) {
+                    return true;
+                }
+            }
+
+            // Otherwise by preference - play beats reap beats fight beats
+            // discard - so a card clicked to be played is not then discarded
+            // on a coin flip.
             if (this.press(game, player, buttons, ACTION_PREFERENCE)) {
                 return true;
             }
@@ -175,32 +200,63 @@ class BotPolicy {
     }
 
     /**
-     * The turn itself: play what can be played, use what can be used, then
-     * end the turn. `getLegalActions` is the engine's own legality check, so
-     * "can be played" here means precisely what it would mean to a human.
+     * The turn itself: choose a move, or end the turn when none is left.
+     *
+     * The candidate list is the engine's own legality check (`getLegalActions`
+     * via the shared enumeration), so every option here is one a human could
+     * take. With a learned model the choice is the model's; without one it is
+     * the old order - play out the hand, then use the board, preferring to
+     * reap. End Turn is offered only once nothing else remains, which is what
+     * stops a young model from discovering the strategy of doing nothing.
      */
     playFromMainWindow(game, player, buttons) {
-        const playableFromHand = player.hand.filter(
-            (card) => card.getLegalActions(player).length > 0
-        );
+        const { hand, inPlay, candidates } = mainWindowCandidates(player);
 
-        if (playableFromHand.length) {
-            game.cardClicked(player.name, pick(playableFromHand, this.rng).uuid);
-
-            return true;
+        if (!candidates.length) {
+            return this.press(game, player, buttons, ['end turn']);
         }
 
-        const usableInPlay = player.cardsInPlay.filter(
-            (card) => card.getLegalActions(player).length > 0
-        );
+        const chosen = this.chooseCandidate(game, player, candidates);
+        const list = chosen.list === 'hand' ? hand : inPlay;
+        const card = list[chosen.index];
 
-        if (usableInPlay.length) {
-            game.cardClicked(player.name, pick(usableInPlay, this.rng).uuid);
-
-            return true;
+        if (!card) {
+            return this.press(game, player, buttons, ['end turn']);
         }
 
-        return this.press(game, player, buttons, ['end turn']);
+        // Remember WHY this card was clicked: the menu that opens next is
+        // answered with that move rather than by preference order, so a
+        // creature chosen to fight is not reaped on the way through.
+        this.pendingIntent = chosen.list === 'play' ? { kind: chosen.kind } : null;
+
+        game.cardClicked(player.name, card.uuid);
+
+        return true;
+    }
+
+    /** Rank the moves: the learned model when there is one, else the old order. */
+    chooseCandidate(game, player, candidates) {
+        if (this.policy && candidates.length > 1) {
+            const records = candidates.map((candidate) =>
+                decisionRecord(game, player, { kind: candidate.kind, card: candidate.card })
+            );
+            // Temperature zero: a practice opponent performs, it does not
+            // explore. Exploration is the lab's job, where the games are
+            // training data and nobody is waiting.
+            const index = chooseDecision(this.policy, records, 0, this.rng);
+
+            return candidates[Math.max(0, index)];
+        }
+
+        const handCandidates = candidates.filter((candidate) => candidate.list === 'hand');
+
+        if (handCandidates.length) {
+            return pick(handCandidates, this.rng);
+        }
+
+        const reaps = candidates.filter((candidate) => candidate.kind === 'reap');
+
+        return pick(reaps.length ? reaps : candidates, this.rng);
     }
 
     /**
@@ -211,19 +267,35 @@ class BotPolicy {
      */
     chooseHouse(game, player, buttons) {
         let best = null;
-        let bestScore = -1;
 
-        for (const button of buttons) {
-            const house = textOf(button.text);
-            const inHand = player.hand.filter((card) => card.hasHouse(house)).length;
-            const ready = player.cardsInPlay.filter(
-                (card) => card.hasHouse(house) && !card.exhausted
-            ).length;
-            const score = inHand + ready + this.rng() * 0.75;
+        if (this.policy && buttons.length > 1) {
+            const records = buttons.map((button) =>
+                decisionRecord(game, player, {
+                    kind: 'houseCall',
+                    house: textOf(button.text),
+                    player
+                })
+            );
+            const index = chooseDecision(this.policy, records, 0, this.rng);
 
-            if (score > bestScore) {
-                bestScore = score;
-                best = button;
+            best = buttons[Math.max(0, index)] || null;
+        }
+
+        if (!best) {
+            let bestScore = -1;
+
+            for (const button of buttons) {
+                const house = textOf(button.text);
+                const inHand = player.hand.filter((card) => card.hasHouse(house)).length;
+                const ready = player.cardsInPlay.filter(
+                    (card) => card.hasHouse(house) && !card.exhausted
+                ).length;
+                const score = inHand + ready + this.rng() * 0.75;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = button;
+                }
             }
         }
 

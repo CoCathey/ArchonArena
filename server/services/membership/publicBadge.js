@@ -1,6 +1,10 @@
 const { resolveEntitlements, newPlayerTrialEndsAt } = require('./entitlements');
 const { TIER_IDS } = require('./tiers');
 const { publicCosmetics } = require('./cosmetics');
+// ARCHON (F9): the practice bots are ordinary accounts, so the one place that
+// decides what shows next to a name is also the place that says which of them
+// is a bot.
+const { isBotEmail } = require('../botgames/roster');
 
 /**
  * ARCHON (N12): what other people may see about someone's membership.
@@ -59,6 +63,7 @@ function publicBadge({
     membership = null,
     cosmetics = null,
     registered = null,
+    email = null,
     now = new Date()
 } = {}) {
     // eslint-disable-next-line no-unused-vars
@@ -73,10 +78,21 @@ function publicBadge({
         now
     });
 
+    /**
+     * ARCHON (F9): a practice bot says so, and says nothing else.
+     *
+     * The New pill means "be nice, they just got here" - advice about a
+     * person, addressed to people. A bot account is created the day the
+     * feature is switched on and would wear it for its first fortnight,
+     * which is both untrue and the opposite of useful: what a player needs
+     * to know before they sit down is that the opponent is a computer.
+     */
+    const isBot = isBotEmail(email);
+
     // The pill is about being new, not about the trial's tools: a new player
     // who pays on day one is still new, and still gets the welcome.
     const trialEndsAt = newPlayerTrialEndsAt(registered);
-    const isNew = !!(trialEndsAt && trialEndsAt.getTime() > now.getTime());
+    const isNew = !isBot && !!(trialEndsAt && trialEndsAt.getTime() > now.getTime());
 
     const paid = entitlements.tierId && entitlements.tierId !== TIER_IDS.FREE;
 
@@ -113,9 +129,10 @@ function publicBadge({
         role,
         tier: paid ? entitlements.tierId : TIER_IDS.FREE,
         tierName: paid ? entitlements.tierName : null,
-        // Both omitted rather than sent as false/empty: this rides on a
+        // All omitted rather than sent as false/empty: this rides on a
         // batched public lookup that already drops accounts with nothing to
         // say.
+        ...(isBot ? { isBot: true } : {}),
         ...(isNew ? { isNew: true } : {}),
         ...(visible ? { cosmetics: visible } : {})
     };

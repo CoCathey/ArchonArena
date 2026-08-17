@@ -507,6 +507,10 @@ class PendingGame {
             // player record as `isBot`.
             botGame: this.botGame || undefined,
             botMaxTurns: this.botMaxTurns,
+            botThinkMs: this.botThinkMs,
+            // ARCHON (N21): the learned model the bot plays with, or absent
+            // for the heuristics.
+            botPolicy: this.botPolicy || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,

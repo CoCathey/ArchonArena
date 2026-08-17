@@ -3,6 +3,16 @@ const { randomUUID } = require('node:crypto');
 const { withRandomSource, seededSource } = require('../../game/secureRandom');
 const { decisionRecord } = require('./labFeatures');
 const { chooseDecision } = require('./labPolicy');
+// ARCHON (F9): the move list itself is shared with the practice bots, so the
+// opponent a player meets in the lobby enumerates exactly what this lab
+// learned on - and a deep game's fork enumerates exactly what its live game
+// did. See services/botplayer/decisions.
+const {
+    INTENT_BUTTONS,
+    playableFromHand,
+    usableInPlay,
+    mainWindowCandidates
+} = require('../botplayer/decisions');
 
 /**
  * ARCHON (N18/N21): one simulated game, played start to finish by the computer.
@@ -67,24 +77,6 @@ const ACTION_PREFERENCE = [
 ];
 
 /** Menu button texts that satisfy each intended in-play action kind. */
-const INTENT_BUTTONS = {
-    reap: ['reap with this creature'],
-    fight: ['fight with this creature'],
-    useAbility: [
-        "use this card's action ability",
-        "use this card's omni ability",
-        "remove this creature's stun"
-    ]
-};
-
-/** Hand card type -> the action kind playing it represents. */
-const PLAY_KIND_BY_TYPE = {
-    creature: 'playCreature',
-    artifact: 'playArtifact',
-    action: 'playAction',
-    upgrade: 'playUpgrade'
-};
-
 const MAIN_WINDOW_TITLE = 'choose a card to play, discard or use';
 const HOUSE_CHOICE_TITLE = 'choose which house you want to activate this turn';
 const END_TURN_CONFIRM_TITLE = 'are you sure you want to end your turn?';
@@ -425,62 +417,29 @@ class SimulatedGame {
         return this.policy;
     }
 
-    /** Hand cards the engine says may act right now. */
+    /**
+     * The move list, from the module every bot shares. Kept as methods
+     * because the deep planner reaches for them through the sim it is
+     * analyzing (`sim.playableFromHand`).
+     */
     playableFromHand(player) {
-        return player.hand.filter((card) => card.getLegalActions(player).length > 0);
+        return playableFromHand(player);
     }
 
-    /** In-play cards the engine says may act right now. */
     usableInPlay(player) {
-        return player.cardsInPlay.filter((card) => card.getLegalActions(player).length > 0);
+        return usableInPlay(player);
     }
 
     /**
-     * Every move the bot could make from the main window right now: each
-     * playable hand card, each usable board card with each of its distinct
-     * action kinds. ONE function, used by the live choice and by the deep
-     * planner's forks alike - the fork must enumerate the same list in the
-     * same order, or "play candidate 3" means different moves in different
-     * worlds.
+     * Every move the bot could make from the main window right now.
+     *
+     * Shared with the practice bots (services/botplayer/decisions), because
+     * a fork must enumerate the same list in the same order as the game it
+     * forked - and because the bot a player meets in the lobby should be
+     * choosing from the same moves this lab learned on.
      */
     mainWindowCandidates(player) {
-        const hand = this.playableFromHand(player);
-        const inPlay = this.usableInPlay(player);
-        const candidates = [];
-
-        for (let index = 0; index < hand.length; index++) {
-            const card = hand[index];
-
-            candidates.push({
-                list: 'hand',
-                index,
-                card,
-                kind: PLAY_KIND_BY_TYPE[card.type] || 'playAction'
-            });
-        }
-
-        for (let index = 0; index < inPlay.length; index++) {
-            const card = inPlay[index];
-            const kinds = new Set();
-
-            for (const action of card.getLegalActions(player)) {
-                const text = textOf(action.title);
-
-                if (INTENT_BUTTONS.reap.includes(text)) {
-                    kinds.add('reap');
-                } else if (INTENT_BUTTONS.fight.includes(text)) {
-                    kinds.add('fight');
-                } else {
-                    kinds.add('useAbility');
-                }
-            }
-
-            for (const kind of kinds) {
-                candidates.push({ list: 'play', index, card, kind });
-            }
-        }
-
-        return { hand, inPlay, candidates };
+        return mainWindowCandidates(player);
     }
 
     /**

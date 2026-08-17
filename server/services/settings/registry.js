@@ -621,6 +621,27 @@ const REGISTRY = {
                 label: 'Allow spectators on bot games',
                 default: true
             },
+            // ARCHON (F9): the bot decides in microseconds, and a whole turn
+            // landing in one frame reads as a glitch rather than an
+            // opponent. This is the pause between its plays (jittered a
+            // little either side), not a handicap: it still plays far faster
+            // than a person. Zero plays instantly.
+            thinkMs: {
+                type: 'number',
+                label: 'Bot pauses between plays (milliseconds; 0 = instant)',
+                min: 0,
+                max: 5000,
+                default: 700
+            },
+            // ARCHON (N21): the practice bots play the Champion's Challenge's
+            // reigning model, so the lab's learning shows up in the lobby.
+            // Off falls back to the plain heuristics, which is also what a
+            // site that has not crowned a champion yet plays.
+            useLearnedPolicy: {
+                type: 'boolean',
+                label: 'Bots play the learned Champion’s Challenge policy',
+                default: true
+            },
             // A safety valve, not a pacing knob: past this many rounds the
             // bot concedes so the table can never be held forever.
             maxTurns: {

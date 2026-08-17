@@ -262,6 +262,71 @@ describe('game node bot driver', function () {
         expect(scheduled.length).toBe(1);
     }, 30000);
 
+    /**
+     * ARCHON (F9): the bot decides in microseconds. A whole turn arriving in
+     * one frame reads as a glitch - cards already played, nothing to follow -
+     * so each play waits a moment first, and the board goes out between them.
+     */
+    describe('playing at a pace a person can watch', function () {
+        const pacedGame = (thinkMs) => {
+            const server = buildServer();
+
+            server.onStartGame(
+                buildPendingGame({
+                    id: 'paced-table',
+                    players: {
+                        HelperBot: botSeat('HelperBot', alphaDeck, false),
+                        Human: botSeat('Human', omegaDeck, false)
+                    }
+                })
+            );
+
+            const game = server.games['paced-table'];
+            const scheduled = [];
+
+            game.botDriver = new BotDriver(['HelperBot'], {
+                thinkMs,
+                schedule: (callback, delay) => scheduled.push({ callback, delay }),
+                resume: () => game.botDriver.pump(game)
+            });
+
+            return { game, scheduled };
+        };
+
+        it('thinks before its first play rather than answering instantly', function () {
+            const { game, scheduled } = pacedGame(700);
+
+            // Nothing dispatched yet: the bot is thinking.
+            expect(game.botDriver.pump(game)).toBe(false);
+            expect(scheduled.length).toBe(1);
+            // Jittered around the configured pause, never metronomic.
+            expect(scheduled[0].delay).toBeGreaterThanOrEqual(525);
+            expect(scheduled[0].delay).toBeLessThanOrEqual(875);
+        });
+
+        it('plays one move per think, so a turn arrives as a sequence', function () {
+            const { game, scheduled } = pacedGame(700);
+            const before = game.botDriver.interactions;
+
+            game.botDriver.pump(game);
+            // Run the think: one play lands, and the next think is booked.
+            scheduled.pop().callback();
+
+            expect(game.botDriver.interactions).toBe(before + 1);
+            expect(scheduled.length).toBe(1);
+        });
+
+        it('plays instantly when no pause is configured', function () {
+            const { game, scheduled } = pacedGame(0);
+
+            // Straight through: dispatched inside the call, with nothing
+            // booked for later. Bot-vs-bot games and the specs want this.
+            expect(game.botDriver.pump(game)).toBe(true);
+            expect(game.botDriver.interactions).toBeGreaterThanOrEqual(1);
+            expect(scheduled).toEqual([]);
+        });
+    });
+
     it('concedes rather than wedges when the interaction budget runs out', function () {
         const server = buildServer();
 
