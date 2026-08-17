@@ -1976,7 +1976,7 @@ class ChampionsChallengeService {
             catalog: {
                 enabled: this.catalogService.isEnabled(),
                 indexed: (catalog && catalog[0] && catalog[0].Indexed) || 0,
-                page: catalogState ? catalogState.CurrentPage : 0,
+                page: catalogState ? catalogState.CurrentPage : 1,
                 caughtUp: !!(catalogState && catalogState.CaughtUp),
                 lastRunAt: catalogState ? catalogState.LastRunAt : null,
                 lastError: catalogState ? catalogState.LastError : null,

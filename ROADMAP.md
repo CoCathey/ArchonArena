@@ -2310,6 +2310,47 @@ confidence interval should not read it.
 -   [x] A deck with an enormous record moves at the configured K, to within a rounding step.
 -   [x] A deck whose rating cannot be placed says so, rather than claiming the middle.
 
+#### N35 — The crawl was asking for page 0 _(done)_
+
+**Why:** N33 fixed the crawl's missing trailing slash and it still indexed nothing: page 0,
+"HTTP 404 from https://www.keyforgegame.com/api/decks/", nine failures, breaker parked. The
+slash was only the first of Django's identical 404s. Master Vault's pages are numbered
+**from 1**, and Django answers an invalid page number — page 0 included — with exactly the
+404 a wrong path gets. So the fixed crawler asked a healthy endpoint for a page that cannot
+exist, read the 404 as "wrong address", "confirmed" it against every candidate URL (which
+all 404ed, being asked for page 0 too), and tripped its own breaker. Forever.
+
+**Tasks**
+
+-   [x] **Pages count from 1.** `crawlOnce` clamps the cursor to a floor of 1; migration 83
+        bumps the persisted 0 that deployed databases still hold and clears the breaker state
+        the bug accumulated, so the fix takes effect on deploy rather than after the stale
+        pause expires. Fresh installs seed `CurrentPage` at 1.
+-   [x] **The page past the tail is not an outage.** The third identical 404: a caught-up
+        list whose length is an exact multiple of the page size steps the cursor past the
+        last page. From the endpoint that has been answering, a 404 on page > 1 is now
+        checked with a probe of page 1 — still a deck list means "caught up, that page has
+        not been registered yet", recorded as an empty page; probe dead means the endpoint
+        died, the memory is dropped, and the failure is reported.
+-   [x] **An auth-walled candidate is "not this address".** A 401/403/410 from one listing
+        variant moves to the next candidate the way a 404 does, instead of ending the walk —
+        insurance for the day Ghost Galaxy puts keys in front of one spelling of the list. A
+        429 or 5xx still stops the walk: that is Master Vault answering, not a wrong door.
+-   [x] **The recovery button works during the pause.** "Crawl Master Vault now" runs with
+        `ignorePause`: the breaker exists to stop a timer hammering a failing service, and an
+        operator's single watched pass — pressed precisely to learn whether the fix worked —
+        was the one thing the pause was making impossible. The panel message now also reports
+        a failed pass as a failure instead of "Indexed 0 deck(s).", which reads as success.
+
+**Acceptance criteria**
+
+-   [x] A crawl from a fresh or a deployed-with-the-bug database asks for page 1 first;
+        page 0 is never requested.
+-   [x] Catching up on a list that ends exactly on a page boundary records `CaughtUp`, no
+        failure, and no pause.
+-   [x] A manual pass while the breaker is open reaches Master Vault and reports what
+        actually happened.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

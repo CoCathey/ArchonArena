@@ -354,13 +354,24 @@ const LabHealth = () => {
 
                                     try {
                                         const result = await crawl().unwrap();
+                                        // The response carries the state the pass
+                                        // left behind, so a pass that ran and
+                                        // failed reports the failure rather than
+                                        // "indexed 0" - which reads as success.
+                                        const lastError = result.health?.catalog?.lastError;
 
                                         setCrawlMessage(
-                                            result.success
+                                            !result.success
+                                                ? result.message
+                                                : result.crawl?.indexed > 0
                                                 ? t('Indexed {{indexed}} deck(s).', {
-                                                      indexed: result.crawl?.indexed || 0
+                                                      indexed: result.crawl.indexed
                                                   })
-                                                : result.message
+                                                : lastError
+                                                ? t('The pass ran and failed: {{error}}', {
+                                                      error: lastError
+                                                  })
+                                                : t('The pass ran and found nothing new.')
                                         );
                                     } catch {
                                         setCrawlMessage(t('The crawl could not be started.'));
