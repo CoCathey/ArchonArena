@@ -180,6 +180,117 @@ module.exports.init = function (server) {
         })
     );
 
+    /**
+     * ARCHON (N32): the Vault Tour.
+     *
+     * Two audiences, two gates. A member chooses their own slate of three decks
+     * (Vault Master, like the rest of the lab); an ADMIN curates the field,
+     * because "which decks won which events" is a fact about the world that one
+     * person maintains for everybody, not a per-member setting.
+     */
+    server.post(
+        '/api/champions-challenge/vault-tour/decks',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
+        wrapAsync(async (req, res) => {
+            const deckId = parseInt(req.body && req.body.deckId, 10);
+
+            if (!Number.isFinite(deckId)) {
+                return res.status(400).send({ success: false, message: 'deckId is required' });
+            }
+
+            try {
+                const entry = await championsChallenge.vaultTourService.enroll(
+                    req.user.id,
+                    deckId,
+                    { loadEngineDeck: (id) => championsChallenge.loadEngineDeck(id) }
+                );
+
+                res.send({ success: true, entry });
+            } catch (error) {
+                res.status(400).send({ success: false, message: error.message });
+            }
+        })
+    );
+
+    server.delete(
+        '/api/champions-challenge/vault-tour/decks/:deckId',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
+        wrapAsync(async (req, res) => {
+            await championsChallenge.vaultTourService.withdraw(
+                req.user.id,
+                parseInt(req.params.deckId, 10)
+            );
+
+            res.send({ success: true });
+        })
+    );
+
+    // The field itself: admin-curated, site-wide.
+    server.get(
+        '/api/champions-challenge/vault-tour/field',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!(req.user.permissions && req.user.permissions.isAdmin)) {
+                return res.status(403).send({ success: false, message: 'Admins only.' });
+            }
+
+            res.send({
+                success: true,
+                field: await championsChallenge.vaultTourService.field(),
+                placings: require('../services/championschallenge/VaultTourService').PLACINGS
+            });
+        })
+    );
+
+    server.post(
+        '/api/champions-challenge/vault-tour/field',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!(req.user.permissions && req.user.permissions.isAdmin)) {
+                return res.status(403).send({ success: false, message: 'Admins only.' });
+            }
+
+            const body = req.body || {};
+            const result = await championsChallenge.vaultTourService.addDeck({
+                link: body.link,
+                event: body.event,
+                placing: body.placing,
+                eventDate: body.eventDate || null,
+                userId: req.user.id
+            });
+
+            if (!result.ok) {
+                return res.status(400).send({ success: false, message: result.message });
+            }
+
+            res.send({
+                success: true,
+                deck: result.deck,
+                message: result.message,
+                field: await championsChallenge.vaultTourService.field()
+            });
+        })
+    );
+
+    server.delete(
+        '/api/champions-challenge/vault-tour/field/:uuid',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!(req.user.permissions && req.user.permissions.isAdmin)) {
+                return res.status(403).send({ success: false, message: 'Admins only.' });
+            }
+
+            await championsChallenge.vaultTourService.removeDeck(req.params.uuid);
+
+            res.send({
+                success: true,
+                field: await championsChallenge.vaultTourService.field()
+            });
+        })
+    );
+
     // ARCHON (N24): the Gauntlet's own settings - whether to play the field,
     // how much of the time, and which decks count as the field.
     server.post(

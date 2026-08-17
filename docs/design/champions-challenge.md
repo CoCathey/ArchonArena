@@ -281,6 +281,49 @@ intervals) and in the admin health panel beside each pilot's game count.
 exactly; the recorded `Persona` column then stays null and the page shows no
 styles rather than empty ones.
 
+## The Vault Tour — your slate against what wins (N32)
+
+The mirror lab measures a deck against the company it keeps. The Gauntlet
+measures it against a random sample of every deck that exists. Neither answers
+the question a player picking a deck for an event actually asks, which is **how
+does this hold up against what wins** — and that field cannot be sampled,
+because winning decks are not a distribution. They are a list, and somebody has
+to know which decks were on it.
+
+So this field is **curated**: an admin enters tournament decks by Master Vault or
+Decks of KeyForge link (the id in the URL is the same either way), with the event
+and how the deck finished. The lab fetches each one's cards a few per sweep, the
+same pacing the Gauntlet's pool uses, and plays a member's slate through them
+over and over.
+
+**The deliverable is the matrix**, not a percentage. Against a dozen named
+opponents an average is the least interesting number available: a deck at 60%
+overall that loses every game to the deck which won the biggest event of the year
+has been told something the average hides. Rows are the field, columns are the
+member's three decks, and the last row is the total with its interval.
+
+Three separations are deliberate:
+
+-   **Not the roster.** Three slots, not the eight. Different question, different
+    opposition — and a member testing three decks against tournament decks should
+    not have to withdraw five to do it. A deck may sit in both.
+-   **Its own budget.** Twelve games per deck per day, counted from the Vault Tour
+    table alone, so neither measurement starves the other. Site admins are exempt,
+    as everywhere in the lab.
+-   **Never ARI.** ARI is a rating on the SAS scale fed by games against
+    representative opposition. A hand-picked field of winners is the opposite of
+    representative, and feeding it in would import the operator's choice of
+    opponents straight into the platform's deck rating — invisibly, and unfixably
+    afterwards, because nobody could tell which part of the number came from
+    where. These games are also kept out of the training diary for the same
+    reason: the champion generalises from what it sees.
+
+A starting field ships in `vaultTourField.js` and is seeded on the first sweep
+that finds it missing (`ON CONFLICT DO NOTHING`, so an operator's corrections
+always win). Those entries carry **`placing: unknown`** rather than a guess: the
+list arrived without placings, and "won the event" is not a claim to invent to
+fill a column. An admin sets the real ones on the Vault Tour panel.
+
 ## Where the games run (N24)
 
 A simulated game is about half a second of solid CPU and a deep showcase game

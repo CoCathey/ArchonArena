@@ -391,6 +391,39 @@ export const api = createApi({
         getChampionsChallengeHealth: builder.query({
             query: () => '/champions-challenge/health'
         }),
+        // ARCHON (N32): the Vault Tour - a member's three-deck slate, and the
+        // admin-curated field of tournament decks it is measured against.
+        enrollVaultTourDeck: builder.mutation({
+            query: (deckId) => ({
+                url: '/champions-challenge/vault-tour/decks',
+                method: 'POST',
+                body: { deckId }
+            }),
+            invalidatesTags: [{ type: TAG_TYPES.CHAMPIONS_CHALLENGE, id: 'REPORT' }]
+        }),
+        withdrawVaultTourDeck: builder.mutation({
+            query: (deckId) => ({
+                url: `/champions-challenge/vault-tour/decks/${deckId}`,
+                method: 'DELETE'
+            }),
+            invalidatesTags: [{ type: TAG_TYPES.CHAMPIONS_CHALLENGE, id: 'REPORT' }]
+        }),
+        getVaultTourField: builder.query({
+            query: () => '/champions-challenge/vault-tour/field'
+        }),
+        addVaultTourDeck: builder.mutation({
+            query: (entry) => ({
+                url: '/champions-challenge/vault-tour/field',
+                method: 'POST',
+                body: entry
+            })
+        }),
+        removeVaultTourDeck: builder.mutation({
+            query: (uuid) => ({
+                url: `/champions-challenge/vault-tour/field/${uuid}`,
+                method: 'DELETE'
+            })
+        }),
         // ARCHON (N29): start the Master Vault crawl by hand. The Gauntlet's
         // field is drawn from the catalog and the crawl ships off, so without
         // this an operator who turns the setting on has to wait for the next
@@ -1315,6 +1348,12 @@ export const {
     useSaveChampionsChallengeGauntletMutation,
     useGetChampionsChallengeHealthQuery,
     useCrawlDeckCatalogMutation,
+    // ARCHON (N32): the Vault Tour - the member's slate, and the admin's field.
+    useEnrollVaultTourDeckMutation,
+    useWithdrawVaultTourDeckMutation,
+    useGetVaultTourFieldQuery,
+    useAddVaultTourDeckMutation,
+    useRemoveVaultTourDeckMutation,
     useWithdrawChampionsChallengeDeckMutation,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,

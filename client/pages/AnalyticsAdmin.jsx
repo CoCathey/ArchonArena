@@ -5,6 +5,10 @@ import AnalyticsDashboard from '../Components/Admin/AnalyticsDashboard';
 // a route of its own because this is the page an operator already opens to ask
 // "is the site working", and the lab is part of the answer.
 import LabHealth from '../Components/Admin/LabHealth';
+// ARCHON (N32): the Vault Tour field - the tournament decks members' slates are
+// measured against. Admin-maintained, because "which decks won which events" is
+// one person's job for everybody rather than a per-member setting.
+import VaultTourField from '../Components/Admin/VaultTourField';
 
 /**
  * ARCHON (N8): the admin operations dashboard page. The dashboard itself is
@@ -15,6 +19,7 @@ const AnalyticsAdmin = () => (
     <div className='mx-auto w-full max-w-3xl space-y-4'>
         <AnalyticsDashboard />
         <LabHealth />
+        <VaultTourField />
     </div>
 );
 

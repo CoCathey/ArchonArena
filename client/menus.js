@@ -158,6 +158,12 @@ export const SidebarMenu = [
             { path: '/terms', title: 'Terms of Service' },
             { path: '/admin/settings', title: 'Site Settings', permission: 'isAdmin' },
             { path: '/admin/bots', title: 'Bot Settings', permission: 'isAdmin' },
+            // ARCHON (N32): /admin/analytics has had a route since N8 and has
+            // never been listed, so the operations dashboard, the lab health
+            // panel and now the Vault Tour field were reachable only by typing
+            // the URL. A page nobody can navigate to is a page that does not
+            // exist, whatever the router says.
+            { path: '/admin/analytics', title: 'Analytics & Lab', permission: 'isAdmin' },
             { path: '/admin/bug-reports', title: 'Bug Reports', permission: 'isAdmin' },
             { path: '/news', title: 'News Admin', permission: 'canEditNews' },
             { path: '/users', title: 'User Admin', permission: 'canManageUsers' },

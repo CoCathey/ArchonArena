@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const AriService = require('../rating/AriService');
 const BotPolicyService = require('./BotPolicyService');
 const GauntletService = require('./GauntletService');
+const VaultTourService = require('./VaultTourService');
 const DeckService = require('../DeckService');
 const DokService = require('../dok/DokService');
 const CatalogService = require('../catalog/CatalogService');
@@ -98,6 +99,14 @@ class ChampionsChallengeService {
             // filters read. Optional: a server with no DoK key still plays the
             // field, filtered by set and house.
             dokService: new DokService(configService, db, settingsService)
+        });
+        // ARCHON (N32): the Vault Tour - a slate of three decks against an
+        // admin-curated field of tournament winners. Its own table, its own
+        // budget, its own matrix, and deliberately no ARI.
+        this.vaultTourService = new VaultTourService(configService, db, settingsService, {
+            deckService: new DeckService(configService, {
+                getAllCards: async () => getCardIndex()
+            })
         });
         // ARCHON (N29): the crawl the field is drawn FROM. Held here so the lab's
         // health can report where the walk has got to and an operator can start
@@ -446,6 +455,23 @@ class ChampionsChallengeService {
         );
 
         if (!enrollments || !enrollments.length) {
+            // ARCHON (N32): the Vault Tour has its OWN slate, so it must not
+            // depend on anybody having roster decks. Returning here left a site
+            // where nobody had enrolled with an unseeded field, and a member
+            // reading "no tournament decks have been entered yet" about a field
+            // that ships with the code.
+            try {
+                await this.runVaultTourStep(config, {
+                    championModel:
+                        config.learningEnabled !== false
+                            ? await this.policyService.champion()
+                            : null,
+                    styling: this.personaStyling(config, null)
+                });
+            } catch (err) {
+                logger.error('Vault Tour: sweep step failed', err);
+            }
+
             return { played: 0, abandoned: 0 };
         }
 
@@ -770,6 +796,15 @@ class ChampionsChallengeService {
             }
         }
 
+        // ARCHON (N32): the Vault Tour - the slates, against the field somebody
+        // won tournaments with. Its own budget and its own record, so it neither
+        // competes with the roster's games nor touches ARI.
+        try {
+            await this.runVaultTourStep(config, { championModel, styling });
+        } catch (err) {
+            logger.error('Vault Tour: sweep step failed', err);
+        }
+
         // ARCHON (N28): calibrate the pilots against each other, so "one of the
         // three is just weaker" is a fact an operator can read rather than a
         // possibility nobody can rule out.
@@ -936,6 +971,188 @@ class ChampionsChallengeService {
             });
         }
 
+        return 'played';
+    }
+
+    /**
+     * ARCHON (N32): the Vault Tour step - slates against the tournament field.
+     *
+     * A separate pass rather than a branch inside the roster loop, because it is
+     * a separate measurement with a separate budget: these decks are not the
+     * eight, these games are not counted against the eight's twelve a day, and
+     * nothing here reaches ARI. What it shares with the rest of the sweep is the
+     * engine, the sparring pilots and the entitlement.
+     *
+     * Bounded per sweep and per deck per day; a site admin is exempt from the
+     * daily cap, as everywhere else in the lab.
+     *
+     * @returns {Promise<number>} games played
+     */
+    async runVaultTourStep(config, { championModel, styling }) {
+        if (!this.vaultTourService.isEnabled()) {
+            return 0;
+        }
+
+        // The shipped field, and the cards for whatever part of it has none yet.
+        // Seeding is a cheap upsert; hydration is a Master Vault request per
+        // deck, so it is bounded and paced like every other outbound pass here.
+        await this.vaultTourService.seedDefaults();
+
+        const entries = await this.vaultTourService.rosters();
+
+        // Cards are fetched for a field somebody intends to play. The seed above
+        // is free and always runs, so an admin sees the field the moment the lab
+        // ticks; the requests wait for a slate.
+        if (!entries.length) {
+            return 0;
+        }
+
+        await this.vaultTourService.hydrateField();
+
+        const perSweep = Math.max(0, parseInt(config.vaultTourGamesPerSweep, 10) || 0);
+
+        if (!perSweep) {
+            return 0;
+        }
+
+        const slates = new Map();
+
+        for (const entry of entries) {
+            if (!slates.has(entry.UserId)) {
+                slates.set(entry.UserId, []);
+            }
+
+            slates.get(entry.UserId).push(entry.DeckId);
+        }
+
+        const perDay = this.vaultTourService.gamesPerDeckPerDay();
+        const access = new Map();
+        let played = 0;
+
+        for (const userId of shuffle([...slates.keys()])) {
+            if (played >= perSweep) {
+                break;
+            }
+
+            if (!access.has(userId)) {
+                access.set(userId, await this.rosterAccess(userId));
+            }
+
+            if (!access.get(userId).mayUse) {
+                continue;
+            }
+
+            const unlimited = access.get(userId).isAdmin;
+            const today = await this.vaultTourService.gamesToday(userId);
+            // The deck furthest behind on today's games goes first, so a slate
+            // is played evenly rather than one deck taking the whole budget.
+            const eligible = slates
+                .get(userId)
+                .filter((deckId) => unlimited || (today.get(deckId) || 0) < perDay)
+                .sort((left, right) => (today.get(left) || 0) - (today.get(right) || 0));
+
+            if (!eligible.length) {
+                continue;
+            }
+
+            const persona = styling.next();
+            const outcome = await this.playVaultTourGame({
+                userId,
+                deckId: eligible[0],
+                config,
+                championModel,
+                persona
+            });
+
+            if (outcome === 'played') {
+                played++;
+            }
+
+            if (outcome === 'no-opponent') {
+                // Nothing in the field this member can be given. Another member
+                // may still have opponents (the exclusion is per member), so the
+                // pass continues rather than stopping.
+                continue;
+            }
+        }
+
+        return played;
+    }
+
+    /**
+     * One Vault Tour game: a slate deck against a deck that won, or nearly won,
+     * a real event.
+     *
+     * The member's deck takes the alpha seat, which is what makes
+     * `winner === PLAYER_ONE` mean "mine won" without consulting the decks.
+     *
+     * @returns {Promise<'played'|'abandoned'|'no-opponent'>}
+     */
+    async playVaultTourGame({ userId, deckId, config, championModel, persona }) {
+        const opponent = await this.vaultTourService.drawOpponent(userId);
+
+        if (!opponent) {
+            return 'no-opponent';
+        }
+
+        const mine = await this.loadEngineDeck(deckId);
+
+        if (mine.missing.length || mine.deck.houses.length !== 3) {
+            logger.warn(`Vault Tour skipped deck ${deckId} of user ${userId}: not simulatable`);
+
+            return 'abandoned';
+        }
+
+        let result;
+
+        try {
+            result = await this.runMatch(mine.deck, opponent.deck, {
+                seed: this.newSeed(),
+                maxTurns: config.maxTurnsPerGame,
+                policy: personaModel(championModel, persona, this.personaStrength(config)),
+                temperature: 0.7,
+                // Not logged for training: the field is a hand-picked slice of
+                // the game rather than a sample of it, and the diary is what the
+                // champion generalises from.
+                recordDecisions: false
+            });
+        } catch (err) {
+            logger.error(
+                `Vault Tour game failed for user ${userId} (deck ${deckId} vs ${opponent.uuid}):`,
+                err
+            );
+
+            return 'abandoned';
+        }
+
+        if (!result || !result.completed) {
+            logger.warn(
+                `Vault Tour abandoned a game for user ${userId} (deck ${deckId} vs ` +
+                    `${opponent.uuid}): ${result && result.reason}`
+            );
+
+            return 'abandoned';
+        }
+
+        try {
+            await this.vaultTourService.recordGame({
+                userId,
+                deckId,
+                opponent,
+                won: result.winner === PLAYER_ONE,
+                result,
+                persona: persona ? persona.key : null
+            });
+            await this.vaultTourService.noteOpponentPlayed(opponent.uuid);
+        } catch (err) {
+            logger.error('Vault Tour: could not record a game', err);
+
+            return 'abandoned';
+        }
+
+        // Deliberately no ARI. See VaultTourService's header: a curated field of
+        // winners is the opposite of representative opposition, and the rating
+        // it would move is the one the whole platform prices decks with.
         return 'played';
     }
 
@@ -1513,10 +1730,13 @@ class ChampionsChallengeService {
         // is attached BESIDE its mirror record, never folded into it - 60%
         // against your own collection and 60% against the world are different
         // claims, and their average answers neither.
-        const [fieldSettings, fieldRecords, fieldRecent] = await Promise.all([
+        const [fieldSettings, fieldRecords, fieldRecent, vaultTour] = await Promise.all([
             this.gauntletService.settingsFor(userId),
             this.gauntletService.recordsFor(userId),
-            this.gauntletService.recentGames(userId)
+            this.gauntletService.recentGames(userId),
+            // ARCHON (N32): the Vault Tour rides beside the rest rather than
+            // inside it - a different slate, a different field, its own matrix.
+            this.vaultTourService.reportFor(userId).catch(() => null)
         ]);
         const poolStatus = await this.gauntletService.poolStatus(userId, fieldSettings);
 
@@ -1567,15 +1787,25 @@ class ChampionsChallengeService {
                 ladder: await this.policyService.personaLadder().catch(() => [])
             },
             cards: cards ? { ...cards, deckId: topDeck.deckId, deckName: topDeck.name } : null,
+            vaultTour,
             gauntlet: {
                 ...fieldSettings,
                 pool: poolStatus,
                 recent: fieldRecent,
-                strategies: Object.entries(GauntletService.STRATEGIES).map(([key, strategy]) => ({
-                    key,
-                    label: strategy.label,
-                    description: strategy.description
-                }))
+                // ARCHON: the catalogue under its OWN name. It used to be sent as
+                // `strategies`, which is also what fieldSettings calls the
+                // member's saved choice - so the spread was overwritten and the
+                // panel read the menu as the selection. Two consequences, both
+                // silent: a saved strategy never showed as chosen, and saving any
+                // other setting posted the whole catalogue back as the choice,
+                // where it was filtered out as unrecognised and wiped.
+                strategyOptions: Object.entries(GauntletService.STRATEGIES).map(
+                    ([key, strategy]) => ({
+                        key,
+                        label: strategy.label,
+                        description: strategy.description
+                    })
+                )
             }
         };
     }

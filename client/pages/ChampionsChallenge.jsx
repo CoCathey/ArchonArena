@@ -13,8 +13,10 @@ import {
     useGetChampionsChallengeQuery,
     useEnrollChampionsChallengeDeckMutation,
     useEnrollRandomChampionsChallengeDeckMutation,
+    useEnrollVaultTourDeckMutation,
     useSaveChampionsChallengeGauntletMutation,
-    useWithdrawChampionsChallengeDeckMutation
+    useWithdrawChampionsChallengeDeckMutation,
+    useWithdrawVaultTourDeckMutation
 } from '../redux/api';
 import { serverMessage } from '../redux/apiError';
 
@@ -265,7 +267,11 @@ const GauntletPanel = ({ gauntlet, onSave, saving, t }) => {
                     {t('Strategies — what the opponent should be good at')}
                 </div>
                 <div className='flex flex-wrap gap-1.5'>
-                    {(gauntlet?.strategies || []).map((strategy) => (
+                    {/* The menu comes from `strategyOptions`; `strategies` is
+                        this member's choice. They were once the same field, so
+                        the chips compared a list of objects against a key and
+                        nothing was ever shown as chosen. */}
+                    {(gauntlet?.strategyOptions || []).map((strategy) => (
                         <Chip
                             active={current.strategies.includes(strategy.key)}
                             key={strategy.key}
@@ -772,6 +778,222 @@ StylePanel.propTypes = {
     t: PropTypes.func
 };
 
+/**
+ * ARCHON (N32): the Vault Tour - three of your decks against a field somebody
+ * won a tournament with.
+ *
+ * The rest of the lab answers "how does this deck do against my collection" and
+ * "against a random slice of everything". This answers the question a
+ * competitive player actually asks, and the answer is a MATRIX rather than a
+ * percentage: against a dozen named decks, the average is the least interesting
+ * number available. A deck at 60% overall that loses every game to the deck that
+ * won the biggest event of the year has been told something an average hides.
+ *
+ * Kept visibly separate from the roster above it, because it is separate: three
+ * slots not eight, its own twelve games a day, and no effect on ARI at all.
+ */
+const VaultTourPanel = ({ vaultTour, onAdd, onRemove, busy, t }) => {
+    const [filter, setFilter] = useState('');
+
+    if (!vaultTour || !vaultTour.enabled) {
+        return null;
+    }
+
+    const {
+        slate = [],
+        field = [],
+        matrix = { opponents: [], cells: {}, totals: {} },
+        // Its own list, not the roster's: no SAS requirement, and a deck already
+        // in the eight may sit here too.
+        candidates = []
+    } = vaultTour;
+    const needle = filter.trim().toLowerCase();
+    const offered = needle
+        ? candidates.filter((deck) => deck.name.toLowerCase().includes(needle))
+        : candidates;
+    const slots = `${slate.length}/${vaultTour.slateSize}`;
+    const opponents = matrix.opponents || [];
+
+    return (
+        <Panel
+            type='default'
+            compactHeader
+            title={t('The Vault Tour ({{slots}} slots used)', { slots })}
+        >
+            <p className='m-0 pb-2 text-sm text-muted'>
+                {t(
+                    'Three decks, played over and over against a field of tournament decks an ' +
+                        'admin keeps. Separate from your roster above: its own slots, its own ' +
+                        '{{perDay}} games a day, and these games never move ARI — a hand-picked ' +
+                        'field of winners is the opposite of the ordinary opposition a rating needs.',
+                    { perDay: vaultTour.gamesPerDeckPerDay }
+                )}
+            </p>
+
+            <div className='flex flex-wrap items-center gap-1.5 pb-2'>
+                {slate.map((deck) => (
+                    <Chip active key={deck.deckId} onClick={() => onRemove(deck.deckId)}>
+                        {deck.name} ×
+                    </Chip>
+                ))}
+            </div>
+
+            {slate.length < vaultTour.slateSize && (
+                <div className='pb-2'>
+                    {/* A collection runs to hundreds of decks, so the list is
+                        searched rather than scrolled - and it says how many are
+                        not being shown instead of quietly truncating. */}
+                    <input
+                        className='mb-1.5 w-full max-w-sm rounded border border-border/70 bg-surface-secondary/60 px-2 py-1 text-sm text-foreground'
+                        onChange={(e) => setFilter(e.target.value)}
+                        placeholder={t('Find a deck to add…')}
+                        value={filter}
+                    />
+                    <div className='flex flex-wrap items-center gap-1.5'>
+                        {offered.slice(0, 12).map((deck) => (
+                            <Chip
+                                disabled={busy}
+                                key={deck.deckId}
+                                onClick={() => onAdd(deck.deckId)}
+                                title={deck.sas ? t('SAS {{sas}}', { sas: deck.sas }) : undefined}
+                            >
+                                + {deck.name}
+                            </Chip>
+                        ))}
+                        {offered.length > 12 && (
+                            <span className='text-[11px] text-muted'>
+                                {t('and {{count}} more — type to narrow', {
+                                    count: offered.length - 12
+                                })}
+                            </span>
+                        )}
+                        {offered.length === 0 && (
+                            <span className='text-[11px] text-muted'>
+                                {candidates.length
+                                    ? t('No deck of yours matches that.')
+                                    : t('No decks of yours are available to add.')}
+                            </span>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {field.length === 0 ? (
+                <p className='m-0 text-[11px] text-muted'>
+                    {t(
+                        'No tournament decks have been entered yet. An admin adds them from the ' +
+                            'Vault Tour panel in site administration.'
+                    )}
+                </p>
+            ) : opponents.length === 0 ? (
+                <p className='m-0 text-[11px] text-muted'>
+                    {/* The gap between "in the field" and "playable" is a few
+                        sweeps of Master Vault fetches, and looks like a stall if
+                        nothing names it. */}
+                    {vaultTour.playableField === 0
+                        ? t(
+                              '{{count}} decks in the field, none with their cards yet — the lab ' +
+                                  'fetches a few per sweep from Master Vault. Games start as soon ' +
+                                  'as the first one lands.',
+                              { count: field.length }
+                          )
+                        : t(
+                              '{{playable}} of {{count}} field decks are ready to play, waiting ' +
+                                  'on games. Put a deck on the slate and the lab starts playing ' +
+                                  'it through them.',
+                              { playable: vaultTour.playableField, count: field.length }
+                          )}
+                </p>
+            ) : (
+                <div className='overflow-x-auto'>
+                    <table className='w-full min-w-[34rem] border-collapse text-sm'>
+                        <thead>
+                            <tr className='text-left text-[11px] uppercase tracking-wide text-muted'>
+                                <th className='py-1 pr-2 font-normal'>{t('Opponent')}</th>
+                                {slate.map((deck) => (
+                                    <th className='py-1 pr-2 font-normal' key={deck.deckId}>
+                                        {deck.name}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {opponents.map((opponent) => (
+                                <tr className='border-t border-border/40' key={opponent.uuid}>
+                                    <td className='max-w-[16rem] truncate py-1 pr-2'>
+                                        <span className='text-foreground'>{opponent.name}</span>{' '}
+                                        <span className='text-[11px] text-muted'>
+                                            {opponent.placing === 'unknown'
+                                                ? opponent.event
+                                                : `${opponent.event} · ${opponent.placing}`}
+                                        </span>
+                                    </td>
+                                    {slate.map((deck) => {
+                                        const cell =
+                                            matrix.cells[`${deck.deckId}|${opponent.uuid}`];
+
+                                        return (
+                                            <td className='py-1 pr-2' key={deck.deckId}>
+                                                {cell ? (
+                                                    <span
+                                                        className={
+                                                            cell.winRate >= 0.5
+                                                                ? 'text-emerald-300'
+                                                                : 'text-red-300'
+                                                        }
+                                                        title={t('{{wins}}–{{losses}}', {
+                                                            wins: cell.wins,
+                                                            losses: cell.losses
+                                                        })}
+                                                    >
+                                                        {pct(cell.winRate)}
+                                                    </span>
+                                                ) : (
+                                                    <span className='text-muted'>—</span>
+                                                )}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))}
+                            <tr className='border-t border-border/60'>
+                                <td className='py-1 pr-2 text-[11px] uppercase tracking-wide text-muted'>
+                                    {t('Against the field')}
+                                </td>
+                                {slate.map((deck) => {
+                                    const total = matrix.totals[deck.deckId];
+
+                                    return (
+                                        <td
+                                            className='py-1 pr-2 font-semibold text-foreground'
+                                            key={deck.deckId}
+                                        >
+                                            {total
+                                                ? t('{{rate}} ({{games}})', {
+                                                      rate: pct(total.rate),
+                                                      games: total.games
+                                                  })
+                                                : '—'}
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </Panel>
+    );
+};
+
+VaultTourPanel.propTypes = {
+    vaultTour: PropTypes.object,
+    onAdd: PropTypes.func,
+    onRemove: PropTypes.func,
+    busy: PropTypes.bool,
+    t: PropTypes.func
+};
+
 const ChampionsChallenge = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -791,6 +1013,10 @@ const ChampionsChallenge = () => {
     const [withdraw, { isLoading: withdrawing }] = useWithdrawChampionsChallengeDeckMutation();
     const [saveGauntlet, { isLoading: savingGauntlet }] =
         useSaveChampionsChallengeGauntletMutation();
+    const [addVaultTourDeck, { isLoading: addingVaultTour }] = useEnrollVaultTourDeckMutation();
+    const [removeVaultTourDeck, { isLoading: removingVaultTour }] =
+        useWithdrawVaultTourDeckMutation();
+    const vaultTourBusy = addingVaultTour || removingVaultTour;
 
     const busy = enrolling || withdrawing || randomizing;
 
@@ -1094,6 +1320,36 @@ const ChampionsChallenge = () => {
                         )}
                     </Panel>
 
+                    <VaultTourPanel
+                        vaultTour={data?.vaultTour}
+                        busy={vaultTourBusy}
+                        t={t}
+                        onAdd={async (deckId) => {
+                            setActionError(null);
+
+                            try {
+                                await addVaultTourDeck(deckId).unwrap();
+                            } catch (error) {
+                                setActionError(
+                                    serverMessage(
+                                        error,
+                                        t('That deck could not be added to the Vault Tour.')
+                                    )
+                                );
+                            }
+                        }}
+                        onRemove={async (deckId) => {
+                            setActionError(null);
+
+                            try {
+                                await removeVaultTourDeck(deckId).unwrap();
+                            } catch (error) {
+                                setActionError(
+                                    serverMessage(error, t('That deck could not be withdrawn.'))
+                                );
+                            }
+                        }}
+                    />
                     <StylePanel personas={data?.personas} decks={data?.decks} t={t} />
                     <MatchupMatrix matchups={data?.matchups} t={t} />
                     <CardContribution cards={data?.cards} t={t} />
