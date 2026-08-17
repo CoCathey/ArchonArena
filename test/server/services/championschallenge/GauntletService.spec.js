@@ -420,12 +420,16 @@ describe('GauntletService', function () {
         it('asks for enrichment only for playable decks with no stats', async function () {
             service.dokService = {
                 isEnabled: () => true,
-                enrichDeck: vi.fn().mockResolvedValue(undefined)
+                enrichDeck: vi.fn().mockResolvedValue(true)
             };
             answer([['ds."Uuid" IS NULL', [{ Uuid: 'u-1' }, { Uuid: 'u-2' }]]]);
 
-            expect(await service.enrichPool()).toBe(2);
-            expect(service.dokService.enrichDeck).toHaveBeenCalledWith('u-1');
+            expect(await service.enrichPool()).toEqual({ asked: 2, enriched: 2 });
+            // Background: the pool growing is worth less than a member waiting on
+            // the same per-minute budget.
+            expect(service.dokService.enrichDeck).toHaveBeenCalledWith('u-1', {
+                background: true
+            });
 
             const [query] = queriesMatching('ds."Uuid" IS NULL');
 
@@ -435,8 +439,83 @@ describe('GauntletService', function () {
         it('does nothing when the server has no DoK key', async function () {
             service.dokService = { isEnabled: () => false, enrichDeck: vi.fn() };
 
-            expect(await service.enrichPool()).toBe(0);
+            expect(await service.enrichPool()).toEqual({ asked: 0, enriched: 0 });
             expect(service.dokService.enrichDeck).not.toHaveBeenCalled();
+        });
+
+        /**
+         * ARCHON (N27): the ask is stamped whether or not DoK answers.
+         *
+         * Master Vault registers decks Decks of KeyForge has no rating for, and
+         * "no DeckSas row" is also what a deck nobody has asked about looks like.
+         * With no stamp, the pass spent its whole per-run budget re-asking the
+         * same unanswerable decks on every sweep and never reached the pool
+         * behind them - the one shape of "hammering somebody else's API" that
+         * looks like ordinary progress from the inside.
+         */
+        it('remembers every ask, including the ones DoK cannot answer', async function () {
+            service.dokService = {
+                isEnabled: () => true,
+                // DoK has no rating for this deck: no row is written, so the
+                // deck still has no stats after the ask.
+                enrichDeck: vi.fn().mockResolvedValue(false)
+            };
+            answer([['ds."Uuid" IS NULL', [{ Uuid: 'u-1' }]]]);
+
+            expect(await service.enrichPool()).toEqual({ asked: 1, enriched: 0 });
+
+            const [stamp] = queriesMatching('SET "SasAskedAt"');
+
+            expect(stamp[0]).toContain('WHERE "Uuid" = $1');
+            expect(stamp[1]).toEqual(['u-1']);
+        });
+
+        it('stamps before asking, so a timeout still counts as a request', async function () {
+            const order = [];
+
+            service.dokService = {
+                isEnabled: () => true,
+                enrichDeck: vi.fn(async () => {
+                    order.push('ask');
+
+                    return false;
+                })
+            };
+            answer([
+                ['ds."Uuid" IS NULL', [{ Uuid: 'u-1' }]],
+                [
+                    'SET "SasAskedAt"',
+                    () => {
+                        order.push('stamp');
+
+                        return [];
+                    }
+                ]
+            ]);
+
+            await service.enrichPool();
+
+            expect(order).toEqual(['stamp', 'ask']);
+        });
+
+        it('leaves a deck alone until the retry window has passed', async function () {
+            service.dokService = { isEnabled: () => true, enrichDeck: vi.fn() };
+            config.gauntletEnrichRetryDays = 30;
+            answer([['ds."Uuid" IS NULL', []]]);
+
+            await service.enrichPool();
+
+            const [query] = queriesMatching('ds."Uuid" IS NULL');
+
+            expect(query[0]).toContain('g."SasAskedAt" IS NULL OR g."SasAskedAt" < $2');
+            // Never asked first; among those, the decks the draw keeps picking.
+            expect(query[0]).toContain('ORDER BY g."SasAskedAt" ASC NULLS FIRST');
+            expect(query[0]).toContain('g."GamesPlayed" DESC');
+
+            const cutoff = query[1][1];
+            const daysAgo = (Date.now() - cutoff.getTime()) / (24 * 60 * 60 * 1000);
+
+            expect(daysAgo).toBeCloseTo(30, 1);
         });
     });
 

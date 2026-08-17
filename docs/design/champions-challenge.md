@@ -178,8 +178,34 @@ Strategies are read off the deck's AERC breakdown — `amber` is amber control,
 which only exists for decks Decks of KeyForge has been asked about. So a
 strategy or SAS filter narrows the pool to enriched decks, and the page says
 how many decks the filters actually reach rather than letting a member wonder
-why every game is still a mirror. The pool is enriched a few decks per sweep,
-most-played first.
+why every game is still a mirror.
+
+**Asking DoK about the pool, politely (N27).** Enrichment runs a few decks per
+sweep — never-asked first, and within those the most played, because a deck the
+draw keeps picking is the one whose stats the report most needs. Two rules keep
+it from becoming a way to hammer somebody else's API.
+
+It asks about decks the crawl brought **into the pool**, never the catalog at
+large. The catalog indexes every deck that exists; at 25 requests a minute that
+is years of asking, for data the site would never read.
+
+And every ask is **stamped** whether or not DoK answers (`SasAskedAt`). Master
+Vault registers plenty of decks DoK has no rating for, and "no `DeckSas` row" is
+also exactly what a deck nobody has asked about looks like — so the pass used to
+spend its whole per-run budget re-asking the same unanswerable decks on every
+sweep and never reach the pool behind them. One nullable timestamp turns that
+into a queue that rotates: asked once per `gauntletEnrichRetryDays` (30), long
+because "DoK does not rate this deck" does not change week to week.
+
+Both of the sweeps that spend the DoK budget on nobody's behalf — this one and
+the stale-SAS refresh — also leave `dok.backgroundHeadroom` (5) requests of each
+minute alone. Yielding when the budget is spent only protects whoever asked
+first; a sweep is otherwise entitled to the minute's last slot, and a member
+arriving a second later sees no SAS at all, which from their side is
+indistinguishable from DoK being down. The admin health panel reports how much
+of the playable pool is rated and how much was asked about and came back
+unrated, because a SAS filter that matches nothing is otherwise unexplainable
+from the outside: the pool looks full and healthy.
 
 **Reported separately, never averaged.** Field results live in their own table
 and appear in their own column. "How do I do against my own decks" and "how do

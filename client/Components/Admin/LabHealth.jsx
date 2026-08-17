@@ -186,6 +186,23 @@ const LabHealth = () => {
                         })}
                     />
                     <Row
+                        label={t('SAS on the pool')}
+                        tone={health.gauntlet.rated > 0 ? 'good' : undefined}
+                        value={t('{{rated}} rated', {
+                            rated: (health.gauntlet.rated || 0).toLocaleString()
+                        })}
+                        // The SAS and strategy filters are computed from Decks of
+                        // KeyForge enrichment, so a filter that matches nothing is
+                        // otherwise unexplainable: the pool looks full and healthy.
+                        hint={
+                            health.gauntlet.unrated
+                                ? t('{{unrated}} asked, unrated by DoK', {
+                                      unrated: (health.gauntlet.unrated || 0).toLocaleString()
+                                  })
+                                : undefined
+                        }
+                    />
+                    <Row
                         label={t('Last Master Vault fetch')}
                         value={when(health.gauntlet.lastFetchAt)}
                     />

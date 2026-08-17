@@ -45,6 +45,16 @@ DoK public API ◀── fetch ── DokService ── upsert ──▶ "DeckSa
 `dok.enabled`, `dok.apiKey` (env `DOK_API_KEY`), `dok.apiUrl`, `dok.requestTimeoutMs`,
 `dok.refreshDays` — file/env config today, settings-service driven later.
 
+`dok.maxRequestsPerMinute` (25, DoK's free tier, enforced as a ceiling in code) and
+`dok.backgroundHeadroom` (5) share one budget between three kinds of caller. A member's
+own request — a collection import, the SAS on a deck they just opened — may spend the
+whole minute. The two background sweeps may not: the stale-SAS refresh and the
+Gauntlet's pool enrichment leave the headroom alone, because peek-and-take on its own
+only protects whoever asked first, and a sweep taking the minute's last slot leaves the
+next member's page with no SAS on it — which from their side looks exactly like DoK
+being down. The reserve is clamped so background work always keeps at least one slot,
+however small the configured limit.
+
 ## Files changed
 
 -   `server/services/dok/DokService.js` — new

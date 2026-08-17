@@ -48,6 +48,13 @@ const { cloneCard } = require('./packCards');
 // member's own import (DeckService.parseDeckResponse).
 const MV_DECK_URL = 'https://www.keyforgegame.com/api/decks/';
 
+// How long before the enrichment pass asks Decks of KeyForge about a pool deck
+// it has already asked about and got nothing for. Long, because the usual reason
+// for nothing is that DoK does not rate that deck - a fact that does not change
+// week to week - and short enough that a deck DoK adds later is picked up
+// without an operator doing anything.
+const SAS_RETRY_DAYS = 30;
+
 /**
  * The strategy filters, expressed over Decks of KeyForge's AERC components.
  *
@@ -434,38 +441,68 @@ class GauntletService {
      * skipped when the operator has no DoK key (the site works without one -
      * sets and houses still filter, because the catalog knows those).
      *
-     * @returns {Promise<number>} how many decks were asked about
+     * Two rules keep this from becoming a way to hammer somebody else's API.
+     *
+     * It asks about decks the crawl actually brought into the pool, never the
+     * catalog at large: the catalog indexes every deck that exists, which at 25
+     * requests a minute is years of asking, and the pool is the only part of it
+     * this site plays. And every ask is STAMPED, answered or not - Master Vault
+     * registers plenty of decks DoK has no rating for, and a pass that looks for
+     * "no DeckSas row" cannot tell those from decks nobody has asked about yet.
+     * Before the stamp existed, the same unanswerable handful was re-asked every
+     * sweep and the decks behind them were never reached.
+     *
+     * @returns {Promise<{asked: number, enriched: number}>}
      */
-    async enrichPool({ decksPerRun } = {}) {
+    async enrichPool({ decksPerRun, retryDays } = {}) {
         const config = this.getConfig();
         const perRun = Math.max(1, parseInt(decksPerRun ?? config.gauntletEnrichPerRun, 10) || 5);
+        const retry = Math.max(
+            1,
+            parseInt(retryDays ?? config.gauntletEnrichRetryDays, 10) || SAS_RETRY_DAYS
+        );
+        const outcome = { asked: 0, enriched: 0 };
 
         if (!this.dokService || !this.dokService.isEnabled || !this.dokService.isEnabled()) {
-            return 0;
+            return outcome;
         }
 
-        let asked = 0;
-
         try {
+            const cutoff = new Date(Date.now() - retry * 24 * 60 * 60 * 1000);
             const rows = await this.db.query(
                 'SELECT g."Uuid" FROM "GauntletDecks" g ' +
                     'LEFT JOIN "DeckSas" ds ON ds."Uuid" = g."Uuid" ' +
                     'WHERE g."Playable" = true AND ds."Uuid" IS NULL ' +
-                    // Most-played first: a deck the draw keeps picking is the
-                    // one whose stats the report most needs.
-                    'ORDER BY g."GamesPlayed" DESC LIMIT $1',
-                [perRun]
+                    'AND (g."SasAskedAt" IS NULL OR g."SasAskedAt" < $2) ' +
+                    // Never asked first, and within that group most-played
+                    // first: a deck the draw keeps picking is the one whose
+                    // stats the report most needs.
+                    'ORDER BY g."SasAskedAt" ASC NULLS FIRST, g."GamesPlayed" DESC LIMIT $1',
+                [perRun, cutoff]
             );
 
             for (const row of rows || []) {
-                await this.dokService.enrichDeck(row.Uuid);
-                asked++;
+                // Stamped before the ask, not after: a crash or a timeout
+                // mid-request must still count as having spent the request.
+                await this.db.query(
+                    'UPDATE "GauntletDecks" SET "SasAskedAt" = ' +
+                        'now() AT TIME ZONE \'utc\' WHERE "Uuid" = $1',
+                    [row.Uuid]
+                );
+                outcome.asked++;
+
+                // background: the pool growing is worth less than any member
+                // waiting on the same budget, so this yields the last few
+                // requests of the minute to them.
+                if (await this.dokService.enrichDeck(row.Uuid, { background: true })) {
+                    outcome.enriched++;
+                }
             }
         } catch (err) {
             logger.error('Gauntlet: pool enrichment failed', err);
         }
 
-        return asked;
+        return outcome;
     }
 
     /** Does anyone have the Gauntlet switched on? The pool grows only if so. */

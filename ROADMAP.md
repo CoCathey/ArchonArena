@@ -1982,6 +1982,46 @@ operator a way to see whether the lab is working at all.
 -   [x] A stale sweep lease reports as stale, and the health panel survives every one of its
         queries failing.
 
+#### N27 — SAS on the decks the crawl brings in _(done)_
+
+**Why:** the Gauntlet's SAS window and strategy filters are computed from Decks of KeyForge
+enrichment, so a pool deck with no `DeckSas` row satisfies none of them and can never be
+drawn. The enrichment pass existed but could not make progress: it looked for pool decks with
+no stats, which is also, indistinguishably, what a deck DoK has no rating for looks like — and
+Master Vault registers plenty of those. So it spent its whole per-run budget re-asking the same
+unanswerable decks every sweep and never reached the pool behind them. From the inside that is
+indistinguishable from working.
+
+**Tasks**
+
+-   [x] **Every ask is stamped**, answered or not (`GauntletDecks."SasAskedAt"`, migration 77),
+        ordered never-asked-first and re-asked only after `gauntletEnrichRetryDays` (30) — long,
+        because "DoK does not rate this deck" does not change week to week. The stamp is written
+        _before_ the request, so a timeout still counts as having spent it.
+-   [x] **The pool, not the catalog.** Enrichment asks about decks the crawl brought into the
+        playable pool; the catalog indexes every deck that exists, and at 25 requests a minute
+        that is years of asking for data nothing would read.
+-   [x] **`dok.backgroundHeadroom` (5).** Both sweeps that spend the DoK budget on nobody's
+        behalf now leave part of each minute alone. Peek-and-take protects only whoever asked
+        first: a sweep was entitled to the minute's last slot, and a member arriving a second
+        later saw no SAS at all — from their side, exactly like DoK being down. Clamped so
+        background work always keeps at least one slot, however low the limit is set.
+-   [x] **`enrichDeck` reports whether anything was stored**, so a caller pacing itself can tell
+        "DoK answered" from "DoK had nothing, or we were out of budget".
+-   [x] **Pool SAS coverage in the lab health panel**: how many playable decks are rated, and how
+        many were asked about and came back unrated. Without the pair, a SAS filter matching
+        nothing is unexplainable from the outside — the pool looks full and healthy.
+-   Later: enrich the pool from the deck's own card list rather than asking DoK at all (AERC is
+    a published formula), which would make the strategy filters work with no key at all.
+
+**Depends on:** N24 (the pool), the DoK integration. **Acceptance criteria**
+
+-   [x] A deck DoK cannot answer for is asked about once, not once per sweep, and the decks
+        behind it are reached.
+-   [x] A background sweep cannot take the last requests of a minute; a member's own enrichment
+        can.
+-   [x] Neither sweep can be configured into never running at all.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

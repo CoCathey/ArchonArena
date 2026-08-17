@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS public."GauntletDecks"
     -- hands back first; also shows the operator that the pool is being used.
     "LastPlayedAt" timestamp without time zone,
     "GamesPlayed" integer NOT NULL DEFAULT 0,
+    -- When Decks of KeyForge was last asked about this deck's SAS - set whether
+    -- or not it answered, which is the point. The pool's SAS and strategy
+    -- filters need enrichment to mean anything, but plenty of pool decks are
+    -- ones DoK has no rating for, and "no DeckSas row" cannot tell those apart
+    -- from decks nobody has asked about yet. Without this stamp the sweep asked
+    -- the same handful of unanswerable decks every run, forever, and never
+    -- reached the rest of the pool.
+    "SasAskedAt" timestamp without time zone,
     CONSTRAINT "PK_GauntletDecks" PRIMARY KEY ("Uuid")
 )
 

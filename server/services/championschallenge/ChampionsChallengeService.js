@@ -1404,9 +1404,20 @@ class ChampionsChallengeService {
                     'FROM "ProvingGroundsGames"'
             ),
             ask(
-                'SELECT COUNT(*) FILTER (WHERE "Playable")::int AS "Playable", ' +
+                'SELECT COUNT(*) FILTER (WHERE g."Playable")::int AS "Playable", ' +
                     'COUNT(*)::int AS "Hydrated", ' +
-                    'MAX("FetchedAt") AS "LastFetch" FROM "GauntletDecks"'
+                    // ARCHON (N27): how much of the playable pool carries a SAS
+                    // score, and how much has been asked about without getting
+                    // one. Without this pair, a SAS or strategy filter that
+                    // matches nothing is unexplainable from the outside: the
+                    // filters are computed from Decks of KeyForge enrichment, so
+                    // an unenriched pool answers every one of them with "no
+                    // opponents" while looking perfectly healthy.
+                    'COUNT(*) FILTER (WHERE g."Playable" AND ds."Uuid" IS NOT NULL)::int AS "Rated", ' +
+                    'COUNT(*) FILTER (WHERE g."Playable" AND ds."Uuid" IS NULL ' +
+                    'AND g."SasAskedAt" IS NOT NULL)::int AS "Unrated", ' +
+                    'MAX(g."FetchedAt") AS "LastFetch" FROM "GauntletDecks" g ' +
+                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = g."Uuid"'
             ),
             ask(
                 'SELECT "MissingCards", COUNT(*)::int AS "Decks" FROM "GauntletDecks" ' +
@@ -1462,6 +1473,11 @@ class ChampionsChallengeService {
                 hydrated: (pool && pool[0] && pool[0].Hydrated) || 0,
                 lastFetchAt: (pool && pool[0] && pool[0].LastFetch) || null,
                 target: config.gauntletTargetPoolSize,
+                // How many pool decks the SAS and strategy filters can see, and
+                // how many DoK was asked about and had no rating for - the second
+                // number is a ceiling on the first, not a fault.
+                rated: (pool && pool[0] && pool[0].Rated) || 0,
+                unrated: (pool && pool[0] && pool[0].Unrated) || 0,
                 // What the pool could NOT play, grouped - an operator seeing one
                 // card id at the top of this list has learned something
                 // actionable about their card data.

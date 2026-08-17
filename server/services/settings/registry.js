@@ -264,6 +264,18 @@ const REGISTRY = {
                 min: 1,
                 max: 200,
                 default: 10
+            },
+            // ARCHON (N27): two sweeps spend this budget on nobody's behalf -
+            // the stale-SAS refresh and the Gauntlet asking about pool decks -
+            // and peek-and-take alone lets either of them take the minute's last
+            // slot. A member arriving a second later then sees no SAS at all,
+            // which from their side is indistinguishable from DoK being down.
+            backgroundHeadroom: {
+                type: 'number',
+                label: 'Requests each minute reserved for members (background sweeps leave these alone)',
+                min: 0,
+                max: 24,
+                default: 5
             }
         }
     },
@@ -594,6 +606,18 @@ const REGISTRY = {
                 min: 0,
                 max: 25,
                 default: 5
+            },
+            // ARCHON (N27): Master Vault registers decks Decks of KeyForge does
+            // not rate, and "no SAS row" cannot tell those from decks nobody has
+            // asked about yet. Every ask is stamped, so this is how long before
+            // an unanswered deck is worth asking about again - long, because the
+            // usual answer does not change week to week.
+            gauntletEnrichRetryDays: {
+                type: 'number',
+                label: 'Days before asking again about a pool deck DoK had no SAS for',
+                min: 1,
+                max: 365,
+                default: 30
             },
             // ARCHON (N24): where the simulated games actually run. Sparring is
             // solid CPU with nobody waiting on it, so it can be moved off the
