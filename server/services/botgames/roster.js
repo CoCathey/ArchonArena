@@ -52,6 +52,31 @@ const HOUSE_LABELS = {
 
 const BOT_HOUSES = BOT_ROSTER.map((entry) => entry.house);
 
+/**
+ * The domain every bot account's email sits on. No human can register it
+ * (`.invalid` is reserved by RFC 2606), which is what makes it usable as
+ * proof that an account is ours - see BotService for the ownership rules.
+ *
+ * It doubles as the display signal: the badge next to a name says BOT
+ * because of this, so a bot is marked everywhere a name is rendered without
+ * a second table to join or a flag to remember to set.
+ */
+const BOT_EMAIL_DOMAIN = 'archon-bots.invalid';
+
+/**
+ * The sentinel email for a house's bot. Keyed on the HOUSE rather than the
+ * name, because a bot's name is an admin's to change and an email built from
+ * it would stop proving anything the moment they changed it.
+ */
+function botEmail(house) {
+    return `bot+${house}@${BOT_EMAIL_DOMAIN}`;
+}
+
+/** Is this account one of ours? */
+function isBotEmail(email) {
+    return typeof email === 'string' && email.toLowerCase().endsWith(`@${BOT_EMAIL_DOMAIN}`);
+}
+
 function isBotHouse(house) {
     return BOT_HOUSES.includes(house);
 }
@@ -69,7 +94,10 @@ function defaultNameFor(house) {
 module.exports = {
     BOT_ROSTER,
     BOT_HOUSES,
+    BOT_EMAIL_DOMAIN,
     HOUSE_LABELS,
+    botEmail,
+    isBotEmail,
     isBotHouse,
     houseLabel,
     defaultNameFor

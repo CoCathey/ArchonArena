@@ -94,19 +94,54 @@ const NewPill = ({ t }) => (
 NewPill.propTypes = { t: PropTypes.func };
 
 /**
+ * ARCHON (F9): the mark on a practice bot.
+ *
+ * Same pill shape as the welcome, deliberately: both are facts about who you
+ * are looking at rather than claims about money, so neither gets a key. Blue
+ * because it is the one colour on the site that is not already a tier, a role
+ * or a warning - a bot is none of those, it is simply not a person.
+ *
+ * It replaces the New pill rather than sitting beside it (publicBadge never
+ * sets both): a bot account is days old by definition, and "be nice, they
+ * just got here" is advice about a person.
+ */
+const BotPill = ({ t }) => (
+    <span
+        aria-label={t('Bot')}
+        className='inline-flex items-center rounded-full border border-sky-500/40 bg-sky-500/15 px-1 text-[0.62em] font-semibold uppercase tracking-wide text-sky-300'
+        title={t('A practice bot - games against it are never rated')}
+    >
+        {t('Bot')}
+    </span>
+);
+
+BotPill.propTypes = { t: PropTypes.func };
+
+/**
  * @param {object} props
  * @param {string} [props.tier] tier id; anything not a paid tier renders no key
  * @param {string} [props.tierName] display name, used for the tooltip
  * @param {object} [props.cosmetics] chosen cosmetics; only the key finish is read
  * @param {boolean} [props.isNew] ARCHON (N20): within the new-player window
+ * @param {boolean} [props.isBot] ARCHON (F9): a practice bot, not a person
  * @param {boolean} [props.withLabel] also show the tier name in words
  */
-const PlayerBadge = ({ tier, tierName, cosmetics, isNew = false, withLabel = false }) => {
+const PlayerBadge = ({
+    tier,
+    tierName,
+    cosmetics,
+    isNew = false,
+    isBot = false,
+    withLabel = false
+}) => {
     const { t } = useTranslation();
     const style = TIER_STYLE[tier];
+    // A bot never wears the welcome: what matters about it is that it is a
+    // bot, and it is new by construction.
+    const pill = isBot ? <BotPill t={t} /> : isNew ? <NewPill t={t} /> : null;
 
     if (!style) {
-        return isNew ? <NewPill t={t} /> : null;
+        return pill;
     }
 
     // ARCHON (N12): the chosen finish is applied ON TOP of the tier's colour and
@@ -130,7 +165,7 @@ const PlayerBadge = ({ tier, tierName, cosmetics, isNew = false, withLabel = fal
                 <KeyGlyph fill={style.fill} ring={style.ring} />
                 {withLabel && <span className='text-[0.8em] font-medium'>{label}</span>}
             </span>
-            {isNew && <NewPill t={t} />}
+            {pill}
         </span>
     );
 };
@@ -139,6 +174,7 @@ PlayerBadge.displayName = 'PlayerBadge';
 
 PlayerBadge.propTypes = {
     cosmetics: PropTypes.object,
+    isBot: PropTypes.bool,
     isNew: PropTypes.bool,
     tier: PropTypes.string,
     tierName: PropTypes.string,

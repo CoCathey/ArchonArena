@@ -1,5 +1,5 @@
 const logger = require('../../log');
-const { BOT_ROSTER, houseLabel, isBotHouse } = require('./roster');
+const { BOT_ROSTER, botEmail, houseLabel, isBotHouse } = require('./roster');
 
 /**
  * ARCHON (F9): the practice bots - who they are, and which decks they play.
@@ -64,13 +64,11 @@ class BotService {
     }
 
     /**
-     * The sentinel email that marks a Users row as a given bot's.
-     *
-     * Keyed on the HOUSE: a bot's name is editable, so an email built from
-     * the name would stop proving anything the moment an admin renamed one.
+     * The sentinel email that marks a Users row as a given bot's. Defined in
+     * roster.js, because the badge next to a name reads it too.
      */
     botEmail(house) {
-        return `bot+${house}@archon-bots.invalid`;
+        return botEmail(house);
     }
 
     /**

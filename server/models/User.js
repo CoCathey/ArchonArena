@@ -119,7 +119,10 @@ class User {
             // on exactly the day it stops unlocking features.
             cosmetics: this.userData.cosmetics,
             // ARCHON (N20): the New pill for fresh accounts.
-            registered: this.userData.registered
+            registered: this.userData.registered,
+            // ARCHON (F9): the BOT pill. The email never leaves the server -
+            // publicBadge reads it and emits a flag, nothing more.
+            email: this.userData.email
         });
     }
 

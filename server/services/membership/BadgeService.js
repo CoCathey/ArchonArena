@@ -63,7 +63,7 @@ class BadgeService {
         const cosmeticGroup = cosmeticColumns;
 
         return this.db.query(
-            'SELECT u."Username", u."Registered", ' +
+            'SELECT u."Username", u."Registered", u."Email", ' +
                 '  COALESCE(array_agg(r."Name") FILTER (WHERE r."Name" IS NOT NULL), ' +
                 '    \'{}\') AS "Roles", ' +
                 '  m."Tier", m."Status", m."ExpiresAt", m."GrantedTier", m."GrantedUntil"' +
@@ -75,7 +75,7 @@ class BadgeService {
                 cosmeticJoin +
                 'WHERE lower(u."Username") = ANY($1) ' +
                 '  AND u."Disabled" IS NOT TRUE AND u."Verified" IS TRUE ' +
-                'GROUP BY u."Username", u."Registered", m."Tier", m."Status", m."ExpiresAt", ' +
+                'GROUP BY u."Username", u."Registered", u."Email", m."Tier", m."Status", m."ExpiresAt", ' +
                 '  m."GrantedTier", m."GrantedUntil"' +
                 cosmeticGroup,
             [wanted, BADGE_ROLE_NAMES]
@@ -167,14 +167,21 @@ class BadgeService {
                 membership,
                 cosmetics: this.storedCosmetics(row),
                 // ARCHON (N20): drives the New pill next to fresh accounts.
-                registered: row.Registered
+                registered: row.Registered,
+                // ARCHON (F9): and the BOT pill next to a practice bot, which
+                // is the one badge a name cannot be rendered without.
+                email: row.Email
             });
 
             if (
                 badge.role === 'user' &&
                 badge.tier === TIER_IDS.FREE &&
                 !badge.cosmetics &&
-                !badge.isNew
+                !badge.isNew &&
+                // A bot has nothing else to say and still must say this one:
+                // dropping it here is what would leave a bot indistinguishable
+                // from a person in every list on the site.
+                !badge.isBot
             ) {
                 continue;
             }
