@@ -46,7 +46,7 @@ const Lobby = () => {
             body: t(
                 'Climb worldwide, regional, country and state leaderboards - Archon, Sealed and Alliance each ranked on their own.'
             ),
-            path: '/stats/leaderboards'
+            path: '/community/leaderboards'
         },
         {
             title: t('Tournaments'),

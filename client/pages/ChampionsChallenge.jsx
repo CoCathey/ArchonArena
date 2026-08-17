@@ -116,8 +116,10 @@ const ChampionsChallenge = () => {
     const user = useSelector((state) => state.account.user);
     const unlocked = hasCapability(user, CAPABILITIES.CHAMPIONS_CHALLENGE);
     const [actionError, setActionError] = useState(null);
-    // ARCHON (N21): the randomizer's swap cadence, user-configurable.
+    // ARCHON (N21): the randomizer's swap cadence and how many slots to fill,
+    // both user-configurable.
     const [randomGames, setRandomGames] = useState(20);
+    const [randomCount, setRandomCount] = useState(1);
 
     const { data, isFetching } = useGetChampionsChallengeQuery(undefined, {
         skip: !user || !unlocked
@@ -164,6 +166,10 @@ const ChampionsChallenge = () => {
     const gems = decks.filter((deck) => deck.hiddenGem);
     const slots = data ? `${decks.length}/${data.maxEnrolled}` : null;
     const atCapacity = data ? decks.length >= data.maxEnrolled : false;
+    // The randomizer never asks for more than fits: the roster can fill up
+    // between typing a number and pressing the button.
+    const freeSlots = data ? Math.max(0, data.maxEnrolled - decks.length) : 0;
+    const randomToAdd = Math.max(1, Math.min(randomCount, freeSlots || 1));
 
     return (
         <div className='mx-auto max-w-6xl space-y-3 p-3'>
@@ -255,9 +261,11 @@ const ChampionsChallenge = () => {
                             </div>
                         )}
 
-                        {/* ARCHON (N21): the randomizer - fill a slot with a
-                            random eligible deck; it swaps itself for a fresh
-                            one after the configured number of games. */}
+                        {/* ARCHON (N21): the randomizer - fill one or more
+                            slots with random eligible decks; each swaps
+                            itself for a fresh one after the configured
+                            number of games. Asking for more decks than there
+                            are free slots fills what fits. */}
                         <div className='mb-2 flex flex-wrap items-center gap-2'>
                             <button
                                 className={[
@@ -269,16 +277,40 @@ const ChampionsChallenge = () => {
                                 onClick={() =>
                                     change(
                                         enrollRandom,
-                                        randomGames,
+                                        { games: randomGames, count: randomToAdd },
                                         t('No random deck could be enrolled.')
                                     )
                                 }
                                 type='button'
                             >
-                                🎲 {t('Add a random deck')}
+                                🎲{' '}
+                                {randomToAdd === 1
+                                    ? t('Add a random deck')
+                                    : t('Add {{count}} random decks', { count: randomToAdd })}
                             </button>
                             <label className='flex items-center gap-1.5 text-[11px] text-muted'>
-                                {t('swap it out after')}
+                                {t('how many')}
+                                <input
+                                    className='w-14 rounded border border-border/70 bg-surface-secondary/60 px-1.5 py-0.5 text-xs text-foreground'
+                                    max={freeSlots || 1}
+                                    min={1}
+                                    type='number'
+                                    value={randomCount}
+                                    onChange={(event) =>
+                                        setRandomCount(
+                                            Math.max(
+                                                1,
+                                                Math.min(
+                                                    Math.max(1, freeSlots),
+                                                    parseInt(event.target.value, 10) || 1
+                                                )
+                                            )
+                                        )
+                                    }
+                                />
+                            </label>
+                            <label className='flex items-center gap-1.5 text-[11px] text-muted'>
+                                {t('swap each out after')}
                                 <input
                                     className='w-14 rounded border border-border/70 bg-surface-secondary/60 px-1.5 py-0.5 text-xs text-foreground'
                                     max={500}
@@ -299,6 +331,11 @@ const ChampionsChallenge = () => {
                                 />
                                 {t('games')}
                             </label>
+                            {freeSlots > 0 && (
+                                <span className='text-[11px] text-muted'>
+                                    {t('({{count}} free)', { count: freeSlots })}
+                                </span>
+                            )}
                         </div>
 
                         {candidates.length ? (

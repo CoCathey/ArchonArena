@@ -372,10 +372,10 @@ export const api = createApi({
         // ARCHON (N21): the randomizer - a slot filled with a random eligible
         // deck that swaps itself for a fresh one after `games` games.
         enrollRandomChampionsChallengeDeck: builder.mutation({
-            query: (games) => ({
+            query: ({ games, count = 1 }) => ({
                 url: '/champions-challenge/decks/random',
                 method: 'POST',
-                body: { games }
+                body: { games, count }
             }),
             invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),

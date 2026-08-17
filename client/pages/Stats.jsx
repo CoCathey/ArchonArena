@@ -5,6 +5,7 @@ import { Button as HeroButton, Input } from '@heroui/react';
 
 import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
+import Ratings from './Ratings';
 import { useGetDeckStatsQuery, useGetMetaStatsQuery, useGetPlayerStatsQuery } from '../redux/api';
 
 const pct = (value) => (value == null ? '—' : `${value.toFixed(1)}%`);
@@ -629,38 +630,59 @@ DeckStats.displayName = 'DeckStats';
  * ARCHON: statistics & analytics. A public meta dashboard (house / SAS win
  * rates, format popularity, headline totals) plus per-player breakdowns,
  * replacing the old Stats placeholder.
+ *
+ * Your own numbers come first. A player opening Stats is nearly always asking
+ * "how am I doing?", and that used to be a separate page reached through a
+ * flyout - so the section is one page now, and it opens on you. The meta and
+ * the per-deck breakdowns are a click away on the same page rather than
+ * somewhere else in the tree.
+ *
+ * Signed out there is no "me" to show, so the tab is not offered and the meta
+ * leads instead.
  */
 const Stats = () => {
     const { t } = useTranslation();
-    const [tab, setTab] = useState('meta');
+    const user = useSelector((state) => state.account.user);
+
+    // Signed in, both /stats and /stats/me open here - which is what makes the
+    // old bookmark still land on what it named.
+    const [tab, setTab] = useState(user ? 'me' : 'meta');
+
+    const tabs = [
+        user && { key: 'me', label: t('My Stats') },
+        { key: 'meta', label: t('The Meta') },
+        { key: 'player', label: t('Player Stats') },
+        { key: 'decks', label: t('Your Decks') }
+    ].filter(Boolean);
+
+    // A signed-out visitor can never select 'me', but a player who signs out
+    // while sitting on it can end up holding it.
+    const active = tab === 'me' && !user ? 'meta' : tab;
 
     return (
         <div className='mx-auto w-full max-w-4xl space-y-4'>
-            <div className='flex gap-2'>
-                <HeroButton
-                    size='sm'
-                    variant={tab === 'meta' ? 'primary' : 'tertiary'}
-                    onPress={() => setTab('meta')}
-                >
-                    {t('The Meta')}
-                </HeroButton>
-                <HeroButton
-                    size='sm'
-                    variant={tab === 'player' ? 'primary' : 'tertiary'}
-                    onPress={() => setTab('player')}
-                >
-                    {t('Player Stats')}
-                </HeroButton>
-                <HeroButton
-                    size='sm'
-                    variant={tab === 'decks' ? 'primary' : 'tertiary'}
-                    onPress={() => setTab('decks')}
-                >
-                    {t('Your Decks')}
-                </HeroButton>
+            <div className='flex flex-wrap gap-2'>
+                {tabs.map((entry) => (
+                    <HeroButton
+                        key={entry.key}
+                        size='sm'
+                        variant={active === entry.key ? 'primary' : 'tertiary'}
+                        onPress={() => setTab(entry.key)}
+                    >
+                        {entry.label}
+                    </HeroButton>
+                ))}
             </div>
 
-            {tab === 'meta' ? <MetaStats /> : tab === 'decks' ? <DeckStats /> : <PlayerStats />}
+            {active === 'me' ? (
+                <Ratings embedded />
+            ) : active === 'meta' ? (
+                <MetaStats />
+            ) : active === 'decks' ? (
+                <DeckStats />
+            ) : (
+                <PlayerStats />
+            )}
         </div>
     );
 };

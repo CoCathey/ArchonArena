@@ -16,8 +16,12 @@ const selectClass =
     'rounded-md border border-border/65 bg-surface-secondary/55 px-3 py-2 text-sm text-foreground focus:border-border/90 focus:outline-none dark:border-border/80 dark:bg-surface-secondary/85';
 
 /**
- * ARCHON: member directory (Phase 9), chess.com-style: stat tiles +
- * searchable member list. Online count comes from lobby presence.
+ * ARCHON: the player directory (Phase 9), chess.com-style: stat tiles +
+ * searchable player list. Online count comes from lobby presence.
+ *
+ * Called "Players" throughout: on this site "member" means someone on a paid
+ * tier, and this page lists everyone who plays. The route keeps its old name
+ * so existing links still resolve.
  */
 const Members = () => {
     const { t } = useTranslation();
@@ -43,7 +47,7 @@ const Members = () => {
     const tiles = [
         { value: (onlineUsers || []).length, label: t('Online') },
         { value: stats?.joined24h ?? '-', label: t('Joined in the past 24 hours') },
-        { value: stats?.total ?? '-', label: t('Members') }
+        { value: stats?.total ?? '-', label: t('Players') }
     ];
 
     return (
@@ -64,7 +68,7 @@ const Members = () => {
                 ))}
             </div>
 
-            <Panel title={t('Search Members')}>
+            <Panel title={t('Search Players')}>
                 <form
                     className='mb-3 flex flex-wrap gap-2'
                     onSubmit={(event) => {
@@ -143,7 +147,7 @@ const Members = () => {
                 </div>
                 {members.length === 0 && !isFetching && (
                     <div className='py-6 text-center text-sm text-muted'>
-                        {t('No members match your search')}
+                        {t('No players match your search')}
                     </div>
                 )}
                 <div className='mt-3 flex items-center justify-between'>
