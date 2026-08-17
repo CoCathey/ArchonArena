@@ -46,8 +46,15 @@ const keyMarginLabel = (keyDiff) => {
 // before concluding none is coming. Generous on purpose: the cost of waiting is
 // a moment of "Rating this game...", and the cost of giving up early is telling
 // a player their game did not count when it did.
+//
+// ARCHON (N35): forty-five seconds, not fifteen. Rating runs after the finished
+// game is persisted and alongside the replay write, on a lobby that may also be
+// running Challenge sweeps, so a busy server takes longer than the old window
+// allowed - and what the player saw when it ran out was a flat "this game was
+// not rated", about a game that was being rated as they read it. The polls are
+// one small indexed read each; the honesty is worth more than they cost.
 const RATING_POLL_MS = 1500;
-const RATING_POLL_ATTEMPTS = 10;
+const RATING_POLL_ATTEMPTS = 30;
 
 const GameResultPanel = ({ gameId, username, winner }) => {
     const { t } = useTranslation();
@@ -91,6 +98,22 @@ const GameResultPanel = ({ gameId, username, winner }) => {
     const you = (data.players || []).find(
         (player) => player.username?.toLowerCase() === username?.toLowerCase()
     );
+
+    // ARCHON (N35): running out of patience is not a verdict.
+    //
+    // The server distinguishes "this game will never be rated, here is why"
+    // from "the rating has not landed yet", and only the first is something to
+    // report. When the poll budget runs out with the answer still pending, the
+    // game is in all likelihood being rated right now - saying it was not is
+    // both wrong and the single most alarming thing this panel could say, since
+    // a player reads it as their win not counting.
+    if (!data.rated && data.pending) {
+        return (
+            <div className='rounded-md border border-border/60 bg-surface-secondary/60 px-3 py-2 text-center text-xs text-muted'>
+                {t('Still rating this game — it will appear in your Amber history shortly.')}
+            </div>
+        );
+    }
 
     // An unrated game is a normal outcome, not an error — say so plainly
     // instead of leaving a blank space where the result would be, and say WHY

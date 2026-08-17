@@ -2310,6 +2310,31 @@ confidence interval should not read it.
 -   [x] A deck with an enormous record moves at the configured K, to within a rounding step.
 -   [x] A deck whose rating cannot be placed says so, rather than claiming the middle.
 
+#### N35 — "Rating this game…" _(done)_
+
+**Why:** a player reported the post-game panel sitting on "Rating this game…" and not knowing
+whether anything was happening. The rating path is sound — the reporting around it was not.
+
+**Tasks**
+
+-   [x] **Running out of patience is not a verdict.** The panel polled for fifteen seconds and
+        then said "This game was not rated" — about a game that was in all likelihood being rated
+        as the player read it. The server already distinguishes "never will be, here is why" from
+        "not yet"; the panel now keeps that distinction to the end and says it is still rating.
+-   [x] **Forty-five seconds, not fifteen.** Rating runs after the finished game is persisted and
+        alongside the replay write, on a lobby that may also be running Challenge sweeps. Each
+        poll is one indexed read.
+-   [x] **Slowness is in the log.** A rating that takes over a second is warned about with its
+        duration, and a failure now records how long it took before it failed. The three causes of
+        a spinner — threw, declined, slow — were distinguishable in the logs for the first two
+        only, which is why "is it doing it at all" had no answer.
+
+**Acceptance criteria**
+
+-   [x] A game still pending when the poll budget runs out is never described as unrated.
+-   [x] A practice game says so immediately rather than making anyone wait.
+-   [x] A slow rating names itself, with its duration, in the logs.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
