@@ -6,6 +6,10 @@ import Panel from '../Components/Site/Panel';
 import SeasonOperations from '../Components/Admin/SeasonOperations';
 // ARCHON (N4): rebuild the ladder after changing the Elo config
 import RatingRecalculation from '../Components/Admin/RatingRecalculation';
+// ARCHON (N37): comping a tier to an account. The mechanism has existed since
+// N12 - granted columns, resolver, endpoint, even the RTK mutation - with no
+// button anywhere to reach it.
+import MembershipGrants from '../Components/Admin/MembershipGrants';
 import {
     useGetAdminSettingsQuery,
     useResetAdminSettingsMutation,
@@ -394,6 +398,7 @@ const SettingsAdmin = () => {
                     </div>
                 </Panel>
             ))}
+            <MembershipGrants />
             <SeasonOperations />
             <RatingRecalculation />
         </div>
