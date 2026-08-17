@@ -3,10 +3,16 @@ const {
     cloneCard
 } = require('../../../../server/services/championschallenge/packCards');
 const {
+    SimulatedGame,
     runSimulatedGame,
+    replayTo,
     PLAYER_ONE,
     PLAYER_TWO
 } = require('../../../../server/services/championschallenge/SimulatedGame');
+const {
+    emptyModel,
+    trainModel
+} = require('../../../../server/services/championschallenge/labPolicy');
 
 // The one property the whole Champion’s Challenge stands on: a simulated game,
 // played by the computer through the real engine, always reaches a legitimate
@@ -97,4 +103,82 @@ describe('SimulatedGame', function () {
         expect(result.completed).toBe(false);
         expect(result.reason).toBe('interaction-cap');
     }, 30000);
+
+    // ARCHON (N21): the properties the deep planner stands on. Determinism
+    // is not a nicety here - a fork that reconstructs a subtly different
+    // game would "learn" from moves that were never made.
+    describe('seeded determinism and forking', function () {
+        it('plays the identical game twice from one seed', async function () {
+            const first = await runSimulatedGame(alphaDeck, omegaDeck, {
+                seed: 20260817,
+                fingerprints: true
+            });
+            const second = await runSimulatedGame(alphaDeck, omegaDeck, {
+                seed: 20260817,
+                fingerprints: true
+            });
+
+            expect(first.completed).toBe(true);
+            expect(second.winner).toBe(first.winner);
+            expect(second.inputLog.length).toBe(first.inputLog.length);
+            expect(second.fingerprints).toEqual(first.fingerprints);
+        }, 30000);
+
+        it('forks mid-game to the exact recorded state, then diverges honestly', async function () {
+            const original = await runSimulatedGame(alphaDeck, omegaDeck, {
+                seed: 424242,
+                fingerprints: true
+            });
+
+            expect(original.completed).toBe(true);
+
+            const mid = Math.floor(original.inputLog.length / 2);
+            const { sim } = await replayTo(alphaDeck, omegaDeck, {
+                seed: 424242,
+                inputLog: original.inputLog,
+                upTo: mid,
+                rolloutSeed: 777
+            });
+
+            // The fork IS the original game at that moment...
+            expect(SimulatedGame.fingerprint(sim.game)).toBe(original.fingerprints[mid - 1]);
+
+            // ...and lives its own life from there.
+            const continuation = await sim.run();
+
+            expect(continuation.completed).toBe(true);
+            expect(continuation.winReason).toBe('keys');
+        }, 60000);
+
+        it('plays a learned policy to a legitimate finish', async function () {
+            const trained = trainModel(emptyModel(), [
+                {
+                    winnerSide: PLAYER_ONE,
+                    decisions: [
+                        {
+                            state: { bias: 1 },
+                            action: { 'act:reap': 1 },
+                            cardId: null,
+                            side: PLAYER_ONE
+                        }
+                    ]
+                }
+            ]);
+
+            const result = await runSimulatedGame(alphaDeck, omegaDeck, {
+                seed: 99,
+                policy: trained,
+                temperature: 0.7,
+                recordDecisions: true
+            });
+
+            expect(result.completed).toBe(true);
+            expect(result.winnerKeys).toBe(3);
+            // The diary: every logged decision carries features, a side and
+            // the chosen action - the shape training reads.
+            expect(result.decisions.length).toBeGreaterThan(10);
+            expect(result.decisions[0].state.bias).toBe(1);
+            expect(result.decisions[0].side).toBeDefined();
+        }, 30000);
+    });
 });

@@ -101,3 +101,43 @@ sweep (~0.7s once per process), not at lobby boot.
     the current meta's archetypes".
 -   Policy upgrades (fight/trade heuristics, key-timing) — each one sharpens
     every number the lab already reports.
+
+## The learning bot (N21)
+
+The sparring partner studies its own games now. The pieces, and the property
+each one protects:
+
+**The diary and the model.** Every sparring game logs its chosen decisions
+as features — the amber race, the key race, board presence, the action
+taken, the card involved — and the finished game labels them. A
+dependency-free logistic model with one learned weight per card id trains
+in-process (`labPolicy.js`); its spec plants a signal and proves training
+finds it. The champion model steers every game at softmax temperature, so
+the bot mostly does what looks best while still sampling the alternatives
+it needs to learn from.
+
+**The title fight.** Candidates train from the diary and must beat the
+sitting champion head-to-head (per-seat policies, neutral decks, seats
+flipped by coin) until the 95% Wilson lower bound of their record clears
+50%. Promotion is a status flip on a `BotPolicies` row; retirement keeps
+the record. The bot provably improves and can never quietly regress.
+
+**Determinism, then forks.** Seeded games draw engine randomness through an
+AsyncLocalStorage-scoped source (`secureRandom.withRandomSource`) — real
+games never enter the scope — with the bot's own dice on a separate stream
+and every input logged by list-position. `replayTo` rebuilds the exact game
+at any point (fingerprint-verified), and any mismatch aborts the fork
+loudly. This is what lets the deep bot take card abilities literally: a
+fork EXECUTES the candidate card's real ability code.
+
+**The deep bot.** At house calls and key-race turns it forks the game per
+candidate move, plays sampled futures forward with the fast policy, scores
+horizons with the value model, keeps the best road, and annotates the
+decision with win odds and alternatives; the biggest swing is flagged as
+the turning point. Budgets everywhere (admin-config) — a deep game is
+seconds-to-minutes, which is why the fast bot keeps the volume and the deep
+bot plays the showcases the page renders.
+
+**The randomizer.** 🎲 slots draw a random eligible deck and rotate it out
+after a member-chosen number of games — the collection-wide gem hunt.
+Admin-owned decks skip the daily cap so the operator can flood their own lab.

@@ -11,6 +11,7 @@ import { CAPABILITIES, hasCapability } from '../membership';
 import {
     useGetChampionsChallengeQuery,
     useEnrollChampionsChallengeDeckMutation,
+    useEnrollRandomChampionsChallengeDeckMutation,
     useWithdrawChampionsChallengeDeckMutation
 } from '../redux/api';
 import { serverMessage } from '../redux/apiError';
@@ -115,14 +116,18 @@ const ChampionsChallenge = () => {
     const user = useSelector((state) => state.account.user);
     const unlocked = hasCapability(user, CAPABILITIES.CHAMPIONS_CHALLENGE);
     const [actionError, setActionError] = useState(null);
+    // ARCHON (N21): the randomizer's swap cadence, user-configurable.
+    const [randomGames, setRandomGames] = useState(20);
 
     const { data, isFetching } = useGetChampionsChallengeQuery(undefined, {
         skip: !user || !unlocked
     });
     const [enroll, { isLoading: enrolling }] = useEnrollChampionsChallengeDeckMutation();
+    const [enrollRandom, { isLoading: randomizing }] =
+        useEnrollRandomChampionsChallengeDeckMutation();
     const [withdraw, { isLoading: withdrawing }] = useWithdrawChampionsChallengeDeckMutation();
 
-    const busy = enrolling || withdrawing;
+    const busy = enrolling || withdrawing || randomizing;
 
     const change = async (mutation, deckId, fallback) => {
         setActionError(null);
@@ -223,15 +228,78 @@ const ChampionsChallenge = () => {
                                                 t('That deck could not be withdrawn.')
                                             )
                                         }
-                                        title={t('Withdraw from the Champion’s Challenge')}
+                                        title={
+                                            deck.random
+                                                ? t(
+                                                      'Randomizer slot — swaps for a fresh random deck after {{target}} games. Click to withdraw.',
+                                                      { target: deck.randomGamesTarget }
+                                                  )
+                                                : t('Withdraw from the Champion’s Challenge')
+                                        }
                                         type='button'
                                     >
+                                        {deck.random && <span aria-hidden='true'>🎲</span>}
                                         {deck.name}
+                                        {deck.random && deck.randomGamesTarget && (
+                                            <span className='text-[10px] text-amber-300/80'>
+                                                {Math.min(
+                                                    deck.gamesSinceEnrolled,
+                                                    deck.randomGamesTarget
+                                                )}
+                                                /{deck.randomGamesTarget}
+                                            </span>
+                                        )}
                                         <span aria-hidden='true'>×</span>
                                     </button>
                                 ))}
                             </div>
                         )}
+
+                        {/* ARCHON (N21): the randomizer - fill a slot with a
+                            random eligible deck; it swaps itself for a fresh
+                            one after the configured number of games. */}
+                        <div className='mb-2 flex flex-wrap items-center gap-2'>
+                            <button
+                                className={[
+                                    'rounded-full border border-dashed px-2.5 py-1 text-xs transition',
+                                    'border-border/70 bg-surface-secondary/60 text-foreground hover:border-border',
+                                    atCapacity || busy ? 'cursor-not-allowed opacity-40' : ''
+                                ].join(' ')}
+                                disabled={atCapacity || busy}
+                                onClick={() =>
+                                    change(
+                                        enrollRandom,
+                                        randomGames,
+                                        t('No random deck could be enrolled.')
+                                    )
+                                }
+                                type='button'
+                            >
+                                🎲 {t('Add a random deck')}
+                            </button>
+                            <label className='flex items-center gap-1.5 text-[11px] text-muted'>
+                                {t('swap it out after')}
+                                <input
+                                    className='w-14 rounded border border-border/70 bg-surface-secondary/60 px-1.5 py-0.5 text-xs text-foreground'
+                                    max={500}
+                                    min={1}
+                                    type='number'
+                                    value={randomGames}
+                                    onChange={(event) =>
+                                        setRandomGames(
+                                            Math.max(
+                                                1,
+                                                Math.min(
+                                                    500,
+                                                    parseInt(event.target.value, 10) || 20
+                                                )
+                                            )
+                                        )
+                                    }
+                                />
+                                {t('games')}
+                            </label>
+                        </div>
 
                         {candidates.length ? (
                             <>
@@ -291,14 +359,36 @@ const ChampionsChallenge = () => {
 
                         {data && decks.length > 0 && (
                             <p className='m-0 pt-2 text-[11px] text-muted'>
-                                {t(
-                                    'Each enrolled deck plays up to {{perDay}} games a day against the ' +
-                                        'rest of your roster. {{total}} games played so far, {{today}} today.',
-                                    {
-                                        perDay: data.gamesPerDeckPerDay,
-                                        total: data.totals?.games ?? 0,
-                                        today: data.totals?.today ?? 0
-                                    }
+                                {data.unlimited
+                                    ? t(
+                                          'Your decks are exempt from the daily cap (site admin). ' +
+                                              '{{total}} games played so far, {{today}} today.',
+                                          {
+                                              total: data.totals?.games ?? 0,
+                                              today: data.totals?.today ?? 0
+                                          }
+                                      )
+                                    : t(
+                                          'Each enrolled deck plays up to {{perDay}} games a day against the ' +
+                                              'rest of your roster. {{total}} games played so far, {{today}} today.',
+                                          {
+                                              perDay: data.gamesPerDeckPerDay,
+                                              total: data.totals?.games ?? 0,
+                                              today: data.totals?.today ?? 0
+                                          }
+                                      )}
+                                {data.bot && data.bot.championVersion > 0 && (
+                                    <>
+                                        {' '}
+                                        {t(
+                                            'Sparring partner: learned model v{{version}}, trained on ' +
+                                                '{{games}} of its own games.',
+                                            {
+                                                version: data.bot.championVersion,
+                                                games: data.bot.championTrainedGames
+                                            }
+                                        )}
+                                    </>
                                 )}
                             </p>
                         )}
@@ -436,6 +526,77 @@ const ChampionsChallenge = () => {
                             </p>
                         )}
                     </Panel>
+
+                    {(data?.showcase?.length ?? 0) > 0 && (
+                        <Panel
+                            type='default'
+                            compactHeader
+                            title={t('Showcase games — the deep bot, thinking out loud')}
+                        >
+                            <div className='space-y-3'>
+                                {data.showcase.map((game, gameIndex) => (
+                                    <div
+                                        className='rounded-md border border-border/70 bg-surface-secondary/40 p-2.5'
+                                        key={gameIndex}
+                                    >
+                                        <div className='mb-1.5 text-sm font-medium text-foreground'>
+                                            {t(
+                                                '{{winner}} beat {{loser}} {{wk}}–{{lk}} in {{turns}} turns',
+                                                {
+                                                    winner: game.winner,
+                                                    loser: game.loser,
+                                                    wk: game.winnerKeys,
+                                                    lk: game.loserKeys,
+                                                    turns: game.turns
+                                                }
+                                            )}
+                                        </div>
+                                        <ul className='m-0 list-none space-y-1 p-0'>
+                                            {(game.annotations || []).map(
+                                                (annotation, annotationIndex) => (
+                                                    <li
+                                                        className='text-xs text-muted'
+                                                        key={annotationIndex}
+                                                    >
+                                                        <span className='text-foreground'>
+                                                            {t('Turn {{turn}}:', {
+                                                                turn: annotation.turn
+                                                            })}
+                                                        </span>{' '}
+                                                        {annotation.chosen}
+                                                        {annotation.winProb !== null &&
+                                                            annotation.winProb !== undefined && (
+                                                                <span>
+                                                                    {' '}
+                                                                    (
+                                                                    {Math.round(
+                                                                        annotation.winProb * 100
+                                                                    )}
+                                                                    % {t('to win')})
+                                                                </span>
+                                                            )}
+                                                        {annotation.turningPoint && (
+                                                            <span className='ml-1.5 inline-flex items-center rounded-full border border-violet-500/40 bg-violet-500/15 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-violet-300'>
+                                                                {t('the game turned here')}
+                                                            </span>
+                                                        )}
+                                                    </li>
+                                                )
+                                            )}
+                                        </ul>
+                                    </div>
+                                ))}
+                            </div>
+                            <p className='m-0 pt-2 text-[11px] text-muted'>
+                                {t(
+                                    'A few games a day are played by the deep bot: at the decisions ' +
+                                        'that matter it forks the live game, plays each option out with ' +
+                                        'the cards’ real abilities, and keeps the road with the best ' +
+                                        'odds — then shows its working here.'
+                                )}
+                            </p>
+                        </Panel>
+                    )}
 
                     {decks.some((deck) => deck.games > 0) && (
                         <Panel type='default' compactHeader title={t('What wins games')}>

@@ -1472,6 +1472,64 @@ deserves to be legible as one.
 -   [x] A trial account's public badge shows the New pill and no tier key; a paying new
         player shows both their paid tier and the pill — pinned in `publicBadge.spec.js`.
 
+#### N21 — The learning bot: a sparring partner that studies its own games _(done)_
+
+**Why:** every number the Champion's Challenge reports is only as good as the player producing
+it. A bot that learns makes every ARI, every hidden gem and every finding sharper — and the
+machinery it needs (self-play at volume, deterministic replay, a value model) is exactly what
+F9's practice opponent and F3's game analysis have been waiting for. Perfect play is not on
+any menu (hidden information sees to that); _provably improving_ play is, and proof is the
+design's spine.
+
+**Tasks**
+
+-   [x] **The learning loop.** Sparring games log every chosen decision as features
+        (`labFeatures.js` — only what a seated player could see); finished games label them;
+        a dependency-free logistic model with per-card learned weights (`labPolicy.js`, spec
+        proves it finds a planted signal) trains in-process; and the champion model steers
+        every sparring game, exploring at softmax temperature so the diary stays honest.
+-   [x] **Champion gating.** A candidate trains every `trainEveryGames` logged games and
+        must TAKE the title: head-to-head against the champion (per-seat policies), on
+        neutral decks that touch nobody's stats, promoted only when the 95% Wilson lower
+        bound of its record clears 50% — retired, record kept, if it cannot prove itself in
+        the window. The bot can get provably stronger and can never quietly get worse.
+-   [x] **Card abilities taken literally: deterministic replay and forking.** Simulated
+        games run seeded — engine randomness scoped through an AsyncLocalStorage source
+        (`secureRandom.withRandomSource`; real games never enter the scope), bot dice on a
+        separate stream, every input logged by list-position. `replayTo` reconstructs the
+        exact game at any point (fingerprint-verified in specs), and a mismatch aborts the
+        fork loudly rather than play a subtly different game.
+-   [x] **The deep bot** (`DeepGame.js`): at the decisions that matter (house calls, key
+        turns) it forks the live game, plays each candidate move out — the card's REAL
+        ability code resolving — across sampled futures, scores the horizon with the value
+        model, and keeps the best road. Every analyzed decision leaves an annotation with
+        win odds and alternatives; the largest swing is flagged as where the game turned.
+-   [x] **Two bots, one product**: the fast bot keeps the volume (ARI, win rates, gems);
+        the deep bot plays `deepGamesPerDay` showcase games rendered on the page with its
+        working shown. **(admin-config)** for all of it — the learning switch, training
+        cadence and diary depth, arena thresholds, and every deep-thinking budget.
+-   [x] **The randomizer**: 🎲 slots fill with a random eligible deck and swap themselves
+        for a fresh one after a member-configured number of games — collection-wide gem
+        hunting with no manual enrollment. Site admins' decks are exempt from the daily
+        game cap, so the operator can flood the lab they are tuning.
+-   Later: the deep bot as F9's practice opponent; the value model over real replays as
+    F3's win-probability graph and blunder detection; richer features and search budgets as
+    the diary deepens.
+
+**Depends on:** N18/N19. **Feeds F9 and F3.**
+**Acceptance criteria**
+
+-   [x] Two runs from one seed play the identical game, and a mid-game fork reconstructs
+        the exact recorded state before diverging — asserted on real games.
+-   [x] Training provably learns: a planted signal (winning moves, a strong card) is found
+        from outcomes alone, and the model never trains in place.
+-   [x] Promotion demands proof: 52% over 200 games does not take the title; a Wilson-clear
+        record does; an unproven candidate retires.
+-   [x] Deep games finish legitimately, annotate their decisions, and flag exactly one
+        turning point — asserted on a real planned game.
+-   [x] Arena games appear in no member-facing table; sparring and showcase games keep
+        every existing exclusion (no `Games`, no Elo, no leaderboards).
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
