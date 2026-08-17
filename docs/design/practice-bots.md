@@ -43,6 +43,22 @@ decks it may play.
    next player (up to an admin-configured number of concurrent games).
 5. Practice games are never persisted or rated - no Amber, no deck records,
    no statistics, no replays.
+6. **Pick who you are practising against (N31).** The pending screen offers the
+   Champion's Challenge's three sparring styles - the Racer, the Bruiser, the
+   Schemer - plus "its own game", the champion unstyled. It is the same brain
+   wearing a different plan (`labPersonas`), so the Racer a member meets here is
+   the Racer their decks are measured against in the lab.
+
+    The choice lives on the pending screen because that is the only place it can:
+    a bot table starts the instant its joiner picks a deck, so a picker anywhere
+    later would arrive after the game had begun. Each table also OPENS in a style,
+    rotated between tables, so a player who keeps coming back meets all three
+    without touching the picker at all.
+
+    With no learned champion there are no styles on offer. A style is a bias on
+    the champion's own weights, so before the lab has crowned one it would change
+    nothing - and a picker that visibly does nothing is worse than an absent one,
+    because a player cannot tell which they are looking at.
 
 ## Shape
 

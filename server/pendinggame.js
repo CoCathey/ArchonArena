@@ -428,6 +428,14 @@ class PendingGame {
             // ARCHON (F9): lets the game list say this table is the Helper
             // Bot's practice table rather than an ordinary player's game.
             botGame: this.botGame || undefined,
+            // ARCHON (N31): which sparring style the bot is playing, and the
+            // styles a joiner may choose from. Carried on the table rather than
+            // fetched separately because the pending screen is the only place
+            // the choice can be made - the game starts the instant a deck is
+            // picked - and a picker that arrives after the game does is no
+            // picker at all.
+            botStyle: this.botStyle || undefined,
+            botStyles: this.botGame ? this.botStyles : undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,

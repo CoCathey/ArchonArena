@@ -2138,6 +2138,37 @@ answered every strategy with "no opponents" while looking perfectly healthy.
 -   [x] Destroying your own creature is not counted as removal, and the opponent drawing is not
         counted as your efficiency.
 
+#### N31 — Play the sparring partner yourself _(done)_
+
+**Why:** the three sparring styles (N28) existed only in the background, measuring decks nobody
+could meet. They were built as a bias on one learned brain precisely so they could be shared, and
+the practice bots already play the champion — so the Racer that measured your deck can be the
+Racer you sit down against.
+
+**Tasks**
+
+-   [x] **A style on every practice table**, rotated between tables so a player who keeps coming
+        back meets all three, and named on the pending screen rather than hidden.
+-   [x] **The joiner picks** (`selectbotstyle`): the pending screen is the only place the choice
+        can be made — a bot table starts the instant its joiner picks a deck — so the picker sits
+        beside the deck button and re-resolves the bot's brain in place. Only the human seated at
+        the table may set it, and only before it starts.
+-   [x] **"Its own game" is always an option**: the champion unstyled is a perfectly good
+        opponent and the one every table offered before this existed.
+-   [x] **No champion, no picker.** A style is a bias ON the champion's weights, so before the lab
+        has crowned one a style would change nothing at all — and a picker that visibly does
+        nothing is worse than one that is absent, because a player cannot tell which they are
+        looking at. `bots.styledOpponents` and `bots.styleStrength` are the operator's dials.
+-   Later: show the style on the game board while playing, and record it with the practice game
+    so "I keep losing to the Bruiser" is a fact a player can check.
+
+**Depends on:** N28 (the styles), F9 (the practice bots). **Acceptance criteria**
+
+-   [x] A table opens in a style and the brain that reaches the game node is wearing it.
+-   [x] A player at the table can change it; a player who is not cannot, and neither can anyone
+        once the game is under way.
+-   [x] With no learned champion, no styles are offered at all.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

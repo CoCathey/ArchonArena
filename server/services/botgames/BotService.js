@@ -5,6 +5,14 @@ const { BOT_ROSTER, botEmail, houseLabel, isBotHouse } = require('./roster');
 // separately - and a site that has never trained one simply gets the
 // heuristics, which is what null means here.
 const BotPolicyService = require('../championschallenge/BotPolicyService');
+// ARCHON (N31): the lab's three sparring pilots, offered as opponents. One
+// learned brain wearing a plan - not a fourth bot maintained separately.
+const {
+    PERSONAS,
+    personaByKey,
+    personaFor,
+    personaModel
+} = require('../championschallenge/labPersonas');
 
 /**
  * ARCHON (F9): the practice bots - who they are, and which decks they play.
@@ -64,6 +72,9 @@ class BotService {
         // Champion lookups are cached inside the policy service, so asking
         // per table costs nothing worth avoiding.
         this.policyService = new BotPolicyService(undefined, this.db, this.settingsService);
+        // ARCHON (N31): which style the next table opens with. Rotated rather
+        // than random so a player who keeps coming back meets all three.
+        this.styleCursor = 0;
     }
 
     /** Admin-configurable knobs, defaults from the settings registry. */
@@ -215,19 +226,76 @@ class BotService {
      * has crowned a champion, and what an admin gets when they switch the
      * learned play off. A failure to read it is also null - a bot that plays
      * a little worse beats a table that does not open.
+     *
+     * ARCHON (N31): with a style, the champion plays it. The three styles are
+     * the lab's own sparring pilots (labPersonas), so the opponent in the lobby
+     * can be the same Racer or Bruiser the Challenge measures decks against -
+     * one brain wearing a plan, not a fourth bot maintained separately.
      */
-    async championModel() {
+    async championModel(persona = null) {
         if (this.getConfig().useLearnedPolicy === false) {
             return null;
         }
 
         try {
-            return await this.policyService.champion();
+            const champion = await this.policyService.champion();
+
+            return personaModel(champion, persona, this.styleStrength());
         } catch (err) {
             logger.warn('Could not read the champion bot policy; playing the heuristics', err);
 
             return null;
         }
+    }
+
+    /**
+     * The styles a joiner may pick from - empty when styled opponents are off,
+     * or when there is no learned model for a style to dress.
+     *
+     * A persona is a bias on the champion's weights, so with no champion there
+     * is nothing to bias: the heuristic bot plays as it always has, and offering
+     * a picker that changes nothing would be worse than offering none.
+     */
+    async availableStyles() {
+        if (this.getConfig().styledOpponents === false) {
+            return [];
+        }
+
+        const champion = await this.championModel();
+
+        if (!champion) {
+            return [];
+        }
+
+        return PERSONAS.map((persona) => ({
+            key: persona.key,
+            label: persona.label,
+            description: persona.description
+        }));
+    }
+
+    /** How hard a style pulls the practice bot away from its best play. */
+    styleStrength() {
+        const strength = Number(this.getConfig().styleStrength);
+
+        return Number.isFinite(strength) && strength >= 0 ? strength : 1;
+    }
+
+    /** A style by key, for a joiner's choice; null for "no style, just play". */
+    styleFor(key) {
+        return key ? personaByKey(key) : null;
+    }
+
+    /**
+     * The style the next open table opens with, rotated so a player who keeps
+     * coming back meets all three rather than the same one every time.
+     */
+    nextStyle() {
+        if (this.getConfig().styledOpponents === false) {
+            return null;
+        }
+
+        return personaFor(this.styleCursor++);
     }
 
     /**

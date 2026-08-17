@@ -450,6 +450,52 @@ const PendingGame = () => {
                         </AlertPanel>
                     )}
 
+                    {/* ARCHON (N31): pick who you are practising against.
+                        The three styles are the Champion's Challenge's own
+                        sparring pilots - one learned brain wearing a different
+                        plan - and this is the only screen where the choice can
+                        be made, because picking a deck starts the table. */}
+                    {isBotTable && isSeatedHere && currentGame.botStyles?.length > 0 && (
+                        <div className='mb-2 border-t border-border/60 pt-3'>
+                            <div className='mb-1.5 text-[11px] uppercase tracking-wide text-muted'>
+                                {t('Opponent style')}
+                            </div>
+                            <div className='flex flex-wrap gap-1.5'>
+                                {[
+                                    { key: '', label: t('Its own game'), description: null },
+                                    ...currentGame.botStyles
+                                ].map((style) => {
+                                    const active = (currentGame.botStyle || '') === style.key;
+
+                                    return (
+                                        <button
+                                            key={style.key || 'none'}
+                                            className={[
+                                                'rounded-full border px-2.5 py-1 text-xs transition',
+                                                active
+                                                    ? 'border-accent/60 bg-accent/20 text-amber-200'
+                                                    : 'border-border/70 bg-surface-secondary/60 text-foreground hover:border-border'
+                                            ].join(' ')}
+                                            onClick={() =>
+                                                dispatch(
+                                                    lobbySendMessage(
+                                                        'selectbotstyle',
+                                                        currentGame.id,
+                                                        style.key
+                                                    )
+                                                )
+                                            }
+                                            title={style.description || undefined}
+                                            type='button'
+                                        >
+                                            {style.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
                     <div className='flex flex-wrap items-center gap-2 border-t border-border/60 pt-3'>
                         <Button
                             variant='primary'

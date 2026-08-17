@@ -748,6 +748,26 @@ const REGISTRY = {
                 label: 'Bots play the learned Champion’s Challenge policy',
                 default: true
             },
+            // ARCHON (N31): the lab's three sparring pilots, offered as
+            // opponents. A style is a bias on the champion's own weights, so
+            // this needs the learned policy to be on - with no champion there is
+            // nothing to bias, and the picker is simply not offered.
+            styledOpponents: {
+                type: 'boolean',
+                label: 'Let players pick the practice bot’s style (Racer, Bruiser, Schemer)',
+                default: true
+            },
+            styleStrength: {
+                type: 'number',
+                // The same trade the lab makes: a style pulls the bot away from
+                // the policy trained to win, so it plays a little worse for it.
+                // Its own dial, because a human opponent is a different context
+                // from a sparring measurement.
+                label: 'How strongly a style pulls the practice bot from its best play',
+                min: 0,
+                max: 3,
+                default: 1
+            },
             // A safety valve, not a pacing knob: past this many rounds the
             // bot concedes so the table can never be held forever.
             maxTurns: {

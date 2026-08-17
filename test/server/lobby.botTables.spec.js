@@ -336,6 +336,120 @@ describe('the practice bot table', function () {
      * the Start button belonged to a player with no hands, and any tick that
      * cost us the deck-selection hook stranded the joiner permanently.
      */
+
+    /**
+     * ARCHON (N31): the practice opponent's style.
+     *
+     * The three styles are the Champion's Challenge's own sparring pilots, and
+     * the pending screen is the only place the choice can be made - a bot table
+     * starts the instant its joiner picks a deck, so a picker anywhere later
+     * would arrive after the game had begun.
+     */
+    describe("the opponent's style", function () {
+        const champion = { version: 5, weights: { 'a:act:reap': 0.2 }, cardWeights: {} };
+
+        beforeEach(function () {
+            // A site that has crowned a champion. Without one there is nothing
+            // for a style to bias, which is its own test below.
+            service.policyService.champion = async () => champion;
+        });
+
+        const socketFor = (name) => {
+            const socket = {
+                id: `socket-${name}`,
+                user: humanUser(name),
+                joinChannel: () => {},
+                sent: [],
+                send: (...args) => socket.sent.push(args)
+            };
+
+            lobby.sockets[socket.id] = socket;
+
+            return socket;
+        };
+
+        it('opens the table in a style, and offers the rest', async function () {
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+
+            expect(game.botStyle).toBeTruthy();
+            expect(game.botStyles.map((style) => style.key).length).toBe(3);
+            // The brain that travels to the node is wearing it.
+            expect(game.botPolicy.persona).toBe(game.botStyle);
+        });
+
+        it('is changed by the player sitting at the table', async function () {
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+            const socket = socketFor('Ana');
+
+            game.join(socket.id, socket.user);
+
+            await lobby.onSelectBotStyle(socket, game.id, 'schemer');
+
+            expect(game.botStyle).toBe('schemer');
+            expect(game.botPolicy.persona).toBe('schemer');
+        });
+
+        it('takes an empty choice as the champion playing its own game', async function () {
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+            const socket = socketFor('Ana');
+
+            game.join(socket.id, socket.user);
+
+            await lobby.onSelectBotStyle(socket, game.id, '');
+
+            expect(game.botStyle).toBeUndefined();
+            expect(game.botPolicy && game.botPolicy.persona).toBeUndefined();
+        });
+
+        it("is not somebody else's to set", async function () {
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+            const seated = socketFor('Ana');
+
+            game.join(seated.id, seated.user);
+            await lobby.onSelectBotStyle(seated, game.id, 'racer');
+
+            await lobby.onSelectBotStyle(socketFor('Bob'), game.id, 'schemer');
+
+            expect(game.botStyle).toBe('racer');
+        });
+
+        // The load-bearing refusal: a style is a bias ON the champion's weights,
+        // so with no champion a picker would visibly do nothing at all.
+        it('is not offered at all before the lab has crowned a champion', async function () {
+            service.policyService.champion = async () => null;
+
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+
+            expect(game.botStyles).toEqual([]);
+            expect(game.botPolicy).toBeNull();
+        });
+
+        it('cannot be changed once the game is under way', async function () {
+            await lobby.runBotTableSweep();
+
+            const [game] = botGames();
+            const socket = socketFor('Ana');
+
+            game.join(socket.id, socket.user);
+            await lobby.onSelectBotStyle(socket, game.id, 'racer');
+            game.started = true;
+
+            await lobby.onSelectBotStyle(socket, game.id, 'bruiser');
+
+            expect(game.botStyle).toBe('racer');
+        });
+    });
+
     describe('a ready table always starts', function () {
         const seatHumanWithDeck = async (game, name = 'Ana') => {
             const person = humanUser(name);

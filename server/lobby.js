@@ -893,7 +893,15 @@ class Lobby {
         // rest of the table, and the node has no database to ask. Null is
         // fine and common: it means the heuristics, which is what a site
         // plays until the lab crowns a champion.
-        game.botPolicy = await this.botService.championModel();
+        // ARCHON (N31): the table opens in a style, rotated between tables, and
+        // the joiner may change it on the pending screen. The styles are the
+        // lab's own sparring pilots, so the opponent here is the same Racer or
+        // Bruiser the Champion's Challenge measures decks against.
+        const style = this.botService.nextStyle();
+
+        game.botStyle = style ? style.key : undefined;
+        game.botStyles = await this.botService.availableStyles();
+        game.botPolicy = await this.botService.championModel(style);
         // 'TBA' is the platform's existing "no socket" id: the lobby and the
         // node both already treat such a seat as connectionless, so the game
         // closes itself when the human is gone instead of waiting on the bot.
@@ -1401,6 +1409,7 @@ class Lobby {
         socket.registerEvent('newgame', this.onNewGame.bind(this));
         socket.registerEvent('removegame', this.onRemoveGame.bind(this));
         socket.registerEvent('restartnode', this.onRestartNode.bind(this));
+        socket.registerEvent('selectbotstyle', this.onSelectBotStyle.bind(this));
         socket.registerEvent('selectdeck', this.onSelectDeck.bind(this));
         socket.registerEvent('selectrandomdeck', this.onSelectRandomDeck.bind(this));
         socket.registerEvent('startgame', this.onStartGame.bind(this));
@@ -2256,6 +2265,51 @@ class Lobby {
         }
 
         return true;
+    }
+
+    /**
+     * ARCHON (N31): choose which style the practice bot plays.
+     *
+     * The pending screen is the only place this choice can be made: a bot table
+     * starts the instant its joiner picks a deck, so a picker anywhere later
+     * would arrive after the game. The style is applied by re-resolving the
+     * bot's brain here, which is the same call the table opened with - the
+     * policy travels to the game node with the table, and the node has no
+     * database to ask.
+     *
+     * Only the human seated at the table may set it, and only before it starts.
+     */
+    async onSelectBotStyle(socket, gameId, styleKey) {
+        const game = this.games[gameId];
+
+        if (!game || !game.botGame || game.started) {
+            return;
+        }
+
+        const seated = Object.values(game.getPlayers()).some(
+            (player) => !player.isBot && player.name === socket.user.username
+        );
+
+        if (!seated) {
+            return;
+        }
+
+        // An unknown key is "no style" rather than an error: the champion plays
+        // its own game, which is a perfectly good opponent and the one every
+        // table offered before this existed.
+        const style = this.botService.styleFor(styleKey);
+
+        game.botStyle = style ? style.key : undefined;
+
+        try {
+            game.botPolicy = await this.botService.championModel(style);
+        } catch (err) {
+            logger.error('Could not restyle the practice bot', err);
+
+            return;
+        }
+
+        this.sendGameState(game);
     }
 
     onSelectDeck(socket, gameId, deckId, isStandalone) {
