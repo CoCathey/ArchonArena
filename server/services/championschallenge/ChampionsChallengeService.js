@@ -19,8 +19,10 @@ const {
     MIN_OPENING_GAMES,
     sasExpectedScore,
     isHiddenGem,
-    buildFindings
+    buildFindings,
+    wilsonInterval
 } = require('./labMath');
+const { shrink, SHRINK_PRIOR } = require('./labPolicy');
 
 /** Most candidate decks offered for enrollment at once. */
 const MAX_CANDIDATES = 60;
@@ -1302,6 +1304,15 @@ class ChampionsChallengeService {
             }));
 
         const bot = await this.policyService.vitals().catch(() => null);
+        // ARCHON (N26): the three things the roster's own games were already
+        // producing and nothing showed - which of your decks beats which, what
+        // the bot has learned about the cards in your best deck, and the
+        // champion's line of succession.
+        const champion = await this.policyService.champion().catch(() => null);
+        const matchups = this.matchupMatrix(enrollmentList, games);
+        const strengthCurve = await this.policyService.strengthCurve().catch(() => []);
+        const topDeck = decks.find((deck) => deck.games > 0) || null;
+        const cards = topDeck ? await this.cardContribution(topDeck.deckId, champion) : null;
 
         // ARCHON (N24): the field. Each deck's record against strangers' decks
         // is attached BESIDE its mirror record, never folded into it - 60%
@@ -1344,6 +1355,9 @@ class ChampionsChallengeService {
             findings: buildFindings(decks),
             showcase,
             bot,
+            matchups,
+            strengthCurve,
+            cards: cards ? { ...cards, deckId: topDeck.deckId, deckName: topDeck.name } : null,
             gauntlet: {
                 ...fieldSettings,
                 pool: poolStatus,
@@ -1354,6 +1368,239 @@ class ChampionsChallengeService {
                     description: strategy.description
                 }))
             }
+        };
+    }
+
+    /**
+     * ARCHON (N26): the lab's vital signs, for the operator.
+     *
+     * Everything here already existed - as a counter in a result object, a
+     * warning in a log, a row nobody reads. That is the problem: two features
+     * ship behind operator switches (the Gauntlet's catalog crawl, the worker
+     * node), and an operator deciding whether to turn them on had no way to see
+     * whether the last hour of work went anywhere.
+     *
+     * Read-only, tolerant of every part being absent, and never throws: a health
+     * panel that 500s is worse than no health panel.
+     */
+    async labHealth() {
+        const config = this.getConfig();
+        const ask = async (sql, params = []) => {
+            try {
+                return await this.db.query(sql, params);
+            } catch (err) {
+                logger.error('Challenge health query failed', err);
+
+                return null;
+            }
+        };
+
+        const [lease, sparring, pool, unplayable, diary, deep] = await Promise.all([
+            ask('SELECT "Owner", "HeartbeatAt" FROM "ChallengeSweepLease" WHERE "Id" = 1'),
+            ask(
+                'SELECT COUNT(*)::int AS "Total", ' +
+                    'COUNT(*) FILTER (WHERE "FinishedAt" >= ' +
+                    "date_trunc('day', now() AT TIME ZONE 'utc'))::int AS \"Today\" " +
+                    'FROM "ProvingGroundsGames"'
+            ),
+            ask(
+                'SELECT COUNT(*) FILTER (WHERE "Playable")::int AS "Playable", ' +
+                    'COUNT(*)::int AS "Hydrated", ' +
+                    'MAX("FetchedAt") AS "LastFetch" FROM "GauntletDecks"'
+            ),
+            ask(
+                'SELECT "MissingCards", COUNT(*)::int AS "Decks" FROM "GauntletDecks" ' +
+                    'WHERE "Playable" = false AND "MissingCards" IS NOT NULL ' +
+                    'GROUP BY "MissingCards" ORDER BY "Decks" DESC LIMIT 5'
+            ),
+            ask('SELECT COUNT(*)::int AS "Games" FROM "BotTrainingGames"'),
+            ask(
+                'SELECT COUNT(*)::int AS "Games", ' +
+                    'AVG(jsonb_array_length("Annotations"))::float AS "Annotations" ' +
+                    'FROM "ProvingGroundsGames" WHERE "Deep" = true AND "Annotations" IS NOT NULL'
+            )
+        ]);
+
+        const leaseRow = lease && lease[0];
+        const heartbeat = leaseRow ? new Date(leaseRow.HeartbeatAt) : null;
+        const leaseSeconds = Math.max(30, parseInt(config.sweepLeaseSeconds, 10) || 120);
+
+        return {
+            running: !!config.enabled,
+            // Where the games are supposed to run, and who is actually running
+            // them - the two most useful facts when a lab has gone quiet.
+            sweepOwner: config.sweepOwner || 'lobby',
+            lease: leaseRow
+                ? {
+                      owner: leaseRow.Owner,
+                      heartbeatAt: leaseRow.HeartbeatAt,
+                      // A holder that stopped refreshing is the signal that a
+                      // worker node died, and it is invisible without this.
+                      stale: !heartbeat || Date.now() - heartbeat.getTime() > leaseSeconds * 1000
+                  }
+                : null,
+            sparring: {
+                total: (sparring && sparring[0] && sparring[0].Total) || 0,
+                today: (sparring && sparring[0] && sparring[0].Today) || 0
+            },
+            learning: {
+                enabled: config.learningEnabled !== false,
+                diaryGames: (diary && diary[0] && diary[0].Games) || 0,
+                vitals: await this.policyService.vitals().catch(() => null),
+                curve: await this.policyService.strengthCurve(10).catch(() => [])
+            },
+            deep: {
+                games: (deep && deep[0] && deep[0].Games) || 0,
+                avgAnnotations:
+                    deep && deep[0] && deep[0].Annotations
+                        ? Math.round(deep[0].Annotations * 10) / 10
+                        : null
+            },
+            gauntlet: {
+                enabled: config.gauntletEnabled !== false,
+                playable: (pool && pool[0] && pool[0].Playable) || 0,
+                hydrated: (pool && pool[0] && pool[0].Hydrated) || 0,
+                lastFetchAt: (pool && pool[0] && pool[0].LastFetch) || null,
+                target: config.gauntletTargetPoolSize,
+                // What the pool could NOT play, grouped - an operator seeing one
+                // card id at the top of this list has learned something
+                // actionable about their card data.
+                unplayable: (unplayable || []).map((row) => ({
+                    reason: row.MissingCards,
+                    decks: row.Decks
+                }))
+            }
+        };
+    }
+
+    /**
+     * ARCHON (N26): which of your decks beats which.
+     *
+     * The mirror lab has been playing every pair on the roster against each
+     * other for as long as it has been running, and nothing has ever shown the
+     * result. This is the table those games were always producing: rows are the
+     * deck, columns the opponent, cells the record between exactly those two.
+     *
+     * Pure given the games, and read from the WINNER column only - counting a
+     * game from both sides would double every cell.
+     */
+    matchupMatrix(enrollments, games) {
+        const ids = enrollments.map((enrollment) => enrollment.DeckId);
+        const onRoster = new Set(ids);
+        const cells = {};
+
+        for (const game of games) {
+            if (!onRoster.has(game.WinnerDeckId) || !onRoster.has(game.LoserDeckId)) {
+                continue;
+            }
+
+            const forward = `${game.WinnerDeckId}|${game.LoserDeckId}`;
+            const reverse = `${game.LoserDeckId}|${game.WinnerDeckId}`;
+
+            cells[forward] = cells[forward] || { wins: 0, games: 0 };
+            cells[reverse] = cells[reverse] || { wins: 0, games: 0 };
+            cells[forward].wins++;
+            cells[forward].games++;
+            cells[reverse].games++;
+        }
+
+        return {
+            decks: enrollments.map((enrollment) => ({
+                deckId: enrollment.DeckId,
+                name: enrollment.Name
+            })),
+            cells: Object.fromEntries(
+                Object.entries(cells).map(([key, cell]) => [
+                    key,
+                    {
+                        ...cell,
+                        winRate: cell.games ? cell.wins / cell.games : null,
+                        // Same conservatism as everywhere else: a 2-0 between two
+                        // decks is not a matchup, it is two games.
+                        confident: cell.games >= MIN_OPENING_GAMES
+                    }
+                ])
+            ),
+            minGames: MIN_OPENING_GAMES
+        };
+    }
+
+    /**
+     * ARCHON (N26): what the bot has learned about the cards in YOUR deck.
+     *
+     * The learned policy carries a weight per card id and a count of how often
+     * it has seen each one (N25). Intersected with a deck's card list, that is a
+     * genuinely new thing to tell a member: not what a card is worth in the
+     * abstract, but what having played it has been worth across the games this
+     * site has actually played.
+     *
+     * Two refusals keep it honest. A card the model has seen fewer than
+     * SHRINK_PRIOR times is dropped outright - below that, most of what the
+     * number expresses is the prior rather than the card, and "no view yet" is
+     * the truthful thing to say. And a card it HAS seen plenty of but is neutral
+     * about is dropped too, because a list where most rows say nothing teaches a
+     * reader to ignore the rows that do.
+     *
+     * @returns {Promise<object|null>} strongest and weakest cards, or null
+     */
+    async cardContribution(deckId, model) {
+        if (!model || !model.cardWeights) {
+            return null;
+        }
+
+        let rows;
+
+        try {
+            rows = await this.db.query(
+                'SELECT dc."CardId", dc."Count" FROM "DeckCards" dc WHERE dc."DeckId" = $1',
+                [deckId]
+            );
+        } catch (err) {
+            logger.error('Challenge: could not read deck cards for contribution', err);
+
+            return null;
+        }
+
+        const counts = model.cardCounts || {};
+        const scored = [];
+
+        for (const row of rows || []) {
+            const seen = counts[row.CardId] || 0;
+
+            if (seen < SHRINK_PRIOR) {
+                continue;
+            }
+
+            const weight = shrink(model.cardWeights[row.CardId], seen);
+
+            if (Math.abs(weight) < 0.02) {
+                continue;
+            }
+
+            const card = getCardIndex()[row.CardId];
+
+            scored.push({
+                cardId: row.CardId,
+                name: card ? card.name : row.CardId,
+                copies: row.Count,
+                weight: Math.round(weight * 1000) / 1000,
+                games: seen
+            });
+        }
+
+        if (!scored.length) {
+            return null;
+        }
+
+        scored.sort((a, b) => b.weight - a.weight);
+
+        return {
+            modelVersion: model.version || 0,
+            best: scored.slice(0, 5),
+            worst: scored
+                .slice(-5)
+                .reverse()
+                .filter((entry) => entry.weight < 0)
         };
     }
 
@@ -1460,6 +1707,9 @@ class ChampionsChallengeService {
             wins,
             losses,
             winRate,
+            // ARCHON (N26): the interval, not just the rate. 5-3 and 300-180 both
+            // print "62%"; only one of them means it.
+            interval: wilsonInterval(wins, total),
             expectedWinRate,
             delta: winRate != null && expectedWinRate != null ? winRate - expectedWinRate : null,
             // ARCHON (N19): the deck's ARI - the platform's living rating,

@@ -243,11 +243,22 @@ describe('replay analysis access', function () {
         describeMissingReplay: async () => 'not-recorded'
     };
 
+    const scored = [];
+
     const replayAnalysis = {
         analyse: (replay) => {
             analysed.push(replay);
 
             return { available: true, turns: [] };
+        },
+        // ARCHON (N26): the win-probability curve rides with the analysis. The
+        // stub records the SEAT it was asked for, which is the thing the route
+        // decides: your own game is read from your side, a shared one from the
+        // first player's.
+        winProbability: async (replay, seat) => {
+            scored.push({ replay, seat });
+
+            return { available: true, seat, points: [] };
         },
         // ARCHON (F3): the misplay review. What matters at the route is WHO
         // it was filtered to, so the stub records the viewer it was asked for.
@@ -288,6 +299,17 @@ describe('replay analysis access', function () {
         expect(route, `${path} is not registered`).toBeDefined();
 
         const sent = {};
+        // `wrapAsync` does not return its promise (it catches into next), so
+        // awaiting the handler awaits ONE tick rather than the handler's body.
+        // A route that responds after two awaits therefore used to look like a
+        // route that never responded - which is a property of how many awaits
+        // the route happens to contain, not of whether it works. So wait for the
+        // RESPONSE, with a bounded fallback so a handler that genuinely answers
+        // nothing fails the assertion instead of hanging the suite.
+        let markResponded;
+        const responded = new Promise((resolve) => {
+            markResponded = resolve;
+        });
         const res = {
             status(code) {
                 sent.status = code;
@@ -297,6 +319,7 @@ describe('replay analysis access', function () {
             send(body) {
                 sent.status = sent.status || 200;
                 sent.body = body;
+                markResponded();
 
                 return this;
             }
@@ -317,6 +340,10 @@ describe('replay analysis access', function () {
             });
 
             if (!advanced) {
+                await Promise.race([
+                    responded,
+                    new Promise((resolve) => setTimeout(resolve, 2000))
+                ]);
                 break;
             }
         }
@@ -342,6 +369,10 @@ describe('replay analysis access', function () {
 
         expect(response.status).toBe(200);
         expect(response.body.analysis.available).toBe(true);
+        // ARCHON (N26): the curve came too, read from the asking player's own
+        // seat - board-derived, so unlike the misplay review it is safe to send.
+        expect(response.body.analysis.winProbability.available).toBe(true);
+        expect(scored[scored.length - 1].seat).toBe(member.username);
     });
 
     // ARCHON (F3): the misplay review rides with the analysis, filtered to

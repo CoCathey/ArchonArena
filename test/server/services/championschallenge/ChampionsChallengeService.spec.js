@@ -579,6 +579,148 @@ describe('ChampionsChallengeService', function () {
             });
         });
 
+        /**
+         * ARCHON (N26): the three things the roster's own games were already
+         * producing and nothing showed.
+         */
+        describe('the report’s new sections', function () {
+            const enrollments = [
+                { DeckId: 1, Name: 'Alpha' },
+                { DeckId: 2, Name: 'Beta' },
+                { DeckId: 3, Name: 'Gamma' }
+            ];
+
+            const game = (winner, loser) => ({ WinnerDeckId: winner, LoserDeckId: loser });
+
+            it('counts each pairing once, from the winner column', function () {
+                const matrix = service.matchupMatrix(enrollments, [
+                    game(1, 2),
+                    game(1, 2),
+                    game(2, 1)
+                ]);
+
+                // Three games between 1 and 2: 1 won two of them.
+                expect(matrix.cells['1|2']).toMatchObject({ wins: 2, games: 3 });
+                // The mirror cell is the same three games from the other side -
+                // not six games, which is what counting both columns would give.
+                expect(matrix.cells['2|1']).toMatchObject({ wins: 1, games: 3 });
+            });
+
+            it('leaves a pairing too thin to mean anything unconfident', function () {
+                const matrix = service.matchupMatrix(enrollments, [game(1, 2)]);
+
+                expect(matrix.cells['1|2'].confident).toBe(false);
+                expect(matrix.cells['1|2'].winRate).toBe(1);
+            });
+
+            it('ignores games involving a deck no longer on the roster', function () {
+                const matrix = service.matchupMatrix(enrollments, [game(1, 99), game(99, 2)]);
+
+                expect(Object.keys(matrix.cells)).toHaveLength(0);
+            });
+
+            it('reads card contribution from the model’s shrunken weights', async function () {
+                answer([
+                    [
+                        'FROM "DeckCards" dc WHERE',
+                        [
+                            { CardId: 'anger', Count: 2 },
+                            { CardId: 'hand-of-dis', Count: 1 },
+                            { CardId: 'foggify', Count: 1 }
+                        ]
+                    ]
+                ]);
+
+                const contribution = await service.cardContribution(7, {
+                    version: 4,
+                    cardWeights: { anger: 1.5, 'hand-of-dis': -1.5, foggify: 2 },
+                    // foggify has been seen twice: its weight is nearly all
+                    // shrunk away and it must not appear beside the other two.
+                    cardCounts: { anger: 500, 'hand-of-dis': 500, foggify: 2 }
+                });
+
+                expect(contribution.best[0].cardId).toBe('anger');
+                expect(contribution.worst[0].cardId).toBe('hand-of-dis');
+                expect(contribution.best.map((entry) => entry.cardId)).not.toContain('foggify');
+                expect(contribution.worst.map((entry) => entry.cardId)).not.toContain('foggify');
+                // Names come from the real pack index, not the id.
+                expect(contribution.best[0].name).toBe('Anger');
+            });
+
+            it('says nothing about cards when the bot has never trained', async function () {
+                expect(await service.cardContribution(7, null)).toBeNull();
+            });
+
+            it('never claims a card is bad on the strength of a handful of games', async function () {
+                answer([['FROM "DeckCards" dc WHERE', [{ CardId: 'anger', Count: 1 }]]]);
+
+                // A large raw weight, three observations behind it: nothing to say.
+                expect(
+                    await service.cardContribution(7, {
+                        cardWeights: { anger: 3 },
+                        cardCounts: { anger: 3 }
+                    })
+                ).toBeNull();
+            });
+        });
+
+        describe('lab health', function () {
+            it('reports a stale lease as stale', async function () {
+                config.sweepLeaseSeconds = 120;
+                answer([
+                    [
+                        'FROM "ChallengeSweepLease"',
+                        [
+                            {
+                                Owner: 'worker@dead-host:9',
+                                // Ten minutes ago, with a two-minute lease.
+                                HeartbeatAt: new Date(Date.now() - 600000)
+                            }
+                        ]
+                    ]
+                ]);
+
+                const health = await service.labHealth();
+
+                expect(health.lease.owner).toBe('worker@dead-host:9');
+                expect(health.lease.stale).toBe(true);
+            });
+
+            it('reports a live lease as live', async function () {
+                answer([
+                    [
+                        'FROM "ChallengeSweepLease"',
+                        [{ Owner: 'lobby@host:1', HeartbeatAt: new Date() }]
+                    ]
+                ]);
+
+                expect((await service.labHealth()).lease.stale).toBe(false);
+            });
+
+            it('groups what the pool could not play, for the operator', async function () {
+                answer([
+                    ['GROUP BY "MissingCards"', [{ MissingCards: 'a-card-from-2027', Decks: 12 }]]
+                ]);
+
+                const health = await service.labHealth();
+
+                expect(health.gauntlet.unplayable).toEqual([
+                    { reason: 'a-card-from-2027', decks: 12 }
+                ]);
+            });
+
+            it('survives every query failing', async function () {
+                db.query.mockRejectedValue(new Error('database on fire'));
+
+                const health = await service.labHealth();
+
+                // A health panel that 500s is worse than no health panel.
+                expect(health.lease).toBeNull();
+                expect(health.sparring.today).toBe(0);
+                expect(health.gauntlet.playable).toBe(0);
+            });
+        });
+
         // ARCHON (N25): exploration anneals with the champion's experience.
         describe('exploration', function () {
             it('starts adventurous and settles toward the floor', function () {

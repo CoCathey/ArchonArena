@@ -108,6 +108,22 @@ module.exports.init = function (server) {
         })
     );
 
+    // ARCHON (N26): the lab's vital signs. Admin-only, and a separate route
+    // from the member report because it is a different question: not "how are my
+    // decks doing" but "is the lab working at all" - the pool, the diary, the
+    // sweep lease and which node holds it.
+    server.get(
+        '/api/champions-challenge/health',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!(req.user.permissions && req.user.permissions.isAdmin)) {
+                return res.status(403).send({ success: false, message: 'Admins only.' });
+            }
+
+            res.send({ success: true, health: await championsChallenge.labHealth() });
+        })
+    );
+
     // ARCHON (N24): the Gauntlet's own settings - whether to play the field,
     // how much of the time, and which decks count as the field.
     server.post(

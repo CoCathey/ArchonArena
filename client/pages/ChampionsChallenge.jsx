@@ -367,6 +367,228 @@ GauntletPanel.propTypes = {
     t: PropTypes.func
 };
 
+/**
+ * ARCHON (N26): which of your decks beats which.
+ *
+ * The mirror lab has been playing every pair on the roster against each other
+ * since N18 and nothing ever showed the result. Rows are the deck, columns the
+ * opponent; a cell too thin to mean anything is left blank rather than coloured,
+ * the same rule the house-matchup matrix on the stats page follows.
+ */
+const MatchupMatrix = ({ matchups, t }) => {
+    const decks = (matchups?.decks || []).filter((deck) =>
+        Object.keys(matchups.cells || {}).some((key) => key.startsWith(`${deck.deckId}|`))
+    );
+
+    if (decks.length < 2) {
+        return null;
+    }
+
+    const cellClass = (cell) => {
+        if (!cell || !cell.confident || cell.winRate == null) {
+            return 'text-muted';
+        }
+
+        if (cell.winRate >= 0.6) {
+            return 'bg-emerald-500/20 text-emerald-200';
+        }
+
+        if (cell.winRate <= 0.4) {
+            return 'bg-red-500/20 text-red-200';
+        }
+
+        return 'text-foreground';
+    };
+
+    return (
+        <Panel type='default' compactHeader title={t('Your decks against each other')}>
+            <p className='m-0 pb-2 text-[11px] text-muted'>
+                {t(
+                    'How the row deck does against the column deck in sparring. Pairs with fewer ' +
+                        'than {{min}} games between them are left blank.',
+                    { min: matchups.minGames }
+                )}
+            </p>
+            <div className='overflow-x-auto'>
+                <table className='w-full border-collapse text-sm'>
+                    <thead>
+                        <tr className='text-xs uppercase tracking-wide text-muted'>
+                            <th className='px-2 py-1 text-left'>{t('vs')}</th>
+                            {decks.map((deck) => (
+                                <th className='px-2 py-1 text-center' key={deck.deckId}>
+                                    <span className='block max-w-24 truncate' title={deck.name}>
+                                        {deck.name}
+                                    </span>
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {decks.map((row) => (
+                            <tr className='border-b border-border/40' key={row.deckId}>
+                                <td
+                                    className='max-w-32 truncate px-2 py-1.5 text-foreground'
+                                    title={row.name}
+                                >
+                                    {row.name}
+                                </td>
+                                {decks.map((column) => {
+                                    const cell =
+                                        row.deckId === column.deckId
+                                            ? null
+                                            : matchups.cells[`${row.deckId}|${column.deckId}`];
+
+                                    return (
+                                        <td
+                                            className={`px-2 py-1.5 text-center ${cellClass(cell)}`}
+                                            key={column.deckId}
+                                            title={
+                                                cell
+                                                    ? t('{{wins}}-{{losses}}', {
+                                                          wins: cell.wins,
+                                                          losses: cell.games - cell.wins
+                                                      })
+                                                    : undefined
+                                            }
+                                        >
+                                            {row.deckId === column.deckId
+                                                ? '—'
+                                                : !cell || !cell.confident
+                                                ? '·'
+                                                : pct(cell.winRate)}
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </Panel>
+    );
+};
+
+MatchupMatrix.propTypes = { matchups: PropTypes.object, t: PropTypes.func };
+
+/**
+ * ARCHON (N26): what the bot has learned about the cards in your deck.
+ *
+ * Not a card's power level in the abstract - what having played it has been worth
+ * across the games this site has actually played, read from the learned model's
+ * per-card weights. Weights arrive already shrunk by how often the model has
+ * seen each card, and cards it has barely seen are dropped upstream rather than
+ * listed at nearly zero.
+ */
+const CardContribution = ({ cards, t }) => {
+    if (!cards || !cards.best?.length) {
+        return null;
+    }
+
+    const row = (entry, tone) => (
+        <li className='flex items-baseline justify-between gap-2 text-sm' key={entry.cardId}>
+            <span className='truncate text-foreground'>
+                {entry.name}
+                {entry.copies > 1 && <span className='text-muted'> ×{entry.copies}</span>}
+            </span>
+            <span className={tone} title={t('{{games}} games seen', { games: entry.games })}>
+                {entry.weight > 0 ? '+' : ''}
+                {entry.weight.toFixed(2)}
+            </span>
+        </li>
+    );
+
+    return (
+        <Panel
+            type='default'
+            compactHeader
+            title={t('What the bot makes of {{deck}}', { deck: cards.deckName })}
+        >
+            <div className='grid gap-3 sm:grid-cols-2'>
+                <div>
+                    <div className='mb-1 text-[10px] uppercase tracking-wide text-muted'>
+                        {t('Pulling their weight')}
+                    </div>
+                    <ul className='m-0 list-none space-y-0.5 p-0'>
+                        {cards.best.map((entry) => row(entry, 'text-emerald-300'))}
+                    </ul>
+                </div>
+                {cards.worst?.length > 0 && (
+                    <div>
+                        <div className='mb-1 text-[10px] uppercase tracking-wide text-muted'>
+                            {t('Doing least')}
+                        </div>
+                        <ul className='m-0 list-none space-y-0.5 p-0'>
+                            {cards.worst.map((entry) => row(entry, 'text-red-300'))}
+                        </ul>
+                    </div>
+                )}
+            </div>
+            <p className='m-0 pt-2 text-[11px] text-muted'>
+                {t(
+                    'Learned by the sparring model (v{{version}}) from playing these cards, not ' +
+                        'from anybody’s opinion of them. Cards it has seen too few times to have ' +
+                        'a view on are left out.',
+                    { version: cards.modelVersion }
+                )}
+            </p>
+        </Panel>
+    );
+};
+
+CardContribution.propTypes = { cards: PropTypes.object, t: PropTypes.func };
+
+/**
+ * ARCHON (N26): the champion's line of succession.
+ *
+ * Every promotion had to beat the champion before it under a sequential test, so
+ * this list IS the improvement, in order - the one thing that turns "the bot is
+ * learning" into a claim a member can check.
+ */
+const StrengthCurve = ({ curve, t }) => {
+    const promoted = (curve || []).filter((entry) => entry.promotedAt);
+
+    if (promoted.length < 1) {
+        return null;
+    }
+
+    return (
+        <Panel type='default' compactHeader title={t('The sparring partner’s history')}>
+            <ul className='m-0 list-none space-y-1 p-0 text-sm'>
+                {promoted
+                    .slice()
+                    .reverse()
+                    .map((entry) => (
+                        <li className='flex flex-wrap items-baseline gap-2' key={entry.version}>
+                            <span className='font-semibold text-foreground'>
+                                {t('v{{version}}', { version: entry.version })}
+                            </span>
+                            <span className='text-muted'>
+                                {t('took the title {{record}}, trained on {{games}} games', {
+                                    record: `${entry.arenaWins}–${entry.arenaLosses}`,
+                                    games: (entry.trainedGames || 0).toLocaleString()
+                                })}
+                            </span>
+                            {entry.status === 'champion' && (
+                                <span className='rounded-full border border-accent/50 bg-accent/15 px-1.5 text-[10px] uppercase tracking-wide text-amber-200'>
+                                    {t('current')}
+                                </span>
+                            )}
+                        </li>
+                    ))}
+            </ul>
+            <p className='m-0 pt-2 text-[11px] text-muted'>
+                {t(
+                    'Each version had to beat the one before it head to head, on neutral decks, ' +
+                        'by enough that a sequential test called it real — so the list only ever ' +
+                        'goes one way.'
+                )}
+            </p>
+        </Panel>
+    );
+};
+
+StrengthCurve.propTypes = { curve: PropTypes.array, t: PropTypes.func };
+
 const ChampionsChallenge = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -688,6 +910,10 @@ const ChampionsChallenge = () => {
                             </p>
                         )}
                     </Panel>
+
+                    <MatchupMatrix matchups={data?.matchups} t={t} />
+                    <CardContribution cards={data?.cards} t={t} />
+                    <StrengthCurve curve={data?.strengthCurve} t={t} />
 
                     {/* ARCHON (N24): the Gauntlet. Sits under the roster
                         because it is a property of how the roster is played,

@@ -274,3 +274,69 @@ stays above zero, because a policy that stops exploring cannot notice the day
 its habits stopped working. Dropped forks are counted and logged, so a deep bot
 quietly running on a quarter of its samples no longer looks exactly like a deep
 bot thinking hard.
+
+## The model on real games (N26)
+
+The value model the Challenge trains had only ever looked at the lab's own
+sparring. It reads real games now: every recorded board frame of a replay,
+scored from one player's seat, which turns a replay into a **win-probability
+curve** and the sharpest drops in that curve into moments worth reviewing.
+Gated on `advanced_replays` like the rest of replay analysis, so it reaches the
+Archon tier rather than staying behind Vault Master.
+
+**Parity is structural, not hoped for.** A model's weights are meaningless
+against features scaled differently from the ones it trained on, and a mismatch
+would produce a confident graph of nothing with no error anywhere. So there is
+exactly one feature computation (`stateFeaturesFrom`) and two adapters build the
+view it takes: one from live engine objects, one from a recorded frame
+(`replayValue.js`). A spec asserts a live position and its recording produce
+identical features.
+
+**What it refuses to claim.** No counterfactual lines. "What would have happened
+if you had reaped instead" needs the game replayed down a different branch, which
+needs a seed and an input log — the deep bot can fork its own games because it
+seeds them deliberately, and nothing can fork a human game played against crypto
+randomness. So the panel reports where the game turned and says plainly that the
+other road is not knowable. A drop is also not a verdict: the opponent playing
+well produces one as surely as a misstep, and the copy says so. With no trained
+model there is no curve at all, rather than a heuristic stand-in a reader could
+not tell apart from the real thing.
+
+## What the roster's games were already producing (N26)
+
+Three panels over data the lab had been generating since N18 without ever showing
+it:
+
+**Your decks against each other.** The mirror lab plays every pair on the roster;
+this is that matrix. Counted from the winner column only — counting both sides
+would double every cell — and a pair with fewer than `MIN_OPENING_GAMES` between
+them is left blank rather than coloured.
+
+**What the bot makes of your deck.** The learned model carries a weight per card
+id and a count of how often it has seen each one, so intersecting that with a
+deck's cards says what having played each card has been worth across the games
+this site actually played. A card seen fewer than `SHRINK_PRIOR` times is left
+out entirely: below that the number is mostly prior, and "no view yet" is the
+truthful thing to say.
+
+**The sparring partner's history.** Every version that took the title, with the
+record it took it on. Each promotion had to clear the sequential test against the
+champion before it, so the list only ever goes one way — which is what turns "the
+bot is learning" into a claim a member can check.
+
+Win rates now carry their **95% interval** as well: 5-3 and 300-180 both print
+"62%", and only one of them means it.
+
+## The lab's vital signs (N26)
+
+`/admin/analytics` grew a Champion's Challenge health panel. Every number in it
+already existed — as a counter in a result object, a warning in a log, a row
+nobody read — which was the problem: two features ship behind operator switches
+(the catalog crawl, the worker node) and an operator had no way to see whether
+the last hour of work went anywhere. It answers three questions: is anything
+playing (games today, which process holds the sweep lease, and whether that
+lease's heartbeat has gone stale — a dead worker node is otherwise invisible), is
+the bot learning (diary depth, champion version, any title fight in progress),
+and is the field growing (pool against target, last Master Vault fetch, and what
+the pool could **not** play, grouped — one card id at the top of that list is an
+actionable fact about this server's card data).

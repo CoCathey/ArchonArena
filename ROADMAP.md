@@ -1930,6 +1930,58 @@ and every Deep Probe ranking that reads it more truthful.
 -   [x] Each arena pairing is played twice on one seed with the seats swapped, and a title
         settled mid-pair stops the second half.
 
+#### N26 — The model on real games, and the lab made visible _(done)_
+
+**Why:** the value model trained by N21/N25 had only ever looked at the lab's own sparring, and
+three of the most useful things the Challenge produces were never shown to anybody. This points
+the model at real replays, surfaces what the roster's games were already computing, and gives an
+operator a way to see whether the lab is working at all.
+
+**Tasks**
+
+-   [x] **Win-probability curve on real games** (`replayValue.js`), under `advanced_replays` so
+        it reaches the Archon tier rather than staying behind Vault Master. Every recorded board
+        frame scored from one player's seat; the sharpest drops flagged and clickable, jumping
+        the viewer to the frame. Parity is STRUCTURAL: one `stateFeaturesFrom`, two adapters
+        (live engine, recorded frame), because a model read against differently-scaled features
+        produces a confident graph of nothing with no error anywhere. A spec asserts a live
+        position and its recording give identical features.
+-   [x] **The refusals, stated in the panel.** No counterfactual lines — forking a game needs a
+        seed and an input log, which only the bot's own games have — and a drop is a change in
+        the position, not a verdict on a decision. With no trained model there is no curve at
+        all rather than a heuristic stand-in a reader could not tell apart.
+-   [x] **Your decks against each other**: the matchup matrix the mirror lab has been producing
+        since N18, counted from the winner column only, blank where a pair is too thin.
+-   [x] **What the bot makes of your deck**: per-card contribution from the learned model's
+        weights, dropped entirely for cards it has seen fewer than `SHRINK_PRIOR` times, because
+        below that the number is mostly prior and "no view yet" is the truthful answer.
+-   [x] **The sparring partner's history**: every version that took the title and the record it
+        took it on — each one having cleared the sequential test against its predecessor, so the
+        list only ever goes one way.
+-   [x] **Win rates carry their 95% interval.** 5-3 and 300-180 both print "62%".
+-   [x] **Lab health on `/admin/analytics`**: games today, which node holds the sweep lease and
+        whether its heartbeat has gone stale (a dead worker node is otherwise invisible), diary
+        depth, champion version, any title fight, pool against target, last Master Vault fetch,
+        and what the pool could not play — grouped, because one card id at the top of that list
+        is actionable.
+-   Later: an on-demand showcase game; per-turn win probability on the live board for
+    spectators; the curve over a member's whole history as a form graph.
+
+**Depends on:** N21/N25 (the model), N1 (board-state replays). **Feeds F3.**
+**Acceptance criteria**
+
+-   [x] A live position and the recorded frame of that same position produce identical features —
+        the one property that makes the curve mean anything.
+-   [x] A curve rises as the seat's amber lead grows, and reads the same game inverted from the
+        other seat.
+-   [x] No model means no curve, with a reason a member can read.
+-   [x] A matchup pairing is counted once, not twice; a pairing involving a withdrawn deck is not
+        counted at all.
+-   [x] A card the model has barely seen is left out of contribution rather than listed with a
+        confident-looking number.
+-   [x] A stale sweep lease reports as stale, and the health panel survives every one of its
+        queries failing.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

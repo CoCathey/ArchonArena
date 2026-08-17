@@ -387,6 +387,10 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
+        // ARCHON (N26): the lab's vital signs, for the operations dashboard.
+        getChampionsChallengeHealth: builder.query({
+            query: () => '/champions-challenge/health'
+        }),
         // ARCHON (N24): the Gauntlet - play the field, and which field.
         saveChampionsChallengeGauntlet: builder.mutation({
             query: (settings) => ({
@@ -1302,6 +1306,7 @@ export const {
     useEnrollChampionsChallengeDeckMutation,
     useEnrollRandomChampionsChallengeDeckMutation,
     useSaveChampionsChallengeGauntletMutation,
+    useGetChampionsChallengeHealthQuery,
     useWithdrawChampionsChallengeDeckMutation,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,

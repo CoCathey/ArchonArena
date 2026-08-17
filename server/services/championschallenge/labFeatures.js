@@ -19,46 +19,92 @@
  * blind. Add, don't rename.
  */
 
-/** Feature keys for a game state, from one player's seat. */
-function stateFeatures(game, player) {
-    const opponent = player.opponent;
-    const myCreatures = player.creaturesInPlay || [];
-    const oppCreatures = (opponent && opponent.creaturesInPlay) || [];
+/**
+ * ARCHON (N26): the features, computed from a plain VIEW of a position.
+ *
+ * There is exactly one feature computation on this site, and this is it. The
+ * live engine and a recorded replay frame are two different shapes of the same
+ * facts, and the temptation is to write a second extractor for the second shape
+ * - which is how a model trained on one set of scalings comes to be evaluated
+ * against another and produce a confident graph of nothing. So both callers
+ * build a view (see `stateFeatures` for the engine, replayValue for a frame) and
+ * the arithmetic happens here, once.
+ *
+ * A view is:
+ *   { round, me: SEAT, them: SEAT|null }
+ *   SEAT = { amber, keys, keyCost, creatures: [{power, exhausted}],
+ *            artifacts, hand, archives, deck }
+ * where `artifacts`, `hand`, `archives` and `deck` are COUNTS - a replay knows
+ * how many cards a deck holds but not which, and the model never needed to know.
+ *
+ * KEYS ARE A CONTRACT - a model trained yesterday must read today's features.
+ * Add, don't rename.
+ */
+function stateFeaturesFrom({ round, me, them }) {
+    const myCreatures = me.creatures || [];
+    const oppCreatures = (them && them.creatures) || [];
     const myPower = myCreatures.reduce((sum, c) => sum + (c.power || 0), 0);
     const oppPower = oppCreatures.reduce((sum, c) => sum + (c.power || 0), 0);
-    const myKeys = player.getForgedKeys();
-    const oppKeys = opponent ? opponent.getForgedKeys() : 0;
-    const myCost = player.getCurrentKeyCost();
-    const oppCost = opponent ? opponent.getCurrentKeyCost() : 6;
+    const myKeys = me.keys || 0;
+    const oppKeys = (them && them.keys) || 0;
+    const myCost = me.keyCost;
+    const oppCost = them ? them.keyCost : 6;
 
     return {
         bias: 1,
-        turn: Math.min(1, (game.round || 0) / 25),
-        myAmber: Math.min(1, player.amber / 12),
-        oppAmber: opponent ? Math.min(1, opponent.amber / 12) : 0,
-        amberDiff: clamp11((player.amber - (opponent ? opponent.amber : 0)) / 8),
+        turn: Math.min(1, (round || 0) / 25),
+        myAmber: Math.min(1, me.amber / 12),
+        oppAmber: them ? Math.min(1, them.amber / 12) : 0,
+        amberDiff: clamp11((me.amber - (them ? them.amber : 0)) / 8),
         myKeys: myKeys / 3,
         oppKeys: oppKeys / 3,
         keyDiff: clamp11((myKeys - oppKeys) / 2),
         // How close each side is to forging, at their CURRENT cost - the
         // number that decides most endgames.
-        myAmberToKey: Math.min(1, Math.max(0, myCost - player.amber) / 8),
-        oppAmberToKey: opponent ? Math.min(1, Math.max(0, oppCost - opponent.amber) / 8) : 1,
+        myAmberToKey: Math.min(1, Math.max(0, myCost - me.amber) / 8),
+        oppAmberToKey: them ? Math.min(1, Math.max(0, oppCost - them.amber) / 8) : 1,
         myCreatures: Math.min(1, myCreatures.length / 8),
         oppCreatures: Math.min(1, oppCreatures.length / 8),
         myReady: Math.min(1, myCreatures.filter((c) => !c.exhausted).length / 8),
         myPower: Math.min(1, myPower / 30),
         oppPower: Math.min(1, oppPower / 30),
         powerDiff: clamp11((myPower - oppPower) / 20),
-        myArtifacts: Math.min(
-            1,
-            (player.cardsInPlay || []).filter((c) => c.type === 'artifact').length / 5
-        ),
-        myHand: Math.min(1, player.hand.length / 10),
-        oppHand: opponent ? Math.min(1, opponent.hand.length / 10) : 0,
-        myArchives: Math.min(1, (player.archives || []).length / 6),
-        myDeck: Math.min(1, (player.deck || []).length / 36)
+        myArtifacts: Math.min(1, (me.artifacts || 0) / 5),
+        myHand: Math.min(1, (me.hand || 0) / 10),
+        oppHand: them ? Math.min(1, (them.hand || 0) / 10) : 0,
+        myArchives: Math.min(1, (me.archives || 0) / 6),
+        myDeck: Math.min(1, (me.deck || 0) / 36)
     };
+}
+
+/** The live engine's seat, as a view. */
+function seatView(player) {
+    if (!player) {
+        return null;
+    }
+
+    return {
+        amber: player.amber,
+        keys: player.getForgedKeys(),
+        keyCost: player.getCurrentKeyCost(),
+        creatures: (player.creaturesInPlay || []).map((card) => ({
+            power: card.power,
+            exhausted: !!card.exhausted
+        })),
+        artifacts: (player.cardsInPlay || []).filter((card) => card.type === 'artifact').length,
+        hand: player.hand.length,
+        archives: (player.archives || []).length,
+        deck: (player.deck || []).length
+    };
+}
+
+/** Feature keys for a game state, from one player's seat. */
+function stateFeatures(game, player) {
+    return stateFeaturesFrom({
+        round: game.round,
+        me: seatView(player),
+        them: seatView(player.opponent)
+    });
 }
 
 function clamp11(value) {
@@ -207,6 +253,8 @@ function decisionRecord(game, player, action) {
 
 module.exports = {
     stateFeatures,
+    stateFeaturesFrom,
+    seatView,
     actionFeatures,
     decisionRecord,
     promptKey,

@@ -43,6 +43,34 @@ function wilsonLowerBound(wins, games, z = 1.96) {
 }
 
 /**
+ * ARCHON (N26): the whole 95% Wilson interval, not just its floor.
+ *
+ * A win rate printed as "62%" tells a member nothing about whether to believe
+ * it, and the two decks in a roster whose records are 5-3 and 300-180 both print
+ * the same headline. The interval is the honest form of the same number: it says
+ * 62% and it says how far that could be wrong.
+ *
+ * @returns {{low: number, high: number, rate: number|null}}
+ */
+function wilsonInterval(wins, games, z = 1.96) {
+    if (!games || games <= 0) {
+        return { low: 0, high: 1, rate: null };
+    }
+
+    const p = wins / games;
+    const z2 = z * z;
+    const centre = p + z2 / (2 * games);
+    const spread = z * Math.sqrt((p * (1 - p) + z2 / (4 * games)) / games);
+    const denominator = 1 + z2 / games;
+
+    return {
+        rate: p,
+        low: Math.max(0, (centre - spread) / denominator),
+        high: Math.min(1, (centre + spread) / denominator)
+    };
+}
+
+/**
  * ARCHON (N25): the sequential probability ratio test - "have we seen enough?"
  *
  * A fixed-N test has to decide its sample size before it knows anything, so it
@@ -237,6 +265,7 @@ module.exports = {
     MIN_CONFIDENT_GAMES,
     MIN_OPENING_GAMES,
     wilsonLowerBound,
+    wilsonInterval,
     sprt,
     sasExpectedScore,
     isHiddenGem,

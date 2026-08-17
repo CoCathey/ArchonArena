@@ -226,6 +226,44 @@ class BotPolicyService {
         return 'fighting';
     }
 
+    /**
+     * ARCHON (N26): the champion's line of succession.
+     *
+     * Every version that ever held or contested the title, with the record it
+     * held it on. This is the one thing that makes "the bot is learning" a claim
+     * a member can check rather than a promise on a page: each promotion had to
+     * clear the sequential test against the champion before it, so the list IS
+     * the improvement, in order.
+     *
+     * Never throws - a page must not fail because a history query did.
+     */
+    async strengthCurve(limit = 20) {
+        try {
+            const rows = await this.db.query(
+                'SELECT "Version", "Status", "TrainedGames", "ArenaWins", "ArenaLosses", ' +
+                    '"CreatedAt", "PromotedAt" FROM "BotPolicies" ' +
+                    'ORDER BY "Version" DESC LIMIT $1',
+                [Math.max(1, Math.min(100, limit))]
+            );
+
+            return (rows || [])
+                .map((row) => ({
+                    version: row.Version,
+                    status: row.Status,
+                    trainedGames: row.TrainedGames,
+                    arenaWins: row.ArenaWins,
+                    arenaLosses: row.ArenaLosses,
+                    createdAt: row.CreatedAt,
+                    promotedAt: row.PromotedAt
+                }))
+                .reverse();
+        } catch (err) {
+            logger.error('Challenge bot: could not read the strength curve', err);
+
+            return [];
+        }
+    }
+
     /** The learning loop's public vitals, for the Challenge page. */
     async vitals() {
         const rows = await this.db.query(
