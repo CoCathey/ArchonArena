@@ -63,7 +63,7 @@ class AnalyticsService {
                 'COUNT(*) FILTER (' +
                 'WHERE g."FinishedAt" >= (now() AT TIME ZONE \'utc\') - interval \'1 day\') AS "GamesToday" ' +
                 'FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
-                'WHERE g."FinishedAt" IS NOT NULL',
+                'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE',
             []
         );
 
@@ -90,7 +90,7 @@ class AnalyticsService {
         const rows = await this.db.query(
             'SELECT date_trunc(\'day\', g."FinishedAt") AS "Day", COUNT(*) AS "Games", ' +
                 'COUNT(*) FILTER (WHERE g."Source" = \'irl\') AS "InPerson" ' +
-                'FROM "Games" g WHERE g."FinishedAt" IS NOT NULL ' +
+                'FROM "Games" g WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE ' +
                 `AND g."FinishedAt" >= (now() AT TIME ZONE 'utc') - interval '${window} days' ` +
                 'GROUP BY 1 ORDER BY 1 ASC',
             []
@@ -123,7 +123,7 @@ class AnalyticsService {
                 'SELECT gp."PlayerId", COUNT(*) AS "Played" FROM "GamePlayers" gp ' +
                 'JOIN "Games" g ON g."Id" = gp."GameId" ' +
                 'JOIN cohort c ON c."Id" = gp."PlayerId" ' +
-                'WHERE g."FinishedAt" IS NOT NULL GROUP BY gp."PlayerId") ' +
+                'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE GROUP BY gp."PlayerId") ' +
                 'SELECT COUNT(*) AS "Registered", ' +
                 'COUNT(*) FILTER (WHERE c."OnboardedAt" IS NOT NULL) AS "Onboarded", ' +
                 'COUNT(*) FILTER (WHERE EXISTS (' +

@@ -76,7 +76,8 @@ const {
  */
 
 /** Only decided games count: unfinished and abandoned games are not results. */
-const DECIDED = 'g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL';
+const DECIDED =
+    'g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL';
 
 /**
  * Below this, a compared record is shown but flagged as too thin to lean on.

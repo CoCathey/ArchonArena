@@ -59,7 +59,9 @@ const OWNER_COUNT_SQL = `(SELECT COUNT(DISTINCT x."UserId") FROM "Decks" x WHERE
 const globalRecord = (outcome) =>
     '(SELECT COUNT(*) FROM "Games" g ' +
     'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
-    'WHERE CASE WHEN d."Uuid" IS NULL ' +
+    // ARCHON (F9): a practice game against a bot is recorded and replayable,
+    // and is not a result - it never moves a deck's record.
+    'WHERE g."BotGame" IS NOT TRUE AND CASE WHEN d."Uuid" IS NULL ' +
     'THEN gp."DeckId" IN (SELECT x."Id" FROM "Decks" x WHERE x."Name" = d."Name") ' +
     'ELSE gp."DeckUuid" = d."Uuid" END ' +
     `AND ${outcome})`;
@@ -252,8 +254,8 @@ class DeckService {
                     'CASE WHEN "GlobalWinCount" + "GlobalLoseCount" = 0 THEN 0 ELSE (CAST("GlobalWinCount" AS FLOAT) / ("GlobalWinCount" + "GlobalLoseCount")) * 100 END AS "GlobalWinRate" ' +
                     'FROM ( ' +
                     `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = d."UserId" AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "WinCount", ' +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != d."UserId" AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "LoseCount", ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" = d."UserId" AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "WinCount", ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" != d."UserId" AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "LoseCount", ' +
                     `${GLOBAL_RECORD_SQL.wins} AS "GlobalWinCount", ` +
                     `${GLOBAL_RECORD_SQL.losses} AS "GlobalLoseCount" ` +
                     'FROM "Decks" d ' +
@@ -737,8 +739,8 @@ class DeckService {
                     // alias to `deckcount`, so mapDeck's `deck.DeckCount` was
                     // undefined and every deck's usage level computed as 0.
                     `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ds."AercScore" AS "AercScore", da."Ari" AS "Ari", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     // ARCHON: SAS joined HERE rather than attached to the page
                     // afterwards. It used to be decorated onto the rows the API
                     // had already fetched, which meant the database could not
@@ -1587,8 +1589,8 @@ class DeckService {
         try {
             decks = await db.query(
                 `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     'FROM "Decks" d ' +
                     'JOIN "Users" u ON u."Id" = "UserId" ' +
                     'JOIN "Expansions" e on e."Id" = d."ExpansionId" ' +

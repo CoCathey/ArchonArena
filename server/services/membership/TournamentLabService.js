@@ -74,7 +74,7 @@ class TournamentLabService {
                         'JOIN "Decks" d ON d."Id" = gp."DeckId" ' +
                         SET_JOIN('d') +
                         ' LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
-                        'WHERE gp."PlayerId" = $1 AND g."FinishedAt" IS NOT NULL ' +
+                        'WHERE gp."PlayerId" = $1 AND g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE ' +
                         `  AND g."WinnerId" IS NOT NULL${setFilter} ` +
                         `GROUP BY d."Id", d."Name", d."Uuid", ds."SasRating", ${SET_GROUP_BY} ` +
                         `ORDER BY COUNT(*) DESC, MAX(g."FinishedAt") DESC LIMIT $${params.length}`,
@@ -160,7 +160,7 @@ class TournamentLabService {
                 'SELECT (g."WinnerId" = gp."PlayerId") AS "won", g."FinishedAt" ' +
                     'FROM "GamePlayers" gp JOIN "Games" g ON g."Id" = gp."GameId" ' +
                     'WHERE gp."PlayerId" = $1 AND gp."DeckId" = $2 ' +
-                    '  AND g."FinishedAt" IS NOT NULL AND g."WinnerId" IS NOT NULL ' +
+                    '  AND g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE AND g."WinnerId" IS NOT NULL ' +
                     'ORDER BY g."FinishedAt" DESC LIMIT $3',
                 [userId, deckId, Math.min(Number(games) || 10, 50)]
             );

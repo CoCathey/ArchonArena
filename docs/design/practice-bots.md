@@ -111,15 +111,28 @@ input once `game.winner` is set, so the bot can never press anything on the
 post-game menu. Anything it cannot answer is left standing, where force-pass
 (`Game.checkInactivity`) remains the human's remedy.
 
-**Bot games are invisible to the rest of the platform.** The Champion’s Challenge
-doctrine, applied at the router: `startGame` never creates the row, GAMEWIN
-neither persists nor replays nor rates, and `persistFinishedGame` (REMATCH /
-PLAYERLEFT / next-game paths) checks the same flag. The flag rides the save
-state from the node, so a lobby restart cannot lose it. Every official
-statistic filters only on FinishedAt/WinnerId; one bot row in "Games" would
-be a real result in thirty queries at once. Quick Join also never matches
-into a bot table - a plain game means a person - and the bot's table is
-exempt from the stale-pending-game cleanup, because waiting is its job.
+**Practice games are recorded, and are never results.** These were once one
+decision - "invisible" - and a player asked for the half of it that was wrong:
+they wanted to find a game again, watch the replay back, and show somebody the
+turn that won it, none of which is possible for a game that was never written
+down. So a bot game is persisted and its replay saved like any other, and its
+row carries `BotGame`.
+
+What the flag buys is the other half. Every statistic on this site selects
+finished games with the same shape - `FinishedAt IS NOT NULL [AND WinnerId IS
+NOT NULL]` - so one unflagged bot row would be a real result in thirty places
+at once: deck records, house and meta aggregates, player win rates, the
+Tournament Lab, the intelligence reports. Every one of them excludes flagged
+rows, and a spec reads the source to prove none of them forgets
+(`botGamesAreNotResults.spec.js`) - thirty places is too many to remember, and
+a win rate that is quietly two points off is not something anybody notices.
+
+The line is: **listings show them, numbers do not count them.** A player's game
+history and their profile's recent games include practice games deliberately -
+that is what recording them was for. Ratings never see one at all: the router
+declines to call the rating engine for a bot game, and the engine re-checks the
+flag itself, because that is the function that moves somebody's Amber. Quick
+Join never matches into a bot table either.
 
 **The account is real, provably ours, and unenterable.** The bot is an
 ordinary row in "Users" - that is what lets every existing path treat it as

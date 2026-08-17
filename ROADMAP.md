@@ -1946,6 +1946,12 @@ commit to it, and run the engine as a continuous soak test.
         costs about a minute of compute per game. Deep thought at a live table wants seeded
         practice games and a logged input stream first — the bot-vs-bot showcase is where
         that pays off, since both seats are ours.
+-   [x] **Practice games are recorded, and are never results.** A player wanted to find a bot
+        game again and watch the replay back, so bot games are persisted and replayed like any
+        other — with a `Games."BotGame"` flag (migration 76) that every aggregate excludes, and
+        a spec that reads the source to prove none of the thirty finished-game queries forgets.
+        Listings show them; numbers do not count them; ratings never see one (the router
+        declines, and the rating engine re-checks).
 -   [x] **Bot Settings** (`/admin/bots`, isAdmin): the roster with each bot's name, picture,
         profile, on/off switch and deck count, plus the knobs that govern all of them. Bots
         are ordinary accounts, so their pictures and profiles go through the same pipeline a

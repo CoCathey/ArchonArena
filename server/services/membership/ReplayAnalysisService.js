@@ -481,7 +481,7 @@ class ReplayAnalysisService {
                 'FROM "GameReplays" gr ' +
                 'JOIN "Games" g ON g."Id" = gr."GameDbId" ' +
                 'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" AND gp."PlayerId" = $1 ' +
-                'WHERE g."FinishedAt" IS NOT NULL ' +
+                'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE ' +
                 'ORDER BY g."FinishedAt" DESC LIMIT $2',
             [userId, capped],
             'playerInsights'
