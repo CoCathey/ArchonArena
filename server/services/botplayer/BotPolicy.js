@@ -242,11 +242,7 @@ class BotPolicy {
                 return true;
             }
 
-            const preferred = buttons.filter(
-                (button) => !NEVER_PRESS.includes(textOf(button.text))
-            );
-            const pool = preferred.length ? preferred : buttons;
-            const button = pick(pool, this.rng);
+            const button = this.chooseButton(game, player, buttons, title);
 
             game.menuButton(player.name, button.arg, button.uuid, button.method);
 
@@ -254,6 +250,45 @@ class BotPolicy {
         }
 
         return false;
+    }
+
+    /**
+     * ARCHON: which button to press, when nothing fixed applies.
+     *
+     * This is the prompt a card raises - "would you like to use this?",
+     * "choose a house", which of two triggers goes first - and there are a
+     * great many of them: nearly every optional ability in KeyForge arrives
+     * here. It used to be answered by picking a button at random, which made
+     * a large part of the game a coin flip.
+     *
+     * With the champion model it is scored like any other decision, on the
+     * prompt's title and the button's own text (labFeatures' `button` kind).
+     * Without one it presses **Yes**: an optional ability is shown to the
+     * player it benefits, so accepting is the better half of the coin - and
+     * the ones where it would not be (concede, cancel) never reach here.
+     */
+    chooseButton(game, player, buttons, title) {
+        const preferred = buttons.filter((button) => !NEVER_PRESS.includes(textOf(button.text)));
+        const pool = preferred.length ? preferred : buttons;
+
+        if (pool.length === 1) {
+            return pool[0];
+        }
+
+        if (this.policy) {
+            const records = pool.map((button) =>
+                decisionRecord(game, player, {
+                    kind: 'button',
+                    prompt: title,
+                    button: textOf(button.text)
+                })
+            );
+            const index = chooseDecision(this.policy, records, 0, this.rng);
+
+            return pool[Math.max(0, index)];
+        }
+
+        return pool.find((button) => textOf(button.text) === 'yes') || pick(pool, this.rng);
     }
 
     /**

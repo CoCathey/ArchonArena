@@ -416,15 +416,12 @@ class SimulatedGame {
                 return this.pressButtonAt(game, player, buttons, autoresolve);
             }
 
-            const allowed = buttons
-                .map((button, index) => ({ button, index }))
-                .filter(({ button }) => !NEVER_PRESS.includes(textOf(button.text)));
-            const pool = allowed.length
-                ? allowed
-                : buttons.map((button, index) => ({ button, index }));
-            const pick = pool[Math.floor(this.rng() * pool.length)];
-
-            return this.pressButtonAt(game, player, buttons, pick.index);
+            return this.pressButtonAt(
+                game,
+                player,
+                buttons,
+                await this.chooseButton(game, player, buttons, state.menuTitle)
+            );
         }
 
         return false;
@@ -582,6 +579,63 @@ class SimulatedGame {
         this.noteDecision(game, player, { kind: 'select', card: unselected[index], prompt });
 
         return index;
+    }
+
+    /**
+     * ARCHON: which button to press, when nothing fixed applies.
+     *
+     * This is the prompt a card raises - "would you like to use this?",
+     * "choose a house", which of two triggers goes first - and there are a
+     * great many of them: nearly every optional ability in KeyForge arrives
+     * here. It used to be answered by picking a button at random, which made
+     * a large part of the game a coin flip that no amount of training could
+     * reach, because the choice was never recorded as a decision at all.
+     *
+     * With a model it is scored like any other decision, on the prompt's
+     * title and the button's own text. Without one it presses **Yes**: an
+     * optional ability is shown to the player it benefits, so accepting is
+     * the better half of the coin - and the ones where it is not (concede,
+     * cancel) never reach here.
+     *
+     * @returns {Promise<number>} the index of the button to press
+     */
+    async chooseButton(game, player, buttons, promptTitle) {
+        const allowed = buttons
+            .map((button, index) => ({ button, index }))
+            .filter(({ button }) => !NEVER_PRESS.includes(textOf(button.text)));
+        const pool = allowed.length ? allowed : buttons.map((button, index) => ({ button, index }));
+
+        if (pool.length === 1) {
+            return pool[0].index;
+        }
+
+        const prompt = textOf(promptTitle);
+        const policy = this.policyFor(player);
+        let chosen;
+
+        if (policy) {
+            const records = pool.map(({ button }) =>
+                decisionRecord(game, player, {
+                    kind: 'button',
+                    prompt,
+                    button: textOf(button.text)
+                })
+            );
+
+            chosen = pool[Math.max(0, chooseDecision(policy, records, this.temperature, this.rng))];
+        } else {
+            chosen =
+                pool.find(({ button }) => textOf(button.text) === 'yes') ||
+                pool[Math.floor(this.rng() * pool.length)];
+        }
+
+        this.noteDecision(game, player, {
+            kind: 'button',
+            prompt,
+            button: textOf(chosen.button.text)
+        });
+
+        return chosen.index;
     }
 
     /** Keep a decision for training, when this game is recording. */

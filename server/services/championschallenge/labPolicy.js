@@ -156,12 +156,14 @@ function decisionTarget(decision, nextDecision, outcome, lambda, valueOf) {
  * @param {number} [options.l2] weight decay, keeps card weights from memorizing
  * @param {number} [options.lambda] how far to lean on the next state's value
  *        (0 = pure outcome, the pre-N25 behaviour)
+ * @param {number} [options.targetWeight] how much harder a search-measured
+ *        decision pulls than an outcome-labelled one
  * @returns {object} the trained model
  */
 function trainModel(
     model,
     games,
-    { learningRate = 0.05, epochs = 2, l2 = 1e-4, lambda = 0.5 } = {}
+    { learningRate = 0.05, epochs = 2, l2 = 1e-4, lambda = 0.5, targetWeight = 8 } = {}
 ) {
     const next = {
         version: (model.version || 0) + 1,
@@ -213,8 +215,28 @@ function trainModel(
                     .find((entry) => entry.side === decision.side);
                 const label = decisionTarget(decision, nextForSide, outcome, lambda, valueOf);
                 const predicted = scoreDecision(next, decision);
+                /**
+                 * ARCHON: a measured decision counts for more than a guessed
+                 * one.
+                 *
+                 * Two kinds of row arrive here. One carries a number the deep
+                 * bot established by forking the position, playing the move
+                 * and rolling the future forward. The other carries "this
+                 * appeared in a game somebody won" - which for a play on turn
+                 * 3 of a game thrown away on turn 20 is noise pointing the
+                 * wrong way. They used to push the weights equally hard, and
+                 * since the fast bot outproduces the deep bot by orders of
+                 * magnitude, the signal was drowned by the noise no matter
+                 * how much search was bought.
+                 *
+                 * The weight goes on the GRADIENT, not on the decay: L2 is a
+                 * property of the weights, not of the evidence. Counts stay
+                 * unweighted too - one observation is one observation, and
+                 * inflating them would under-shrink a card seen once.
+                 */
+                const measured = typeof decision.target === 'number';
                 // Logistic loss gradient: (p - y) times each feature.
-                const gradient = predicted - label;
+                const gradient = (predicted - label) * (measured ? targetWeight : 1);
 
                 for (const [key, value] of Object.entries(decision.state || {})) {
                     const weightKey = `s:${key}`;

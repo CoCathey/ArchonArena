@@ -104,7 +104,7 @@ class BotPolicyService {
      *
      * @returns {Promise<object|null>} the new candidate row, or null
      */
-    async trainCandidate({ batchGames = 200, lambda } = {}) {
+    async trainCandidate({ batchGames = 200, lambda, targetWeight } = {}) {
         if (await this.candidate()) {
             return null;
         }
@@ -126,7 +126,19 @@ class BotPolicyService {
         const base = (await this.champion()) || emptyModel();
         // lambda: how far a label leans on the value of what came next rather
         // than on the final result alone (labPolicy.decisionTarget).
-        const trained = trainModel(base, games, lambda === undefined ? {} : { lambda });
+        // targetWeight: how much harder a decision the deep bot MEASURED
+        // pulls than one merely labelled by who won.
+        const options = {};
+
+        if (lambda !== undefined) {
+            options.lambda = lambda;
+        }
+
+        if (targetWeight !== undefined) {
+            options.targetWeight = targetWeight;
+        }
+
+        const trained = trainModel(base, games, options);
 
         const versions = await this.db.query(
             'SELECT COALESCE(MAX("Version"), 0)::int AS "Version" FROM "BotPolicies"'

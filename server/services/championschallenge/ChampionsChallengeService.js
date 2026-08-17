@@ -712,7 +712,8 @@ class ChampionsChallengeService {
                         if (logged % (config.trainEveryGames || 25) === 0) {
                             await this.policyService.trainCandidate({
                                 batchGames: (config.trainEveryGames || 25) * 8,
-                                lambda: config.trainingLambda
+                                lambda: config.trainingLambda,
+                                targetWeight: config.trainingTargetWeight
                             });
                         }
                     } catch (err) {
@@ -910,7 +911,12 @@ class ChampionsChallengeService {
 
                 if (logged % (config.trainEveryGames || 25) === 0) {
                     await this.policyService.trainCandidate({
-                        batchGames: (config.trainEveryGames || 25) * 8
+                        // Same knobs as the sparring path: this one used to
+                        // fall back to the code defaults, so a site that had
+                        // tuned its training got the untuned values here.
+                        batchGames: (config.trainEveryGames || 25) * 8,
+                        lambda: config.trainingLambda,
+                        targetWeight: config.trainingTargetWeight
                     });
                 }
             } catch (err) {

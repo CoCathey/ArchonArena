@@ -159,7 +159,18 @@ const ACTION_KINDS = [
     'select',
     // ARCHON (F9): activating a prophecy - a card out of hand now for a
     // standing effect that pays later.
-    'activateProphecy'
+    'activateProphecy',
+    /**
+     * ARCHON: pressing a button on a prompt the policy has no fixed answer
+     * for - "would you like to use this?", "choose a house", the order two
+     * triggers resolve in.
+     *
+     * These were answered by picking a button at random, which is a large
+     * slice of KeyForge played by coin flip: nearly every optional ability
+     * in the game arrives as one of these. Same treatment `select` got in
+     * N25 - the prompt's own title is what tells one from another.
+     */
+    'button'
 ];
 
 /**
@@ -291,7 +302,7 @@ const ROLE_KEYS = {
  *        contexts each action kind is crossed with
  * @returns {{features: Object<string, number>, cardId: string|null}}
  */
-function actionFeatures({ kind, card, house, player }) {
+function actionFeatures({ kind, card, house, player, button }) {
     const features = {};
 
     for (const candidate of ACTION_KINDS) {
@@ -354,6 +365,21 @@ function actionFeatures({ kind, card, house, player }) {
         }
     }
 
+    /**
+     * ARCHON: the button's own text, separately from the prompt it answers.
+     *
+     * The promptKey weight learns "on THIS prompt, that answer" - precise,
+     * but it knows nothing until the loop has seen that prompt. This one
+     * generalizes: `btn:yes` carries what saying yes to an optional ability
+     * is worth ACROSS every prompt, which is what makes the very first
+     * unfamiliar prompt better than a coin flip. The set is small and
+     * closed - yes, no, done, cancel, a handful of card-specific words - so
+     * it costs almost nothing to carry.
+     */
+    if (kind === 'button' && button) {
+        features[`btn:${normalizeText(button, 24)}`] = 1;
+    }
+
     if (kind === 'houseCall' && house && player) {
         features['house:inHand'] = Math.min(
             1,
@@ -410,22 +436,32 @@ function normalizeLocation(location) {
 }
 
 /**
- * The prompt a selection is answering, normalized into a learnable key.
+ * The prompt an answer is answering, normalized into a learnable key.
  *
  * Ownership features alone cannot tell "choose a creature to destroy" from
  * "choose a creature to heal" - the board looks identical, and the right target
  * is the opposite one. The prompt's own title is the missing signal, so it gets
- * two weights per prompt (one for picking your own card, one for the
- * opponent's), which is bounded, cheap, and exactly the distinction needed.
+ * one weight per prompt and answer, which is bounded, cheap, and exactly the
+ * distinction needed.
+ *
+ * `variant` is which answer this is: for a selection, whose card was picked
+ * (a boolean, kept as 'mine'/'theirs' so every key trained before this note
+ * still reads); for a button, the button's own text.
  */
-function promptKey(title, mine) {
-    const normalized = String(title || 'unknown')
+function promptKey(title, variant) {
+    const answer =
+        typeof variant === 'string' ? normalizeText(variant, 24) : variant ? 'mine' : 'theirs';
+
+    return `${normalizeText(title || 'unknown', 60)}|${answer}`;
+}
+
+/** Prompt and button text, reduced to something stable enough to be a key. */
+function normalizeText(value, limit) {
+    return String(value)
         .toLowerCase()
         .replace(/[^a-z ]/g, '')
         .trim()
-        .slice(0, 60);
-
-    return `${normalized}|${mine ? 'mine' : 'theirs'}`;
+        .slice(0, limit);
 }
 
 /** One decision record, as stored for training and consumed by the model. */
@@ -442,7 +478,8 @@ function decisionRecord(game, player, action) {
         turn: game.round || 0
     };
 
-    // Only selections carry a prompt: it is what tells "destroy" from "heal".
+    // Selections and buttons carry a prompt: it is what tells "destroy" from
+    // "heal", and one optional ability from another.
     if (action.kind === 'select') {
         const mine = !!(
             action.card &&
@@ -451,6 +488,8 @@ function decisionRecord(game, player, action) {
         );
 
         record.promptKey = promptKey(action.prompt, mine);
+    } else if (action.kind === 'button') {
+        record.promptKey = promptKey(action.prompt, action.button || '');
     }
 
     return record;

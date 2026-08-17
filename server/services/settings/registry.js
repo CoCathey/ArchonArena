@@ -504,6 +504,18 @@ const REGISTRY = {
                 max: 1,
                 default: 0.5
             },
+            // ARCHON: the deep bot measures a decision by playing it out; the
+            // fast bot labels one by who eventually won. The second is far
+            // noisier and there is far more of it, so without this the only
+            // signal that can teach move ORDER is drowned by the volume of the
+            // signal that cannot. 1 restores the old behaviour.
+            trainingTargetWeight: {
+                type: 'number',
+                label: 'How much harder a searched decision pulls than a played one',
+                min: 1,
+                max: 50,
+                default: 8
+            },
             arenaMinGames: {
                 type: 'number',
                 // ARCHON (N25): a floor under the sequential test, not a sample
@@ -557,26 +569,37 @@ const REGISTRY = {
             // The deep planner: fewer, slower, annotated showcase games. A
             // deep game costs seconds-to-minutes of CPU where a fast one
             // costs half a second - these knobs are the leash.
+            // ARCHON: these are the LEARNING budget, not a showcase budget.
+            //
+            // Every analyzed decision is a row whose value was established by
+            // playing the move out, and those are the only rows that can teach
+            // move order - an outcome label says "this appeared in a game
+            // somebody won", which for a turn-3 play in a game thrown away on
+            // turn 20 points the wrong way. At the old defaults the fast bot
+            // produced roughly four thousand labelled decisions for every
+            // measured one, so the loop learned almost entirely from the
+            // noisier of the two. These raise the measured share by about
+            // thirteen times, for something like half an hour of CPU a day.
             deepGamesPerDay: {
                 type: 'number',
-                label: 'Deep showcase games per roster per day (0 = none)',
+                label: 'Deep searched games per roster per day (0 = none)',
                 min: 0,
                 max: 20,
-                default: 2
+                default: 8
             },
             deepMaxAnalyzedDecisions: {
                 type: 'number',
                 label: 'Decisions analyzed per deep game',
                 min: 2,
                 max: 40,
-                default: 10
+                default: 20
             },
             deepCandidates: {
                 type: 'number',
                 label: 'Candidate moves tried per analyzed decision',
                 min: 2,
                 max: 12,
-                default: 5
+                default: 8
             },
             deepSamples: {
                 type: 'number',

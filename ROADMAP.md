@@ -2310,6 +2310,24 @@ commit to it, and run the engine as a continuous soak test.
         exchange, against the best target the prompt allows. Because it all lives in
         `services/botplayer/decisions.js`, the lab's unmodelled games train on exactly what a
         lobby opponent plays. `test/server/services/botgames/botPlayQuality.spec.js`.
+-   [x] **The searched decision now outweighs the guessed one.** N25 made the deep bot's
+        rollouts into training targets and `trainModel` prefer them — but every row still
+        reached the gradient with the same force, and the fast bot outproduces the deep bot by
+        orders of magnitude: about one training decision in four thousand carried a number
+        anybody had measured. `trainingTargetWeight` (default 8) scales the gradient for a
+        measured decision — on the gradient, not the decay, and not the shrinkage counts — and
+        the deep budget rose with it (8 games/day × 20 decisions × 8 candidates, roughly
+        thirteen times the measured rows for about half an hour of CPU). The two only work
+        together, and the budget is guarded by a spec because it is exactly what gets trimmed
+        to reclaim CPU without noticing the trade. **(admin-config)**
+-   [x] **Button prompts are learned, not flipped for.** "Would you like to use this?",
+        "choose a house", which trigger goes first — nearly every optional ability in the game
+        — was answered by picking a button at random, and never recorded as a decision, so no
+        training could reach it. Buttons are decisions now: one weight per (prompt, answer)
+        pair plus one for the button text itself, so `btn:yes` carries what accepting an
+        optional ability is worth across prompts and an unfamiliar prompt beats a coin flip on
+        its first showing. With no model the bot presses Yes — an optional ability is shown to
+        the player it benefits, and concede and cancel never reach the branch.
 -   [x] **The bots play the race, not just the board.** Two facts a KeyForge player reads
         first and the bot ignored entirely. _Are they about to forge?_ Amber at or above the
         opponent's key cost is a key already unless it leaves first, so a steal or capture is

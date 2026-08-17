@@ -324,6 +324,22 @@ thing to destroy and a bad thing to sacrifice. Each distinct prompt also gets
 two weights of its own, which is what lets "destroy" and "heal" be learned
 apart when the board looks identical.
 
+**And it answered at random too.** Targets were the half of the interaction
+layer that got fixed; the other half is the button prompt — "would you like to
+use this?", "choose a house", which of two triggers resolves first. Nearly
+every optional ability in KeyForge arrives as one of these, and any prompt the
+policy had no fixed title for was answered by picking a button out of a hat.
+Worse than the odds: the choice was never recorded as a decision, so no amount
+of training could ever reach it.
+
+Buttons are decisions now, on the same footing as targets — one weight per
+(prompt, answer) pair, plus one for the button's own text so that `btn:yes`
+carries what accepting an optional ability is worth **across** prompts. That
+second weight is what makes an unfamiliar prompt better than a coin flip on its
+first showing rather than after the hundredth. With no model at all the bot
+presses Yes, because an optional ability is shown to the player it benefits and
+the ones where that reasoning fails (concede, cancel) never reach the branch.
+
 **The deep bot compared candidates under different futures.** The rollout seed
 mixed in the candidate index, so road A and road B were played out against
 different draws and a move could win the comparison for having been dealt a
@@ -345,6 +361,29 @@ recorded as training targets now — the taken road and the rejected ones, which
 are the only negative examples the loop ever gets — and `trainModel` prefers a
 measured target over any outcome-derived label. A minute of forking becomes
 knowledge that costs nothing to use again.
+
+**...and then drowned.** Preferring a measured target is not the same as
+weighting one. Every row reached the gradient with the same force, and the fast
+bot outproduces the deep bot by orders of magnitude: at the budgets this
+shipped with, roughly one training decision in four thousand carried a number
+anybody had measured. The loop was learning almost entirely from the label that
+cannot teach move order — "this appeared in a game somebody won", which for a
+good turn-3 play in a game thrown away on turn 20 points the wrong way.
+
+Two numbers fix that and they only work together. `trainingTargetWeight`
+(default 8) scales the gradient for a searched decision, so a minute of
+thinking outweighs a handful of noisy games rather than being averaged into
+them — it goes on the gradient and not on the weight decay, because L2 is a
+property of the weights and not of the evidence, and the shrinkage counts stay
+unweighted because one observation is still one observation. And the deep
+budget itself went up: 8 games a day, 20 analyzed decisions each, 8 candidates
+apiece, which is about thirteen times the measured rows for something like half
+an hour of CPU. `deepGamesPerDay` still accepts 0, because a small box has to
+be able to say no.
+
+The budget is guarded by a spec rather than by a comment
+(`registryTypes.spec.js`): these are exactly the numbers somebody trims to
+reclaim CPU without noticing what was traded away.
 
 Two supporting changes:
 

@@ -99,4 +99,53 @@ describe('labPolicy', function () {
             expect(chooseDecision(model, [], 0, () => 0.5)).toBe(-1);
         });
     });
+
+    /**
+     * ARCHON: a decision the deep bot MEASURED against one merely labelled
+     * by who won.
+     *
+     * The fast bot outproduces the deep bot by orders of magnitude, so if
+     * both push the weights equally hard the measured signal is drowned by
+     * the volume of the noisy one - and the measured signal is the only one
+     * that can teach move ORDER, because an outcome label cannot tell a good
+     * turn-3 play in a lost game from a bad one.
+     */
+    describe('a searched decision against a played one', function () {
+        // The same move, in one game where the search measured it as losing
+        // and one where the final score happened to call it winning.
+        const measured = () => ({
+            winnerSide: 'challenger-alpha',
+            decisions: [{ ...decision('reap'), target: 0 }]
+        });
+        const played = () => ({
+            winnerSide: 'challenger-alpha',
+            decisions: [decision('reap')]
+        });
+        const scoreAfter = (games, options) =>
+            scoreDecision(trainModel(emptyModel(), games, options), decision('reap'));
+
+        it('pulls harder than the same evidence from an outcome', function () {
+            const measuredOnly = scoreAfter([measured()], { epochs: 1 });
+            const playedOnly = scoreAfter([played()], { epochs: 1 });
+
+            // One says "this was worth nothing", the other "this was in a
+            // won game"; both from a blank model, so the distance each moved
+            // from 0.5 is exactly how hard it pulled.
+            expect(Math.abs(measuredOnly - 0.5)).toBeGreaterThan(Math.abs(playedOnly - 0.5));
+        });
+
+        it('outweighs several games of outcome labels saying otherwise', function () {
+            const games = [measured(), played(), played(), played(), played()];
+
+            expect(scoreAfter(games, { epochs: 1 })).toBeLessThan(0.5);
+        });
+
+        it('is one-for-one again at a weight of 1', function () {
+            const games = [measured(), played(), played(), played(), played()];
+
+            // The pre-change behaviour, kept reachable: four outcome labels
+            // against one measured target, and the outcomes win.
+            expect(scoreAfter(games, { epochs: 1, targetWeight: 1 })).toBeGreaterThan(0.5);
+        });
+    });
 });

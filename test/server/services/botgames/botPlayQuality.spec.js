@@ -708,6 +708,86 @@ describe('a bot and its prophecies', function () {
     });
 });
 
+/**
+ * ARCHON: the prompt a card raises.
+ *
+ * "Would you like to use this?", "choose a house", which of two triggers
+ * resolves first - nearly every optional ability in KeyForge arrives as a
+ * button prompt, and every one the policy had no fixed title for was
+ * answered by picking a button at random. It was the largest coin flip left
+ * in the bot, and worse, it was never recorded as a decision, so no amount
+ * of training could reach it.
+ */
+describe('a bot answering a prompt it has no fixed answer for', function () {
+    const asked = (seat, buttons) => ({
+        ...seat,
+        promptState: { menuTitle: 'Would you like to draw a card?', buttons }
+    });
+    const yesNo = [
+        { text: 'Yes', arg: 'yes', method: 'm' },
+        { text: 'No', arg: 'no', method: 'm' }
+    ];
+
+    it('takes the offer rather than flipping for it', function () {
+        // An optional ability is shown to the player it benefits, so yes is
+        // the better half of the coin - twenty times out of twenty.
+        const game = gameStub();
+        const policy = new BotPolicy();
+
+        for (let attempt = 0; attempt < 20; attempt++) {
+            policy.respond(game, asked(player(), yesNo));
+        }
+
+        expect(game.answers).toEqual(new Array(20).fill('yes'));
+    });
+
+    it('presses what the model rates highest once there is one', function () {
+        const model = emptyModel();
+
+        // A champion that has learned this particular prompt is a trap.
+        model.promptWeights = { 'would you like to draw a card|no': 6 };
+        model.promptCounts = { 'would you like to draw a card|no': 500 };
+
+        const game = gameStub();
+
+        new BotPolicy({ policy: model }).respond(game, asked(player(), yesNo));
+
+        expect(game.answers).toEqual(['no']);
+    });
+
+    it('generalizes from the button alone to a prompt it has never seen', function () {
+        // `btn:yes` is what one weight for "accepting an optional ability"
+        // looks like; it is what makes an unfamiliar prompt better than a
+        // coin flip on the very first showing.
+        const model = emptyModel();
+
+        model.weights['a:btn:no'] = 6;
+
+        const game = gameStub();
+
+        new BotPolicy({ policy: model }).respond(game, {
+            ...player(),
+            promptState: { menuTitle: 'Some card nobody has seen before', buttons: yesNo }
+        });
+
+        expect(game.answers).toEqual(['no']);
+    });
+
+    it('still never concedes or cancels while anything else is offered', function () {
+        const game = gameStub();
+
+        new BotPolicy().respond(
+            game,
+            asked(player(), [
+                { text: 'Concede', arg: 'concede', method: 'm' },
+                { text: 'Maybe', arg: 'maybe', method: 'm' }
+            ])
+        );
+
+        expect(game.answers).toEqual(['maybe']);
+    });
+});
+
 describe('a bot asked to allow manual mode', function () {
     it('says yes every time, not on a coin flip', function () {
         const game = gameStub();
