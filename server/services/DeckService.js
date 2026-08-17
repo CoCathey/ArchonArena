@@ -322,7 +322,7 @@ class DeckService {
      */
     async getRandomDeckIdForUser(
         userId,
-        { isAlliance, unchainedOnly = false, sasMin, sasMax } = {}
+        { isAlliance, unchainedOnly = false, sasMin, sasMax, house } = {}
     ) {
         const params = [userId];
         let where = 'WHERE d."UserId" = $1 ';
@@ -330,6 +330,20 @@ class DeckService {
         if (isAlliance !== undefined && isAlliance !== null) {
             params.push(isAlliance);
             where += `AND d."IsAlliance" = $${params.length} `;
+        }
+
+        // ARCHON (F9): "a deck this bot may play". Each practice bot belongs
+        // to a house and only ever plays decks containing it, so the house is
+        // a filter on the roll rather than something checked afterwards -
+        // rolling first and rejecting would loop on a collection where most
+        // decks are the wrong colour. Same EXISTS the deck list's `house`
+        // filter uses, so the dice and the list agree on what contains a
+        // house.
+        if (house) {
+            params.push(String(house).toLowerCase());
+            where +=
+                'AND EXISTS (SELECT 1 FROM "DeckHouses" dh JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
+                `WHERE dh."DeckId" = d."Id" AND h."Code" = $${params.length}) `;
         }
 
         // Playable only in the unchained format, and the only thing playable
@@ -388,6 +402,34 @@ class DeckService {
         }
 
         return rows && rows.length > 0 ? rows[0].Id : null;
+    }
+
+    /**
+     * ARCHON (F9): how many decks this account holds containing a house.
+     *
+     * Only the Bot Settings page asks - so an admin can see at a glance that
+     * the Ekwidon bot has nothing to play and that no amount of enabling it
+     * will change that. Same EXISTS as the roll, so the number and the roll
+     * cannot disagree.
+     */
+    async countDecksForUserWithHouse(userId, house) {
+        try {
+            const rows = await db.query(
+                'SELECT count(*)::int AS "Total" FROM "Decks" d ' +
+                    'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
+                    'WHERE d."UserId" = $1 AND d."IsAlliance" = false ' +
+                    `AND e."ExpansionId" <> ${UNCHAINED_EXPANSION_ID} ` +
+                    'AND EXISTS (SELECT 1 FROM "DeckHouses" dh JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
+                    'WHERE dh."DeckId" = d."Id" AND h."Code" = $2)',
+                [userId, String(house).toLowerCase()]
+            );
+
+            return (rows && rows[0] && rows[0].Total) || 0;
+        } catch (err) {
+            logger.error(`Failed to count ${house} decks for user ${userId}`, err);
+
+            return 0;
+        }
     }
 
     async deckExistsForUser(user, deckId) {

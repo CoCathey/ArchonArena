@@ -437,28 +437,28 @@ const REGISTRY = {
             }
         }
     },
-    // ARCHON (F9): the Helper Bot - a practice opponent that always hosts an
-    // open table in the lobby.
-    helperBot: {
-        title: 'Helper Bot',
+    // ARCHON (F9): the practice bots - one per house, always hosting an open
+    // table in the lobby.
+    //
+    // `page` moves a section off the general Site Settings screen and onto a
+    // screen of its own: these knobs belong next to the roster they govern
+    // (names, pictures, profiles, which bots play), and that roster is not
+    // registry-shaped. The section is still stored, validated and audited
+    // exactly like every other one - only where it is EDITED changes.
+    bots: {
+        title: 'Bots',
+        page: 'bots',
         description:
-            'A house bot that always hosts one open game in the lobby. Anyone can join, and the ' +
-            'game starts the moment they pick a deck; the bot plays a random deck from its own ' +
-            'collection (import decks into the bot account to curate its pool), or a random ' +
-            'standalone deck when it owns none. Practice games are never persisted or rated and ' +
-            'can never touch Amber, deck records or any statistic. Nobody can log into the bot ' +
-            'account.',
+            'Practice bots host an open game in the lobby around the clock. Anyone can join, and ' +
+            'the game starts the moment they pick a deck. Each bot belongs to a house and only ' +
+            'plays decks containing it; a table that gets joined is replaced by one hosted by a ' +
+            'different bot. Practice games are never persisted or rated and can never touch ' +
+            'Amber, deck records or any statistic. Nobody can log into a bot account.',
         fields: {
             enabled: {
                 type: 'boolean',
-                label: 'Host an open Helper Bot table',
+                label: 'Keep an open practice table in the lobby',
                 default: true
-            },
-            botUsername: {
-                type: 'text',
-                label: 'Bot account name (3-15 letters, numbers, - or _)',
-                maxLength: 15,
-                default: 'HelperBot'
             },
             maxConcurrentGames: {
                 type: 'number',

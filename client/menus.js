@@ -160,6 +160,7 @@ export const SidebarMenu = [
             { path: '/privacy', title: 'Privacy Policy' },
             { path: '/terms', title: 'Terms of Service' },
             { path: '/admin/settings', title: 'Site Settings', permission: 'isAdmin' },
+            { path: '/admin/bots', title: 'Bot Settings', permission: 'isAdmin' },
             { path: '/admin/bug-reports', title: 'Bug Reports', permission: 'isAdmin' },
             { path: '/news', title: 'News Admin', permission: 'canEditNews' },
             { path: '/users', title: 'User Admin', permission: 'canManageUsers' },

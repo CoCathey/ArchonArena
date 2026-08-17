@@ -35,6 +35,10 @@ class BotDriver {
      * @param {object} [options]
      * @param {number} [options.maxTurns] concede past this many rounds
      * @param {number} [options.maxInteractions] concede past this many inputs
+     * @param {number} [options.maxPumpMs] event-loop budget for one pump
+     * @param {function} [options.resume] continue a pump that ran out of budget
+     * @param {function} [options.schedule] injectable timer, for tests
+     * @param {function} [options.now] injectable clock, for tests
      * @param {function} [options.rng] injectable for reproducible tests
      */
     constructor(botNames, options = {}) {
@@ -45,10 +49,29 @@ class BotDriver {
         this.maxInteractions = Number.isFinite(options.maxInteractions)
             ? options.maxInteractions
             : 5000;
+        /**
+         * ARCHON (F9): the bot may never hold the node's event loop.
+         *
+         * Everything here is synchronous inside the engine, and the node is
+         * single-threaded and shared: every other game on it, and the ping
+         * the lobby uses to decide whether this node is alive, wait behind a
+         * pump. A node that stops answering for a minute is declared timed
+         * out, and the lobby then clears every game on it - so an expensive
+         * bot turn is not "the bot is slow", it is every player on the node
+         * losing their game.
+         *
+         * A pump therefore runs on a budget and, if it needs longer, hands
+         * the loop back and finishes on a later tick.
+         */
+        this.maxPumpMs = Number.isFinite(options.maxPumpMs) ? options.maxPumpMs : 1000;
+        this.resume = options.resume || null;
+        this.schedule = options.schedule || ((callback) => setTimeout(callback, 0));
+        this.now = options.now || (() => Date.now());
         this.policy = new BotPolicy({ rng: options.rng });
 
         this.interactions = 0;
         this.conceded = false;
+        this.resumeScheduled = false;
     }
 
     /**
@@ -65,10 +88,19 @@ class BotDriver {
      * @returns {boolean} whether any input was dispatched
      */
     pump(game) {
+        const deadline = this.now() + this.maxPumpMs;
         let acted = false;
         let idleContinues = 0;
 
         while (!game.winner) {
+            // Budget first: whatever is left to do is picked up by the
+            // continuation below rather than done at the node's expense.
+            if (this.now() >= deadline) {
+                this.scheduleResume(game);
+
+                return acted;
+            }
+
             let progressed = false;
 
             for (const name of this.botNames) {
@@ -112,6 +144,24 @@ class BotDriver {
         }
 
         return acted;
+    }
+
+    /**
+     * Finish this pump on a later tick, so the node can serve everybody else
+     * (and answer the lobby's ping) in between. One continuation at a time:
+     * the pump that resumes reschedules itself if it too runs out of budget.
+     */
+    scheduleResume(game) {
+        if (this.resumeScheduled || !this.resume || game.winner) {
+            return;
+        }
+
+        this.resumeScheduled = true;
+
+        this.schedule(() => {
+            this.resumeScheduled = false;
+            this.resume();
+        });
     }
 
     /**

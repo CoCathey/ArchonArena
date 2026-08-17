@@ -89,11 +89,27 @@ const botSeat = (name, deck, isBot = true) => ({
     deck
 });
 
+/**
+ * Wait for a bot game to finish. A pump hands the event loop back when its
+ * budget runs out and continues on a later tick, so a whole bot-vs-bot game
+ * arrives across several ticks rather than inside one call - which is the
+ * point: the node has to stay answerable while the bot thinks.
+ */
+const played = async (game, timeoutMs = 60000) => {
+    const deadline = Date.now() + timeoutMs;
+
+    while (!game.winner && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    return game.winner;
+};
+
 describe('game node bot driver', function () {
     const alphaDeck = buildDeck('alpha', ['brobnar', 'dis', 'logos']);
     const omegaDeck = buildDeck('omega', ['sanctum', 'shadows', 'untamed']);
 
-    it('plays a bot-vs-bot game to a legitimate win through onStartGame alone', function () {
+    it('plays a bot-vs-bot game to a legitimate win through onStartGame alone', async function () {
         const server = buildServer();
 
         server.onStartGame(
@@ -107,6 +123,8 @@ describe('game node bot driver', function () {
         );
 
         const game = server.games['bot-table'];
+
+        await played(game);
 
         expect(game.winner).toBeDefined();
         expect(['HelperBot', 'Sparring']).toContain(game.winner.name);
@@ -196,6 +214,52 @@ describe('game node bot driver', function () {
 
         expect(game.winner).toBeDefined();
         expect(game.winReason).toBe('concede');
+    }, 30000);
+
+    /**
+     * The node is single-threaded and shared. A bot that thinks for a minute
+     * inside one call is not "a slow bot": the lobby's ping goes unanswered,
+     * the node is declared timed out, and every game on it is cleared. So a
+     * pump hands the loop back on a budget and finishes later.
+     */
+    it('hands the event loop back rather than holding the node', function () {
+        const server = buildServer();
+
+        server.onStartGame(
+            buildPendingGame({
+                id: 'budgeted-table',
+                players: {
+                    HelperBot: botSeat('HelperBot', alphaDeck, false),
+                    Sparring: botSeat('Sparring', omegaDeck, false)
+                }
+            })
+        );
+
+        const game = server.games['budgeted-table'];
+        const scheduled = [];
+
+        // A budget of zero: every pump is out of time before it starts, so
+        // this pins the handover itself rather than a duration.
+        game.botDriver = new BotDriver(['HelperBot', 'Sparring'], {
+            maxPumpMs: 0,
+            schedule: (callback) => scheduled.push(callback),
+            resume: () => game.botDriver.pump(game)
+        });
+
+        expect(game.botDriver.pump(game)).toBe(false);
+        expect(game.winner).toBeUndefined();
+
+        // It asked to be continued - once, however many times it is pumped,
+        // so continuations cannot stack up.
+        expect(scheduled.length).toBe(1);
+
+        game.botDriver.pump(game);
+        expect(scheduled.length).toBe(1);
+
+        // And running the continuation asks for the next one, so the game
+        // still progresses - one tick at a time.
+        scheduled.pop()();
+        expect(scheduled.length).toBe(1);
     }, 30000);
 
     it('concedes rather than wedges when the interaction budget runs out', function () {

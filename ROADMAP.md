@@ -1582,13 +1582,19 @@ commit to it, and run the engine as a continuous soak test.
         `server/services/championschallenge/SimulatedGame.js`; the showcase reuses it. The
         policy now lives in `server/services/botplayer/BotPolicy.js`, shared with the Helper
         Bot.
--   [x] **The practice opponent: the Helper Bot** (design: `docs/design/helper-bot.md`). A
-        house bot that always hosts one open table in the lobby — join it, pick a deck, and
-        the game starts itself; the bot plays a random deck (its own collection first,
-        standalone decks as the zero-setup fallback) through the real engine on the real game
-        node, answering instantly, and opens a fresh table for the next player. Wedges end in
-        an honest concede, never a hang. **(admin-config)** `helperBot`: on/off, bot name,
-        concurrent-table cap, joiner grace period, spectators, turn cap.
+-   [x] **The practice opponents: thirteen bots, one per house** (design:
+        `docs/design/practice-bots.md`). The lobby always has an open table hosted by a bot
+        from the roster — join it, pick a deck, and the game starts itself. Each bot belongs
+        to a house and plays only decks containing it (its own collection first, standalone
+        decks as the zero-setup fallback), so the table that replaces a joined one is a
+        different character playing a different colour of deck. Games run on the real engine
+        on the real game node, answering instantly; wedges end in an honest concede, never a
+        hang, and a pump can never hold the node's event loop.
+-   [x] **Bot Settings** (`/admin/bots`, isAdmin): the roster with each bot's name, picture,
+        profile, on/off switch and deck count, plus the knobs that govern all of them. Bots
+        are ordinary accounts, so their pictures and profiles go through the same pipeline a
+        player's do — and are unenterable, house-keyed, and can never capture a real
+        account's name.
 -   [x] Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics
         aggregate — never persisted at all (the Champion’s Challenge doctrine, applied at
         the router), and Quick Join never matches into a bot table. Asserted by

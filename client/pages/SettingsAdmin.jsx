@@ -332,9 +332,14 @@ const SettingsAdmin = () => {
         }
     };
 
+    // ARCHON (F9): a section that names an admin screen of its own is edited
+    // there, not here - the bot knobs belong beside the roster they govern.
+    // Everything else lands on this page automatically, as it always has.
+    const sections = Object.entries(data.sections).filter(([, section]) => !section.page);
+
     return (
         <div className='mx-auto w-full max-w-3xl space-y-4'>
-            {Object.entries(data.sections).map(([sectionKey, section]) => (
+            {sections.map(([sectionKey, section]) => (
                 <Panel key={sectionKey} title={t(section.title)}>
                     <p className='mb-3 text-xs text-muted'>{t(section.description)}</p>
                     <div className='space-y-3'>

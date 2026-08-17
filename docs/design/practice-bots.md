@@ -1,0 +1,194 @@
+# The practice bots
+
+## Goal
+
+There is always one open game in the lobby that anyone can join and play,
+against a bot that picks a random deck. An empty lobby is the hardest problem
+a new platform has; this is the half of F9 that answers it for a _player_ (the
+other half, a watchable bot-vs-bot showcase, builds on the same pieces).
+
+## Thirteen characters, one per house
+
+A bot belongs to a house, is named for it, and only ever plays decks that
+contain that house. That is what makes the open table worth returning to: sit
+down against Snudge and you know you are getting Dis. When a table gets
+joined, the next one is opened by a different bot, so the lobby's practice
+seat is a rotating cast rather than a fixture.
+
+| House    | Bot            | House         | Bot            |
+| -------- | -------------- | ------------- | -------------- |
+| Brobnar  | BingleBangbang | Sanctum       | Bulwark        |
+| Dis      | Snudge         | Saurian       | Philophosaurus |
+| Ekwidon  | TalentScout    | Shadows       | BadPenny       |
+| Geistoid | Memette        | Skyborn       | RedBaron       |
+| Logos    | HelperBot      | Star Alliance | Explorover     |
+| Mars     | Tunk           | Unfathomable  | Bubbles        |
+| Untamed  | FuzzyGruen     |               |                |
+
+Those are only the names a fresh site starts with. Every bot's name, picture
+and profile is an admin's to change from **Bot Settings**; the house is not,
+because the house is what the bot's account is bound to and what decides the
+decks it may play.
+
+## What a player gets
+
+1. The game list always shows an open table - **"Play against Snudge! (Dis
+   practice)"** - hosted by a bot with its deck already picked.
+2. Join it, pick any of your decks, and the game starts itself - no waiting
+   for an owner to press Start (the owner is a bot; it has no mouse). The
+   Start button works too, and belongs to the player who joined.
+3. The bot plays a real game through the real engine: house calls, plays,
+   reaps, fights, and answers to every card prompt. It answers instantly.
+4. The moment your game starts, a different bot opens a fresh table for the
+   next player (up to an admin-configured number of concurrent games).
+5. Practice games are never persisted or rated - no Amber, no deck records,
+   no statistics, no replays.
+
+## Shape
+
+```
+server/services/botgames/roster.js           the thirteen houses and their default names
+server/services/botgames/BotService.js       accounts, admin edits, who hosts, which deck
+server/services/botplayer/BotPolicy.js       how a bot answers any prompt (shared)
+server/services/championschallenge/SimulatedGame.js  the lab's driver, delegating to BotPolicy
+server/gamenode/botdriver.js                 the bot's seat at a real table (pump per event)
+server/gamenode/gameserver.js                pumps the driver at start, per input, per sweep
+server/lobby.js  runBotTableSweep            hosts/recycles the table, auto-starts on deck pick
+server/gamerouter.js                         skips create/update/replay/rating for bot games
+server/api/bots.js                           the Bot Settings API (isAdmin)
+client/pages/BotAdmin.jsx                    the Bot Settings screen, at /admin/bots
+server/db/schema/migrations/74 - Bots.sql    house -> account binding, per-bot on/off
+server/services/settings/registry.js         the `bots` section (edited on the bot screen)
+```
+
+Six properties are worth keeping if this is ever extended.
+
+**One policy, every bot.** The prompt-answering policy was extracted from the
+Champion’s Challenge SimulatedGame into `BotPolicy`, and the lab and all
+thirteen practice bots drive it. It answers from the buttons and selectable cards the
+prompt itself publishes, so it can answer anything the ~2,700 card
+implementations raise, and it plays through `menuButton`/`cardClicked` - the
+same calls a browser click becomes - so it cannot cheat and upstream card
+fixes apply to it automatically. A strength upgrade lands in the lab and at
+the table at once.
+
+**Termination has a human witness now.** The lab could abandon a wedged game
+and record nothing; at a real table somebody is sitting across from the bot.
+So the node driver's caps end in an honest **concede** instead: past the
+interaction budget or the turn cap the bot says so in chat, concedes, and
+the ordinary win flow frees the table. The pump also never dispatches an
+input once `game.winner` is set, so the bot can never press anything on the
+post-game menu. Anything it cannot answer is left standing, where force-pass
+(`Game.checkInactivity`) remains the human's remedy.
+
+**Bot games are invisible to the rest of the platform.** The Champion’s Challenge
+doctrine, applied at the router: `startGame` never creates the row, GAMEWIN
+neither persists nor replays nor rates, and `persistFinishedGame` (REMATCH /
+PLAYERLEFT / next-game paths) checks the same flag. The flag rides the save
+state from the node, so a lobby restart cannot lose it. Every official
+statistic filters only on FinishedAt/WinnerId; one bot row in "Games" would
+be a real result in thirty queries at once. Quick Join also never matches
+into a bot table - a plain game means a person - and the bot's table is
+exempt from the stale-pending-game cleanup, because waiting is its job.
+
+**The account is real, provably ours, and unenterable.** The bot is an
+ordinary row in "Users" - that is what lets every existing path treat it as
+just another player. Its stored password is deliberately not a bcrypt hash
+(every login comparison fails), and it is recognised by a sentinel email no
+human can register, minted from the bot's HOUSE rather than its name -
+because the name is an admin's to change and would stop proving anything the
+moment they changed it. A name already held by any other account means that
+bot simply does not play, rather than the site seating a bot in somebody's
+name; the other twelve carry on.
+
+Because the account is real, editing a bot's picture and profile is editing a
+user: the Bot Settings screen writes the same `Settings_Avatar`, `Bio`,
+`Country` and `State` a person edits, through the same picture pipeline
+(`services/images/userImages.js`), so a bot's face renders everywhere a
+player's does with no second code path. The bot's lobby seat id is `'TBA'` - the platform's existing "no
+socket" sentinel - so the node's `isEmpty()` counts the bot as absent and a
+table the human abandons closes itself; `checkAbandonment` likewise never
+awards a bot an abandonment win.
+
+**The sweep repairs, it does not remember.** Every 15 seconds the lobby
+re-reads the admin config (the off switch works without a restart), ensures
+the roster, and re-establishes the invariant: one open table while under the
+concurrency cap, hosted by a bot chosen at random from those that can
+actually play - enabled, holding a deck of their house, and not already
+sitting somewhere else. A table whose joiner sat down and never picked a deck
+is recycled after a grace period; a table lost to a
+node death or lobby restart is simply re-hosted. Rematch is the one
+deliberate detour: the bot holds no socket, so the ordinary rematch flow
+returns the table with both decks still held - re-picking a deck starts the
+next game - and the recycle clock is refreshed so the sweep does not sweep
+it out from under someone who just asked to keep playing.
+
+**A ready table cannot sit idle, and is never a dead end.** Starting is
+reachable three ways, because the bot owning the table means the Start
+button would otherwise belong to a player with no hands:
+
+1. **Deck selection starts it** (`onSelectDeck`) — what a player actually
+   experiences, immediate. The deck is seated before the parts of selection
+   that can fail late (the SAS attach, a state push), so the failure path
+   asks to start too rather than stranding a table that is genuinely ready.
+2. **The sweep heals it** (≤15s). Readiness is re-derived every tick from
+   the lobby's own state instead of being trusted to a single event, so a
+   game node that was briefly unavailable, a deck applied down a path that
+   does not reach the hook, or a lost callback costs a few seconds rather
+   than the table.
+3. **The joiner can press Start** (`onStartGame`, and `canClickStart` in the
+   client). Ownership cannot be the gate at a bot table, so the seated
+   player holds the button; a joiner with no deck is told to pick one rather
+   than clicking into silence.
+
+`startBotGameIfReady` is the one launcher behind all three: it
+re-checks everything and reports whether it started, so calling it from
+anywhere, repeatedly, is safe.
+
+**A bot never holds the node.** The engine is synchronous and the game node
+is single-threaded and shared, so a bot thinking inside one call is not "a
+slow bot": every other game on that node waits behind it, including the ping
+the lobby uses to decide the node is alive. A node that goes quiet for a
+minute is declared timed out and the lobby then clears **every game on it**.
+So a pump runs on a wall-clock budget and, if it needs longer, hands the loop
+back and finishes on a later tick.
+
+## The deck
+
+"Picks a random deck" means: a random deck from that bot's own collection
+**containing its house**, chosen by the same query the Lucky Dice use with a
+house filter; when it owns none, a random standalone deck containing its
+house (the curated set shipped in `master-vault-data/standalone-decks.json`,
+seeded by `server/scripts/importstandalonedecks.js`). A new deck is rolled
+for every table.
+
+An admin curates a bot's pool by importing decks into that bot's account -
+Bot Settings shows how many each one holds, and says so plainly when a bot
+has none, because a bot with nothing of its house cannot host however enabled
+it is. The shipped standalone decks cover nine houses, so Ekwidon, Geistoid,
+Skyborn and Unfathomable need decks imported before those four can play.
+
+## Admin config
+
+**Bot Settings** (`/admin/bots`, isAdmin) holds both halves: the roster - each
+bot's name, picture, profile, on/off switch and deck count - and the knobs
+that govern all of them (keep a table open at all, most concurrent games, the
+joiner grace period, spectators, the concede cap). The knobs are an ordinary
+settings section (`bots`) stored, validated and audited like every other; the
+registry's `page` field is what moves it off the general Site Settings screen
+and onto this one, next to the roster it governs. All of it is read per sweep
+tick, so nothing needs a restart.
+
+## Future
+
+-   The F9 showcase: a supervisor keeping a bot-vs-bot table spectatable is
+    the remaining half; the driver already plays both seats (the spec plays
+    full bot-vs-bot games through the real game server).
+-   A first-class rematch that reseats the human at a fresh bot table with
+    one click.
+-   Per-bot personality: a policy weighting per house, so Brobnar's bot
+    fights and Logos' bot draws - the roster already gives each one an
+    identity to hang that on.
+-   Policy upgrades (fight/trade heuristics, key timing) - shared with the
+    Champion’s Challenge, so the lab's ratings sharpen with the same change.
+-   The tutorial's sparring partner (N11).

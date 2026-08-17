@@ -633,7 +633,18 @@ class GameServer {
             .map((player) => player.name);
 
         if (botNames.length > 0) {
-            game.botDriver = new BotDriver(botNames, { maxTurns: pendingGame.botMaxTurns });
+            game.botDriver = new BotDriver(botNames, {
+                maxTurns: pendingGame.botMaxTurns,
+                // A pump that runs out of its event-loop budget finishes here,
+                // on a later tick, with the board pushed out as it goes. The
+                // node stays responsive to every other game on it - and to the
+                // lobby's ping, which is what decides this node is alive.
+                resume: () =>
+                    this.runAndCatchErrors(game, () => {
+                        game.botDriver.pump(game);
+                        this.sendGameState(game);
+                    })
+            });
             game.addAlert('info', 'Good luck, have fun!');
             this.runAndCatchErrors(game, () => {
                 game.botDriver.pump(game);

@@ -64,6 +64,7 @@ import Register from './pages/Register';
 import ResetPassword from './pages/ResetPassword';
 import Security from './pages/Security.jsx';
 import SettingsAdmin from './pages/SettingsAdmin';
+import BotAdmin from './pages/BotAdmin';
 import Unauthorised from './pages/Unauthorised';
 import UserAdmin from './pages/UserAdmin';
 import GameLobby from './Components/Games/GameLobby';
@@ -149,6 +150,8 @@ const AppRoutes = ({ currentGame, user }) => {
                 path='/admin/settings'
                 element={requirePermission('isAdmin', <SettingsAdmin />)}
             />
+            {/* ARCHON (F9): the practice bot roster (admin only) */}
+            <Route path='/admin/bots' element={requirePermission('isAdmin', <BotAdmin />)} />
             {/* ARCHON (N8): operations dashboard (admin only) */}
             <Route
                 path='/admin/analytics'

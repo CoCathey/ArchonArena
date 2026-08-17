@@ -13,6 +13,8 @@ const championsChallenge = require('./championschallenge');
 const ratings = require('./ratings');
 // ARCHON: runtime admin settings
 const adminSettings = require('./admin-settings');
+// ARCHON (F9): the practice bot roster - names, pictures, profiles
+const bots = require('./bots');
 // ARCHON: native tournament engine
 const tournaments = require('./tournaments');
 // ARCHON: community (friends, members, clubs)
@@ -73,6 +75,8 @@ module.exports.init = function (server, options) {
     oidc.init(server);
     // ARCHON: runtime admin settings
     adminSettings.init(server);
+    // ARCHON (F9): the practice bots' own admin screen
+    bots.init(server);
     // ARCHON: native tournament engine
     tournaments.init(server);
     // ARCHON: beta bug reports

@@ -23,8 +23,8 @@ const TournamentService = require('./services/tournament/TournamentService');
 const tournamentEvents = require('./services/tournament/tournamentEvents');
 // ARCHON: Quick Match matchmaking queue (Amber-based pairing)
 const MatchmakingService = require('./services/matchmaking/MatchmakingService');
-// ARCHON (F9): the Helper Bot - a practice opponent that always hosts a table
-const HelperBotService = require('./services/botgames/HelperBotService');
+// ARCHON (F9): the practice bots - one per house, always hosting a table
+const BotService = require('./services/botgames/BotService');
 const { UNCHAINED_EXPANSION_ID } = require('./services/DeckService');
 const { filterText } = require('./services/moderation/contentFilter');
 const RatingService = require('./services/rating/RatingService');
@@ -211,21 +211,23 @@ class Lobby {
             this.championsChallengeSweep.unref();
         }
 
-        // ARCHON (F9): the Helper Bot's open table. The sweep keeps exactly
+        // ARCHON (F9): the practice bots' open table. The sweep keeps exactly
         // one unstarted bot game waiting in the lobby (while the concurrency
-        // cap allows), recycles a table whose joiner wandered off, and takes
-        // the table down when the admin switches the bot off - the switch is
+        // cap allows), hosted by a bot chosen at random from the roster, so
+        // the next person to arrive meets a different character playing a
+        // different house. It also recycles a table whose joiner wandered
+        // off, and takes the table down when an admin switches the bots off -
         // read on every tick, so it works without a restart.
-        this.helperBotService =
-            options.helperBotService ||
-            new HelperBotService({
+        this.botService =
+            options.botService ||
+            new BotService({
                 userService: this.userService,
                 deckService: this.deckService
             });
-        this.lastHelperBotDeckWarnMs = 0;
-        this.helperBotSweep = setInterval(() => this.runHelperBotSweep(), 15 * 1000);
-        if (this.helperBotSweep && this.helperBotSweep.unref) {
-            this.helperBotSweep.unref();
+        this.lastBotDeckWarnMs = 0;
+        this.botTableSweep = setInterval(() => this.runBotTableSweep(), 15 * 1000);
+        if (this.botTableSweep && this.botTableSweep.unref) {
+            this.botTableSweep.unref();
         }
 
         this.userService.on('onBlocklistChanged', this.onBlocklistChanged.bind(this));
@@ -709,39 +711,37 @@ class Lobby {
     }
 
     /**
-     * ARCHON (F9): keep the Helper Bot's table open.
+     * ARCHON (F9): keep a practice table open.
      *
-     * The invariant is simple: while the bot is enabled and under its
+     * The invariant is simple: while the bots are on and under the
      * concurrency cap, exactly one unstarted bot game with a free seat is
-     * waiting in the lobby. Everything else here is repair - re-opening a
-     * table whose joiner never picked a deck, clearing tables hosted under a
-     * previous bot name, and taking the table down when the bot is disabled.
-     * The sweep recreates rather than preserves, so any state it loses (a
-     * restart, an admin force-close, a node death) heals on the next tick.
+     * waiting in the lobby - hosted by a bot picked at random from the
+     * roster, so the table that replaces a joined one is a different
+     * character playing a different house.
+     *
+     * Everything else here is repair: starting a table whose seats are both
+     * decked, re-opening one whose joiner never picked a deck, and taking
+     * them all down when an admin switches the bots off. The sweep recreates
+     * rather than preserves, so any state it loses (a restart, an admin
+     * force-close, a node death) heals on the next tick.
      */
-    async runHelperBotSweep() {
-        if (!this.helperBotService || this.helperBotSweepRunning) {
+    async runBotTableSweep() {
+        if (!this.botService || this.botTableSweepRunning) {
             return;
         }
 
-        this.helperBotSweepRunning = true;
+        this.botTableSweepRunning = true;
 
         try {
-            const config = this.helperBotService.getConfig();
+            const config = this.botService.getConfig();
             const pendingBotGames = () =>
                 Object.values(this.games).filter((game) => game.botGame && !game.started);
 
             if (!config.enabled) {
                 for (const game of pendingBotGames()) {
-                    this.removeHelperBotGame(game);
+                    this.removeBotTable(game);
                 }
 
-                return;
-            }
-
-            const botUser = await this.helperBotService.ensureBotUser();
-
-            if (!botUser) {
                 return;
             }
 
@@ -752,18 +752,8 @@ class Lobby {
                     (player) => !player.isBot
                 );
 
-                // A table hosted under a previous bot name is nobody's now -
-                // but never one somebody is sitting at. Deleting a table out
-                // from under a player is worse than leaving a stray one up.
-                if (game.owner.username !== botUser.username) {
-                    if (!humanSeated) {
-                        this.removeHelperBotGame(game);
-                        continue;
-                    }
-                }
-
                 if (!humanSeated) {
-                    game.helperBotHumanSince = undefined;
+                    game.botTableHumanSince = undefined;
                     continue;
                 }
 
@@ -785,21 +775,21 @@ class Lobby {
                  * state rather than trusted to an event. Costs one predicate
                  * per table and removes the whole class of failure.
                  */
-                if (this.startHelperBotGameIfReady(game)) {
+                if (this.startBotGameIfReady(game)) {
                     continue;
                 }
 
                 // A human who is still choosing needs a clock, whichever path
                 // seated them.
-                if (!game.helperBotHumanSince) {
-                    game.helperBotHumanSince = Date.now();
+                if (!game.botTableHumanSince) {
+                    game.botTableHumanSince = Date.now();
                 }
 
-                if (Date.now() - game.helperBotHumanSince > recycleMs) {
+                if (Date.now() - game.botTableHumanSince > recycleMs) {
                     // Somebody sat down and never picked a deck. Free the
                     // table for the next player; the joiner just returns to
                     // the lobby.
-                    this.removeHelperBotGame(game);
+                    this.removeBotTable(game);
                 }
             }
 
@@ -812,53 +802,83 @@ class Lobby {
 
             if (open.length === 0) {
                 if (botGames.length < Math.max(1, Number(config.maxConcurrentGames) || 1)) {
-                    await this.createHelperBotGame(botUser, config);
+                    await this.createBotTable(config);
                 }
             } else {
                 // One open table is the promise; a second is clutter.
                 for (const extra of open.slice(1)) {
-                    this.removeHelperBotGame(extra);
+                    this.removeBotTable(extra);
                 }
             }
         } catch (err) {
-            logger.error('Helper Bot sweep failed', err);
+            logger.error('Bot table sweep failed', err);
         } finally {
-            this.helperBotSweepRunning = false;
+            this.botTableSweepRunning = false;
         }
     }
 
     /**
-     * Host one open Helper Bot table: the bot seated as owner, its random
-     * deck already picked, ready for anyone to join. The deck is applied
-     * before the game is published so the lobby never lists a bot table that
-     * cannot start.
+     * Everyone the lobby currently has seated, bots included.
+     *
+     * The roster picks the next host from whoever is NOT in here: an account
+     * in two games at once is one seat pretending to be two, and meeting a
+     * different character each time is the whole point of thirteen of them.
      */
-    async createHelperBotGame(botUser, config) {
-        const selection = await this.helperBotService.pickDeckSelection(botUser);
+    seatedUsernames() {
+        const seated = [];
 
-        if (!selection) {
+        for (const game of Object.values(this.games)) {
+            for (const player of Object.values(game.getPlayers())) {
+                seated.push(player.name);
+            }
+        }
+
+        return seated;
+    }
+
+    /**
+     * Host one open bot table: a bot chosen at random from the roster, seated
+     * as owner with a deck of its own house already picked, ready for anyone
+     * to join.
+     *
+     * The host and its deck are chosen together (`pickHost`), because a bot
+     * with nothing to play cannot host: the roster hands back the first bot
+     * that has a deck rather than opening a table that could never start.
+     * The deck is applied before the game is published, so the lobby never
+     * lists a bot table that is not ready for a joiner.
+     */
+    async createBotTable(config) {
+        const host = await this.botService.pickHost(this.seatedUsernames());
+
+        if (!host) {
             // Once an hour, not once a tick: this repeats until an admin
-            // imports decks for the bot or seeds the standalone decks.
-            if (Date.now() - this.lastHelperBotDeckWarnMs > 60 * 60 * 1000) {
-                this.lastHelperBotDeckWarnMs = Date.now();
+            // gives the bots decks, and every tick would bury the log.
+            if (Date.now() - this.lastBotDeckWarnMs > 60 * 60 * 1000) {
+                this.lastBotDeckWarnMs = Date.now();
                 logger.warn(
-                    'Helper Bot has no decks to play - import decks into the bot account ' +
-                        'or seed standalone decks (npm scripts: importstandalonedecks)'
+                    'No practice bot can host a table - none of the enabled bots has a deck of ' +
+                        'its house. Import decks into the bot accounts (Bot Settings lists what ' +
+                        'each one holds), or seed the standalone decks: ' +
+                        'node server/scripts/importstandalonedecks.js'
                 );
             }
 
             return;
         }
 
+        const { bot, deck } = host;
+        const botUser = bot.user;
+
         const game = new PendingGame(botUser, {
             allowSpectators: !!config.allowSpectators,
             gameFormat: 'normal',
             muteSpectators: false,
-            name: `Play against ${botUser.username}! (practice)`,
+            name: `Play against ${botUser.username}! (${bot.label} practice)`,
             showHand: false
         });
 
         game.botGame = true;
+        game.botHouse = bot.house;
         game.botMaxTurns = config.maxTurns;
         // 'TBA' is the platform's existing "no socket" id: the lobby and the
         // node both already treat such a seat as connectionless, so the game
@@ -867,31 +887,27 @@ class Lobby {
         game.players[botUser.username].isBot = true;
 
         try {
-            await this.applyDeckSelection(
-                game,
-                botUser.username,
-                selection.deckId,
-                selection.isStandalone
-            );
+            await this.applyDeckSelection(game, botUser.username, deck.deckId, deck.isStandalone);
         } catch (err) {
-            logger.error('Helper Bot could not select its deck', err);
+            logger.error(`The ${bot.label} bot could not select its deck`, err);
 
             return;
         }
 
         game.addMessage(
-            '{0} hosts this table. Join, pick a deck, and the game starts by itself - practice games are never rated.',
-            botUser.username
+            '{0} hosts this table and plays {1} decks. Join, pick a deck, and the game starts by itself - practice games are never rated.',
+            botUser.username,
+            bot.label
         );
 
         this.games[game.id] = game;
         this.broadcastGameMessage('newgame', game);
 
-        logger.info(`Helper Bot opened table ${game.id}`);
+        logger.info(`${botUser.username} (${bot.label}) opened practice table ${game.id}`);
     }
 
     /** Retire an unstarted bot table, freeing anyone seated at it. */
-    removeHelperBotGame(game) {
+    removeBotTable(game) {
         if (!game || game.started) {
             return;
         }
@@ -911,7 +927,7 @@ class Lobby {
      *
      * @returns {boolean} whether the game was started by this call
      */
-    startHelperBotGameIfReady(game) {
+    startBotGameIfReady(game) {
         if (!game || game.started || !game.botGame) {
             return false;
         }
@@ -925,7 +941,7 @@ class Lobby {
         const gameNode = this.router.startGame(game);
 
         if (!gameNode) {
-            logger.error(`No game nodes available for Helper Bot game ${game.id}`);
+            logger.error(`No game nodes available for practice game ${game.id}`);
 
             // The joiner is sitting at a table that visibly did not start -
             // say why instead of leaving the silence to them.
@@ -945,7 +961,7 @@ class Lobby {
         game.started = true;
 
         logger.info(
-            `Helper Bot game ${game.id} started against ${players
+            `Practice game ${game.id} started against ${players
                 .filter((player) => !player.isBot)
                 .map((player) => player.name)
                 .join(', ')}`
@@ -1773,7 +1789,7 @@ class Lobby {
         // ARCHON (F9): the clock the sweep recycles an idle joiner on. The
         // game itself starts from onSelectDeck, the moment they hold a deck.
         if (game.botGame) {
-            game.helperBotHumanSince = Date.now();
+            game.botTableHumanSince = Date.now();
         }
 
         // ARCHON: joining your tournament table auto-selects your
@@ -1804,7 +1820,7 @@ class Lobby {
             return;
         }
 
-        // ARCHON (F9): the Helper Bot owns its table but has no hands to
+        // ARCHON (F9): a practice bot owns its table but has no hands to
         // press Start with, so ownership cannot be what gates starting one -
         // the player who joined it may. Selecting a deck normally starts the
         // table before anybody reaches for the button; this is what makes the
@@ -1822,7 +1838,7 @@ class Lobby {
                 return;
             }
 
-            this.startHelperBotGameIfReady(game);
+            this.startBotGameIfReady(game);
 
             return;
         }
@@ -2259,7 +2275,7 @@ class Lobby {
                 // ARCHON (F9): a bot table launches as soon as its human
                 // holds a deck - the bot picked its own at hosting time.
                 if (game.botGame) {
-                    this.startHelperBotGameIfReady(game);
+                    this.startBotGameIfReady(game);
                 }
             })
             .catch((err) => {
@@ -2280,7 +2296,7 @@ class Lobby {
                 // here. Ask anyway - it refuses unless everything is really
                 // in place, and the alternative is a table nobody can start.
                 if (game.botGame) {
-                    this.startHelperBotGameIfReady(game);
+                    this.startBotGameIfReady(game);
                 }
 
                 return;
@@ -3187,7 +3203,7 @@ class Lobby {
         // game. Refresh the recycle clock so the sweep does not sweep the
         // table out from under the player who just asked to keep playing.
         if (game.botGame) {
-            game.helperBotHumanSince = Date.now();
+            game.botTableHumanSince = Date.now();
         }
 
         const seating = this.rematchSeating(game);
@@ -3312,7 +3328,7 @@ class Lobby {
         // ARCHON (F9): same as onGameRematch - the refusal returns the table,
         // and the clock must not immediately recycle it.
         if (game.botGame) {
-            game.helperBotHumanSince = Date.now();
+            game.botTableHumanSince = Date.now();
         }
 
         // Nobody needs a deck in hand here - the whole point is that everyone

@@ -900,6 +900,18 @@ export const api = createApi({
                 method: 'DELETE'
             })
         }),
+        // ARCHON (F9): the practice bot roster - names, pictures, profiles.
+        // Not a settings section: thirteen accounts with faces.
+        getAdminBots: builder.query({
+            query: () => '/admin/bots'
+        }),
+        saveAdminBot: builder.mutation({
+            query: ({ house, ...changes }) => ({
+                url: `/admin/bots/${house}`,
+                method: 'PUT',
+                body: changes
+            })
+        }),
         getCards: builder.query({
             query: () => '/cards',
             providesTags: [{ type: TAG_TYPES.CARDS, id: 'LIST' }]
@@ -1293,6 +1305,8 @@ export const {
     useGetDeckStatsQuery,
     useGetPlayerProfileQuery,
     useGetAdminSettingsQuery,
+    useGetAdminBotsQuery,
+    useSaveAdminBotMutation,
     useSaveAdminSettingsMutation,
     useResetAdminSettingsMutation,
     useListEventsQuery,
