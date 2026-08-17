@@ -4,7 +4,6 @@ import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
 import About from './pages/About';
 import Activation from './pages/Activation';
 import AllianceBuilderPage from './pages/AllianceBuilder';
-import BanlistAdmin from './pages/BanlistAdmin';
 import BlockList from './pages/BlockList';
 import Decks from './pages/Decks';
 import ForgotPassword from './pages/ForgotPassword';
@@ -100,6 +99,21 @@ const AppRoutes = ({ currentGame, user }) => {
         return element;
     };
 
+    /**
+     * ARCHON: a page that holds sections belonging to different permissions.
+     * User Admin carries the account editor and the ban list, and gating the
+     * route on the higher of the two would lock a ban list manager out of the
+     * only screen their permission now leads to. The page itself decides which
+     * sections to render.
+     */
+    const requireAnyPermission = (permissions, element) => {
+        if (!user || !permissions.some((permission) => user.permissions?.[permission])) {
+            return <Unauthorised />;
+        }
+
+        return element;
+    };
+
     return (
         <Routes>
             <Route path='/' element={<Lobby />} />
@@ -129,17 +143,24 @@ const AppRoutes = ({ currentGame, user }) => {
                 element={<ResetPassword id={getParam('id')} token={getParam('token')} />}
             />
             <Route path='/security' element={<Security />} />
-            <Route path='/users' element={requirePermission('canManageUsers', <UserAdmin />)} />
+            <Route
+                path='/users'
+                element={requireAnyPermission(
+                    ['canManageUsers', 'canManageBanlist'],
+                    <UserAdmin />
+                )}
+            />
             <Route path='/nodes' element={requirePermission('canManageNodes', <NodesAdmin />)} />
             <Route path='/privacy' element={<Privacy />} />
             <Route path='/terms' element={<Terms />} />
-            <Route
-                path='/banlist'
-                element={requirePermission(
-                    'canManageBanlist',
-                    <BanlistAdmin permission='canManageBanlist' />
-                )}
-            />
+            {/* ARCHON: the ban list is a section of User Admin now. This path
+                is linked from nowhere but is the kind of URL an admin has
+                bookmarked, and a dead link is a worse outcome than a redirect
+                nobody notices. */}
+            <Route path='/banlist' element={<Navigate to='/users' replace />} />
+            {/* ARCHON: News and Motd are unlinked from every menu - neither
+                feature is in use here. The routes stay so that re-listing them
+                in menus.js is the whole of turning either back on. */}
             <Route path='/admin/motd' element={requirePermission('canManageMotd', <MotdAdmin />)} />
             <Route
                 path='/admin/bug-reports'

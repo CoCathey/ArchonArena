@@ -92,7 +92,10 @@ const BanlistAdmin = () => {
     }, [addState, currentRequest, deleteState, isLoading]);
 
     if (isLoading) {
-        return 'Loading banlist, please wait...';
+        // A section of User Admin now, so this renders inside that page rather
+        // than as the whole of one - a bare string would land as loose text
+        // under the account panels.
+        return <div className='p-3 text-sm text-muted'>Loading banlist, please wait...</div>;
     }
 
     const columns = [
