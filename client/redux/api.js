@@ -391,6 +391,13 @@ export const api = createApi({
         getChampionsChallengeHealth: builder.query({
             query: () => '/champions-challenge/health'
         }),
+        // ARCHON (N29): start the Master Vault crawl by hand. The Gauntlet's
+        // field is drawn from the catalog and the crawl ships off, so without
+        // this an operator who turns the setting on has to wait for the next
+        // scheduled run to learn whether anything happened.
+        crawlDeckCatalog: builder.mutation({
+            query: () => ({ url: '/champions-challenge/catalog/crawl', method: 'POST' })
+        }),
         // ARCHON (N24): the Gauntlet - play the field, and which field.
         saveChampionsChallengeGauntlet: builder.mutation({
             query: (settings) => ({
@@ -1307,6 +1314,7 @@ export const {
     useEnrollRandomChampionsChallengeDeckMutation,
     useSaveChampionsChallengeGauntletMutation,
     useGetChampionsChallengeHealthQuery,
+    useCrawlDeckCatalogMutation,
     useWithdrawChampionsChallengeDeckMutation,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,

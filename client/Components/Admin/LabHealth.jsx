@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import moment from 'moment';
 
 import Panel from '../Site/Panel';
-import { useGetChampionsChallengeHealthQuery } from '../../redux/api';
+import { useCrawlDeckCatalogMutation, useGetChampionsChallengeHealthQuery } from '../../redux/api';
 
 /**
  * ARCHON (N26): the Champion's Challenge lab, as an operator sees it.
@@ -52,6 +52,8 @@ const LabHealth = () => {
     const { data, isFetching, isError } = useGetChampionsChallengeHealthQuery(undefined, {
         pollingInterval: 30000
     });
+    const [crawl, { isLoading: crawling }] = useCrawlDeckCatalogMutation();
+    const [crawlMessage, setCrawlMessage] = useState(null);
     const health = data?.health;
 
     if (isError) {
@@ -272,15 +274,92 @@ const LabHealth = () => {
                         </div>
                     )}
 
-                    {health.gauntlet.enabled && health.gauntlet.hydrated === 0 && (
-                        <p className='m-0 pt-2 text-[11px] text-amber-300'>
-                            {t(
-                                'Nothing has been fetched yet. The pool is drawn from the Master ' +
-                                    'Vault deck catalog, and the catalog crawl ships off by ' +
-                                    'default — turn on catalog.enabled and the pool starts filling ' +
-                                    'a few decks per sweep.'
-                            )}
+                    {/* ARCHON (N29): the crawl the pool is drawn from. On a
+                        default install this is the whole reason the Gauntlet has
+                        no opponents, and nothing used to report it. */}
+                    <Row
+                        label={t('Master Vault crawl')}
+                        tone={health.catalog?.enabled ? 'good' : 'bad'}
+                        value={health.catalog?.enabled ? t('on') : t('off')}
+                        hint={
+                            health.catalog?.enabled
+                                ? health.catalog.caughtUp
+                                    ? t('caught up')
+                                    : t('page {{page}}', { page: health.catalog.page })
+                                : t('catalog.enabled in Site Settings')
+                        }
+                    />
+                    <Row
+                        label={t('Decks indexed')}
+                        tone={health.catalog?.indexed > 0 ? 'good' : 'bad'}
+                        value={(health.catalog?.indexed || 0).toLocaleString()}
+                        hint={
+                            health.catalog?.lastRunAt
+                                ? t('last run {{when}}', { when: when(health.catalog.lastRunAt) })
+                                : t('never run')
+                        }
+                    />
+                    {health.catalog?.pausedUntil && (
+                        <Row
+                            label={t('Crawl paused')}
+                            tone='bad'
+                            value={when(health.catalog.pausedUntil)}
+                            hint={t('{{failures}} failures', {
+                                failures: health.catalog.failures
+                            })}
+                        />
+                    )}
+                    {health.catalog?.lastError && (
+                        <p className='m-0 pt-1 text-[11px] text-red-300'>
+                            {health.catalog.lastError}
                         </p>
+                    )}
+
+                    {health.catalog?.indexed === 0 && (
+                        <div className='pt-2'>
+                            <p className='m-0 text-[11px] text-amber-300'>
+                                {health.catalog.enabled
+                                    ? t(
+                                          'The crawl is on but has indexed nothing yet. It walks ' +
+                                              'Master Vault a few pages at a time; start a pass ' +
+                                              'now to see whether it reaches them.'
+                                      )
+                                    : t(
+                                          'The Gauntlet has no field to draw from. The pool is ' +
+                                              'built from the Master Vault deck catalog, and the ' +
+                                              'crawl ships off by default because it walks ' +
+                                              'somebody else’s API — turn on catalog.enabled in ' +
+                                              'Site Settings, then start a pass here.'
+                                      )}
+                            </p>
+                            <button
+                                className='mt-1.5 rounded border border-border/70 bg-surface-secondary/60 px-2 py-1 text-[11px] text-foreground hover:border-border disabled:opacity-50'
+                                disabled={crawling || !health.catalog.enabled}
+                                onClick={async () => {
+                                    setCrawlMessage(null);
+
+                                    try {
+                                        const result = await crawl().unwrap();
+
+                                        setCrawlMessage(
+                                            result.success
+                                                ? t('Indexed {{indexed}} deck(s).', {
+                                                      indexed: result.crawl?.indexed || 0
+                                                  })
+                                                : result.message
+                                        );
+                                    } catch {
+                                        setCrawlMessage(t('The crawl could not be started.'));
+                                    }
+                                }}
+                                type='button'
+                            >
+                                {crawling ? t('Crawling…') : t('Crawl Master Vault now')}
+                            </button>
+                            {crawlMessage && (
+                                <p className='m-0 pt-1 text-[11px] text-muted'>{crawlMessage}</p>
+                            )}
+                        </div>
                     )}
                 </div>
             </div>

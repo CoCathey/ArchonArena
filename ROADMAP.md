@@ -2069,6 +2069,36 @@ spot. ARI is built on those games, so the bias went straight into the platform's
         than empty ones.
 -   [x] A duel pair with an abandoned half is dropped whole.
 
+#### N29 — The Gauntlet, reachable on a default install _(done)_
+
+**Why:** the Gauntlet's field is drawn from the Master Vault deck catalog, and the crawl that
+builds that catalog ships **off** — it walks somebody else's API, so turning it on is an
+operator's decision. The result was a feature that looks available and cannot work: a member
+switched the Gauntlet on, saw "0 of 0 pool", and was told "the pool is still being built",
+which is true of a pool that is filling and false of one that never will.
+
+**Tasks**
+
+-   [x] **The member is told which kind of empty this is.** `poolStatus` reports
+        `catalogEmpty`, and the panel says the server is not indexing Master Vault decks rather
+        than promising opponents that are not coming. A failed check assumes the catalog is
+        populated — naming a cause that is not so is worse than saying nothing.
+-   [x] **The crawl's own state in the lab health panel**: on or off, decks indexed, which page
+        the walk has reached, whether it has caught up, last run, last error, and whether the
+        circuit breaker has parked it — which from the outside looks exactly like a crawl nobody
+        turned on.
+-   [x] **A hand-started pass** (`POST /api/champions-challenge/catalog/crawl`, admin, rate
+        limited), so an operator who turns the setting on finds out within seconds instead of
+        waiting for the next scheduled run. It refuses rather than switching the setting on
+        itself: outbound traffic to somebody else's API is a decision made deliberately on the
+        settings page, not a side effect of a diagnostics button.
+
+**Depends on:** N24 (the pool), the deck catalog. **Acceptance criteria**
+
+-   [x] An empty catalog and a filling pool produce different sentences for the member.
+-   [x] The panel reports a parked crawl as parked.
+-   [x] The crawl button is admin-only and cannot enable a disabled crawl.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

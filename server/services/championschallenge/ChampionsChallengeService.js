@@ -11,6 +11,7 @@ const BotPolicyService = require('./BotPolicyService');
 const GauntletService = require('./GauntletService');
 const DeckService = require('../DeckService');
 const DokService = require('../dok/DokService');
+const CatalogService = require('../catalog/CatalogService');
 const { cloneCard, getCardIndex } = require('./packCards');
 const { runSimulatedGame, PLAYER_ONE } = require('./SimulatedGame');
 const { runDeepGame } = require('./DeepGame');
@@ -98,6 +99,12 @@ class ChampionsChallengeService {
             // field, filtered by set and house.
             dokService: new DokService(configService, db, settingsService)
         });
+        // ARCHON (N29): the crawl the field is drawn FROM. Held here so the lab's
+        // health can report where the walk has got to and an operator can start
+        // it by hand - the Gauntlet is unreachable on a default install without
+        // it, and "the pool is still being built" is not a true account of a
+        // crawl that was never switched on.
+        this.catalogService = new CatalogService(configService, db, settingsService);
         // ARCHON (N28): which persona pair duels next, kept across sweeps so
         // every pair is measured about equally often rather than the first pair
         // being measured every time.
@@ -1586,50 +1593,59 @@ class ChampionsChallengeService {
             }
         };
 
-        const [lease, sparring, pool, unplayable, diary, pilots, deep] = await Promise.all([
-            ask('SELECT "Owner", "HeartbeatAt" FROM "ChallengeSweepLease" WHERE "Id" = 1'),
-            ask(
-                'SELECT COUNT(*)::int AS "Total", ' +
-                    'COUNT(*) FILTER (WHERE "FinishedAt" >= ' +
-                    "date_trunc('day', now() AT TIME ZONE 'utc'))::int AS \"Today\" " +
-                    'FROM "ProvingGroundsGames"'
-            ),
-            ask(
-                'SELECT COUNT(*) FILTER (WHERE g."Playable")::int AS "Playable", ' +
-                    'COUNT(*)::int AS "Hydrated", ' +
-                    // ARCHON (N27): how much of the playable pool carries a SAS
-                    // score, and how much has been asked about without getting
-                    // one. Without this pair, a SAS or strategy filter that
-                    // matches nothing is unexplainable from the outside: the
-                    // filters are computed from Decks of KeyForge enrichment, so
-                    // an unenriched pool answers every one of them with "no
-                    // opponents" while looking perfectly healthy.
-                    'COUNT(*) FILTER (WHERE g."Playable" AND ds."Uuid" IS NOT NULL)::int AS "Rated", ' +
-                    'COUNT(*) FILTER (WHERE g."Playable" AND ds."Uuid" IS NULL ' +
-                    'AND g."SasAskedAt" IS NOT NULL)::int AS "Unrated", ' +
-                    'MAX(g."FetchedAt") AS "LastFetch" FROM "GauntletDecks" g ' +
-                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = g."Uuid"'
-            ),
-            ask(
-                'SELECT "MissingCards", COUNT(*)::int AS "Decks" FROM "GauntletDecks" ' +
-                    'WHERE "Playable" = false AND "MissingCards" IS NOT NULL ' +
-                    'GROUP BY "MissingCards" ORDER BY "Decks" DESC LIMIT 5'
-            ),
-            ask('SELECT COUNT(*)::int AS "Games" FROM "BotTrainingGames"'),
-            // ARCHON (N28): what each pilot has actually played. A persona with a
-            // tenth of the others' games is a rotation that is not rotating, and
-            // an average game length far from the others is a pilot whose bias
-            // has stopped being a style and started being a handicap.
-            ask(
-                'SELECT "Persona", COUNT(*)::int AS "Played", AVG("Turns")::float AS "Turns" ' +
-                    'FROM "ProvingGroundsGames" WHERE "Persona" IS NOT NULL GROUP BY "Persona"'
-            ),
-            ask(
-                'SELECT COUNT(*)::int AS "Games", ' +
-                    'AVG(jsonb_array_length("Annotations"))::float AS "Annotations" ' +
-                    'FROM "ProvingGroundsGames" WHERE "Deep" = true AND "Annotations" IS NOT NULL'
-            )
-        ]);
+        const [lease, sparring, pool, unplayable, diary, pilots, deep, catalog] = await Promise.all(
+            [
+                ask('SELECT "Owner", "HeartbeatAt" FROM "ChallengeSweepLease" WHERE "Id" = 1'),
+                ask(
+                    'SELECT COUNT(*)::int AS "Total", ' +
+                        'COUNT(*) FILTER (WHERE "FinishedAt" >= ' +
+                        "date_trunc('day', now() AT TIME ZONE 'utc'))::int AS \"Today\" " +
+                        'FROM "ProvingGroundsGames"'
+                ),
+                ask(
+                    'SELECT COUNT(*) FILTER (WHERE g."Playable")::int AS "Playable", ' +
+                        'COUNT(*)::int AS "Hydrated", ' +
+                        // ARCHON (N27): how much of the playable pool carries a SAS
+                        // score, and how much has been asked about without getting
+                        // one. Without this pair, a SAS or strategy filter that
+                        // matches nothing is unexplainable from the outside: the
+                        // filters are computed from Decks of KeyForge enrichment, so
+                        // an unenriched pool answers every one of them with "no
+                        // opponents" while looking perfectly healthy.
+                        'COUNT(*) FILTER (WHERE g."Playable" AND ds."Uuid" IS NOT NULL)::int AS "Rated", ' +
+                        'COUNT(*) FILTER (WHERE g."Playable" AND ds."Uuid" IS NULL ' +
+                        'AND g."SasAskedAt" IS NOT NULL)::int AS "Unrated", ' +
+                        'MAX(g."FetchedAt") AS "LastFetch" FROM "GauntletDecks" g ' +
+                        'LEFT JOIN "DeckSas" ds ON ds."Uuid" = g."Uuid"'
+                ),
+                ask(
+                    'SELECT "MissingCards", COUNT(*)::int AS "Decks" FROM "GauntletDecks" ' +
+                        'WHERE "Playable" = false AND "MissingCards" IS NOT NULL ' +
+                        'GROUP BY "MissingCards" ORDER BY "Decks" DESC LIMIT 5'
+                ),
+                ask('SELECT COUNT(*)::int AS "Games" FROM "BotTrainingGames"'),
+                // ARCHON (N28): what each pilot has actually played. A persona with a
+                // tenth of the others' games is a rotation that is not rotating, and
+                // an average game length far from the others is a pilot whose bias
+                // has stopped being a style and started being a handicap.
+                ask(
+                    'SELECT "Persona", COUNT(*)::int AS "Played", AVG("Turns")::float AS "Turns" ' +
+                        'FROM "ProvingGroundsGames" WHERE "Persona" IS NOT NULL GROUP BY "Persona"'
+                ),
+                ask(
+                    'SELECT COUNT(*)::int AS "Games", ' +
+                        'AVG(jsonb_array_length("Annotations"))::float AS "Annotations" ' +
+                        'FROM "ProvingGroundsGames" WHERE "Deep" = true AND "Annotations" IS NOT NULL'
+                ),
+                // ARCHON (N29): the catalog the pool is drawn from. Nothing has ever
+                // reported this, and it is the first thing that is wrong when the
+                // Gauntlet has no opponents: the crawl ships off, so a default
+                // install has an empty catalog, an empty pool, and a panel promising
+                // decks that are not coming.
+                ask('SELECT COUNT(*)::int AS "Indexed" FROM "DeckCatalog"')
+            ]
+        );
+        const catalogState = await this.catalogService.getState().catch(() => null);
 
         const leaseRow = lease && lease[0];
         const heartbeat = leaseRow ? new Date(leaseRow.HeartbeatAt) : null;
@@ -1703,6 +1719,22 @@ class ChampionsChallengeService {
                     reason: row.MissingCards,
                     decks: row.Decks
                 }))
+            },
+            // ARCHON (N29): the Master Vault crawl, which is where the field
+            // comes from and the thing that is switched off on a default install.
+            // An operator whose Gauntlet has no opponents should be able to read
+            // the reason here instead of inferring it.
+            catalog: {
+                enabled: this.catalogService.isEnabled(),
+                indexed: (catalog && catalog[0] && catalog[0].Indexed) || 0,
+                page: catalogState ? catalogState.CurrentPage : 0,
+                caughtUp: !!(catalogState && catalogState.CaughtUp),
+                lastRunAt: catalogState ? catalogState.LastRunAt : null,
+                lastError: catalogState ? catalogState.LastError : null,
+                // The circuit breaker: a crawl parked after repeated Master Vault
+                // failures looks exactly like a crawl nobody turned on.
+                pausedUntil: catalogState ? catalogState.PausedUntil : null,
+                failures: catalogState ? catalogState.ConsecutiveFailures || 0 : 0
             }
         };
     }

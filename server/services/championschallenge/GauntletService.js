@@ -124,6 +124,8 @@ class GauntletService {
         this.settingsService = settingsService;
         this.deckService = deckService;
         this.dokService = dokService;
+        // Latches once the catalog is known to hold rows; see hasCatalogDecks.
+        this.catalogSeen = false;
     }
 
     getConfig() {
@@ -796,6 +798,16 @@ class GauntletService {
                 playable: row.Playable || 0,
                 hydrated: row.Hydrated || 0,
                 matching,
+                // ARCHON (N29): WHY the pool is empty, when it is.
+                //
+                // "Still being built" is true of a pool that is filling and
+                // false of a pool that never will, and those are the two cases a
+                // member cannot tell apart. The field is drawn from the Master
+                // Vault catalog, the catalog crawl ships off by default, and an
+                // empty catalog therefore means no amount of waiting will produce
+                // an opponent - so the panel needs to know which kind of nothing
+                // this is rather than promising decks that are not coming.
+                catalogEmpty: !(await this.hasCatalogDecks()),
                 // Whether the filters depend on enrichment, which is what makes
                 // `matching` smaller than a member might expect.
                 needsEnrichment: !!(
@@ -808,6 +820,34 @@ class GauntletService {
             logger.error('Gauntlet: could not read pool status', err);
 
             return { playable: 0, hydrated: 0, matching: 0, needsEnrichment: false };
+        }
+    }
+
+    /**
+     * Is there anything in the catalog to hydrate from at all?
+     *
+     * One row is the whole question - the pool grows from the catalog, so an
+     * empty catalog is the difference between "no opponents yet" and "no
+     * opponents ever, until an operator turns the crawl on". Latches true, since
+     * a catalog never empties.
+     */
+    async hasCatalogDecks() {
+        if (this.catalogSeen) {
+            return true;
+        }
+
+        try {
+            const rows = await this.db.query('SELECT 1 FROM "DeckCatalog" LIMIT 1');
+
+            this.catalogSeen = !!(rows && rows.length);
+
+            return this.catalogSeen;
+        } catch (err) {
+            logger.warn(`Gauntlet: could not check the catalog: ${err.message}`);
+
+            // Claim it is populated on a failed read: the alternative is telling
+            // a member the server is not indexing decks because one query hiccuped.
+            return true;
         }
     }
 

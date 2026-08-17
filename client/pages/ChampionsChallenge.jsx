@@ -312,13 +312,26 @@ const GauntletPanel = ({ gauntlet, onSave, saving, t }) => {
                                 )}
                             </>
                         )}
+                        {/* ARCHON (N29): which kind of empty this is. "Still being
+                            built" is true of a pool that is filling and false of
+                            one that never will - and the field is drawn from a
+                            Master Vault crawl that ships switched off, so on a
+                            default install the honest answer is that no amount of
+                            waiting produces an opponent. */}
                         {!pool.playable && (
                             <>
                                 {' '}
-                                {t(
-                                    'The pool is still being built — the site fetches catalog ' +
-                                        'decks a few at a time so Master Vault is not hammered.'
-                                )}
+                                {pool.catalogEmpty
+                                    ? t(
+                                          'There is no field to draw from yet: this server is not ' +
+                                              'indexing Master Vault decks, so no opponents are ' +
+                                              'on the way. An admin can turn the deck catalog on.'
+                                      )
+                                    : t(
+                                          'The pool is still being built — the site fetches ' +
+                                              'catalog decks a few at a time so Master Vault is ' +
+                                              'not hammered.'
+                                      )}
                             </>
                         )}
                     </span>

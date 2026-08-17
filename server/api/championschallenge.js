@@ -9,6 +9,17 @@ const { CAPABILITIES } = require('../services/membership/capabilities');
 const configService = new ConfigService();
 const championsChallenge = new ChampionsChallengeService(configService);
 
+// ARCHON (N29): the hand-started catalog crawl walks Master Vault. It is
+// admin-only and bounded per run already, but a button an operator can hold down
+// is still a button pointed at somebody else's API.
+const { rateLimit } = require('./rateLimit');
+const crawlLimit = rateLimit({
+    name: 'catalog-crawl',
+    windowMs: 10 * 60 * 1000,
+    max: 5,
+    message: 'The catalog crawl was just started. Give it a few minutes before starting another.'
+});
+
 /**
  * ARCHON (N18): the Champion’s Challenge - Vault Master's background deck testing.
  *
@@ -121,6 +132,51 @@ module.exports.init = function (server) {
             }
 
             res.send({ success: true, health: await championsChallenge.labHealth() });
+        })
+    );
+
+    /**
+     * ARCHON (N29): start the Master Vault crawl by hand.
+     *
+     * The Gauntlet's field is drawn from the deck catalog, and the crawl that
+     * builds the catalog ships OFF - so a default install has an empty catalog,
+     * an empty pool, and no way to find out whether turning the setting on did
+     * anything short of waiting an hour for the next scheduled run. This runs one
+     * pass and reports what it indexed.
+     *
+     * It does not turn the setting on. Outbound traffic to somebody else's API is
+     * an operator's decision made deliberately on the settings page, not a side
+     * effect of pressing a button on a diagnostics panel - so with the crawl
+     * disabled this says so and sends nothing.
+     */
+    server.post(
+        '/api/champions-challenge/catalog/crawl',
+        passport.authenticate('jwt', { session: false }),
+        crawlLimit,
+        wrapAsync(async (req, res) => {
+            if (!(req.user.permissions && req.user.permissions.isAdmin)) {
+                return res.status(403).send({ success: false, message: 'Admins only.' });
+            }
+
+            const catalogService = championsChallenge.catalogService;
+
+            if (!catalogService.isEnabled()) {
+                return res.send({
+                    success: false,
+                    message:
+                        'The Master Vault catalog crawl is switched off. Turn on catalog.enabled ' +
+                        'in Site Settings first — it walks somebody else’s API, so it is an ' +
+                        'operator’s decision rather than a button’s.'
+                });
+            }
+
+            const result = await catalogService.crawlOnce();
+
+            res.send({
+                success: true,
+                crawl: result,
+                health: await championsChallenge.labHealth()
+            });
         })
     );
 
