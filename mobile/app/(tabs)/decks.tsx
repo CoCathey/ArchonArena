@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { router } from 'expo-router';
+import React, { useCallback, useRef, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
 import {
     ActivityIndicator,
     FlatList,
@@ -18,6 +18,20 @@ import { Button, EmptyState, ErrorBanner, TextField } from '../../src/ui/primiti
 
 export default function DecksScreen() {
     const library = useDeckLibrary({ pageSize: 40 });
+    // Tab screens stay mounted, so a deck deleted on the detail screen would
+    // still be sitting in this list when the player came back. Refresh on
+    // every RETURN to the tab, not on first focus — the hook has just loaded.
+    const seenFocus = useRef(false);
+    const refresh = library.refresh;
+    useFocusEffect(
+        useCallback(() => {
+            if (!seenFocus.current) {
+                seenFocus.current = true;
+                return;
+            }
+            refresh();
+        }, [refresh])
+    );
     const [importText, setImportText] = useState('');
     const [importing, setImporting] = useState(false);
     const [importError, setImportError] = useState<string | undefined>();

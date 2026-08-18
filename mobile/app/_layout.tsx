@@ -159,6 +159,10 @@ export default function RootLayout() {
                     name='deck/[id]'
                     options={{ title: 'Deck', headerBackTitle: 'Back' }}
                 />
+                <Stack.Screen
+                    name='notifications'
+                    options={{ title: 'Notifications', headerBackTitle: 'Back' }}
+                />
                 {/* ARCHON (N12): Archon+ and the tools it unlocks. Stack
                     screens rather than tabs — six tabs is already the most a
                     phone reads comfortably, and these are places you go to

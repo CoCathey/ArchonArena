@@ -415,6 +415,15 @@ export async function markNotificationsRead(ids?: number[]) {
     return apiFetch<ApiResponse>('/api/notifications/read', { method: 'POST', body: { ids } });
 }
 
+/**
+ * Just the badge number. A separate endpoint from the list on purpose — the
+ * bell polls, and polling a page of rows to render one integer is bandwidth a
+ * phone pays for.
+ */
+export async function fetchUnreadNotificationCount() {
+    return apiFetch<ApiResponse & { unread?: number }>('/api/notifications/unread-count');
+}
+
 export interface NotificationPreference {
     category: string;
     group: string;

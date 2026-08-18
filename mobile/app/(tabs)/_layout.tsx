@@ -1,9 +1,10 @@
 import React, { useEffect } from 'react';
-import { Redirect, Tabs } from 'expo-router';
-import { AppState, ColorValue, Text } from 'react-native';
+import { Redirect, Tabs, router } from 'expo-router';
+import { AppState, ColorValue, Pressable, Text, View } from 'react-native';
 import { connectLobby } from '../../src/net/lobbySocket';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useFriendsStore } from '../../src/stores/friendsStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { colors } from '../../src/theme';
 
 /**
@@ -13,8 +14,58 @@ import { colors } from '../../src/theme';
  */
 const FRIEND_POLL_MS = 60000;
 
+/**
+ * How often to re-check the unread notification count. Same reasoning as the
+ * friends poll: notifications arrive over push, so this only has to keep the
+ * badge honest for somebody sitting in the app with push declined.
+ */
+const NOTIFICATION_POLL_MS = 60000;
+
 function TabIcon(props: { glyph: string; color: ColorValue }) {
     return <Text style={{ fontSize: 20, color: props.color }}>{props.glyph}</Text>;
+}
+
+/**
+ * ARCHON: the bell, mirroring the website's top-nav one. It sits on Play
+ * because that is the screen the app opens on — a notification centre nobody
+ * passes is a notification centre nobody reads.
+ */
+function NotificationBell() {
+    const unread = useNotificationsStore((state) => state.unread);
+
+    return (
+        <Pressable
+            onPress={() => router.push('/notifications')}
+            hitSlop={10}
+            accessibilityRole='button'
+            accessibilityLabel={
+                unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'
+            }
+            style={{ paddingHorizontal: 14 }}
+        >
+            <Text style={{ fontSize: 19, color: colors.text }}>🔔</Text>
+            {unread > 0 ? (
+                <View
+                    style={{
+                        position: 'absolute',
+                        top: -3,
+                        right: 7,
+                        minWidth: 16,
+                        paddingHorizontal: 3,
+                        height: 16,
+                        borderRadius: 8,
+                        backgroundColor: colors.brand,
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                    }}
+                >
+                    <Text style={{ color: '#161006', fontSize: 10, fontWeight: '800' }}>
+                        {unread > 99 ? '99+' : unread}
+                    </Text>
+                </View>
+            ) : null}
+        </Pressable>
+    );
 }
 
 export default function TabsLayout() {
@@ -59,6 +110,34 @@ export default function TabsLayout() {
         };
     }, [loadFriends, token]);
 
+    // The bell's badge, on the same terms as the friends one.
+    useEffect(() => {
+        if (!token) {
+            useNotificationsStore.getState().reset();
+            return undefined;
+        }
+
+        const refresh = () => useNotificationsStore.getState().refreshCount();
+        const poll = () => {
+            if (AppState.currentState === 'active') {
+                refresh();
+            }
+        };
+
+        refresh();
+        const timer = setInterval(poll, NOTIFICATION_POLL_MS);
+        const subscription = AppState.addEventListener('change', (state) => {
+            if (state === 'active') {
+                refresh();
+            }
+        });
+
+        return () => {
+            clearInterval(timer);
+            subscription.remove();
+        };
+    }, [token]);
+
     if (!user || !token) {
         return <Redirect href='/login' />;
     }
@@ -82,7 +161,8 @@ export default function TabsLayout() {
                 name='index'
                 options={{
                     title: 'Play',
-                    tabBarIcon: ({ color }) => <TabIcon glyph='⚔' color={color} />
+                    tabBarIcon: ({ color }) => <TabIcon glyph='⚔' color={color} />,
+                    headerRight: () => <NotificationBell />
                 }}
             />
             <Tabs.Screen
