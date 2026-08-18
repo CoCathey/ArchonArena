@@ -1,0 +1,27 @@
+-- ARCHON (N45): the bot learns from the people who play here.
+--
+-- Every row in the training diary until now came from the lab playing itself,
+-- which makes the whole learning loop a closed system: it can get steadily
+-- better at beating its own habits and never discover that the habits are the
+-- problem. The one source of moves the lab cannot generate is a person, and
+-- the site already runs thousands of games with one sitting right there.
+--
+-- Those games are captured LIVE, at the game node, at the moment the click
+-- arrives and before the engine acts on it (server/gamenode/humancapture.js).
+-- Rebuilding them afterwards from the replay was the obvious cheaper route and
+-- it is a trap worth writing down: a recording knows a deck's SIZE but not its
+-- contents, so the deck-composition features the model reads would simply be
+-- absent - and absent reads as FALSE, not as unknown. Every human row would
+-- have carried a quiet, systematic lie, with nothing in the output to show it.
+--
+-- What the column is for: a human row is outcome-labelled like a sparring row
+-- but comes from better play, so it pulls harder at training time - and how
+-- much harder is an admin knob (championsChallenge.humanGameWeight). Baking
+-- the weight into the row at capture time would have made the knob unable to
+-- affect anything already in the diary, which is most of it. So the SOURCE is
+-- stored and the weight is applied when the batch is folded.
+--
+-- Nothing here identifies anybody: a decision is the feature vector of a
+-- position and the move taken from it, with no player, deck or game attached.
+ALTER TABLE public."BotTrainingGames"
+    ADD COLUMN IF NOT EXISTS "Source" text NOT NULL DEFAULT 'self';

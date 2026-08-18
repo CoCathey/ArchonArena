@@ -46,6 +46,14 @@ CREATE TABLE IF NOT EXISTS public."BotTrainingGames"
     -- from the behaviour that produced them - but "how much of my diary is one
     -- style" should have an answer. See labPersonas.js.
     "Persona" text COLLATE pg_catalog."default",
+    -- ARCHON (N45): where this game came from. 'self' is the lab sparring
+    -- against itself, which is every row the loop wrote before this existed
+    -- and so is the default; 'human' is a game a person played on this site,
+    -- captured live at the game node. The distinction has to survive into the
+    -- table because it decides how hard the row pulls at training time, and
+    -- the pull is an admin knob - a diary that had baked the weight in at
+    -- capture time could never be re-weighted. See humanLearning.js.
+    "Source" text COLLATE pg_catalog."default" NOT NULL DEFAULT 'self',
     "CreatedAt" timestamp without time zone NOT NULL,
     CONSTRAINT "PK_BotTrainingGames" PRIMARY KEY ("Id")
 )

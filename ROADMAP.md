@@ -2631,6 +2631,61 @@ expensive rows are produced most slowly.
 -   [x] The teacher's spec now reads the cap from the registry instead of hard-coding it, so
         changing how much history the loop keeps no longer looks like a broken teacher.
 
+#### N45 — Learning from the people who play here _(done)_
+
+**Why:** every row in the training diary came from the lab playing itself, which makes the
+learning loop a closed system — it can get steadily better at beating its own habits and never
+discover that the habits are the problem. Meanwhile the site runs thousands of games with a
+person sitting on one side of the table, and their moves are the one source of play nothing in
+the lab generates. Asked for directly: "learn from human games with the bots."
+
+**The route not taken, and why it matters.** Rebuilding the rows from replays afterwards is
+cheaper and would have been wrong. A recording knows a deck's SIZE but not its contents, so the
+deck-composition features the model reads would be absent — and absent reads as _false_, not as
+unknown. Every human row would then have carried a quiet, systematic lie, with nothing in the
+output to show it. Replays also record board snapshots rather than the action taken, so the move
+itself would have to be inferred. Capture therefore had to be live.
+
+**Tasks**
+
+-   [x] **`HumanCapture` at the game node**, reading each decision out of the click on its way
+        past `onGameMessage` — before the engine acts, so the row describes the position the move
+        was chosen FROM rather than the consequence it produced.
+-   [x] **The rows are the bot's own rows.** The capture calls `decisionRecord(game, player,
+action)` — the same function the bot's driver calls, with the same triple — and a spec
+        compares a captured row against that function called directly. Anything less and the
+        model is fed two languages without being told which it is reading.
+-   [x] **A main-window click names the card; the menu that follows names the move.** Reap and
+        fight are the same click, so the row waits for the button. A cancelled menu writes
+        nothing, and an abandoned click cannot be revived by a later, unrelated press.
+-   [x] **Only the choices the bot would also have scored.** The mulligan, the end-of-turn
+        confirmation, its own prophecy question and Done/Autoresolve are skipped, mirroring the
+        policy's own rule-answered list — and a decision with fewer than two options is not a
+        decision. Otherwise the model learns that whatever the engine compels is good, weighted
+        by how often it compels it.
+-   [x] **Conceded and abandoned games are thrown away.** A concession labels every move the
+        conceder made a losing move, including the good ones, and people concede for reasons that
+        have nothing to do with the position.
+-   [x] **`"Source"` on `BotTrainingGames`, not a baked-in weight.** The pull is applied when a
+        batch is folded, so changing `humanGameWeight` re-weights the whole diary rather than only
+        its future — and most of a diary is always already written. `trainModel` needed no change:
+        it already honours a per-row weight, the same door the AI teacher's rows use.
+-   [x] **Settings:** `humanLearning` — `bot` (practice tables, the default), `all` (people
+        against people too), `off`; and `humanGameWeight`, default 3. Above the 1 a sparring row
+        pulls, because the move came from somebody trying to win; well below the 8 a searched
+        decision pulls, because the label is still "somebody won this game twenty turns later".
+        Zero parks the rows without losing them.
+-   [x] **Said out loud, and visible.** A capturing table says so in its chat log when it opens;
+        nothing captured identifies anybody. The lab health panel reports the human share of the
+        diary, because a capture that has silently stopped looks exactly like a healthy lab from
+        every other figure on that page.
+
+**Acceptance criteria**
+
+-   [x] A captured row is byte-identical to `decisionRecord` for the same position and move.
+-   [x] A forced move, a cancelled menu and a rule-answered prompt each write nothing.
+-   [x] Changing the weight changes what the existing diary trains to.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

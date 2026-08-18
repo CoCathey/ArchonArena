@@ -3,6 +3,7 @@ const { emptyModel, trainModel } = require('./labPolicy');
 const { sprt, wilsonInterval } = require('./labMath');
 const { personaByKey, duelPairKey } = require('./labPersonas');
 const { withCardPriors, stripCardPriors } = require('./cardPriors');
+const { MODES, humanLearningConfig } = require('./humanLearning');
 const { sectionDefaults } = require('../settings/registry');
 
 /**
@@ -42,27 +43,48 @@ class BotPolicyService {
     }
 
     /**
-     * ARCHON (N38): how strongly the card-text priors pull, from the admin
-     * knob. Composed from registry defaults the way getSectionWithDefaults
-     * does, so a stubbed settings service in a spec reads as the defaults
-     * rather than as an error. Zero (or a broken read) means priors off.
+     * The Challenge's settings, composed over the registry defaults the way
+     * getSectionWithDefaults does - so a stubbed settings service in a spec,
+     * or a database never written to, reads as the defaults rather than as an
+     * error.
      */
-    priorWeight() {
+    section() {
         try {
-            const section = {
+            return {
                 ...sectionDefaults('championsChallenge'),
                 ...((this.settingsService.getSection &&
                     this.settingsService.getSection('championsChallenge')) ||
                     {})
             };
-            const weight = Number(section.cardPriorWeight);
-
-            return Number.isFinite(weight) && weight > 0 ? weight : 0;
         } catch (err) {
-            logger.error('Challenge bot: could not read the card prior weight', err);
+            logger.error('Challenge bot: could not read the Challenge settings', err);
 
-            return 0;
+            return sectionDefaults('championsChallenge');
         }
+    }
+
+    /**
+     * ARCHON (N38): how strongly the card-text priors pull, from the admin
+     * knob. Zero (or a broken read) means priors off.
+     */
+    priorWeight() {
+        const weight = Number(this.section().cardPriorWeight);
+
+        return Number.isFinite(weight) && weight > 0 ? weight : 0;
+    }
+
+    /**
+     * How many games the diary holds before the oldest are pruned. Read here
+     * for the writers that have no caller to pass it (a finished human game
+     * arrives from the lobby's GAMEWIN handler, which has no business knowing
+     * about diary pruning).
+     */
+    diaryCap() {
+        const keep = Number(this.section().trainingGamesKept);
+
+        return Number.isFinite(keep) && keep > 0
+            ? keep
+            : sectionDefaults('championsChallenge').trainingGamesKept;
     }
 
     /**
@@ -115,12 +137,15 @@ class BotPolicyService {
      * One sparring game into the diary. Returns how many games the diary
      * holds, which is what the caller's "time to train?" check reads.
      */
-    async recordTrainingGame({ policyVersion, winnerSide, decisions, persona = null }, keep) {
+    async recordTrainingGame(
+        { policyVersion, winnerSide, decisions, persona = null, source = 'self' },
+        keep
+    ) {
         await this.db.query(
             'INSERT INTO "BotTrainingGames" ' +
-                '("PolicyVersion", "WinnerSide", "Decisions", "Persona", "CreatedAt") ' +
-                "VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc')",
-            [policyVersion || null, winnerSide, JSON.stringify(decisions), persona]
+                '("PolicyVersion", "WinnerSide", "Decisions", "Persona", "Source", "CreatedAt") ' +
+                "VALUES ($1, $2, $3, $4, $5, now() AT TIME ZONE 'utc')",
+            [policyVersion || null, winnerSide, JSON.stringify(decisions), persona, source]
         );
 
         // Prune beyond the working set, oldest first. A diary is not an
@@ -141,6 +166,50 @@ class BotPolicyService {
     }
 
     /**
+     * ARCHON (N45): one finished HUMAN game into the same diary.
+     *
+     * The rows were captured live at the game node
+     * (server/gamenode/humancapture.js) through the same `decisionRecord` the
+     * bot's own driver calls, so they are the same shape as every other row
+     * here and the trainer needs no special case for them beyond the pull.
+     *
+     * Two guards, and both matter:
+     *
+     *  - The MODE is re-checked here, not only where the table was stamped. A
+     *    game can run for half an hour; an admin who switches capture off
+     *    during one has said no, and the row that arrives afterwards should
+     *    not land anyway.
+     *  - The rows carry no weight. The pull is applied when the batch is
+     *    folded (trainCandidate), from the knob as it reads THEN - so an
+     *    operator who decides human play is pulling too hard can change it and
+     *    have the whole diary re-read, rather than only its future.
+     *
+     * @param {{winnerSide: string, decisions: object[]}} game
+     * @returns {Promise<number>} the diary's size, or 0 if nothing was filed
+     */
+    async recordHumanGame({ winnerSide, decisions } = {}) {
+        if (!winnerSide || !Array.isArray(decisions) || !decisions.length) {
+            return 0;
+        }
+
+        if (humanLearningConfig(this.settingsService).mode === MODES.OFF) {
+            return 0;
+        }
+
+        const size = await this.recordTrainingGame(
+            { winnerSide, decisions, source: 'human' },
+            this.diaryCap()
+        );
+
+        logger.info(
+            `Challenge bot: learned from a human game - ${decisions.length} decisions, ` +
+                `diary now ${size}`
+        );
+
+        return size;
+    }
+
+    /**
      * Fold the recent diary over the champion into a new candidate. One
      * candidate at a time: while a title fight is on, fresh games keep
      * accumulating for the NEXT candidate instead.
@@ -153,7 +222,7 @@ class BotPolicyService {
         }
 
         const rows = await this.db.query(
-            'SELECT "WinnerSide", "Decisions" FROM "BotTrainingGames" ' +
+            'SELECT "WinnerSide", "Decisions", "Source" FROM "BotTrainingGames" ' +
                 'ORDER BY "Id" DESC LIMIT $1',
             [batchGames]
         );
@@ -162,9 +231,17 @@ class BotPolicyService {
             return null; // not enough evidence to be worth a title fight
         }
 
+        // ARCHON (N45): a human's move pulls harder than a sparring one.
+        //
+        // Applied HERE rather than at capture time, and that is the point of
+        // storing the source instead of the weight: the knob then governs the
+        // whole diary rather than only the rows written after it was last
+        // changed. `trainModel` already honours a per-row `weight` - the LLM
+        // teacher's rows use the same door - so nothing downstream changes.
+        const humanWeight = humanLearningConfig(this.settingsService).weight;
         const games = rows.map((row) => ({
             winnerSide: row.WinnerSide,
-            decisions: row.Decisions || []
+            decisions: weighDecisions(row.Decisions || [], row.Source, humanWeight)
         }));
         // champion() arrives with priors attached; the very first candidate
         // (no champion yet) gets them attached to the blank slate, so version
@@ -530,4 +607,25 @@ class BotPolicyService {
     }
 }
 
+/**
+ * ARCHON (N45): stamp the pull a stored row's SOURCE earns it.
+ *
+ * A row that already carries its own weight keeps it - that is the LLM
+ * teacher's rows, whose pull is set from how well that teacher has been
+ * agreeing with the deep bot, and is evidence about the row rather than about
+ * where it came from.
+ */
+function weighDecisions(decisions, source, weight) {
+    if (source !== 'human' || !Array.isArray(decisions)) {
+        return decisions;
+    }
+
+    return decisions.map((decision) =>
+        decision && typeof decision.weight === 'number' ? decision : { ...decision, weight }
+    );
+}
+
 module.exports = BotPolicyService;
+// Exported for its own spec: this is where "a human row pulls harder" is
+// actually decided, and it is worth pinning without a database in the way.
+module.exports.weighDecisions = weighDecisions;

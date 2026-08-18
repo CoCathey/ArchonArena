@@ -567,6 +567,48 @@ const REGISTRY = {
                 max: 50,
                 default: 8
             },
+            // ARCHON (N45): learning from the people who play here.
+            //
+            // Every other row in the diary comes from the bot playing itself,
+            // so the whole loop is a closed system: it can get better at
+            // beating its own habits and never learn that the habits are the
+            // problem. A human seat is the one source of moves nothing in the
+            // lab generates - and there are thousands of them sitting unused
+            // in the practice tables the site already runs.
+            //
+            // Nothing captured identifies anybody: a row is the feature vector
+            // of a position and the move taken from it, the same shape
+            // sparring writes, with no player, deck or game attached. See
+            // humanLearning.js for what each mode takes.
+            humanLearning: {
+                type: 'select',
+                label: 'Learn from human play',
+                default: 'bot',
+                options: [
+                    { value: 'bot', label: 'Practice games against the bots (default)' },
+                    { value: 'all', label: 'Every game, people against people too' },
+                    { value: 'off', label: 'Off - self-play only' }
+                ]
+            },
+            // ARCHON (N45): how hard a human's move pulls, against the 1 an
+            // ordinary sparring row pulls and the 8 a searched one does.
+            //
+            // A human row is outcome-labelled, exactly like a sparring row -
+            // nobody measured it, the game just ended a certain way - so it
+            // belongs at the sparring end of that range rather than the deep
+            // bot's. It sits above 1 because the play itself is better: the
+            // move came from somebody trying to win, which is more than can be
+            // said for the second-best moves exploration keeps sampling. It
+            // sits well below 8 because the label is still "somebody won this
+            // game twenty turns later". Zero parks the rows without losing
+            // them, which is what to set if the diary ever looks poisoned.
+            humanGameWeight: {
+                type: 'number',
+                label: 'How much harder a human’s move pulls than a sparring one',
+                min: 0,
+                max: 50,
+                default: 3
+            },
             // ARCHON (N38): what shrinkage shrinks toward. The model's per-card
             // weights start at zero - "an unseen card is average" - and stay
             // shrunk toward zero for a card's first ~20 sightings. With a
