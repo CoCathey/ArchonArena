@@ -97,7 +97,14 @@ function round3(value) {
  * Assemble the packet from injected services - pure enough to spec against
  * fakes; main() below wires the real ones.
  */
-async function buildPacket({ db, settingsService, policyService, teacherService, cardIndex }) {
+async function buildPacket({
+    db,
+    settingsService,
+    policyService,
+    teacherService,
+    assayService = null,
+    cardIndex
+}) {
     const settings = settingsService.getSectionWithDefaults('championsChallenge');
     const nameOf = (id) => (cardIndex[id] && cardIndex[id].name) || id;
 
@@ -160,6 +167,10 @@ async function buildPacket({ db, settingsService, policyService, teacherService,
         strengthCurve,
         personaLadder,
         teacher: { ...teacher, disagreements },
+        // ARCHON (N44): what the assay has observed and measured - including
+        // where the measurements argue with the synergy tags, which is the
+        // advisor's best material.
+        assay: assayService ? await assayService.report() : null,
         model: champion
             ? {
                   version: champion.Version,
@@ -186,12 +197,14 @@ async function main() {
     // One snapshot, no refresh timer: a script reads and leaves.
     await settingsService.refresh();
 
+    const CardAssayService = require('../services/championschallenge/CardAssayService');
     const configService = new ConfigService();
     const packet = await buildPacket({
         db,
         settingsService,
         policyService: new BotPolicyService(configService, db, settingsService),
         teacherService: new LlmTeacherService(configService, db, settingsService),
+        assayService: new CardAssayService(db),
         cardIndex: getCardIndex()
     });
 

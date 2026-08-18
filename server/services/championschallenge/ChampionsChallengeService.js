@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 
 const AriService = require('../rating/AriService');
 const BotPolicyService = require('./BotPolicyService');
+const CardAssayService = require('./CardAssayService');
 const LlmTeacherService = require('./LlmTeacherService');
 const GauntletService = require('./GauntletService');
 const VaultTourService = require('./VaultTourService');
@@ -93,6 +94,15 @@ class ChampionsChallengeService {
         // them; validated lessons go into the same diary.
         this.llmTeacherService = new LlmTeacherService(configService, db, settingsService, {
             policyService: this.policyService
+        });
+        // ARCHON (N44): the assay - card knowledge measured, not estimated.
+        // Mines the diary for free and, on a CPU budget, runs one controlled
+        // card experiment at a time on synthetic paired decks. The thunks
+        // defer to `this` so the specs' stubbed runMatch reaches it too.
+        this.cardAssayService = new CardAssayService(db, {
+            policyService: this.policyService,
+            runMatch: (...args) => this.runMatch(...args),
+            newSeed: () => this.newSeed()
         });
         // ARCHON (N24): the Gauntlet - foreign decks drawn from the Master
         // Vault catalog. Its hydrator parses Master Vault responses with the
@@ -868,6 +878,17 @@ class ChampionsChallengeService {
                 await this.llmTeacherService.reviewPending();
             } catch (err) {
                 logger.error('Challenge AI teacher: review step failed', err);
+            }
+        }
+
+        // ARCHON (N44): the assay. Mining rides the learning loop for free;
+        // the experiment budget is its own knob, zero by default, and every
+        // assay game lives only in the assay's own counters.
+        if (learning) {
+            try {
+                await this.cardAssayService.sweepStep(config);
+            } catch (err) {
+                logger.error('Card assay: sweep step failed', err);
             }
         }
 

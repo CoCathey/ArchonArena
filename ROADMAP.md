@@ -2605,6 +2605,43 @@ borrowing, with our own homework done in it.
 -   [x] Scores clamp into the 0–4 scale and map to [0, 1] features.
 -   [x] The taxonomy is credited; the scores are generated, not imported.
 
+#### N44 — The assay: measurement instead of curation _(done)_
+
+**Why:** every card number the platform carries is somebody's estimate — DoK's curators, the
+LLM's priors and tags, the model's outcome-trained weights. DoK curates by hand because no human
+can play enough games to measure a card. This platform owns a simulator that executes real card
+code under deterministic seeds. So: measure.
+
+**Tasks**
+
+-   [x] **Phase 1, mining (free).** An incremental walker over the training diary aggregates
+        per-card games and wins — plays only, never deep-search or teacher lesson rows — and the
+        same for pairs the synergy tags hypothesize about when both halves saw play on one side.
+        Observational and confounded, so it is prior-grade evidence: it AUDITS the tags (a
+        claimed combo whose measured lift runs negative is flagged in the advisor packet), it
+        does not convict.
+-   [x] **Phase 2, experiments (CPU, zero tokens).** One experiment at a time, a few games per
+        sweep (`assayGamesPerSweep`, 0 by default): two synthetic decks identical except for one
+        card — target versus a duplicate filler, duplicates being legal — head to head on paired
+        seeds, champion piloting both seats greedily, for a fixed budget
+        (`assayGamesPerExperiment`). The target arm's win rate IS the card's marginal value,
+        measured causally, recorded with its Wilson interval. With a partner seated in both
+        hosts, the same instrument measures the card WITH its combo — the delta against its
+        neutral run is the synergy, in win percentage.
+-   [x] **Targeting that follows the site.** Cards are measured most-played-first; pair
+        experiments are drawn from tag-hypothesized pairs that actually co-play, payoff's
+        neutral measurement first so the delta has a baseline.
+
+**Acceptance criteria**
+
+-   [x] Assay games exist only in the assay's own counters — never ProvingGroundsGames, ARI,
+        the diary, or any member-visible statistic.
+-   [x] The two arms of an experiment differ by exactly one card, and the winning DECK (never
+        the seat) is what scores.
+-   [x] Fixed budgets and intervals, not verdicts: one card in thirty-six rarely moves ten
+        points, so the deliverable is the measurement. Fidelity rises with the champion, and
+        re-measuring is expected — the assay is a flywheel, not a census.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

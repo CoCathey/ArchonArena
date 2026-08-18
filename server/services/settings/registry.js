@@ -619,6 +619,27 @@ const REGISTRY = {
                 max: 1,
                 default: 0.5
             },
+            // ARCHON (N44): the assay - card knowledge measured rather than
+            // estimated. Mining the diary is free and rides the learning
+            // switch; these govern the CONTROLLED experiments: synthetic
+            // paired decks differing by exactly one card, played head to
+            // head until the budget is spent, the win rate recorded with its
+            // interval. Pure CPU, zero API tokens, and assay games touch no
+            // statistic a member sees.
+            assayGamesPerSweep: {
+                type: 'number',
+                label: 'Card assay: measurement games per sweep (0 = off)',
+                min: 0,
+                max: 50,
+                default: 0
+            },
+            assayGamesPerExperiment: {
+                type: 'number',
+                label: 'Games each card measurement is given before it is recorded',
+                min: 40,
+                max: 1000,
+                default: 120
+            },
             arenaMinGames: {
                 type: 'number',
                 // ARCHON (N25): a floor under the sequential test, not a sample
