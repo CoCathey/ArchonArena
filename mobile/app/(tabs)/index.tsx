@@ -5,6 +5,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    Pressable,
     RefreshControl,
     StyleSheet,
     Text,
@@ -16,6 +17,15 @@ import { connectLobby, lobby } from '../../src/net/lobbySocket';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useGameStore } from '../../src/stores/gameStore';
 import { useLobbyStore } from '../../src/stores/lobbyStore';
+import LobbyChatSheet from '../../src/lobby/LobbyChatSheet';
+import QuickMatchPanel from '../../src/lobby/QuickMatchPanel';
+import {
+    applyGameFilters,
+    DEFAULT_GAME_FILTERS,
+    FILTERABLE_FORMATS,
+    filtersAreDefault,
+    type GameFilterState
+} from '../../src/lobby/gameFilters';
 import { colors, radius, spacing } from '../../src/theme';
 import { Badge, Button, Card, EmptyState, ErrorBanner, TextField } from '../../src/ui/primitives';
 
@@ -104,6 +114,10 @@ export default function PlayScreen() {
     >();
     const [password, setPassword] = useState('');
     const [refreshing, setRefreshing] = useState(false);
+    const [quickMatchOpen, setQuickMatchOpen] = useState(false);
+    const [chatOpen, setChatOpen] = useState(false);
+    const [filtersOpen, setFiltersOpen] = useState(false);
+    const [filters, setFilters] = useState<GameFilterState>(DEFAULT_GAME_FILTERS);
     const prevGameId = useRef<string | undefined>(undefined);
     const pathname = usePathname();
 
@@ -170,9 +184,17 @@ export default function PlayScreen() {
         }
     };
 
-    const openGames = games.filter((game) => !game.started);
-    const runningGames = games.filter((game) => game.started);
+    const visible = applyGameFilters(games, filters);
+    const openGames = visible.filter((game) => !game.started);
+    const runningGames = visible.filter((game) => game.started);
     const ordered = [...openGames, ...runningGames];
+    const hidden = games.length - visible.length;
+
+    const toggleFormat = (key: string) =>
+        setFilters((current) => ({
+            ...current,
+            formats: { ...current.formats, [key]: current.formats[key] === false }
+        }));
 
     return (
         <View style={styles.container}>
@@ -200,15 +222,91 @@ export default function PlayScreen() {
                     </Text>
                 </View>
                 <View style={styles.topActions}>
+                    <Pressable onPress={() => setChatOpen(true)} hitSlop={8}>
+                        <Text style={styles.iconAction}>💬</Text>
+                    </Pressable>
+                    <Pressable onPress={() => setFiltersOpen((open) => !open)} hitSlop={8}>
+                        <Text
+                            style={[
+                                styles.iconAction,
+                                !filtersAreDefault(filters) && { color: colors.brand }
+                            ]}
+                        >
+                            ⚲
+                        </Text>
+                    </Pressable>
                     <Button
                         small
                         variant='secondary'
-                        title='Quick join'
-                        onPress={() => router.push({ pathname: '/new-game', params: { quick: '1' } })}
+                        title='Find match'
+                        onPress={() => setQuickMatchOpen(true)}
                     />
                     <Button small title='New game' onPress={() => router.push('/new-game')} />
                 </View>
             </View>
+
+            {/* ARCHON: the lobby filters, which the app never had. Collapsed
+                by default — at four tables they are noise, and the point of
+                them is the day there are forty. */}
+            {filtersOpen ? (
+                <View style={styles.filterPanel}>
+                    <View style={styles.chipRow}>
+                        {FILTERABLE_FORMATS.map((format) => {
+                            const on = filters.formats[format.key] !== false;
+
+                            return (
+                                <Pressable
+                                    key={format.key}
+                                    onPress={() => toggleFormat(format.key)}
+                                    style={[styles.filterChip, on && styles.filterChipOn]}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.filterChipText,
+                                            on && styles.filterChipTextOn
+                                        ]}
+                                    >
+                                        {format.label}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+                    <View style={styles.chipRow}>
+                        {(
+                            [
+                                ['onlyOpenSeats', 'Open seats only'],
+                                ['hideStarted', 'Hide in progress'],
+                                ['hidePractice', 'Hide practice']
+                            ] as const
+                        ).map(([key, label]) => (
+                            <Pressable
+                                key={key}
+                                onPress={() =>
+                                    setFilters((current) => ({ ...current, [key]: !current[key] }))
+                                }
+                                style={[styles.filterChip, filters[key] && styles.filterChipOn]}
+                            >
+                                <Text
+                                    style={[
+                                        styles.filterChipText,
+                                        filters[key] && styles.filterChipTextOn
+                                    ]}
+                                >
+                                    {label}
+                                </Text>
+                            </Pressable>
+                        ))}
+                    </View>
+                    {hidden > 0 ? (
+                        <Pressable onPress={() => setFilters(DEFAULT_GAME_FILTERS)}>
+                            <Text style={styles.filterSummary}>
+                                {hidden} game{hidden === 1 ? '' : 's'} hidden · tap to clear
+                            </Text>
+                        </Pressable>
+                    ) : null}
+                </View>
+            ) : null}
 
             {banner ? <ErrorBanner message={banner} /> : null}
             {gameError ? <ErrorBanner message={gameError} /> : null}
@@ -260,12 +358,27 @@ export default function PlayScreen() {
                     />
                 }
                 ListEmptyComponent={
-                    <EmptyState
-                        title='No games right now'
-                        subtitle='Create one and invite a friend, or wait for an open table.'
-                    />
+                    hidden > 0 ? (
+                        <EmptyState
+                            title='Every game is filtered out'
+                            subtitle={`${hidden} table${
+                                hidden === 1 ? '' : 's'
+                            } are hidden by your filters.`}
+                        />
+                    ) : (
+                        <EmptyState
+                            title='No games right now'
+                            subtitle='Create one and invite a friend, or wait for an open table.'
+                        />
+                    )
                 }
             />
+
+            <QuickMatchPanel
+                visible={quickMatchOpen}
+                onClose={() => setQuickMatchOpen(false)}
+            />
+            <LobbyChatSheet visible={chatOpen} onClose={() => setChatOpen(false)} />
 
             <Modal
                 visible={!!passwordGame}
@@ -333,6 +446,46 @@ const styles = StyleSheet.create({
     statusText: {
         color: colors.textDim,
         fontSize: 12
+    },
+    iconAction: {
+        color: colors.textDim,
+        fontSize: 19,
+        paddingHorizontal: 2
+    },
+    filterPanel: {
+        paddingHorizontal: spacing.md,
+        paddingBottom: spacing.sm,
+        gap: spacing.sm
+    },
+    chipRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6
+    },
+    filterChip: {
+        borderColor: colors.border,
+        borderWidth: 1,
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        backgroundColor: colors.bgElevated
+    },
+    filterChipOn: {
+        borderColor: colors.brand,
+        backgroundColor: colors.surfaceHover
+    },
+    filterChipText: {
+        color: colors.textFaint,
+        fontSize: 12,
+        fontWeight: '600'
+    },
+    filterChipTextOn: {
+        color: colors.brand
+    },
+    filterSummary: {
+        color: colors.accent,
+        fontSize: 11,
+        fontWeight: '600'
     },
     topActions: {
         flexDirection: 'row',

@@ -30,6 +30,7 @@ import {
     startHint
 } from '../src/game/pendingGame';
 import { lobby } from '../src/net/lobbySocket';
+import BotTableControls from '../src/lobby/BotTableControls';
 import { useAuthStore } from '../src/stores/authStore';
 import { useGameStore } from '../src/stores/gameStore';
 import { useLobbyStore } from '../src/stores/lobbyStore';
@@ -268,6 +269,11 @@ export default function PendingGameScreen() {
                         <Text style={styles.waiting}>Waiting for an opponent to join…</Text>
                     </Card>
                 ) : null}
+
+                {/* ARCHON (F9/N31): who you are practising against, and how
+                    hard. Above the start button because both settings stop
+                    meaning anything the moment the game starts. */}
+                <BotTableControls game={currentGame} seated={!iAmSpectator} />
 
                 <View style={styles.actionRow}>
                     {isOwner ? (

@@ -1,9 +1,9 @@
 import { io, Socket } from 'socket.io-client';
 import { refreshAuthToken } from '../api/client';
-import type { GameSummary, HandoffMessage, NewGameRequest } from '../api/types';
+import type { GameSummary, HandoffMessage, LobbyMessage, NewGameRequest } from '../api/types';
 import { useAuthStore } from '../stores/authStore';
 import { useGameStore } from '../stores/gameStore';
-import { useLobbyStore } from '../stores/lobbyStore';
+import { useLobbyStore, type MatchmakingState } from '../stores/lobbyStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { connectToGame } from './gameSocket';
 
@@ -108,6 +108,36 @@ export async function connectLobby(): Promise<void> {
         useLobbyStore.getState().setGameError(message);
     });
 
+    socket.on('matchmaking', (state: MatchmakingState) => {
+        const store = useLobbyStore.getState();
+        store.setMatchmaking(state ?? { status: 'idle' });
+
+        // A match hands the pair a pending game the normal way (`gamestate`),
+        // so there is nothing to navigate to from here — the queue simply
+        // stops. Leaving it on 'matched' would keep a dead panel on screen
+        // behind the pending screen the player has just been given.
+        if (state?.status === 'matched') {
+            store.setMatchmaking({ status: 'idle' });
+        }
+    });
+
+    socket.on('lobbymessages', (messages: LobbyMessage[]) => {
+        useLobbyStore.getState().setChat(Array.isArray(messages) ? messages : []);
+    });
+
+    socket.on('lobbychat', (message: LobbyMessage) => {
+        useLobbyStore.getState().addChatMessage(message);
+    });
+
+    socket.on('nochat', (details?: { message?: string }) => {
+        useLobbyStore
+            .getState()
+            .setChatRefusal(
+                details?.message ??
+                    'New accounts cannot use lobby chat yet. Play a few games first.'
+            );
+    });
+
     socket.on('banner', (notice: string) => {
         useLobbyStore.getState().setBanner(notice);
     });
@@ -185,6 +215,34 @@ export const lobby = {
     },
     pendingChat(message: string): void {
         emit('chat', message);
+    },
+    /**
+     * Site-wide lobby chat. The server answers a refused message with
+     * `nochat` rather than an error, so nothing here throws.
+     */
+    lobbyChat(message: string): void {
+        useLobbyStore.getState().setChatRefusal(undefined);
+        emit('lobbychat', message);
+    },
+    /**
+     * Quick Match: join the queue for a format and let the lobby pair you
+     * with someone of similar Amber. Distinct from the `quickJoin` flag on
+     * newGame, which only takes the first open table it can find.
+     */
+    joinQueue(gameFormat: string): void {
+        useLobbyStore.getState().setMatchmaking({ status: 'searching', format: gameFormat });
+        emit('joinqueue', { gameFormat });
+    },
+    leaveQueue(): void {
+        useLobbyStore.getState().setMatchmaking({ status: 'idle' });
+        emit('leavequeue');
+    },
+    /** Practice tables: what the bot brings, and how it plays. */
+    setBotDifficulty(gameId: string, difficulty: string): void {
+        emit('botdifficulty', gameId, difficulty);
+    },
+    selectBotStyle(gameId: string, styleKey: string): void {
+        emit('selectbotstyle', gameId, styleKey);
     },
     removeGame(gameId: string): void {
         emit('removegame', gameId);

@@ -134,6 +134,16 @@ export interface GameSummary {
     name: string;
     owner: string | { username?: string };
     started?: boolean;
+    /**
+     * A practice table hosted by the Helper Bot. The joiner picks how the bot
+     * plays (`botStyles`) and what deck it brings (`botDifficulty`); both are
+     * settled before the first card, because choosing a deck starts the game.
+     */
+    botGame?: boolean;
+    botStyle?: string;
+    botStyleLabel?: string;
+    botStyles?: BotStyle[];
+    botDifficulty?: string;
     allowSpectators?: boolean;
     gameFormat?: string;
     gamePrivate?: boolean;
@@ -157,6 +167,26 @@ export interface GameSummary {
 export interface ChatMessage {
     date?: string;
     message: MessageFragment | MessageFragment[];
+    [key: string]: unknown;
+}
+
+/** One of the bot's sparring personas (server/services/botgames). */
+export interface BotStyle {
+    key: string;
+    label: string;
+    description?: string;
+}
+
+/**
+ * A site-wide lobby chat line. Unlike a game message this is always plain
+ * text — the lobby has no cards to reference — and it names its author, which
+ * is what the report/block controls hang off.
+ */
+export interface LobbyMessage {
+    id?: string | number;
+    message: string;
+    time?: string;
+    user?: { username?: string; avatar?: string; role?: string; [key: string]: unknown };
     [key: string]: unknown;
 }
 
