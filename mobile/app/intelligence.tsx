@@ -18,6 +18,8 @@ import { CAPABILITIES } from '../src/membership/capabilities';
 import SetFilter from '../src/membership/SetFilter';
 import { hasAnyCapability, hasCapability } from '../src/membership/entitlements';
 import PremiumLock from '../src/membership/PremiumLock';
+import AercSection from '../src/stats/AercSection';
+import DeckComparisonSection from '../src/stats/DeckComparisonSection';
 import {
     duration,
     HouseBar,
@@ -483,6 +485,31 @@ export default function IntelligenceScreen() {
                     ) : (
                         <Muted>Play a few games with your decks and their records appear here.</Muted>
                     )}
+                </PremiumLock>
+            </Card>
+
+            {/* ---- Deck comparison ------------------------------------- */}
+            {/* ARCHON (N12): distinct from the Tournament Lab, which asks
+                which deck to BRING. This asks the plainer question — what do
+                these decks actually do — and answers it in columns. */}
+            <Card>
+                <Text style={styles.panelTitle}>Compare decks</Text>
+                <PremiumLock
+                    capabilities={[CAPABILITIES.DECK_COMPARISON]}
+                    pitch='Put two to four of your decks side by side on the record you actually have with them.'
+                >
+                    <DeckComparisonSection decks={rankings} />
+                </PremiumLock>
+            </Card>
+
+            {/* ---- AERC analytics -------------------------------------- */}
+            <Card>
+                <Text style={styles.panelTitle}>AERC analytics</Text>
+                <PremiumLock
+                    capabilities={[CAPABILITIES.AERC_ANALYTICS]}
+                    pitch='Which kind of deck you play well, and which kind beats you — read in AERC terms rather than by house.'
+                >
+                    <AercSection />
                 </PremiumLock>
             </Card>
 

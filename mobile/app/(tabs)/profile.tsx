@@ -310,6 +310,19 @@ export default function ProfileScreen() {
                         <Text style={styles.linkText}>Deep Probe</Text>
                         <Text style={styles.linkHint}>Which of your decks should you bring?</Text>
                     </Pressable>
+                    {/* ARCHON (N18): the Vault Master lab. Listed for everyone
+                        rather than hidden behind the tier — the screen shows
+                        its locked state, which is what makes it an upgrade
+                        moment instead of a dead end. */}
+                    <Pressable
+                        onPress={() => router.push('/champions-challenge')}
+                        style={styles.linkItem}
+                    >
+                        <Text style={styles.linkText}>Champion’s Challenge</Text>
+                        <Text style={styles.linkHint}>
+                            Let the platform test your decks around the clock.
+                        </Text>
+                    </Pressable>
                 </View>
             </Card>
 

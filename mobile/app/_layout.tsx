@@ -221,6 +221,10 @@ export default function RootLayout() {
                     options={{ title: 'Archon Intelligence', headerBackTitle: 'Back' }}
                 />
                 <Stack.Screen
+                    name='champions-challenge'
+                    options={{ title: "Champion's Challenge", headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
                     name='tournament-lab'
                     options={{ title: 'Deep Probe', headerBackTitle: 'Back' }}
                 />
