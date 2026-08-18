@@ -12,5 +12,6 @@ moves (new cards, new tests).
 | 2026-08-17 | + misplay review justification filters    | 2785 passed, 3 skipped | 40,157       | 0      | 66      |
 | 2026-08-17 | + card knowledge, archives, answer-held   | 2786 passed, 3 skipped | 40,178       | 0      | 66      |
 | 2026-08-17 | merged with main (Proving Grounds, ARI)   | 2791 passed, 3 skipped | 40,245       | 0      | 66      |
+| 2026-08-18 | + forge denial, calibration, habits       | 2792 passed, 3 skipped | 40,253       | 0      | 66      |
 
 Command: `npx vitest run` (~2.5 min). The skips are inherited from upstream.

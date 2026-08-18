@@ -949,6 +949,62 @@ describe('replay misplay review', function () {
             expect(answer.card.name).toBe('Urchin');
         });
 
+        it('names a key-cost raiser as a check answer, with its role', function () {
+            // Bob checked and forged; alice held Anger - known here as forge
+            // denial - in uncalled brobnar. The moment says which function
+            // matched, so the UI can say "a key-cost raiser".
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: {}, bob: { amber: 6 } },
+                        { phase: 'house', hands: { alice: [0, 2, 2], bob: [] } }
+                    ),
+                    frame(22, 2, 'alice', { alice: { house: 'shadows' }, bob: { amber: 6 } }),
+                    frame(30, 2, 'bob', {
+                        alice: {},
+                        bob: {
+                            house: 'untamed',
+                            amber: 0,
+                            keys: { red: true, blue: false, yellow: false }
+                        }
+                    })
+                ]),
+                { rolesFor: (id) => new Set(id === 'anger' ? ['forge-denial'] : []) }
+            );
+
+            const answer = review.moments.find((entry) => entry.type === 'answer-held');
+
+            expect(answer).toBeDefined();
+            expect(answer.pressure).toBe('check');
+            expect(answer.role).toBe('forge-denial');
+            expect(answer.card.name).toBe('Anger');
+        });
+
+        it('counts every justification it fires, for calibration and the panel', function () {
+            // The check-denied fixture: bob at check, alice's thin call, no
+            // forge on bob's next turn. The clear is counted, not silent.
+            const review = findMisplays(
+                recording([
+                    frame(
+                        18,
+                        2,
+                        'alice',
+                        { alice: {}, bob: { amber: 6 } },
+                        { phase: 'house', hands: { alice: [1, 1, 1, 1], bob: [] } }
+                    ),
+                    frame(22, 2, 'alice', { alice: { house: 'brobnar' }, bob: { amber: 6 } }),
+                    frame(30, 2, 'bob', { alice: {}, bob: { house: 'untamed', amber: 3 } })
+                ]),
+                { rolesFor: () => new Set() }
+            );
+
+            expect(review.moments).toEqual([]);
+            expect(review.suppressed['house-call:check-denied']).toBe(1);
+        });
+
         it('profiles the deck as the game revealed it - the toolbox', function () {
             const review = findMisplays(
                 recording([

@@ -345,8 +345,19 @@ function findMisplays(replay, { rolesFor = knownRolesFor } = {}) {
         // One answer-held moment per card per game: a threat that persists
         // must not flag the same held answer turn after turn.
         answeredCards: new Set(),
-        moments: []
+        moments: [],
+        // How often each justification cleared a check, by reason. The count
+        // is of GATE FIRINGS - a cleared turn might not have crossed the flag
+        // threshold anyway - which is exactly what threshold calibration
+        // needs to see (scripts/misplay-calibration.js), and what lets the
+        // panel say "checked and cleared" instead of a bare nothing.
+        suppressed: {}
     };
+    const suppress = (reason) => {
+        context.suppressed[reason] = (context.suppressed[reason] || 0) + 1;
+    };
+
+    context.suppress = suppress;
     const thinned = !!replay.thinned;
     const lastRun = runs[runs.length - 1];
 
@@ -372,7 +383,7 @@ function findMisplays(replay, { rolesFor = knownRolesFor } = {}) {
     }
 
     if (handsRecorded) {
-        cloggedHandMoments(runs, context.handCards, context.moments);
+        cloggedHandMoments(runs, context);
     }
 
     // Where a specific "the answer was in hand" moment fired, the generic
@@ -394,6 +405,10 @@ function findMisplays(replay, { rolesFor = knownRolesFor } = {}) {
         handsRecorded,
         thinned,
         moments,
+        // Game-wide, both players together, and deliberately so: the counts
+        // name no cards and no sides, and the panel uses the total to say
+        // "checked and cleared" instead of a bare nothing.
+        suppressed: context.suppressed,
         toolbox: handsRecorded ? buildToolbox(replay, snapshots, context) : undefined
     };
 }
@@ -421,7 +436,7 @@ function findMisplays(replay, { rolesFor = knownRolesFor } = {}) {
  *     the call's job was denial, and denial is invisible to card counting.
  *     (A game that ended before their next turn counts as denied.)
  */
-function houseCallMoment(run, index, { runs, cards, handCards, moments }) {
+function houseCallMoment(run, index, { runs, cards, handCards, moments, suppress }) {
     if (run.round <= 1 || !run.house || !opensBeforePlay(run)) {
         return;
     }
@@ -440,12 +455,16 @@ function houseCallMoment(run, index, { runs, cards, handCards, moments }) {
     const archive = archiveAt(run.opening, run.player, handCards);
 
     if (!archive && (active.cardPiles?.archives || []).length >= 2) {
+        suppress('house-call:archives-unread');
+
         return;
     }
 
     if (run.forgedDuring) {
         // A key came out of the turn itself: the call produced the one thing
         // that wins games, whatever its card count was.
+        suppress('house-call:forged');
+
         return;
     }
 
@@ -454,6 +473,12 @@ function houseCallMoment(run, index, { runs, cards, handCards, moments }) {
         .filter((house) => HOUSES.has(house));
 
     if (candidates.length < 2 || !candidates.includes(run.house)) {
+        // Counted only when a recorded restriction is what narrowed the
+        // choice - a malformed houses list is not a decision anyone made.
+        if (Array.isArray(active.callableHouses) && candidates.length < 2) {
+            suppress('house-call:forced');
+        }
+
         return;
     }
 
@@ -473,6 +498,8 @@ function houseCallMoment(run, index, { runs, cards, handCards, moments }) {
                 next && keysAt(next.opening, opponent.name) > keysAt(run.opening, opponent.name);
 
             if (!forgedAnyway) {
+                suppress('house-call:check-denied');
+
                 return;
             }
         }
@@ -521,6 +548,8 @@ function houseCallMoment(run, index, { runs, cards, handCards, moments }) {
     if (best !== null && run.amberGained >= potential[best]) {
         // The thin call out-earned the fuller house's worth (steals, board
         // swings - the recording cannot tell, and does not need to).
+        suppress('house-call:out-earned');
+
         return;
     }
 
@@ -558,7 +587,7 @@ function houseCallMoment(run, index, { runs, cards, handCards, moments }) {
  * ended already at lethal - two keys forged, the third paid for - where
  * surplus reaps changed nothing.
  */
-function unusedCreaturesMoment(run, { cards, winner, rolesFor, moments }) {
+function unusedCreaturesMoment(run, { cards, winner, rolesFor, moments, suppress }) {
     if (run.round <= 1 || !run.house || run.mainFrames.length === 0) {
         return;
     }
@@ -576,6 +605,8 @@ function unusedCreaturesMoment(run, { cards, winner, rolesFor, moments }) {
         (active.stats?.amber ?? 0) >=
             (Number.isFinite(active.stats?.keyCost) ? active.stats.keyCost : 6)
     ) {
+        suppress('unused-creatures:already-lethal');
+
         return;
     }
 
@@ -631,8 +662,8 @@ function unusedCreaturesMoment(run, { cards, winner, rolesFor, moments }) {
  *     is what saving a card FOR something looks like; the plan ran, and the
  *     draws were its price, not a mistake.
  *   - every held card is an answer by its own text (a steal or capture, a
- *     board wipe, a key cheat). Holding answers is insurance, and insurance
- *     is not judged for going unclaimed.
+ *     key-cost raiser, a board wipe, a key cheat). Holding answers is
+ *     insurance, and insurance is not judged for going unclaimed.
  *   - the game ended before two more turns could happen. A plan cut short by
  *     the game ending is unjudgeable, and gets the benefit of the doubt.
  *   - the winner ended this turn already at lethal - the refill no longer
@@ -641,7 +672,7 @@ function unusedCreaturesMoment(run, { cards, winner, rolesFor, moments }) {
  * A hold that is still sitting in hand two turns later is the one that gets
  * flagged: it cost the draws AND never became a play.
  */
-function heldCardsMoment(run, index, { runs, handCards, winner, rolesFor, moments }) {
+function heldCardsMoment(run, index, { runs, handCards, winner, rolesFor, moments, suppress }) {
     if (run.round <= 1 || !run.house || run.mainFrames.length === 0) {
         return;
     }
@@ -660,6 +691,8 @@ function heldCardsMoment(run, index, { runs, handCards, winner, rolesFor, moment
         (active.stats?.amber ?? 0) >=
             (Number.isFinite(active.stats?.keyCost) ? active.stats.keyCost : 6)
     ) {
+        suppress('held-cards:already-lethal');
+
         return;
     }
 
@@ -688,9 +721,14 @@ function heldCardsMoment(run, index, { runs, handCards, winner, rolesFor, moment
     }
 
     // The insurance test: a hold made of nothing but answers - steals and
-    // captures, board wipes, key cheats, by the cards' own text - is a
-    // stance, not a slip, whether or not the threat ever came.
-    const ANSWER_ROLES = [ROLES.AMBER_CONTROL, ROLES.BOARD_WIPE, ROLES.KEY_CHEAT];
+    // captures, key-cost raisers, board wipes, key cheats, by the cards' own
+    // text - is a stance, not a slip, whether or not the threat ever came.
+    const ANSWER_ROLES = [
+        ROLES.AMBER_CONTROL,
+        ROLES.FORGE_DENIAL,
+        ROLES.BOARD_WIPE,
+        ROLES.KEY_CHEAT
+    ];
 
     if (
         held.length > 0 &&
@@ -700,6 +738,8 @@ function heldCardsMoment(run, index, { runs, handCards, winner, rolesFor, moment
             return ANSWER_ROLES.some((role) => roles.has(role));
         })
     ) {
+        suppress('held-cards:insurance');
+
         return;
     }
 
@@ -707,6 +747,8 @@ function heldCardsMoment(run, index, { runs, handCards, winner, rolesFor, moment
     const later = laterRunsOf(runs, index, run.player, 2);
 
     if (later.length === 0) {
+        suppress('held-cards:game-ended');
+
         return;
     }
 
@@ -717,6 +759,8 @@ function heldCardsMoment(run, index, { runs, handCards, winner, rolesFor, moment
         if (!Array.isArray(laterEntries)) {
             // The trail goes cold (a thinned stretch, a hand not recorded):
             // continuity cannot be claimed, so nothing is.
+            suppress('held-cards:trail-cold');
+
             return;
         }
 
@@ -729,6 +773,8 @@ function heldCardsMoment(run, index, { runs, handCards, winner, rolesFor, moment
         for (const [entry, count] of heldCounts) {
             if ((laterCounts.get(entry) || 0) < count) {
                 // Part of the hold got played or spent: it was a plan.
+                suppress('held-cards:plan-ran');
+
                 return;
             }
         }
@@ -812,7 +858,12 @@ function answerHeldMoments(run, index, context) {
         const next = laterRunsOf(runs, index, opponent.name, 1)[0];
 
         if (next && keysAt(next.opening, opponent.name) > keysAt(run.opening, opponent.name)) {
-            pressures.push({ kind: 'check', role: ROLES.AMBER_CONTROL });
+            // Both answers to a check: take the amber away, or make the key
+            // cost more than they have.
+            pressures.push({
+                kind: 'check',
+                roles: [ROLES.AMBER_CONTROL, ROLES.FORGE_DENIAL]
+            });
         }
     }
 
@@ -829,7 +880,7 @@ function answerHeldMoments(run, index, context) {
             : 0;
 
         if (nextGap >= ANSWER_BOARD_GAP) {
-            pressures.push({ kind: 'board', role: ROLES.BOARD_WIPE });
+            pressures.push({ kind: 'board', roles: [ROLES.BOARD_WIPE] });
         }
     }
 
@@ -859,7 +910,9 @@ function answerHeldMoments(run, index, context) {
                     continue;
                 }
 
-                if (!rolesFor(identity.id).has(pressure.role)) {
+                const matchedRole = pressure.roles.find((role) => rolesFor(identity.id).has(role));
+
+                if (!matchedRole) {
                     continue;
                 }
 
@@ -894,6 +947,10 @@ function answerHeldMoments(run, index, context) {
                     messageIndex: run.opening.messageIndex,
                     house: run.house,
                     pressure: pressure.kind,
+                    // Which function of the card matched the threat, so the
+                    // UI can say "a key-cost raiser" rather than guessing
+                    // from the pressure.
+                    role: matchedRole,
                     card: {
                         id: identity.id,
                         name: identity.name,
@@ -915,7 +972,7 @@ function answerHeldMoments(run, index, context) {
  * clogged house occupies is a card the deck is not drawing. One moment per
  * streak, placed on the turn the streak had grown longest.
  */
-function cloggedHandMoments(runs, handCards, moments) {
+function cloggedHandMoments(runs, { handCards, moments, suppress }) {
     const streaks = new Map();
     const keyFor = (player, house) => `${player} ${house}`;
 
@@ -980,6 +1037,10 @@ function cloggedHandMoments(runs, handCards, moments) {
                     house === run.house &&
                     (run.forgedDuring || run.amberGained >= CLOG_PAYOFF_AMBER)
                 ) {
+                    if (streak.turns >= CLOG_MIN_TURNS) {
+                        suppress('clogged-hand:cashed-out');
+                    }
+
                     streaks.delete(key);
 
                     continue;
@@ -1055,6 +1116,7 @@ function buildToolbox(replay, snapshots, { cards, handCards, rolesFor }) {
                     cards: 0,
                     pips: 0,
                     amberControl: 0,
+                    forgeDenial: 0,
                     boardWipes: 0,
                     keyCheats: 0
                 });
@@ -1062,6 +1124,7 @@ function buildToolbox(replay, snapshots, { cards, handCards, rolesFor }) {
                 entry.cards++;
                 entry.pips += Number.isFinite(identity.amber) ? identity.amber : 0;
                 entry.amberControl += roles.has(ROLES.AMBER_CONTROL) ? 1 : 0;
+                entry.forgeDenial += roles.has(ROLES.FORGE_DENIAL) ? 1 : 0;
                 entry.boardWipes += roles.has(ROLES.BOARD_WIPE) ? 1 : 0;
                 entry.keyCheats += roles.has(ROLES.KEY_CHEAT) ? 1 : 0;
             }

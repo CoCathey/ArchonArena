@@ -177,10 +177,19 @@ const momentText = (moment, t) => {
                 }
             );
         case 'answer-held': {
-            const tool =
-                moment.pressure === 'check'
-                    ? t('{{card}} — a steal or capture', { card: moment.card?.name })
-                    : t('{{card}} — a board wipe', { card: moment.card?.name });
+            const toolLabels = {
+                'amber-control': t('a steal or capture'),
+                'forge-denial': t('a key-cost raiser'),
+                'board-wipe': t('a board wipe')
+            };
+            const tool = t('{{card}} — {{what}}', {
+                card: moment.card?.name,
+                what:
+                    toolLabels[moment.role] ||
+                    (moment.pressure === 'check'
+                        ? toolLabels['amber-control']
+                        : toolLabels['board-wipe'])
+            });
             const threat =
                 moment.pressure === 'check'
                     ? t('They forged that key')
@@ -278,6 +287,8 @@ const Toolbox = ({ toolbox, t }) => {
                                         ` · ${t('{{n}} steal/capture', {
                                             n: counts.amberControl
                                         })}`}
+                                    {counts.forgeDenial > 0 &&
+                                        ` · ${t('{{n}} forge denial', { n: counts.forgeDenial })}`}
                                     {counts.boardWipes > 0 &&
                                         ` · ${t('{{n}} wipes', { n: counts.boardWipes })}`}
                                     {counts.keyCheats > 0 &&
@@ -305,6 +316,10 @@ const Misplays = ({ misplays, onJump, t }) => {
     }
 
     const moments = (misplays.moments || []).filter((moment) => momentText(moment, t));
+    // An empty list earns more trust when it can say how much was checked:
+    // every justification that fired is a candidate moment the review looked
+    // at and cleared for a reason it could see.
+    const cleared = Object.values(misplays.suppressed || {}).reduce((sum, count) => sum + count, 0);
 
     return (
         <div className='space-y-2'>
@@ -314,12 +329,18 @@ const Misplays = ({ misplays, onJump, t }) => {
 
             {moments.length === 0 ? (
                 <p className='m-0 text-sm text-muted'>
-                    {misplays.handsRecorded
-                        ? t('Nothing stood out — no turn left an obvious question behind.')
-                        : t(
+                    {!misplays.handsRecorded
+                        ? t(
                               'This game was recorded before hands were captured, so only the ' +
                                   'board could be checked — and nothing stood out there.'
-                          )}
+                          )
+                        : cleared > 0
+                        ? t(
+                              'Nothing stood out — {{count}} possible moment(s) were checked and ' +
+                                  'had a visible reason.',
+                              { count: cleared }
+                          )
+                        : t('Nothing stood out — no turn left an obvious question behind.')}
                 </p>
             ) : (
                 <ul className='m-0 list-none space-y-1.5 p-0'>

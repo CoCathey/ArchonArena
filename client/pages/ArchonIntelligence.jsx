@@ -546,6 +546,95 @@ DeckIntelligence.propTypes = { decks: PropTypes.array, t: PropTypes.func };
  * nowhere else - the caveat under "your record by house" says exactly that, and
  * this is the panel that lifts it.
  */
+/**
+ * ARCHON (F3): the misplay review's moments, folded into habits.
+ *
+ * One game's "3 reaps unused" is a moment on that replay; the same thing
+ * across 40% of your games is a habit, and the habit is what changes how you
+ * play next week. Every number here is a link back to the same review that
+ * produced it - the per-game moments live on each replay's analysis panel.
+ */
+const HABIT_LABELS = {
+    'house-call': 'Thin house calls',
+    'answer-held': 'Answers left in hand',
+    'unused-creatures': 'Turns with reaps unused',
+    'held-cards': 'Draws lost to held cards',
+    'clogged-hand': 'Hand-clogging streaks'
+};
+
+const MisplayHabits = ({ habits, t }) => {
+    if (!habits || !habits.reviewed) {
+        return null;
+    }
+
+    return (
+        <div>
+            <div className='mb-1 text-xs uppercase tracking-wide text-muted'>
+                {t('Habits, per the misplay review')}
+            </div>
+
+            {habits.moments === 0 ? (
+                <p className='m-0 text-sm text-muted'>
+                    {t(
+                        'Across {{games}} reviewed games, nothing recurring stood out — the ' +
+                            'review found no moments to fold into a habit.',
+                        { games: habits.reviewed }
+                    )}
+                </p>
+            ) : (
+                <div className='space-y-1.5'>
+                    <div className='flex flex-wrap gap-1.5 text-xs'>
+                        {habits.byType.map((row) => (
+                            <span
+                                className='rounded bg-surface-secondary/60 px-1.5 py-0.5'
+                                key={row.type}
+                            >
+                                <span className='text-foreground'>
+                                    {t(HABIT_LABELS[row.type] || row.type)}
+                                </span>{' '}
+                                <span className='text-muted'>
+                                    {t('{{moments}}× in {{games}} of {{reviewed}} games', {
+                                        moments: row.moments,
+                                        games: row.games,
+                                        reviewed: habits.reviewed
+                                    })}
+                                </span>
+                            </span>
+                        ))}
+                    </div>
+                    <p className='m-0 text-[11px] text-muted'>
+                        {(habits.reapsLeft > 0 || habits.drawsLost > 0) &&
+                            t(
+                                'Left on the table across the sample: about {{reaps}} reap(s) and ' +
+                                    '{{draws}} fresh draw(s). ',
+                                { reaps: habits.reapsLeft, draws: habits.drawsLost }
+                            )}
+                        {habits.cloggedHouses.length > 0 &&
+                            t('The house that clogs your hand most: {{house}}. ', {
+                                house: t(habits.cloggedHouses[0].house)
+                            })}
+                        {t(
+                            'Each game’s moments — and the reasons the review cleared others — ' +
+                                'are on that game’s replay analysis panel.'
+                        )}
+                    </p>
+                    {habits.withHands < habits.reviewed && (
+                        <p className='m-0 text-[11px] text-muted'>
+                            {t(
+                                '{{count}} of the reviewed games were recorded before hands were ' +
+                                    'captured, so only their boards could be checked.',
+                                { count: habits.reviewed - habits.withHands }
+                            )}
+                        </p>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+MisplayHabits.propTypes = { habits: PropTypes.object, t: PropTypes.func };
+
 const ReplayIntelligence = ({ insights, t }) => {
     if (!insights) {
         return <div className='p-3 text-sm text-muted'>{t('Loading…')}</div>;
@@ -652,6 +741,8 @@ const ReplayIntelligence = ({ insights, t }) => {
                     </div>
                 </div>
             )}
+
+            <MisplayHabits habits={insights.habits} t={t} />
 
             {insights.skipped > 0 && (
                 <p className='m-0 text-[11px] text-muted'>

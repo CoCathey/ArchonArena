@@ -311,6 +311,109 @@ describe('replay analysis', function () {
             expect(insights.available).toBe(false);
             expect(insights.reason).toMatch(/nothing to analyse/);
         });
+
+        // ARCHON (F3): the misplay review's moments, folded into habits. The
+        // fixture plants alice's round-2 turn ending its main phase with two
+        // ready brobnar creatures - the same shape the per-game review flags -
+        // and only ALICE's moments count towards alice's habits.
+        it('folds the misplay review into habits, own side only', function () {
+            const idleGame = {
+                GameId: 'g2',
+                Won: false,
+                Data: {
+                    version: 6,
+                    winner: 'bob',
+                    players: [{ name: 'alice' }, { name: 'bob' }],
+                    cards: [{ id: 'troll', name: 'Troll', type: 'creature', house: 'brobnar' }],
+                    handCards: [],
+                    snapshots: [
+                        {
+                            messageIndex: 10,
+                            board: {
+                                round: 2,
+                                phase: 'main',
+                                activePlayer: 'alice',
+                                players: [
+                                    {
+                                        name: 'alice',
+                                        activeHouse: 'brobnar',
+                                        houses: ['brobnar', 'shadows', 'untamed'],
+                                        stats: { amber: 0, chains: 0, keys: {} },
+                                        cardPiles: {
+                                            cardsInPlay: [
+                                                { card: 0, uuid: 't1' },
+                                                { card: 0, uuid: 't2' }
+                                            ],
+                                            discard: [],
+                                            purged: [],
+                                            archives: []
+                                        }
+                                    },
+                                    {
+                                        name: 'bob',
+                                        stats: { amber: 0, chains: 0, keys: {} },
+                                        cardPiles: {
+                                            cardsInPlay: [],
+                                            discard: [],
+                                            purged: [],
+                                            archives: []
+                                        }
+                                    }
+                                ]
+                            },
+                            hands: { alice: [], bob: [] }
+                        },
+                        {
+                            messageIndex: 20,
+                            board: {
+                                round: 3,
+                                phase: 'house',
+                                activePlayer: 'bob',
+                                players: [
+                                    {
+                                        name: 'alice',
+                                        stats: { amber: 0, chains: 0, keys: {} },
+                                        cardPiles: {
+                                            cardsInPlay: [],
+                                            discard: [],
+                                            purged: [],
+                                            archives: []
+                                        }
+                                    },
+                                    {
+                                        name: 'bob',
+                                        stats: { amber: 0, chains: 0, keys: {} },
+                                        cardPiles: {
+                                            cardsInPlay: [],
+                                            discard: [],
+                                            purged: [],
+                                            archives: []
+                                        }
+                                    }
+                                ]
+                            },
+                            hands: { alice: [], bob: [] }
+                        }
+                    ]
+                }
+            };
+
+            const insights = service.aggregate('alice', [
+                idleGame,
+                game('alice', ['brobnar'], ['untamed'])
+            ]);
+
+            expect(insights.habits.reviewed).toBe(2);
+            expect(insights.habits.withHands).toBe(1);
+
+            const unused = insights.habits.byType.find(
+                (entry) => entry.type === 'unused-creatures'
+            );
+
+            expect(unused).toEqual({ type: 'unused-creatures', games: 1, moments: 1 });
+            expect(insights.habits.reapsLeft).toBe(2);
+            expect(insights.habits.perGame).toBe(0.5);
+        });
     });
 });
 

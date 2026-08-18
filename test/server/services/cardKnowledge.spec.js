@@ -53,6 +53,46 @@ describe('card knowledge', function () {
             ).toBe(false);
         });
 
+        it('reads key taxes and opponent forge denial, but never locks and drawbacks', function () {
+            const denial = [
+                'Action: Keys cost +3<A> during your opponent’s next turn.',
+                'Action: Keys cost +3A during your opponent’s next turn.',
+                'Play: Keys cost +1 for each Dis creature in play during your opponent’s next turn.',
+                'While you control a token creature, your opponent cannot forge keys.',
+                'Play: Your opponent skips the “forge a key” step on their next turn.'
+            ];
+
+            for (const text of denial) {
+                expect(classify({ text }).has(ROLES.FORGE_DENIAL), text).toBe(true);
+            }
+
+            // A tool that jams your own forge as hard as theirs is a
+            // strategy, not an answer - and a self-drawback is neither.
+            expect(classify({ text: 'Players cannot forge keys.' }).has(ROLES.FORGE_DENIAL)).toBe(
+                false
+            );
+            expect(classify({ text: 'You cannot forge keys.' }).has(ROLES.FORGE_DENIAL)).toBe(
+                false
+            );
+        });
+
+        it('does not mistake talk of the forge step for forging a key', function () {
+            // Miasma skips the step; it cheats nothing out.
+            expect(
+                classify({
+                    text: 'Play: Your opponent skips the “forge a key” step on their next turn.'
+                }).has(ROLES.KEY_CHEAT)
+            ).toBe(false);
+            // But forging DURING the step, again, is a real extra key.
+            expect(
+                classify({
+                    text:
+                        'After you forge a key during your “forge a key” step, you may forge ' +
+                        'another key at current cost.'
+                }).has(ROLES.KEY_CHEAT)
+            ).toBe(true);
+        });
+
         it('reads a creature that forbids its own reap', function () {
             expect(
                 classify({ type: 'creature', text: 'This creature cannot reap.' }).has(
@@ -87,6 +127,12 @@ describe('card knowledge', function () {
 
         it('knows Key Charge forges', function () {
             expect(rolesFor('key-charge').has(ROLES.KEY_CHEAT)).toBe(true);
+        });
+
+        it('knows Lash of Broken Dreams taxes keys, and Miasma skips the forge', function () {
+            expect(rolesFor('lash-of-broken-dreams').has(ROLES.FORGE_DENIAL)).toBe(true);
+            expect(rolesFor('miasma').has(ROLES.FORGE_DENIAL)).toBe(true);
+            expect(rolesFor('miasma').has(ROLES.KEY_CHEAT)).toBe(false);
         });
 
         it('gives a plain card no roles, and an unknown id an empty set', function () {

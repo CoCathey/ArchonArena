@@ -531,6 +531,19 @@ class ReplayAnalysisService {
         const firstKeyRounds = [];
         const decisiveRounds = [];
         const games = [];
+        // ARCHON (F3): the same review that flags one game's moments, run
+        // across the history and folded into habits. One game's "3 reaps
+        // unused" is a moment; the same thing in 40% of your games is what
+        // this page exists to say.
+        const habits = {
+            reviewed: 0,
+            withHands: 0,
+            moments: 0,
+            byType: new Map(),
+            reapsLeft: 0,
+            drawsLost: 0,
+            cloggedHouses: new Map()
+        };
         let analysed = 0;
         let skipped = 0;
 
@@ -554,6 +567,47 @@ class ReplayAnalysisService {
             }
 
             analysed++;
+
+            const review = this.misplaysFor(row.Data, username);
+
+            if (review.available) {
+                habits.reviewed++;
+                habits.withHands += review.handsRecorded ? 1 : 0;
+
+                const moments = review.moments || [];
+
+                habits.moments += moments.length;
+
+                for (const moment of moments) {
+                    const entry = habits.byType.get(moment.type) || {
+                        type: moment.type,
+                        games: 0,
+                        moments: 0
+                    };
+
+                    entry.moments++;
+                    habits.byType.set(moment.type, entry);
+
+                    if (moment.type === 'unused-creatures') {
+                        habits.reapsLeft += moment.count || 0;
+                    }
+
+                    if (moment.type === 'held-cards') {
+                        habits.drawsLost += moment.missedDraws || 0;
+                    }
+
+                    if (moment.type === 'clogged-hand' && moment.house) {
+                        habits.cloggedHouses.set(
+                            moment.house,
+                            (habits.cloggedHouses.get(moment.house) || 0) + 1
+                        );
+                    }
+                }
+
+                for (const type of new Set(moments.map((moment) => moment.type))) {
+                    habits.byType.get(type).games++;
+                }
+            }
 
             const won = !!row.Won;
             const opponent = analysis.players.find((player) => player.name !== username);
@@ -634,7 +688,25 @@ class ReplayAnalysisService {
             decisiveRound: average(decisiveRounds),
             byHouse: withRates(byHouse.values(), true),
             vsHouse: withRates(vsHouse.values(), false),
-            recent: games.slice(0, 10)
+            recent: games.slice(0, 10),
+            // ARCHON (F3): the review's moments folded into habits. Rates are
+            // over games-with-at-least-one, and `withHands` says how much of
+            // the sample the hand-read checks could even run on - habits from
+            // a mostly-v3 history are board-read only, and the UI says so.
+            habits: {
+                reviewed: habits.reviewed,
+                withHands: habits.withHands,
+                moments: habits.moments,
+                perGame: habits.reviewed
+                    ? Math.round((habits.moments / habits.reviewed) * 100) / 100
+                    : null,
+                byType: [...habits.byType.values()].sort((a, b) => b.moments - a.moments),
+                reapsLeft: habits.reapsLeft,
+                drawsLost: habits.drawsLost,
+                cloggedHouses: [...habits.cloggedHouses.entries()]
+                    .map(([house, streaks]) => ({ house, streaks }))
+                    .sort((a, b) => b.streaks - a.streaks)
+            }
         };
     }
 }

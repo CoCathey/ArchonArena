@@ -1525,8 +1525,16 @@ cannot reap is never "unused"; a hold of pure answers is insurance, not a slip; 
 wide board it answers actually landed; and a per-house **toolbox** profiles what the deck
 showed (cards, pips, steals, wipes, key cheats) - the reading house calls are planned
 with. Always availability, never outcome: conditions, costs and targets stay invisible,
-and the panel says so. True "what would have happened" alternative lines and
-win-probability remain open, and would sit on the same recordings.
+and the panel says so.
+**Tuned by data, read as habits**: the roles include forge denial (key taxes, Miasma-style
+forge skips) - the other answer to a check; every justification the review fires is
+counted (`suppressed`), so an empty panel says "checked and cleared" and
+`npm run calibrate:misplays` reports real flag rates over stored recordings, which is what
+the thresholds get tuned against; and Replay Intelligence folds each player's own moments
+across their recent games into habits - reaps left unused, draws lost to holds, the house
+that clogs their hand - with the per-game moments one click away on each replay. True
+"what would have happened" alternative lines and win-probability remain open, and would
+sit on the same recordings.
 **Depends on:** N1 (board-state replays are the input). **Acceptance:** a coach and student
 step through the same replay in sync, and a finished game produces a win-probability graph.
 

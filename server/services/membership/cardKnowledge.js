@@ -35,6 +35,14 @@ const logger = require('../../log');
 const ROLES = {
     /** Steals or captures - the tools that answer an opponent at check. */
     AMBER_CONTROL: 'amber-control',
+    /**
+     * Raises the opponent's key cost or forbids their forge - the OTHER
+     * answer to a check, and the classic one: the amber stays, the key does
+     * not come. Symmetric locks ("Players cannot forge...") and
+     * self-drawbacks ("You cannot forge...") stay out - a tool that jams
+     * your own forge as hard as theirs is a strategy, not an answer.
+     */
+    FORGE_DENIAL: 'forge-denial',
     /** Destroys or damages every (enemy) creature - answers a wide board. */
     BOARD_WIPE: 'board-wipe',
     /** Forges a key outside the normal start-of-turn forge. */
@@ -53,8 +61,19 @@ const AMBER_CONTROL_RE = /\b(steal|capture)\b/i;
 // creature with power 3 or lower" - but never "each friendly creature" or
 // "each of your creatures": a self-wipe answers nothing.
 const BOARD_WIPE_RE = /(destroy|deal \d+ damage to) each (?!friendly|of your)(\w+ ){0,3}creature/i;
+// Cards refer to the forge PHASE as the quoted '"forge a key" step' (Miasma
+// skips it; double-forge cards forge during it). That quoted phrase is a
+// noun, not an instruction, and is cut before the key-cheat test so a card
+// that merely talks about the step never classifies as cheating a key out.
+const FORGE_STEP_PHRASE_RE = /[“"]forge a key[”"] step/gi;
 const KEY_CHEAT_RE = /forge a key/i;
 const KEY_CHEAT_NEGATED_RE = /(cannot|can['’]t)[^.]{0,40}forge/i;
+// "Keys cost +2<A>", "Keys cost +1A", "key costs +1 for each..." - the tax
+// family - plus denying the opponent's forge outright ("your opponent cannot
+// forge", Miasma's "your opponent skips the ... step"). The pool also holds
+// "Players cannot forge..." (symmetric locks) and "You cannot forge..."
+// (drawbacks); no pattern reaches those.
+const FORGE_DENIAL_RE = /(keys? costs? \+\d|opponent cannot forge|opponent skips[^.]{0,30}forge)/i;
 const CANNOT_REAP_RE = /cannot reap/i;
 const ENEMY_CANNOT_REAP_RE = /enemy creatures cannot reap/i;
 
@@ -81,8 +100,14 @@ function classify(card) {
         roles.add(ROLES.BOARD_WIPE);
     }
 
-    if (KEY_CHEAT_RE.test(text) && !KEY_CHEAT_NEGATED_RE.test(text)) {
+    const withoutStepName = text.replace(FORGE_STEP_PHRASE_RE, '');
+
+    if (KEY_CHEAT_RE.test(withoutStepName) && !KEY_CHEAT_NEGATED_RE.test(withoutStepName)) {
         roles.add(ROLES.KEY_CHEAT);
+    }
+
+    if (FORGE_DENIAL_RE.test(text)) {
+        roles.add(ROLES.FORGE_DENIAL);
     }
 
     if (
