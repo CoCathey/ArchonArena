@@ -28,8 +28,10 @@ key at runtime. A server without the file simply plays without priors.
 
 AERC-style axis scores per card (expected amber, amber control, creature
 control, artifact control, efficiency, disruption — the taxonomy is Decks of
-KeyForge's shared vocabulary; the scores are this platform's own). Feeds the
-graded `card:ax:*` features via `../cardTraits.js`.
+KeyForge's shared vocabulary; the scores are this platform's own), plus
+synergy tags: the mechanics each card `provides` and `wants`. Feeds the
+graded `card:ax:*` features and the combo signals `card:syn:board` /
+`card:syn:hand` via `../cardTraits.js`.
 
 ```
 ANTHROPIC_API_KEY=... npm run card-traits

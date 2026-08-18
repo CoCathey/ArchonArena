@@ -25,8 +25,9 @@
 // review's classifier, so "this card steals" has one answer platform-wide.
 const { ROLES, rolesFor } = require('../membership/cardKnowledge');
 // ARCHON (N43): how MUCH of it a card does - graded AERC-style axes from the
-// committed traits file, absent-tolerant like every other card data source.
-const { traitsFor } = require('./cardTraits');
+// committed traits file, absent-tolerant like every other card data source -
+// and what it wants from its friends (the synergy tags).
+const { traitsFor, synergiesFor } = require('./cardTraits');
 
 /**
  * ARCHON (N26): the features, computed from a plain VIEW of a position.
@@ -419,6 +420,57 @@ function actionFeatures({ kind, card, house, player, button }) {
         if (traits) {
             for (const [axis, value] of Object.entries(traits)) {
                 features[`card:ax:${axis}`] = value;
+            }
+        }
+
+        /**
+         * ARCHON (N43): is this card's combo LIVE? A payoff card carries
+         * `wants` tags; if the mechanics it wants are already provided by
+         * the board, playing it now cashes in - and if they are provided
+         * only by cards still in hand, the partner has not landed yet.
+         * `card:syn:board` and `card:syn:hand` keep those two facts apart
+         * precisely so the model can learn sequencing: play the enabler
+         * first, hold the payoff. Nothing here scripts that rule - the
+         * weights decide whether it is true, and how strongly.
+         */
+        if (player) {
+            const wanted = synergiesFor(card.id);
+
+            if (wanted && wanted.wants.length) {
+                const provided = (cards) => {
+                    const tags = new Set();
+
+                    for (const other of cards || []) {
+                        // A card is not its own combo partner.
+                        if (!other || other === card) {
+                            continue;
+                        }
+
+                        const synergy = synergiesFor(other.id);
+
+                        if (synergy) {
+                            for (const tag of synergy.provides) {
+                                tags.add(tag);
+                            }
+                        }
+                    }
+
+                    return tags;
+                };
+                const onBoard = provided(player.cardsInPlay);
+                const inHand = provided(player.hand);
+                const liveOnBoard = wanted.wants.filter((tag) => onBoard.has(tag));
+                const waitingInHand = wanted.wants.filter(
+                    (tag) => !onBoard.has(tag) && inHand.has(tag)
+                );
+
+                if (liveOnBoard.length) {
+                    features['card:syn:board'] = Math.min(1, liveOnBoard.length / 2);
+                }
+
+                if (waitingInHand.length) {
+                    features['card:syn:hand'] = Math.min(1, waitingInHand.length / 2);
+                }
             }
         }
 

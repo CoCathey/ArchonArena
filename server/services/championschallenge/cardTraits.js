@@ -43,6 +43,26 @@ const AXES = [
 
 const SCALE = 4;
 
+/**
+ * ARCHON (N43): the synergy vocabulary - the mechanics one card can PROVIDE
+ * and another can WANT. DoK models this per card as provides/wants lists
+ * (their SynTraitValue system); this is the same idea in a deliberately
+ * coarse, set-agnostic vocabulary. A payoff card `wants: ['capture']`; an
+ * enabler `provides: ['capture']`; the features in labFeatures light up when
+ * a candidate's wants are satisfied by the board (cash it in) or only by the
+ * hand (the partner has not landed yet - sequencing, learnable).
+ */
+const SYNERGY_TAGS = [
+    'capture', // puts amber onto friendly creatures
+    'archives', // puts cards into the archives
+    'damage', // spreads damage among enemy creatures
+    'swarm', // floods multiple or token creatures into play
+    'friendlyDiscard', // discards from its owner's own hand or deck
+    'friendlyDestroy', // destroys or sacrifices friendly creatures on purpose
+    'powerBoost', // raises friendly creature power
+    'bigCreature' // supplies a high-power body (power 6+)
+];
+
 /** Raw file cache: { file, scores|null }. Absence is cached too. */
 let loaded = null;
 
@@ -109,10 +129,63 @@ function traitsFor(cardId, file = TRAITS_FILE) {
     return traits;
 }
 
+/** Per-card synergy cache, keyed by file. */
+let synergyCache = null;
+
+/**
+ * One card's synergy lists - `{ provides, wants }`, each an array of known
+ * SYNERGY_TAGS - or null for a card with neither (the overwhelmingly common
+ * case), an unknown card, or an absent file. Unknown tags in the file are
+ * dropped rather than trusted: the vocabulary is a contract with the
+ * features, and a stray string must not become a phantom mechanic.
+ */
+function synergiesFor(cardId, file = TRAITS_FILE) {
+    if (!cardId) {
+        return null;
+    }
+
+    if (!synergyCache || synergyCache.file !== file) {
+        synergyCache = { file, cards: new Map() };
+    }
+
+    if (synergyCache.cards.has(cardId)) {
+        return synergyCache.cards.get(cardId);
+    }
+
+    const scores = traitScores(file);
+    const raw = scores && scores[cardId];
+    const clean = (list) =>
+        Array.isArray(list) ? list.filter((tag) => SYNERGY_TAGS.includes(tag)) : [];
+    let synergy = null;
+
+    if (raw && typeof raw === 'object') {
+        const provides = clean(raw.provides);
+        const wants = clean(raw.wants);
+
+        if (provides.length || wants.length) {
+            synergy = { provides, wants };
+        }
+    }
+
+    synergyCache.cards.set(cardId, synergy);
+
+    return synergy;
+}
+
 /** For tests: drop the caches so a spec can point at its own file. */
 function resetCache() {
     loaded = null;
     mapped = null;
+    synergyCache = null;
 }
 
-module.exports = { TRAITS_FILE, AXES, SCALE, traitScores, traitsFor, resetCache };
+module.exports = {
+    TRAITS_FILE,
+    AXES,
+    SCALE,
+    SYNERGY_TAGS,
+    traitScores,
+    traitsFor,
+    synergiesFor,
+    resetCache
+};

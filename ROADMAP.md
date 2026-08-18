@@ -2589,6 +2589,15 @@ borrowing, with our own homework done in it.
         learn each card separately and slowly.
 -   [x] **Absent-tolerant like every card data source:** no file, no axis features, no crash;
         zeros omitted per the sparse convention; keys add-only.
+-   [x] **Synergies: is the combo live?** The same job also tags each card with the mechanics
+        it `provides` and `wants` (DoK's provides/wants idea in a coarse eight-tag vocabulary:
+        capture, archives, damage, swarm, friendlyDiscard, friendlyDestroy, powerBoost,
+        bigCreature). Two features keep the two situations apart — `card:syn:board` (the
+        wanted mechanic has landed: cash in) and `card:syn:hand` (the partner is still in
+        hand) — so SEQUENCING is learnable: play the enabler first, hold the payoff. Nothing
+        scripts that rule; the weights decide whether it is true. This also rescues the combo
+        pieces the standalone priors correctly rated low: weak alone, and now visibly not
+        alone.
 
 **Acceptance criteria**
 

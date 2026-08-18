@@ -27,7 +27,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { getCardIndex } = require('../services/championschallenge/packCards');
-const { TRAITS_FILE, AXES } = require('../services/championschallenge/cardTraits');
+const { TRAITS_FILE, AXES, SYNERGY_TAGS } = require('../services/championschallenge/cardTraits');
 
 const POLL_MS = 30 * 1000;
 
@@ -52,8 +52,28 @@ const RUBRIC = [
     '                   discard from hand, purge, hand-size limits, skipping',
     '                   their steps',
     '',
+    'Also tag each card with SYNERGY tags from this fixed vocabulary - the',
+    'mechanics it PROVIDES to friendly cards and the mechanics it WANTS from',
+    'them to reach full value:',
+    '',
+    '  capture          puts amber onto friendly creatures',
+    '  archives         puts cards into the archives',
+    '  damage           spreads damage among enemy creatures',
+    '  swarm            floods multiple or token creatures into play',
+    '  friendlyDiscard  discards from its owner’s own hand or deck',
+    '  friendlyDestroy  destroys or sacrifices friendly creatures on purpose',
+    '  powerBoost       raises friendly creature power',
+    '  bigCreature      supplies a high-power body (power 6 or more)',
+    '',
+    'A payoff card WANTS the tag (a card that spends captured amber wants',
+    '"capture"; one that plays from the discard wants "friendlyDiscard"; one',
+    'that scales with creature count wants "swarm"). An enabler PROVIDES it.',
+    'Tag only clear cases - most cards provide nothing and want nothing, and',
+    'empty lists are the correct answer for them.',
+    '',
     'Score every card exactly once, keyed by its id, using ids exactly as',
-    'provided, with all six axes present per card (use 0 for none).'
+    'provided, with all six axes present per card (use 0 for none) and both',
+    'tag lists present (empty when none apply).'
 ].join('\n');
 
 const TRAITS_SCHEMA = {
@@ -70,9 +90,11 @@ const TRAITS_SCHEMA = {
                     creatureControl: { type: 'number' },
                     artifactControl: { type: 'number' },
                     efficiency: { type: 'number' },
-                    disruption: { type: 'number' }
+                    disruption: { type: 'number' },
+                    provides: { type: 'array', items: { type: 'string', enum: SYNERGY_TAGS } },
+                    wants: { type: 'array', items: { type: 'string', enum: SYNERGY_TAGS } }
                 },
-                required: ['id', ...AXES],
+                required: ['id', ...AXES, 'provides', 'wants'],
                 additionalProperties: false
             }
         }
@@ -278,6 +300,23 @@ async function collectResults(client, batchId, requestIndex, scores) {
                 card[axis] = clampAxis(entry[axis]);
             }
 
+            // Tags outside the vocabulary are dropped, not trusted: a stray
+            // string must not become a phantom mechanic (cardTraits.js
+            // filters again at read time, but the committed file should
+            // diff clean).
+            const clean = (list) =>
+                Array.isArray(list) ? list.filter((tag) => SYNERGY_TAGS.includes(tag)) : [];
+            const provides = clean(entry.provides);
+            const wants = clean(entry.wants);
+
+            if (provides.length) {
+                card.provides = provides;
+            }
+
+            if (wants.length) {
+                card.wants = wants;
+            }
+
             scores[entry.id] = card;
             wanted.delete(entry.id);
         }
@@ -400,6 +439,11 @@ async function main() {
     for (const axis of AXES) {
         console.log(`Top ${axis}:\n${top(axis)}\n`);
     }
+
+    const providers = Object.values(scores).filter((card) => card.provides).length;
+    const wanters = Object.values(scores).filter((card) => card.wants).length;
+
+    console.log(`Synergies: ${providers} cards provide a mechanic, ${wanters} want one.`);
 
     if (failures.length) {
         console.error(

@@ -4,6 +4,7 @@ const path = require('path');
 
 const {
     traitsFor,
+    synergiesFor,
     resetCache,
     TRAITS_FILE,
     AXES
@@ -69,6 +70,19 @@ describe('cardTraits', function () {
 
             expect(traitsFor('vanilla', file)).toBeNull();
         });
+
+        it('reads synergy lists, drops tags outside the vocabulary', function () {
+            writeTraits({
+                payoff: { wants: ['capture', 'notATag'], provides: [] },
+                enabler: { provides: ['capture'] },
+                vanilla: { expectedAmber: 1 }
+            });
+
+            expect(synergiesFor('payoff', file)).toEqual({ provides: [], wants: ['capture'] });
+            expect(synergiesFor('enabler', file).provides).toEqual(['capture']);
+            expect(synergiesFor('vanilla', file)).toBeNull();
+            expect(synergiesFor('stranger', file)).toBeNull();
+        });
     });
 
     /**
@@ -88,7 +102,11 @@ describe('cardTraits', function () {
                     TRAITS_FILE,
                     JSON.stringify({
                         version: 1,
-                        scores: { 'test-controller': { creatureControl: 3, expectedAmber: 1 } }
+                        scores: {
+                            'test-controller': { creatureControl: 3, expectedAmber: 1 },
+                            'combo-payoff': { wants: ['capture'] },
+                            'combo-enabler': { provides: ['capture'] }
+                        }
                     })
                 );
             }
@@ -128,6 +146,50 @@ describe('cardTraits', function () {
             expect(Object.keys(plain.features).filter((key) => key.startsWith('card:ax:'))).toEqual(
                 []
             );
+        });
+
+        it('a payoff lights differently for a landed partner and a waiting one', function () {
+            if (hadRealFile) {
+                return;
+            }
+
+            const player = (overrides = {}) => ({
+                name: 'me',
+                amber: 0,
+                hand: [],
+                cardsInPlay: [],
+                creaturesInPlay: [],
+                archives: [],
+                deck: [],
+                discard: [],
+                getForgedKeys: () => 0,
+                getCurrentKeyCost: () => 6,
+                opponent: null,
+                ...overrides
+            });
+            const payoff = { id: 'combo-payoff', cardData: {} };
+            const play = (seat) =>
+                actionFeatures({ kind: 'playAction', card: payoff, player: seat }).features;
+
+            // The enabler has landed: cash in.
+            const landed = play(player({ cardsInPlay: [{ id: 'combo-enabler' }] }));
+
+            expect(landed['card:syn:board']).toBeCloseTo(0.5, 10);
+            expect(landed['card:syn:hand']).toBeUndefined();
+
+            // The enabler is still in hand: the combo exists but has not
+            // landed - the sequencing signal.
+            const waiting = play(player({ hand: [{ id: 'combo-enabler' }, payoff] }));
+
+            expect(waiting['card:syn:hand']).toBeCloseTo(0.5, 10);
+            expect(waiting['card:syn:board']).toBeUndefined();
+
+            // A card is not its own combo partner, and no partner anywhere
+            // means no signal at all.
+            const alone = play(player({ hand: [payoff] }));
+
+            expect(alone['card:syn:board']).toBeUndefined();
+            expect(alone['card:syn:hand']).toBeUndefined();
         });
     });
 });
