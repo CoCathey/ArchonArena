@@ -310,6 +310,155 @@ Toolbox.propTypes = { t: PropTypes.func, toolbox: PropTypes.object };
  * the replay at the frame it was read from. Own-game replays only - the
  * server never attaches this section to a shared replay's analysis.
  */
+/**
+ * ARCHON (N26): the win-probability curve.
+ *
+ * The Champion's Challenge's value model, pointed at a real game: every recorded
+ * board frame scored from one player's seat. The line is the position, the
+ * midline is even, and the flagged drops are clickable - a reader can jump
+ * straight to the frame where the game moved.
+ *
+ * The caveat under the chart is load-bearing. A drop is a change in the
+ * position, not a verdict on a decision, and the site cannot tell a reader what
+ * the road not taken held: forking a game needs a seed and an input log, which
+ * only the bot's own games have. Saying so is the difference between a tool and
+ * a fortune teller.
+ */
+const WinProbability = ({ winProbability, onJump, t }) => {
+    if (!winProbability) {
+        return null;
+    }
+
+    if (!winProbability.available) {
+        return (
+            <div className='space-y-1'>
+                <div className='text-xs uppercase tracking-wide text-muted'>
+                    {t('Win probability')}
+                </div>
+                <p className='m-0 text-sm text-muted'>{winProbability.reason}</p>
+            </div>
+        );
+    }
+
+    const points = winProbability.points || [];
+    const moments = winProbability.moments || [];
+
+    if (points.length < 2) {
+        return null;
+    }
+
+    const width = 600;
+    const height = 120;
+    const xOf = (index) => (index / (points.length - 1)) * width;
+    const yOf = (value) => height - value * height;
+    const line = points
+        .map((point, index) => `${xOf(index).toFixed(1)},${yOf(point.winProbability).toFixed(1)}`)
+        .join(' ');
+    // Where each flagged drop sits on the line, so the chart and the list below
+    // point at the same instants.
+    const marked = moments
+        .map((moment) => ({
+            moment,
+            index: points.findIndex((point) => point.messageIndex === moment.messageIndex)
+        }))
+        .filter((entry) => entry.index >= 0);
+
+    return (
+        <div className='space-y-1.5'>
+            <div className='text-xs uppercase tracking-wide text-muted'>
+                {t('Win probability — {{seat}}', { seat: winProbability.seat })}
+            </div>
+
+            <div className='overflow-x-auto'>
+                <svg
+                    className='w-full'
+                    height={height}
+                    preserveAspectRatio='none'
+                    role='img'
+                    aria-label={t('Win probability across the game')}
+                    viewBox={`0 0 ${width} ${height}`}
+                >
+                    {/* Even odds, so a glance says who was ahead. */}
+                    <line
+                        className='text-border'
+                        stroke='currentColor'
+                        strokeDasharray='4 4'
+                        strokeWidth='1'
+                        x1='0'
+                        x2={width}
+                        y1={yOf(0.5)}
+                        y2={yOf(0.5)}
+                    />
+                    <polyline
+                        className='text-emerald-300'
+                        fill='none'
+                        points={line}
+                        stroke='currentColor'
+                        strokeWidth='2'
+                    />
+                    {marked.map(({ moment, index }) => (
+                        <circle
+                            key={moment.messageIndex}
+                            className='text-red-300'
+                            cx={xOf(index)}
+                            cy={yOf(moment.after)}
+                            fill='currentColor'
+                            r='4'
+                        />
+                    ))}
+                </svg>
+            </div>
+
+            {marked.length > 0 && (
+                <ul className='m-0 list-none space-y-1 p-0'>
+                    {marked.map(({ moment }) => (
+                        <li key={moment.messageIndex} className='text-sm'>
+                            <span className='text-muted'>
+                                {t('Turn {{round}}:', { round: moment.round })}
+                            </span>{' '}
+                            <span className='text-foreground'>
+                                {t('{{before}}% to {{after}}%', {
+                                    before: Math.round(moment.before * 100),
+                                    after: Math.round(moment.after * 100)
+                                })}
+                            </span>{' '}
+                            {onJump && (
+                                <button
+                                    className='text-amber-300 underline decoration-dotted underline-offset-2'
+                                    type='button'
+                                    onClick={() => onJump(moment.messageIndex)}
+                                >
+                                    {t('Look')}
+                                </button>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            <p className='m-0 text-[11px] text-muted'>
+                {t(
+                    'Read by the Champion’s Challenge model (v{{version}}, trained on ' +
+                        '{{games}} games) from the board as it stood. A drop is a change in the ' +
+                        'position — it may be the opponent playing well as easily as a misstep — ' +
+                        'and the site cannot tell you what the other line held: replaying a game ' +
+                        'down a different branch needs a seed only the bot’s own games have.',
+                    {
+                        version: winProbability.modelVersion,
+                        games: (winProbability.trainedGames || 0).toLocaleString()
+                    }
+                )}
+            </p>
+        </div>
+    );
+};
+
+WinProbability.propTypes = {
+    onJump: PropTypes.func,
+    t: PropTypes.func,
+    winProbability: PropTypes.object
+};
+
 const Misplays = ({ misplays, onJump, t }) => {
     if (!misplays || !misplays.available) {
         return null;
@@ -464,6 +613,9 @@ const Analysis = ({ analysis, onJump, t }) => {
             })}
 
             <AmberChart players={players} t={t} turns={turns} />
+
+            {/* ARCHON (N26): the same game as the model reads it. */}
+            <WinProbability onJump={onJump} t={t} winProbability={analysis.winProbability} />
 
             {/* The one judgement this makes, and it is labelled as one. */}
             {decisive && (

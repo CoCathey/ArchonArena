@@ -18,6 +18,11 @@ const Game = require('../game/game');
 const Socket = require('../socket');
 const ConfigService = require('../services/ConfigService');
 const HealthServer = require('./healthserver.js');
+// ARCHON (F9): the Helper Bot's seat - answers the bot's prompts after every
+// event that can change game state. Attached to the game instance itself so
+// it lives and dies with the game.
+const BotDriver = require('./botdriver.js');
+const { rolesIndex: warmCardKnowledge } = require('../services/membership/cardKnowledge');
 
 class GameServer {
     constructor() {
@@ -30,6 +35,18 @@ class GameServer {
 
         this.games = {};
         this.protocol = 'https';
+
+        /**
+         * ARCHON (F9): read the card knowledge index now, not mid-game.
+         *
+         * The bots ask it "does this card take amber?" on every decision.
+         * Building it parses nine megabytes of card packs synchronously -
+         * a fifth of a second - and the first bot decision of a game is the
+         * worst possible moment to spend it, because a blocked event loop
+         * on this process is a table that visibly freezes. Once at startup,
+         * cached for the life of the node.
+         */
+        warmCardKnowledge();
 
         try {
             var privateKey = fs
@@ -126,9 +143,54 @@ class GameServer {
         this.healthServer = new HealthServer(this);
         this.healthServer.start();
 
+        this.installCrashGuards();
+
         if (process.env.SCENARIO) {
             require('../devtools/scenario/host.js').install(this, process.env.SCENARIO);
         }
+    }
+
+    /**
+     * ARCHON: one bad moment must not evict everybody on this node.
+     *
+     * The node holds every live game in memory. Node's default behaviour on
+     * an uncaught exception - and, since v15, on an unhandled promise
+     * rejection - is to kill the process, which here means every player on
+     * this node is disconnected mid-game and their game is gone: it exists
+     * nowhere else. The lobby then sees the node die and clears its tables,
+     * so the visible symptom is a board that freezes and a game that has
+     * vanished, with nothing in the client to explain it.
+     *
+     * Errors that happen while RESOLVING a game are already contained
+     * per-game (`runAndCatchErrors`), which is the honest place to handle
+     * them. What reaches here is what escaped that: a throw from inside a
+     * timer, a socket callback, or a promise nobody awaited. For those, a
+     * loud log and a living process is strictly better than taking twenty
+     * other games down - the game that threw is the one at risk, not the
+     * rest, and a node that survives can still be drained and restarted
+     * deliberately.
+     */
+    installCrashGuards() {
+        if (GameServer.crashGuardsInstalled) {
+            return;
+        }
+
+        GameServer.crashGuardsInstalled = true;
+
+        const report = (kind, error) => {
+            // Logged first and unconditionally: whatever else fails after
+            // this, the reason the node nearly died is in the log.
+            logger.error(`${kind} on the game node`, error);
+
+            try {
+                Sentry.captureException(error);
+            } catch (sentryError) {
+                logger.error('Failed to report the error to Sentry', sentryError);
+            }
+        };
+
+        process.on('uncaughtException', (error) => report('Uncaught exception', error));
+        process.on('unhandledRejection', (reason) => report('Unhandled rejection', reason));
     }
 
     debugDump() {
@@ -243,18 +305,50 @@ class GameServer {
     clearStaleAndFinishedGames() {
         const timeout = 20 * 60 * 1000;
 
-        const staleGames = Object.values(this.games).filter(
-            (game) => game.finishedAt && Date.now() - game.finishedAt > timeout
-        );
+        /**
+         * ARCHON: this sweep runs on a timer, and a throw inside a timer is
+         * an uncaught exception - which used to mean the whole node, and
+         * every live game on it, died because ONE game's state upset one
+         * predicate. The work inside is already per-game; the containment
+         * now is too, so a game that cannot be swept is a game that cannot
+         * be swept, not an outage.
+         */
+        const perGame = (game, what, work) => {
+            try {
+                work();
+            } catch (err) {
+                logger.error(`Failed to ${what} game ${game && game.id}`, err);
+            }
+        };
+
+        const staleGames = Object.values(this.games).filter((game) => {
+            try {
+                return game.finishedAt && Date.now() - game.finishedAt > timeout;
+            } catch {
+                return false;
+            }
+        });
         for (const game of staleGames) {
-            logger.info(`closed finished game ${game.id} due to inactivity`);
-            this.closeGame(game);
+            perGame(game, 'close finished', () => {
+                logger.info(`closed finished game ${game.id} due to inactivity`);
+                this.closeGame(game);
+            });
         }
 
-        const emptyGames = Object.values(this.games).filter((game) => game.isEmpty());
+        const emptyGames = Object.values(this.games).filter((game) => {
+            try {
+                return game.isEmpty();
+            } catch (err) {
+                logger.error(`Failed to check whether game ${game && game.id} is empty`, err);
+
+                return false;
+            }
+        });
         for (const game of emptyGames) {
-            logger.info(`closed empty game ${game.id}`);
-            this.closeGame(game);
+            perGame(game, 'close empty', () => {
+                logger.info(`closed empty game ${game.id}`);
+                this.closeGame(game);
+            });
         }
 
         // Check for player inactivity in active games. Piggybacks on the
@@ -263,9 +357,24 @@ class GameServer {
             if (game.finishedAt) {
                 continue;
             }
-            if (game.checkInactivity()) {
+
+            let inactive = false;
+
+            perGame(game, 'check inactivity in', () => {
+                inactive = game.checkInactivity();
+            });
+
+            if (inactive) {
                 this.runAndCatchErrors(game, () => {
                     game.continue();
+
+                    // ARCHON (F9): safety net - if a prompt has somehow been
+                    // waiting on the bot since the last event, answer it now
+                    // rather than leaving the human staring at a stuck board.
+                    if (game.botDriver) {
+                        game.botDriver.pump(game);
+                    }
+
                     this.sendGameState(game);
                 });
             }
@@ -279,6 +388,11 @@ class GameServer {
             this.runAndCatchErrors(game, () => {
                 if (game.checkAbandonment()) {
                     game.continue();
+
+                    if (game.botDriver) {
+                        game.botDriver.pump(game);
+                    }
+
                     this.sendGameState(game);
                 }
             });
@@ -606,6 +720,38 @@ class GameServer {
         if (pendingGame.rematch) {
             game.addAlert('info', 'The rematch is ready');
         }
+
+        // ARCHON (F9): seat the bot. The lobby marks the bot's seat on the
+        // start details (player.isBot); the driver answers its prompts from
+        // here on - starting now, because initialise() has already dealt the
+        // mulligan prompt and nobody is coming to click for the bot.
+        const botNames = Object.values(pendingGame.players)
+            .filter((player) => player.isBot)
+            .map((player) => player.name);
+
+        if (botNames.length > 0) {
+            game.botDriver = new BotDriver(botNames, {
+                maxTurns: pendingGame.botMaxTurns,
+                // ARCHON (F9): play at a pace a person can watch.
+                thinkMs: pendingGame.botThinkMs,
+                // ARCHON (N21): the Champion's Challenge's reigning model,
+                // so the practice opponent plays what the lab learned.
+                policy: pendingGame.botPolicy,
+                // A pump that runs out of its event-loop budget finishes here,
+                // on a later tick, with the board pushed out as it goes. The
+                // node stays responsive to every other game on it - and to the
+                // lobby's ping, which is what decides this node is alive.
+                resume: () =>
+                    this.runAndCatchErrors(game, () => {
+                        game.botDriver.pump(game);
+                        this.sendGameState(game);
+                    })
+            });
+            game.addAlert('info', 'Good luck, have fun!');
+            this.runAndCatchErrors(game, () => {
+                game.botDriver.pump(game);
+            });
+        }
     }
 
     /**
@@ -696,6 +842,28 @@ class GameServer {
     }
 
     onConnection(ioSocket) {
+        // ARCHON: socket.io calls this directly, so a throw here is an
+        // uncaught exception and used to take the node - and every game on
+        // it - down at the moment somebody was trying to JOIN a game. The
+        // player who cannot be seated is told nothing useful either way; the
+        // difference is whether everybody else keeps playing.
+        try {
+            this.seatConnection(ioSocket);
+        } catch (err) {
+            logger.error(
+                `Failed to connect ${ioSocket?.request?.user?.username} to their game`,
+                err
+            );
+
+            try {
+                ioSocket.disconnect();
+            } catch {
+                // Nothing more to do: the socket is already unusable.
+            }
+        }
+    }
+
+    seatConnection(ioSocket) {
         if (!ioSocket.request.user) {
             logger.info('socket connected with no user, disconnecting');
             ioSocket.disconnect();
@@ -896,6 +1064,14 @@ class GameServer {
             game[command](socket.user.username, ...args);
 
             game.continue();
+
+            // ARCHON (F9): whatever the human just did may have handed the
+            // bot a prompt (its turn, a trigger window, a fight choice).
+            // Answer before the state goes out, so the human never watches
+            // a bot "thinking" about a window they cannot see.
+            if (game.botDriver) {
+                game.botDriver.pump(game);
+            }
 
             this.sendGameState(game);
         });

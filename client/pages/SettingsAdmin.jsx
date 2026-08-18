@@ -6,6 +6,10 @@ import Panel from '../Components/Site/Panel';
 import SeasonOperations from '../Components/Admin/SeasonOperations';
 // ARCHON (N4): rebuild the ladder after changing the Elo config
 import RatingRecalculation from '../Components/Admin/RatingRecalculation';
+// ARCHON (N37): comping a tier to an account. The mechanism has existed since
+// N12 - granted columns, resolver, endpoint, even the RTK mutation - with no
+// button anywhere to reach it.
+import MembershipGrants from '../Components/Admin/MembershipGrants';
 import {
     useGetAdminSettingsQuery,
     useResetAdminSettingsMutation,
@@ -156,6 +160,27 @@ const SettingField = ({ descriptor, path, draft, setDraft }) => {
                     maxLength={descriptor.maxLength}
                     onChange={(event) => setDraft(setPath(draft, path, event.target.value))}
                 />
+            </div>
+        );
+    }
+
+    // ARCHON (N24): a fixed choice - a dropdown rather than a free-text field
+    // whose valid values live only in a comment.
+    if (descriptor.type === 'select') {
+        return (
+            <div>
+                <Label>{t(descriptor.label)}</Label>
+                <select
+                    className={inputClass}
+                    value={effective ?? descriptor.default ?? ''}
+                    onChange={(event) => setDraft(setPath(draft, path, event.target.value))}
+                >
+                    {(descriptor.options || []).map((option) => (
+                        <option key={option.value} value={option.value}>
+                            {t(option.label)}
+                        </option>
+                    ))}
+                </select>
             </div>
         );
     }
@@ -332,9 +357,14 @@ const SettingsAdmin = () => {
         }
     };
 
+    // ARCHON (F9): a section that names an admin screen of its own is edited
+    // there, not here - the bot knobs belong beside the roster they govern.
+    // Everything else lands on this page automatically, as it always has.
+    const sections = Object.entries(data.sections).filter(([, section]) => !section.page);
+
     return (
         <div className='mx-auto w-full max-w-3xl space-y-4'>
-            {Object.entries(data.sections).map(([sectionKey, section]) => (
+            {sections.map(([sectionKey, section]) => (
                 <Panel key={sectionKey} title={t(section.title)}>
                     <p className='mb-3 text-xs text-muted'>{t(section.description)}</p>
                     <div className='space-y-3'>
@@ -368,6 +398,7 @@ const SettingsAdmin = () => {
                     </div>
                 </Panel>
             ))}
+            <MembershipGrants />
             <SeasonOperations />
             <RatingRecalculation />
         </div>

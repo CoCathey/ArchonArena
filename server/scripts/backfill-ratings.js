@@ -58,7 +58,7 @@ async function main() {
     const candidates = await db.query(
         'SELECT g."Id", g."GameId", g."FinishedAt", g."GameFormat", g."WinReason" ' +
             'FROM "Games" g ' +
-            'WHERE g."FinishedAt" IS NOT NULL ' +
+            'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE ' +
             'AND g."WinnerId" IS NOT NULL ' +
             'AND (SELECT count(*) FROM "GamePlayers" gp WHERE gp."GameId" = g."Id") = 2 ' +
             'AND NOT EXISTS (SELECT 1 FROM "RatingHistory" rh WHERE rh."GameId" = g."Id") ' +

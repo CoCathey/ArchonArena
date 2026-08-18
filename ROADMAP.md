@@ -8,7 +8,7 @@
 > New systems are built _around_ the gameplay engine as loosely-coupled services, never by
 > rewriting working gameplay.
 
-**Last full codebase audit:** 2026-07-25.
+**Last full codebase audit:** 2026-08-17.
 
 ## How this document is used
 
@@ -24,53 +24,82 @@
 
 ## Architecture principles (apply to every phase)
 
--   [ ] Clean architecture; gameplay engine, tournament engine, statistics engine, auth,
-        deck service, replay service, API, and frontend are separate, loosely-coupled modules.
--   [ ] Prefer reusable services over logic embedded in the gameplay engine.
--   [ ] TypeScript for all new code; incremental migration of touched JS files only.
--   [ ] PostgreSQL as the system of record; Redis for cache/queues/presence.
--   [ ] Docker for local dev and production parity.
--   [ ] Never introduce breaking changes to gameplay if avoidable; incremental refactoring only.
--   [ ] Every feature ships with: current-architecture analysis, proposed architecture, files
-        changed, DB migrations, API changes, tests, and future considerations.
+Standing commitments rather than tasks, so they are never "done" — but each is checked against
+the tree at every audit, and one of them is not being kept.
+
+-   [x] Clean architecture; gameplay engine, tournament engine, statistics engine, auth,
+        deck service, replay service, membership, moderation, API, and frontend are separate,
+        loosely-coupled modules under `server/services/`.
+-   [x] Prefer reusable services over logic embedded in the gameplay engine. The engine is still
+        reached through the ordinary player interface even by the Champion’s Challenge bots.
+-   [ ] **Not kept: TypeScript for all new code.** The server has zero `.ts` files and the web
+        client one `.d.ts`; everything added since the fork — ratings, tournaments, membership,
+        moderation, the Champion’s Challenge — is JavaScript, type-checked only as far as JSDoc and
+        `checkJs: false` allow. The Expo app is the exception and is fully TypeScript. Either
+        start keeping this or strike it; carrying a principle nothing follows makes the rest of
+        the list mean less.
+-   [x] PostgreSQL as the system of record; Redis for cache/queues/presence/rate limits. No
+        MongoDB remains anywhere.
+-   [x] Docker for local dev and production parity.
+-   [x] Never introduce breaking changes to gameplay if avoidable; incremental refactoring only.
+-   [x] Every feature ships with: current-architecture analysis, proposed architecture, files
+        changed, DB migrations, API changes, tests, and future considerations — the larger ones
+        as a design note in `docs/design/`.
 -   [ ] Design for tens of thousands of users (horizontal scale of game nodes, stateless API).
--   [ ] A central **Site Settings service** backs all admin-configurable values with audit log.
+        Untested: no load test has been run, and the multi-node fleet was reverted (**N10**).
+-   [x] A central **Site Settings service** backs all admin-configurable values with audit log —
+        with the three exceptions named under Site administration.
 
 ---
 
-## Where the platform stands (2026-07-29)
+## Where the platform stands (2026-08-17)
 
 **The engineering is far ahead of the operations.** Almost every headline system in this
 roadmap — ratings, tournaments, community, matchmaking, statistics, replays, notifications,
-a native iOS app — is built, tested, and wired end to end. The retention loop closed with
-**N1/N2/N3**: a game can be replayed board-by-board and shared with a public link, players
-are told when their round is paired, and the deck intelligence that differentiates the
-platform is on the screens where the decisions get made.
+moderation, a premium membership, a native iOS app — is built, tested, and wired end to end.
+The site is live and players are playing real games on it (**I1**).
 
-**What is missing is the last mile, and it is almost all operational.** The site is not yet
-serving players at archonarena.com (**I1**) and there are no off-host backups (**I7**) —
-both gated on owner infrastructure actions rather than code. The largest genuinely unbuilt
-systems are moderation (**N5**) and the tutorial (**N11**).
+**Four things changed the shape of the platform since the last audit.** The tournament engine
+went from "the most complete system and the least finished product" to running every format to
+a champion against real PostgreSQL, with the deck lock, hybrid and asynchronous events, prize
+pools and organizer exports (**N9**, **N17**). A premium membership system landed and grew into
+its own product surface — tiers, capabilities, Archon Intelligence, the Tournament Lab, AERC
+analysis, replay analysis, cosmetics, a preview programme and the Champion’s Challenge
+(**N12**, **N18**). Moderation, teams, in-person games and a Learn-to-Play walkthrough — all four listed
+as _missing entirely_ at the last audit — shipped (**N5**, **N7**, **N13**, **N11**). And the
+platform stopped renting its idea of deck strength: **ARI** (**N19**) is now what the Elo
+handicap reads, with SAS demoted to the seed, while thirteen practice bots keep an open table in
+the lobby at all times (**F9**) and a learning bot studies its own games (**N21**).
+
+**What is missing is the last mile, and it is mostly operational or visual.** Observability is
+still unset on the live host (**Q1**) and there are no off-host backups (**I7**) — both gated on
+owner actions rather than code. The largest genuinely unbuilt work is now the look of the site
+(**N16**), the responsive/accessibility/PWA pass (**N6**), and self-serve app distribution
+(**N14**). The zero-downtime deploy was built and then reverted (see below), so a deploy still
+ends games in progress.
 
 **Built and working**
 
-| Area               | State                                                                                                                                                                                                                                 |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gameplay engine    | keyteki fork, 14 sets, 38,221-test baseline, green in CI                                                                                                                                                                              |
-| Brand & navigation | Full rebrand, chess.com-style sidebar, landing hero, token-based light/dark theme                                                                                                                                                     |
-| Auth               | Local + Keybringer OIDC (PKCE, JWKS, auto-link, link/unlink UI)                                                                                                                                                                       |
-| Decks              | Master Vault import, DoK SAS enrichment, rate-limited outbound calls, bulk collection import                                                                                                                                          |
-| Ratings ("Amber")  | SAS-adjusted Elo, FIDE-style K tiers, provisional K, floors, decay, seasons, admin tools, pools (Archon/Sealed/Alliance)                                                                                                              |
-| Rankings           | Leaderboards (world/region/country/state), Top Players, personal Ratings page, W–L records                                                                                                                                            |
-| Tournaments        | Swiss / single-elim / double-elim / round robin / cut-to-top-N, Bo1/3/5, waitlists, check-in, staff, seeding, penalties, brackets, printables, online automation, KeyForge conditions (deck rules, chains, Triad, Reversal, Adaptive) |
-| Matchmaking        | Quick Match queue with Amber-proximity pairing and widening tolerance                                                                                                                                                                 |
-| Notifications      | Typed taxonomy, in-app centre (bell + unread), branded email, per-category opt-out; pairing / event-start / friend / club triggers                                                                                                    |
-| Community          | Friends, member directory, clubs + invite codes, local store directory, Play IRL hub, onboarding wizard                                                                                                                               |
-| Statistics         | Meta dashboard (house/set win rates, SAS bands, format share, house matchup matrix) + per-player and per-deck breakdowns, TTL-cached                                                                                                  |
-| Match history      | Filterable Game History on PostgreSQL; board-state replays with forge jumps, per-player perspective and public share links; Watch hub                                                                                                 |
-| Admin              | Settings service + `/admin/settings` (rating, DoK, tournament, replay retention, watch/broadcast delay, regions, content, navigation), user/ratings/banlist/nodes/motd/news/bug-report admin                                          |
-| Mobile             | Expo iOS app (`mobile/`): login, decks, lobby, pending, full board, spectate, reconnect; EAS + TestFlight runbook                                                                                                                     |
-| Ops                | CI (typecheck/lint/build/test + CodeQL), prod compose + Caddy TLS, `deploy/healthcheck.sh`, Sentry wired client + server                                                                                                              |
+| Area                 | State                                                                                                                                                                                                                                                                       |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gameplay engine      | keyteki fork, 14 sets, 40,245-test baseline, green in CI; shuffles and coin flips drawn from `crypto` rather than `Math.random`                                                                                                                                             |
+| Brand & navigation   | Full rebrand, chess.com-style sidebar, landing hero, token-based light/dark theme                                                                                                                                                                                           |
+| Auth                 | Local (with verified activation email) + Keybringer OIDC (PKCE, JWKS, auto-link, link/unlink UI) built but disabled; owner-initiated account deletion distinct from a ban                                                                                                   |
+| Decks                | Master Vault import, DoK SAS enrichment + background refresh sweep, rate-limited outbound calls, bulk collection import, a remembered DoK key with scheduled sync, a paced import worker, a Master Vault name catalog, Alliance builder                                     |
+| Ratings ("Amber")    | ARI-adjusted Elo (SAS seeds it, play moves it), FIDE-style K tiers, provisional K, floors, decay, seasons + archive, recalculation tool, admin tools, pools (Archon/Sealed/Alliance)                                                                                        |
+| Rankings             | Leaderboards under Community (world/region/country/state), a single Stats page, W–L records, public player profiles every username links to                                                                                                                                 |
+| Tournaments          | Swiss / single-elim / double-elim / round robin / cut-to-top-N, Bo1/3/5, online / in-person / hybrid / asynchronous, waitlists, QR check-in, staff and judge tools, seeding, penalties, brackets, printables, prize pools, entry-fee register                               |
+| Matchmaking          | Quick Match queue with Amber-proximity pairing and widening tolerance, plus queue-health telemetry                                                                                                                                                                          |
+| Notifications        | Typed taxonomy, in-app centre (bell + unread), branded email over Resend / SMTP / SES with a daily and monthly budget cap, Expo push to the phone, per-category opt-out                                                                                                     |
+| Community            | Friends, member directory, clubs (leaderboards, approval joins, named invitations, ownership transfer), teams with their own ladder, local store directory, Play IRL hub, in-person game tracking, onboarding wizard                                                        |
+| Moderation           | Reports with captured snapshots, claim/resolve queue, graduated actions with reason and expiry, chat content filter, full audit log, admin-config policy thresholds                                                                                                         |
+| Membership (Archon+) | Tiers → capabilities → entitlements, badges beside names everywhere, Archon Intelligence, Tournament Lab, AERC analysis, deck comparison, replay analysis and the misplay review, profile cosmetics, the preview programme, organizer CSV exports, the Champion's Challenge |
+| Statistics           | Meta dashboard (house/set win rates, SAS bands, format share, house matchup matrix) + per-player and per-deck breakdowns, TTL-cached                                                                                                                                        |
+| Match history        | Filterable Game History on PostgreSQL; board-state replays with forge jumps, turn navigation, playback, per-player perspective and public share links; Watch hub                                                                                                            |
+| Learn                | A played-through Learn-to-Play walkthrough at `/learn` — 93 steps, no account needed                                                                                                                                                                                        |
+| Admin                | Settings service + `/admin/settings` (sixteen sections including feature flags, bots and moderation policy), `/admin/analytics`, `/admin/moderation`, `/admin/bots`, user/ratings/season/banlist/nodes/motd/news/bug-report admin, scoped statistics reset                  |
+| Mobile               | Expo iOS app (`mobile/`): login, decks, lobby, pending, full board, spectate, reconnect, tournaments, membership, Archon Intelligence, push notifications; EAS + TestFlight runbook; App Store compliance pass                                                              |
+| Ops                  | CI (typecheck/lint/build/test + CodeQL), weekly upstream-sync workflow, prod compose + Caddy TLS, `deploy/healthcheck.sh`, `deploy/update.sh`, encrypted off-host backup/restore rehearsed in CI, Sentry wired client + server                                              |
 
 **Incomplete — built but not finished**
 
@@ -78,32 +107,47 @@ systems are moderation (**N5**) and the tutorial (**N11**).
     match and a server-enforced broadcast delay all do (**N1**); both hands visible to a
     caster is the remaining half, and it belongs with **F4** because it needs a privileged
     view rather than a delay.
+-   **The zero-downtime deploy was built and reverted** (895b773 reverting aedefdd and
+    86f5cfa): games could not be started on the deployed stack, which is worse than the problem
+    it solved. `deploy/update.sh` runs `up -d --build` again, so a deploy still ends every game
+    in progress, the node's health port is read-only, and the admin Restart button is inert
+    (it shells out to `pm2`, which is not installed). Reverted with it, and worth restating:
+    a game result published while the lobby is restarting is dropped with no retry, so that
+    game is never recorded, rated or replayed. → **N10**.
 -   **SAS on the lobby game list.** Deliberately skipped, not missed: decks are not chosen for
     open games, so there is nothing to show there yet. Everywhere else — deck lists, the deck
     view with its AERC breakdown, the pre-game screen, per-deck stats — is done (**N3**).
--   **Admin analytics.** The meta dashboard now covers set win rates and the house matchup
-    matrix (**N3**), but there is still no operational/funnel analytics for admins (**N8**).
--   **Admin-config coverage** stops short of auth (SSO-only mode), matchmaking and moderation
-    policy; replay retention and the Watch settings are now wired. There is still no
-    feature-flag section and only a last-editor audit trail.
--   **Clubs** have no leaderboards, approval-based joins, or ownership transfer.
--   **Web push** is the one part of notifications not built; it waits on the PWA (**N6**).
+-   **Admin-config coverage** stops short of auth (SSO-only mode) and matchmaking parameters.
+    Moderation policy, feature flags and a full audit log are now wired.
+-   **Web push.** Push to the Expo app is built and delivering; browser push still waits on the
+    PWA (**N6**).
+-   **Membership perks are gated in code, not in settings.** `tiers.js` is the single place that
+    says which tier unlocks what, which is deliberate — but the roadmap asked for it to be
+    admin-config, and it is not. Five capabilities are still flagged `planned` and rendered as
+    such rather than as included.
+-   **Onboarding still teaches every new player the same thing.** The walkthrough exists; the
+    question that would let it teach each player only what they are missing does not (**N11**).
 
 **Missing entirely**
 
--   **Moderation tooling** beyond the inherited block list / ban list: no reports, mutes,
-    timeouts, or moderation queue.
--   **Any way to learn the game on the platform.** No tutorial, and onboarding never asks how
-    much a new account already knows — the `/learn` route is a placeholder.
--   **A funding path.** The Patreon link flow works, but there is no campaign, no credentials
-    set, and no defined perks.
--   **In-person game tracking.** Paper games can only be recorded through a tournament.
--   **A reason to visit an empty site.** Nothing to watch when nobody happens to be playing.
--   **Teams**, **versioned public API**, **Discord**, **coaching/AI**, **streaming tools**,
-    **organized-play program**.
+-   **A funding path that has actually been used.** Tiers, capabilities, per-tier checkout
+    links, Patreon sync and a diagnostics endpoint are all built and tested — but there is no
+    campaign, no credentials set, and no page saying where the money goes (**N12**).
+-   **Self-serve app distribution.** `/mobile/ios` and `/mobile/android` are still `Placeholder`
+    pages, so the only way into the beta is knowing the owner (**N14**).
+-   **Staging and load testing** (**N10**).
+-   **Something to _watch_ on an empty site.** The empty-lobby problem is half solved: thirteen
+    practice bots keep an open table you can join at any hour (**F9**). What is still missing is
+    the bot-vs-bot showcase — the node driver already plays both seats, so what remains is the
+    supervisor that keeps one live and lists it on the Watch hub.
+-   **PWA, a responsive pass, an accessibility pass** (**N6**) and the **visual redesign**
+    (**N16**).
+-   **Versioned public API**, **Discord**, **coaching and AI analysis** beyond the shipped
+    misplay review, **streaming tools**, **organized-play program**.
 
-**Not yet verified in production:** DNS, live WebSocket pass-through, Keycloak client
-registration, DoK API key, uptime monitoring, off-host backups.
+**Not yet verified in production:** Sentry DSN and external uptime monitoring (**Q1**), the
+off-host backup bucket (**I7**), a working outbound mail transport (**I6**), Patreon campaign
+credentials (**N12**), Keycloak client registration (deferred, **Phase 3**).
 
 ---
 
@@ -150,11 +194,11 @@ are playing real games on it.
 
 #### I2 — Schema migration ledger and runner _(done)_
 
-**Why:** production schema state is currently untracked. Migrations are applied file-by-file
-by hand (docs/DEPLOYMENT.md §4), nothing records what ran, and the schema directory already
-contains two duplicate ordinals (`40 - Seasons.sql` / `40 - TournamentMatchGames.sql`,
-`41 - GameReplays.sql` / `41 - TournamentPlayerDecks.sql`). Every future feature ships a
-migration; this is the highest-leverage operational fix on the list.
+**Why:** production schema state was untracked. Migrations were applied file-by-file by hand,
+nothing recorded what ran, and the schema directory carried two duplicate ordinals
+(`40 - Seasons.sql` / `40 - TournamentMatchGames.sql`, `41 - GameReplays.sql` /
+`41 - TournamentPlayerDecks.sql`). Every future feature ships a migration; this was the
+highest-leverage operational fix on the list.
 **Tasks**
 
 -   [x] `SchemaMigrations` ledger (filename, sha256 checksum, applied-at, applied-by), in
@@ -172,15 +216,25 @@ migration; this is the highest-leverage operational fix on the list.
         now FAILs on a missing ledger or pending migrations; DEPLOYMENT.md rewritten.
 -   [x] **Verified against a real PostgreSQL 16**: all 46 schema files apply cleanly in
         alphabetical order, baseline seeds 38 rows, a genuinely new multi-statement migration
-        applies, an edited migration is refused, and every exit code is correct for CI.
+        applies, an edited migration is refused, and every exit code is correct for CI. _(Counts
+        as of that verification; the tree now carries 74 schema files and 71 migrations, and the
+        two directories are numbered independently — see below.)_
+
+> **The two numbering schemes, because they are easy to confuse.**
+>
+> `server/db/schema/*.sql` builds a database from empty and is what the Docker initdb mount
+> runs; `server/db/schema/migrations/*.sql` moves an existing database forward and is what the
+> ledger tracks. They have **separate ordinals** — in-person games are schema file 53 and
+> migration 47 — and every "migration N" in this document means the second. New work adds a
+> file to both.
 
 **Depends on:** nothing. Blocks: safe iteration on every schema-touching item below.
 **Acceptance criteria**
 
--   A fresh database and a database at any historical point both converge to the same schema.
--   Running the migrator twice in a row is a no-op the second time.
--   Editing an already-applied migration file fails loudly instead of silently diverging.
--   `healthcheck.sh` FAILs when the running code needs a migration that has not been applied.
+-   [x] A fresh database and a database at any historical point both converge to the same schema.
+-   [x] Running the migrator twice in a row is a no-op the second time.
+-   [x] Editing an already-applied migration file fails loudly instead of silently diverging.
+-   [x] `healthcheck.sh` FAILs when the running code needs a migration that has not been applied.
 
 #### I3 — Public player profiles _(done)_
 
@@ -200,7 +254,7 @@ not new systems, and it makes the whole site feel connected.
 -   [x] Privacy-safe fields only, asserted by a test that the query never even selects Email,
         Password or RegisterIp; disabled and unverified accounts do not resolve, matching the
         member directory and leaderboards.
--   [x] Usernames link through from Leaderboards, Top Players (podium and table), the member
+-   [x] Usernames link through from Leaderboards (podium and table), the member
         directory, and opponent names in recent games.
 -   [x] Remaining link sites done: lobby game list, pending game, tournament players /
         standings / "Your Match", game history, club member lists. Every username outside the
@@ -222,8 +276,8 @@ not new systems, and it makes the whole site feel connected.
 
 #### I4 — Post-game result screen with Amber change _(done)_
 
-**Why:** the rating engine is the heart of the platform and it is currently invisible at the
-moment it matters most. Players finish a rated game with no feedback that anything happened.
+**Why:** the rating engine is the heart of the platform and it was invisible at the moment it
+matters most. Players finished a rated game with no feedback that anything had happened.
 **Tasks**
 
 -   [x] `RatingService.getGameResult()` + `GET /api/games/:gameId/rating` read back the deltas
@@ -411,15 +465,27 @@ that inherit only the site name from config.
         stamped server-side at account creation rather than trusting a client flag. Covers SSO
         sign-ups too, since both paths go through `addUser`. Nullable, because accounts that
         predate the terms have no acceptance and backfilling one would be a false claim.
--   [ ] **Owner action:** AWS SES setup — verified sender identity and production access —
-        before any of this mail can actually be delivered.
+-   [x] **Three transports, not one** (`EmailService`): Resend over its HTTP API, any SMTP
+        provider, or AWS SES. `lobby.emailTransport` picks one, or `auto` resolves it from
+        whichever credential is present — Resend first, because it is the one that can be
+        working within minutes of a decision rather than after a domain review. The original
+        SES-only design made the owner action harder than the problem.
+-   [x] **A send budget that keeps the transport alive** (`MailBudget`, migration 60). Every
+        provider's entry plan is a hard cap with a cliff — Resend's free plan is 100 a day and
+        3,000 a month — and past it the provider stops accepting _all_ mail, so the first
+        casualty is the activation link a new account cannot register without. Sends are
+        counted per day and per month and low-priority categories are shed first, so a busy
+        Saturday of pairing emails cannot take registration down with it.
+-   [ ] **Owner action:** set one of `RESEND_API_KEY`, `SMTP_HOST` or the AWS SES variables,
+        with a verified sender identity, before any of this mail can actually be delivered.
+        `npm run check:email` reports which transport resolved and what is missing.
 
-> **This owner action is now a launch blocker, not a nicety.** Email verification is on by
+> **This owner action is a launch blocker, not a nicety.** Email verification is on by
 > default (see _Known defects_), so registration depends on outbound mail: with no working
 > sender, every sign-up is rolled back with "we could not send your confirmation email" and
 > the site takes no new accounts at all. The server logs an error at boot when verification
-> is on and `lobby.emailFromAddress` is unset. If SES is not ready when the site goes live,
-> set `REQUIRE_ACTIVATION=false` deliberately rather than discovering it from a player —
+> is on and `lobby.emailFromAddress` is unset. If no transport is ready, set
+> `REQUIRE_ACTIVATION=false` deliberately rather than discovering it from a player —
 > accepting that unverified addresses can play until it is turned back on.
 
 **Depends on:** nothing. Blocks: I1's public announcement.
@@ -495,8 +561,8 @@ tuned by what live usage shows._
 
 #### N1 — Full replays, share links, and the Watch hub _(done)_
 
-**Why:** replays currently capture the message log only, and `/watch` is a placeholder.
-Replays are also the substrate for coaching, AI analysis, and streaming tools later.
+**Why:** replays captured the message log only, and `/watch` was a placeholder. Replays are
+also the substrate for coaching, AI analysis, and streaming tools later.
 **Tasks**
 
 -   [x] Board-state snapshots captured alongside the message stream, keyed to the log
@@ -572,7 +638,7 @@ Replays are also the substrate for coaching, AI analysis, and streaming tools la
 -   [ ] Caster mode (both hands visible) stays with **F4** — the delay is the half of it that
         the Watch hub needs, and the half that is safe without a separate privileged view.
 
-#### N2 — Notifications _(done, less web push)_
+#### N2 — Notifications _(done, less browser push)_
 
 **Why:** tournaments and asynchronous community features are only useful if players are told
 things happened. Round pairings in particular are unusable without a ping.
@@ -599,7 +665,15 @@ things happened. Round pairings in particular are unusable without a ping.
 -   [x] Idempotency: a `DedupeKey` partial unique index makes a repeated trigger a no-op —
         `emitRoundPaired` also fires when a best-of series spins up its next game, and a player
         should not be told twice that they are paired. A duplicate suppresses the email too.
--   [ ] Web push once the PWA lands (**N6**).
+-   [x] **Push to the phone** (`PushService`, migration 61). Email is the wrong channel for the
+        things a tournament needs to say: "your match starts in fifteen minutes" is worth an
+        interruption and worth nothing an hour later. Delivery goes through Expo's push service,
+        which fans out to APNs and FCM — the app is built with EAS, so its tokens are Expo
+        tokens and there are no Apple or Google credentials to hold. Same contract as the rest
+        of the path: nothing throws, failures are logged and dropped, and a `DeviceNotRegistered`
+        answer deletes that token on the spot rather than retrying it forever. Which categories
+        are allowed to interrupt is part of the taxonomy, not a per-call decision.
+-   [ ] Browser push once the PWA lands (**N6**). The transport above is native-app only.
 
 **Depends on:** I6 (email template), I3 (linking to profiles). Blocks: F2 (Discord reuses the taxonomy).
 **Acceptance criteria**
@@ -618,8 +692,8 @@ things happened. Round pairings in particular are unusable without a ping.
 
 #### N3 — Deck intelligence _(done, less the lobby-list exception)_
 
-**Why:** SAS is the platform's differentiator against a generic ladder, and it is currently
-under-displayed — the SAS the platform already stores appears on one screen.
+**Why:** SAS is the platform's differentiator against a generic ladder, and it was
+under-displayed — the SAS the platform already stored appeared on one screen.
 **Tasks**
 
 -   [x] SAS column on the deck list, sortable. The data was already fetched and cached on
@@ -736,6 +810,20 @@ no way to report anything or act proportionately. Community size makes this urge
         who saw an error would reasonably repeat the action.
 -   [x] **Policy thresholds (admin-config)**: minimum report length, default mute and timeout
         durations, and the repeat-report window and threshold.
+-   [x] **A first line in front of the queue** (`server/services/moderation/contentFilter.js`).
+        Everything above is after the fact: somebody has to see it, report it, and wait for a
+        human, by which time the harm has landed. Every chat path applied exactly one
+        transformation — a 512-character truncate — which is also the gap App Store Review
+        Guideline 1.2 asks a UGC app to close. The filter masks a short list of slurs and severe
+        profanity and is deliberately **not** a toxicity classifier: KeyForge card, house and
+        deck names collide with innocent substrings, and a player who cannot type the name of
+        the card in their hand concludes the site is broken. So matching is on whole words after
+        normalisation (homoglyphs folded, repeated letters collapsed, separators dropped), and
+        the message still sends with the term masked — dropping it silently teaches somebody to
+        send it again, and refusing it turns the filter into a game to beat.
+-   [x] **Reporting reachable where the abuse happens**, rather than only from a profile: the
+        report control now sits on the surfaces the problem appears on, so nobody has to
+        re-describe what they were already looking at.
 
 **Depends on:** I3 (profiles are where reports start), N2 (notifying the reporter).
 **Acceptance criteria**
@@ -919,23 +1007,49 @@ organizers will hit in practice.
 -   [x] A store can run a paper event on the platform with QR check-in and no laptop per table.
 -   [x] An Alliance event rejects an illegal pod at registration with a clear reason.
 
-#### N10 — Staging, zero-downtime deploys, upstream sync
+#### N10 — Staging, zero-downtime deploys, upstream sync _(deploy script done; drain reverted)_
 
 **Why:** with players on the site, "restart and hope" stops being acceptable, and upstream
 keyteki card fixes need a routine path in.
 **Tasks**
 
--   `staging.archonarena.com` deploying from main.
--   Deploy script: drain the game node (finish or migrate live games), deploy, restart, verify.
--   Scheduled upstream keyteki merge process (docs/UPSTREAM.md) with the card regression suite
-    as the gate.
+-   [x] **A deploy script that cannot half-run** (`deploy/update.sh`): refuses a dirty tree or
+        the wrong branch, `git pull --ff-only`, rebuild, migrate, health-check, and report any
+        finished games left unrated. Every one of those was a step somebody could skip by hand,
+        and skipping them failed quietly rather than loudly — `git fetch` instead of `git pull`
+        once kept production 31 commits behind for a month.
+-   [x] Scheduled upstream keyteki merge process (docs/UPSTREAM.md): `npm run sync:upstream`
+        plus a weekly workflow that runs the full gate and opens a PR only when it is green, an
+        issue when it is not. Never auto-merges.
+-   [~] **Draining the game node: built, then reverted.** A game lives entirely in one game node
+    process's memory and cannot be moved, so "zero downtime" has to mean never restarting a node
+    that still has games on it. That was built — a quiesce control on the node's health port,
+    `stop_grace_period` matched to the 90-minute drain, a second node to roll onto, and a
+    rolling deploy the update script delegated to — and then **reverted in full** (895b773),
+    because games could not be started on the deployed stack and that is worse than the problem
+    it solved. The cause was never found. What the revert put back:
+    -   `deploy/update.sh` runs `up -d --build` directly, so a deploy replaces every container
+        at once and ends every game in progress.
+    -   The node's health port is three read-only routes again; a node cannot be stood down.
+    -   The admin Restart button shells out to `pm2 restart`, and pm2 is not installed anywhere
+        in this stack — the one control an operator reaches for during an incident is inert.
+    -   The per-node game cap is read from a key the config file does not document, so it is
+        never enforced.
+    -   A game result published while the lobby is restarting is dropped with no retry, so a
+        game that finishes in that window is never recorded, rated or replayed. That bug
+        predates the reverted branch and is back.
+-   `staging.archonarena.com` deploying from main. **Do this before re-attempting the drain** —
+    the reverted attempt failed on the deployed stack in a way no local run reproduced, which is
+    exactly the class of failure a staging environment exists to catch.
 -   Load-test game nodes and matchmaking to find the per-node ceiling.
 
 **Depends on:** I1, I2.
 **Acceptance criteria**
 
--   A deploy during active play does not end anyone's game.
--   An upstream merge lands with the full card suite green and a recorded diff of gameplay changes.
+-   A deploy during active play does not end anyone's game — **and a game can still be started
+    on the deployed stack afterwards**, which is the check the first attempt did not have.
+-   [x] An upstream merge lands with the full card suite green and a recorded diff of gameplay
+        changes.
 -   The documented per-node concurrent-game ceiling is backed by a load test.
 
 #### N11 — Guided tutorial and experience-based onboarding _(walkthrough done; branching open)_
@@ -990,12 +1104,17 @@ pairs well with **F9** (a bot as the tutorial's sparring partner).
     quietly teaching the wrong thing. The in-game tutorial for a player's _first real game_
     (the "new to the game" task above) should still run on the engine.
 
-#### N12 — Patreon supporter program
+#### N12 — Archon+ membership _(built end to end; needs a live campaign)_
 
-**Why:** hosting, the DoK API tier, and the domain cost money, and the platform has no funding
-path. TCO's Patreon integration is inherited but dormant (`PatreonService`, the `/patreon` page,
-`/api/account/linkPatreon`, the `keepsSupporterWithNoPatreon` permission) — it needs credentials,
-tiers, and perks that cannot touch competitive fairness.
+**Why:** hosting, the DoK API tier, and the domain cost money, and the platform had no funding
+path. TCO's Patreon integration is inherited but was dormant (`PatreonService`, the `/patreon`
+page, `/api/account/linkPatreon`, the `keepsSupporterWithNoPatreon` permission) — it needed
+credentials, tiers, and perks that cannot touch competitive fairness.
+
+**What this grew into.** It started as "wire up Patreon" and became the platform's second-largest
+system after tournaments: four tiers, twenty-six capabilities, and a set of analytics products
+behind them. That is recorded here rather than split out, because the thing that keeps it honest
+is one document holding both the promise and what backs it.
 **Tasks**
 
 -   [x] **The link flow itself.** Credentials moved out of the browser bundle into config
@@ -1005,32 +1124,92 @@ tiers, and perks that cannot touch competitive fairness.
         supporter role here; OAuth `state` bound to a signed cookie and the requesting user id;
         the Integrations tab (previously behind a hardcoded `false`) shown when there is
         something to integrate. Setup walkthrough:
-        [docs/design/patreon.md](docs/design/patreon.md).
--   Owner: create the Patreon campaign and tiers; set `PATREON_CLIENT_ID`,
-    `PATREON_CLIENT_SECRET` and `PATREON_CAMPAIGN_ID`, then link your own account to verify the
-    round trip against the live campaign.
+        [docs/design/patreon.md](docs/design/patreon.md), plus `deploy/patreon-setup.sh` and a
+        diagnostics endpoint that says which link in the chain is missing.
+-   [x] **Tiers, capabilities and entitlements** (migration 62 — a table, not a role, because a
+        role has no tier, no expiry, no provider and no record of where it came from). Free /
+        Supporter $5 / Archon $10 / Vault Master $20, cumulative by rank so a capability cannot
+        be granted to Archon and forgotten for Vault Master. Features check a **capability**, never
+        a tier name (`requireCapability` server-side, `PremiumLock` client-side, mirrored in the
+        Expo app), so moving a perk between tiers is an edit to `tiers.js` and nothing else.
+        Patreon tier titles map onto ours by name with pledge size as the fallback; admins resolve
+        to the highest tier. Reconciled on every auth refresh, so a lapse takes effect the same day.
+-   [x] **Every tier promise is enforced, or marked as planned.** An audit of the pricing page
+        against the code found thirteen capabilities being sold that nothing implemented —
+        including all five of Vault Master's, so $20 bought nothing over Archon's $10. Rather than
+        delete the roadmap, each carries a `planned` flag and the UI renders it as planned rather
+        than included; `isTierPurchasable` **derives** whether a tier may be sold at all from
+        whether it delivers something today that the tier below does not, so a tier cannot be left
+        on sale by accident and becomes purchasable the day its first feature ships. Five
+        capabilities are still flagged: expanded match history, historical stats, private leagues,
+        extended tournament options, and the advanced (time-series) performance dashboard.
+-   [x] **Archon Intelligence** (`/intelligence`) — Deck, Player and Meta Intelligence, answering
+        "is this a good deck", "am I good with it", and "how does it fare against the field".
+        Every number comes from a real column; where the data does not exist the metric returns
+        `{available: false, reason}` and renders as "not recorded yet" rather than as a zero,
+        because a fabricated zero is worse than an absent number — a player will act on it.
+        Set-aware, since a result from a rotated-out set answers a different question.
+-   [x] **The Tournament Lab, sold as Deep Probe** (`/deep-probe`; the capability id and API
+        paths keep the working name, because released phone builds gate on them) — "which of my
+        decks should I bring to this event", assembled only from the player's own recorded
+        results, with a `confidence` marker about sample size so a 3-game 100% cannot sit
+        unlabelled beside a 40-game 58%. Deck comparison sits alongside it.
+-   [x] **AERC analysis** — the same record read in AERC terms rather than SAS. "My win rate drops
+        against decks with amber control above 8" is actionable; "I lose to decks with 5 more SAS"
+        is not. Built from the AERC breakdown DoK already returns and the platform already stores.
+-   [x] **Replay analysis and the misplay review** (`advanced_replays`) — see **F3** and Phase 10.
+        Watching replays stays free for everyone; what membership buys is the reading of a game
+        rather than the watching of it.
+-   [x] **Badges beside names, everywhere.** One lookup keyed by username rather than a badge
+        threaded through fifteen unrelated services and their SQL — a page gets badges by
+        rendering `<PlayerName>` and does not have to know the system exists. Only non-default
+        badges are sent.
 -   [x] **Profile customisation** — the first cosmetic perks to actually exist, and what
         `profile_cosmetics` (Supporter) and `enhanced_cosmetics` (Vault Master) were already being
         sold as. Five slots: accent colour, profile banner, avatar frame, title and name effect,
-        plus a longer bio. The catalogue and its per-option tier gating live in one file
-        (`server/services/membership/cosmetics.js`); the client maps ids to pixels and never
+        plus a longer bio (migration 68). The catalogue and its per-option tier gating live in one
+        file (`server/services/membership/cosmetics.js`); the client maps ids to pixels and never
         decides who may use what. A lapsed pledge stops rendering the same day the badge does,
-        without deleting the selection — resubscribing restores it. Shipping enhanced cosmetics
-        also makes Vault Master purchasable for the first time: `isTierPurchasable` had correctly
-        refused to sell a tier whose every capability was unbuilt. See
+        without deleting the selection — resubscribing restores it. See
         [docs/design/profile-cosmetics.md](docs/design/profile-cosmetics.md).
--   Remaining supporter perks — cosmetic and convenience only: custom card backs, longer replay
-    retention, larger deck-import batches. **(admin-config)** which tier unlocks which perk.
--   A "Support Archon Arena" page saying plainly where the money goes, with an opt-in supporter
-    list.
+-   [x] **The preview programme** (`previews.js`, migration 67) — the mechanism behind
+        experimental / beta / early access / priority access, which are not features but positions
+        in a queue, and a queue needs a mechanism or the tier is selling a feeling. A preview is
+        registered with a stage, the stage decides which capability admits an account, and
+        priority access is a head start measured in days from the date the preview opened. Every
+        preview is an opt-in switch, and `previewCapabilitiesWithContent()` derives whether those
+        capabilities may be advertised at all, so a tier can never sell an empty queue.
+-   [x] **Organizer exports** (`organizerExport.js`) — standings, pairings and the entry list of
+        any event you run, as CSV, built from the payload the tournament page already renders so
+        an export cannot disagree with the screen the organizer is looking at.
+-   [x] **The Champion’s Challenge** — Vault Master's first genuinely new capability, and the
+        one that took the tier off the shelf. See **N18**.
+-   [x] **Per-tier checkout links.** Patreon takes a `?rid=` per tier; without it every button on
+        the pricing page lands on the campaign homepage and the player who just chose Archon has
+        to go and find Archon again. Reward ids live in config, so a tier recreated on Patreon is
+        a settings change rather than a redeploy, and a missing campaign renders "coming soon"
+        instead of a dead button.
+-   [ ] **Owner:** create the Patreon campaign and tiers; set `PATREON_CLIENT_ID`,
+        `PATREON_CLIENT_SECRET` and `PATREON_CAMPAIGN_ID` (and the per-tier reward ids), then link
+        your own account to verify the round trip against the live campaign. Nothing below the
+        link flow has ever run against a real pledge.
+-   [ ] The five `planned` capabilities above, each of which un-flags itself only when something
+        actually gates on it.
+-   [ ] **(admin-config)** which tier unlocks which perk. Today that mapping is `tiers.js`, which
+        is one honest place but still a redeploy.
+-   [ ] A "Support Archon Arena" page saying plainly where the money goes, with an opt-in supporter
+        list. The `/membership` page is a price list, not an accounting of costs.
 
 **Depends on:** I1 (live site) and owner Patreon setup.
 **Acceptance criteria**
 
--   Linking a Patreon account grants the supporter role within one refresh cycle; unlinking or a
-    lapsed pledge removes it.
--   No perk affects Amber, matchmaking, tournament eligibility, or any other competitive outcome —
-    and the support page says so.
+-   Linking a Patreon account grants the tier within one refresh cycle; unlinking or a
+    lapsed pledge removes it. _(Built and unit-tested against recorded Patreon payloads; never
+    run against a live campaign.)_
+-   [x] No perk affects Amber, matchmaking, tournament eligibility, or any other competitive
+        outcome — asserted by the persona specs, which walk every capability for every tier.
+-   [x] A tier that delivers nothing over the tier below it cannot be sold, and this is derived
+        rather than maintained by hand.
 -   Perks are editable from admin settings without a redeploy.
 
 #### N13 — In-person game tracking _(done)_
@@ -1053,11 +1232,17 @@ gives the Play IRL hub something to do between tournaments.
 -   [x] **Optional deck attachment**, validated against ownership: a deck can only be attached
         to the player who owns it, or a report could credit someone else's deck with a win and
         corrupt deck records and SAS stats.
--   [x] **Rated or not is admin-config** (`inPersonGames.rated`, **off by default** — turning
-        it on is a real decision about a ladder the platform did not witness). Even with it on,
-        a game with no decks attached is recorded **unrated**, because the Elo engine needs
-        both decks' SAS and the alternative is inventing an input. The row records _why_ it
-        was unrated, so a player who reported a game and saw no rating change gets an answer.
+-   [x] **Rated or not is admin-config** (`inPersonGames.rated`). It shipped **off** — turning it
+        on read as a real decision about a ladder the platform did not witness — and the default
+        was later flipped **on** (migration 66) on the argument that the safeguards are the
+        reason it can be on rather than the reason it should be off: a committed paper game
+        already needs two independent reports that agree, inside the window, with both decks
+        attached, which is the same evidence an online game produces. Most KeyForge is played on
+        paper, so the old default meant the ladder measured only the part of the community that
+        plays online. Even with it on, a game with no decks attached is recorded **unrated**,
+        because the Elo engine needs both decks' SAS and the alternative is inventing an input.
+        The row records _why_ it was unrated, so a player who reported a game and saw no rating
+        change gets an answer.
 -   [x] **Surfaced everywhere games already are.** A confirmed game materializes a real
         `Games` row (`Source = 'irl'`) plus `GamePlayers`, then goes through the ordinary
         rating path — so match history, deck records, house statistics and Elo all pick it up
@@ -1259,6 +1444,27 @@ would notice first.
         already exist by following `P1SourceMatchId` / `P2SourceMatchId`, and resolving those links
         from the table is a different thing from resolving them from an array the fake controls.
         Writing it immediately turned up a unique index the fake had no way to model.
+-   [x] **Asynchronous events are a pacing, not a display option** (migration 55). A league played
+        out over days behaves differently, so `Pacing` is a column: the round clock is measured in
+        days, matches are scheduled between the two players rather than called from the desk, and
+        the deadline sweep tells the organizer which rounds are overdue. Reminders are columns
+        rather than a job queue (migration 57), because the platform is the only thing keeping
+        time — two players agree on Thursday at eight and nothing else will remind either of them.
+-   [x] **Scheduling with several times and time zones** (migration 65). A single live offer is
+        one round trip per candidate time between two people who are usually asleep when the other
+        is awake, which is the whole reason an async event exists — two players three zones apart
+        could spend a day of a three-day round discovering Thursday does not work either. A player
+        now offers several slots at once, each recorded with the zone it was offered from.
+-   [x] **Prize pools and an entry-fee register** (migrations 59 and 64). **The platform takes,
+        holds and moves no money.** These record what the organizer told everyone the event costs
+        and how the pot is meant to be split, and who has handed it over — a register kept where
+        everyone is already looking instead of on paper or in the organizer's head. There is no
+        payment integration behind either column and no balance anywhere.
+-   [x] **A judge can release a registered deck** (migration 56) — a distinct column, because
+        "released by a judge" and "never registered" both look like a null `DeckId`, and treating
+        them alike would let a player withhold their deck, read the pairings, and only then choose.
+-   [x] **Organizer CSV exports** — standings, pairings and the entry list, built from the payload
+        the event page already renders (see **N12**, where the capability lives).
 
 #### N16 — Visual redesign: make it look premium
 
@@ -1372,9 +1578,10 @@ foundation **F3** (AI analysis) wants.
 -   [x] Capability `champions_challenge` on the Vault Master tier, gated end to end
         (`requireCapability` on every route, `PremiumLock` on the page), declared across
         server, client and mobile mirrors.
--   Later: let the bot spar a member directly (the **F9** practice opponent), matchup matrices
-    between specific enrolled decks, and strength upgrades to the player — every point of
-    which sharpens the same ratings this feature already reports.
+-   Later: matchup matrices between specific enrolled decks, and strength upgrades to the
+    player — every point of which sharpens the same ratings this feature already reports.
+    (The bot sparring a member directly landed as the **F9** Helper Bot, driving the same
+    `BotPolicy` this lab plays with.)
 
 **Depends on:** N12 (membership), the gameplay engine. **Feeds F9 and F3** — the AI player
 exists now; the showcase supervisor and the analysis models build on it.
@@ -1472,6 +1679,807 @@ deserves to be legible as one.
 -   [x] A trial account's public badge shows the New pill and no tier key; a paying new
         player shows both their paid tier and the pill — pinned in `publicBadge.spec.js`.
 
+#### N21 — The learning bot: a sparring partner that studies its own games _(done)_
+
+**Why:** every number the Champion's Challenge reports is only as good as the player producing
+it. A bot that learns makes every ARI, every hidden gem and every finding sharper — and the
+machinery it needs (self-play at volume, deterministic replay, a value model) is exactly what
+F9's practice opponent and F3's game analysis have been waiting for. Perfect play is not on
+any menu (hidden information sees to that); _provably improving_ play is, and proof is the
+design's spine.
+
+**Tasks**
+
+-   [x] **The learning loop.** Sparring games log every chosen decision as features
+        (`labFeatures.js` — only what a seated player could see); finished games label them;
+        a dependency-free logistic model with per-card learned weights (`labPolicy.js`, spec
+        proves it finds a planted signal) trains in-process; and the champion model steers
+        every sparring game, exploring at softmax temperature so the diary stays honest.
+-   [x] **Champion gating.** A candidate trains every `trainEveryGames` logged games and
+        must TAKE the title: head-to-head against the champion (per-seat policies), on
+        neutral decks that touch nobody's stats, promoted only when the 95% Wilson lower
+        bound of its record clears 50% — retired, record kept, if it cannot prove itself in
+        the window. The bot can get provably stronger and can never quietly get worse.
+-   [x] **Card abilities taken literally: deterministic replay and forking.** Simulated
+        games run seeded — engine randomness scoped through an AsyncLocalStorage source
+        (`secureRandom.withRandomSource`; real games never enter the scope), bot dice on a
+        separate stream, every input logged by list-position. `replayTo` reconstructs the
+        exact game at any point (fingerprint-verified in specs), and a mismatch aborts the
+        fork loudly rather than play a subtly different game.
+-   [x] **The deep bot** (`DeepGame.js`): at the decisions that matter (house calls, key
+        turns) it forks the live game, plays each candidate move out — the card's REAL
+        ability code resolving — across sampled futures, scores the horizon with the value
+        model, and keeps the best road. Every analyzed decision leaves an annotation with
+        win odds and alternatives; the largest swing is flagged as where the game turned.
+-   [x] **Two bots, one product**: the fast bot keeps the volume (ARI, win rates, gems);
+        the deep bot plays `deepGamesPerDay` showcase games rendered on the page with its
+        working shown. **(admin-config)** for all of it — the learning switch, training
+        cadence and diary depth, arena thresholds, and every deep-thinking budget.
+-   [x] **The randomizer**: 🎲 slots fill with a random eligible deck and swap themselves
+        for a fresh one after a member-configured number of games — collection-wide gem
+        hunting with no manual enrollment. Site admins' decks are exempt from the daily
+        game cap, so the operator can flood the lab they are tuning.
+-   Later: the deep bot as F9's practice opponent; the value model over real replays as
+    F3's win-probability graph and blunder detection; richer features and search budgets as
+    the diary deepens.
+
+**Depends on:** N18/N19. **Feeds F9 and F3.**
+**Acceptance criteria**
+
+-   [x] Two runs from one seed play the identical game, and a mid-game fork reconstructs
+        the exact recorded state before diverging — asserted on real games.
+-   [x] Training provably learns: a planted signal (winning moves, a strong card) is found
+        from outcomes alone, and the model never trains in place.
+-   [x] Promotion demands proof: 52% over 200 games does not take the title; a Wilson-clear
+        record does; an unproven candidate retires.
+-   [x] Deep games finish legitimately, annotate their decisions, and flag exactly one
+        turning point — asserted on a real planned game.
+-   [x] Arena games appear in no member-facing table; sparring and showcase games keep
+        every existing exclusion (no `Games`, no Elo, no leaderboards).
+
+#### N22 — Getting decks onto the site without a Master Vault link _(done; catalog off by default)_
+
+**Why:** written up after the fact, because it shipped without a backlog entry. Adding a deck
+required having its Master Vault link to hand, which is not how players hold their collection —
+they know a deck is called "Miss Onyx the Bewildering" and they have five of them on a shelf.
+Master Vault has no per-user endpoint and no name lookup; the only identifier it answers to is a
+uuid.
+**Tasks**
+
+-   [x] **The Master Vault name catalog** (`CatalogService`, migration 51,
+        [docs/design/deck-catalog.md](docs/design/deck-catalog.md)). A background crawl walks the
+        global deck registry oldest-first and records uuid, name, expansion and houses, so a
+        player can search by name. Ordered by registration date because that is the load-bearing
+        property: page N holds the same decks forever and new decks only append, so the persisted
+        cursor never rewinds and a run that stops halfway costs only the pages it did not reach.
+        `links=cards` is deliberately never requested — a search result needs a name, and asking
+        for cards would multiply every response by two orders of magnitude for data this table
+        does not store. Master Vault only, so it works on a server with no DoK key at all.
+        **(admin-config)** and `catalog.enabled` is `false` until an operator opts in, because
+        this is a crawl of somebody else's service.
+-   [x] **A remembered DoK key with scheduled sync** (`DokLinkService`, migration 54). Buying a
+        deck happens more often than anyone wants to go and find their DoK key again. The key is
+        somebody else's credential, so it is sealed at rest (`crypto/secretBox.js`) and unsealed
+        in exactly one place; if the site secret has rotated, the unseal failure is treated as
+        "we do not have a key" rather than shown as a broken sync. A rejection is **terminal**,
+        not retried: DoK issues one key per account and generating a new one voids the old
+        instantly, so retrying a refused key cannot ever succeed and spends a rate limit finding
+        that out.
+-   [x] **A paced import worker** (`DeckImportJobService`, migration 53). Syncing produces a job
+        rather than importing inline: the worker paces Master Vault, holds the circuit breaker,
+        and survives a lobby restart, so a 300-deck collection import cannot be a request that
+        times out or a burst that gets the site rate-limited. **(admin-config)** decks per tick,
+        request spacing and sweep interval.
+-   [x] **Deck co-ownership.** Two accounts can own the same physical deck — a household, a
+        store's loaner, a deck that changed hands — which the one-owner-per-row model refused.
+-   [x] **Deleting a deck archives its games** instead of erasing them. The delete used to take
+        the game records with it, which silently rewrote both players' histories and the stats
+        built on them.
+
+**Acceptance criteria**
+
+-   [x] A player can add a deck by typing its name, on a server with no DoK key.
+-   [x] A stored DoK key is unreadable at rest and dropped the moment DoK refuses it.
+-   [x] A large collection import is paced, resumable, and cannot be lost to a lobby restart.
+
+#### N23 — Account deletion and App Store compliance _(done)_
+
+**Why:** also written up after the fact. Shipping the Expo app to a real review queue turned a
+set of legal and safety requirements into engineering work, and one of them — deletion — was a
+genuine data-model bug rather than a store rule.
+**Tasks**
+
+-   [x] **Deletion is distinct from disablement** (migration 69). `Users.Disabled` was carrying
+        two meanings at once — banned by a moderator, and deleted by its owner — which is right
+        for suppression (both should vanish from the directory and the leaderboards) and wrong
+        for everything else. The bug that proves it: `ModerationService.revoke` lifts a ban by
+        clearing `Disabled`, so revoking a ban on a deleted account would have brought the
+        account back. Deletion is now its own state, initiated by the owner, from both the web
+        and the app.
+-   [x] **The apps cannot talk about money on iOS.** Archon+ is sold on the website; the apps let
+        a player _use_ a membership they already bought. Guideline 3.1.1 forbids prices and links
+        to outside purchasing; 3.1.3(b) permits unlocking content acquired elsewhere, which is
+        the shape the app takes. Rather than rely on a guard every future screen has to remember,
+        the client **strips** `priceUsd` and `checkoutUrl` out of the tier catalogue before any
+        screen sees them, and both fields are optional in the type — a screen that forgets the
+        guard cannot compile a price block. Asserted against a real catalogue payload: no price,
+        no checkout URL, no `patreon.com` and no `$` anywhere in the JSON an iOS build receives,
+        while tier names and benefit copy survive. Paid-entry contests are withheld on iOS for
+        the same reason. See [mobile/APP-REVIEW.md](mobile/APP-REVIEW.md).
+-   [x] **The UGC safety controls review asks for**: reporting, blocking, published contact, and
+        — the one that was missing — a filter in front of posting (**N5**).
+-   [x] **Legal links reachable from the app**, without opening a hole: the first pass at this
+        introduced one, and closing it is part of the same work.
+
+**Acceptance criteria**
+
+-   [x] An owner can delete their account, and a moderator lifting an unrelated ban cannot
+        resurrect it.
+-   [x] An iOS build contains no price, no checkout link and no route to one — enforced by a test
+        that fails the build rather than by a reviewer noticing.
+
+#### N24 — The Gauntlet: your decks against the field, on their own node _(done)_
+
+**Why:** sparring against your own roster measures a deck against the company it keeps. A deck
+that wins 70% inside a weak collection and one that wins 70% against the world are not the
+same deck, and the mirror lab cannot tell them apart. The field already exists in this
+codebase — `CatalogService` walks Master Vault's global deck list, the same walk Decks of
+KeyForge uses to index every deck that exists — it just needed card lists and somewhere
+honest to put the results.
+
+**Tasks**
+
+-   [x] **The pool.** Catalog decks hydrated one Master Vault request at a time, parsed by
+        the member-facing importer's own parser (so a Gauntlet deck is not a second, subtly
+        different notion of "deck"), cached forever — a registered deck's contents never
+        change — and marked unplayable rather than retried when this server has no data for
+        a card. Grown only while somebody has the Gauntlet switched on. **(admin-config)**
+        for pool size, pace, and timeouts.
+-   [x] **Never your own, never a friend's.** The draw excludes any pool deck the member or
+        an accepted friend owns: a friend's deck is exactly the company-it-keeps problem the
+        Gauntlet exists to escape.
+-   [x] **Configurable field**: a share of games against the field (the rest stay mirror
+        games), sets, houses the opponent must contain, a SAS window, and strategies read off
+        the deck's AERC breakdown (amber control, board pressure, speed, artifact/disruption,
+        efficiency). Sets and houses are exact; SAS and strategy can only match enriched
+        decks, so the page reports how many decks the filters actually reach instead of
+        leaving a member wondering why every game is still a mirror.
+-   [x] **Reported separately, never averaged.** Field results live in their own table and
+        their own column, because "against my decks" and "against the field" are different
+        claims. They move ARI at the sim rate, count against the same daily budget, and give
+        a single-deck roster games the mirror lab never could.
+-   [x] **Deep Probe weighs more than win percentage.** Its ranking now combines ARI, the
+        player's win rate against the meta AS IT STANDS (per-house record weighted by
+        prevalence, with coverage stated), what their own record can actually support (95%
+        lower bound, not face value), and Champion's Challenge results — field games counting
+        double the mirror ones. Every term is shown, weights included; the page names the
+        best all-round deck and the best against the current meta, which are often different.
+-   [x] **A node of its own.** `npm run challenge` runs the sweep in a dedicated process, so
+        simulated games stop competing with the lobby's real players. Which node plays is
+        **(admin-config)** (`sweepOwner`: lobby / worker / any) and the right to sweep is a
+        database lease claimed in one atomic statement — two sweepers would quietly play every
+        deck twice its daily budget, invisibly. The worker needs Postgres and nothing else.
+-   Later: matchup matrices against named archetypes; the pool as a public meta sample;
+    field results feeding the ARI seed for decks nobody here owns.
+
+**Depends on:** N18/N19/N21 and **N22** (the Master Vault deck catalog, whose index is the field). **Feeds** Deep Probe and F3.
+**Acceptance criteria**
+
+-   [x] The draw never returns a deck the member or a friend owns, and the count the page
+        shows is built from the same clauses as the draw.
+-   [x] A hydrated deck this server cannot simulate is remembered as unplayable, so it never
+        costs a second Master Vault request.
+-   [x] Field games are recorded from the member's deck's point of view, never written to the
+        mirror table, and never summed with mirror results.
+-   [x] A 3-0 cannot outrank a 40-game record in Deep Probe's ranking, and a missing term
+        (no ARI, no Challenge games) renormalises the weights rather than counting as zero.
+-   [x] Two processes cannot both sweep: the lease is atomic, a database error means nobody
+        plays, and an unrecognised `sweepOwner` falls back to the lobby.
+
+#### N25 — Sharpening the bot: targeting, honest search, better credit _(done)_
+
+**Why:** four things were wrong with how the Champion's Challenge bot learned, and every one of
+them was invisible in the output — a bot that targets at random and a bot that targets well both
+produce a tidy win-rate table. Each fix makes every number the lab reports, every ARI it moves
+and every Deep Probe ranking that reads it more truthful.
+
+**Tasks**
+
+-   [x] **Targeting.** Selections — "choose a creature to destroy", "steal from whom", most of
+        what one KeyForge player does to another — were answered by a dice roll over the
+        selectable cards. They are decisions now, with ownership-gated features (a big creature
+        is a good thing to destroy and a bad thing to sacrifice, which one weight cannot say),
+        amber-on-card, readiness, location, and two learned weights per distinct prompt so
+        "destroy" and "heal" can be told apart when the board looks identical.
+-   [x] **Common random numbers in the search.** The rollout seed mixed in the candidate index,
+        so roads were compared under different futures and a move could win for having been
+        dealt a better deck. Futures are shared across candidates at a decision — a search bug,
+        not a tuning choice: it made the deep bot report deck luck as insight.
+-   [x] **Credit assignment.** Labelling every decision with the final result trained the model
+        against strong plays in games thrown away twenty turns later. Labels now lean partly on
+        the value of the position the same seat reached next, with the value model frozen for the
+        batch. **(admin-config)** `trainingLambda`; 0 restores the old behaviour exactly.
+-   [x] **Distillation.** The deep bot's rollouts measure what a move is worth and those numbers
+        only fed the showcase panel. They are training targets now — the rejected roads included,
+        which are the only negative examples the loop ever gets — so a minute of forking becomes
+        knowledge that costs nothing to reuse.
+-   [x] **Cheaper, faster title fights.** A sequential probability ratio test replaces fixed-N
+        Wilson (a 73% record over fifty games takes the title; an even one is ruled out in about
+        seventy), and arena pairings are paired: one seed played twice with the seats swapped, so
+        deck and draw luck cancel. `arenaMinGames` is a floor under the test now rather than a
+        sample size, hence its default falling from 150 to 30.
+-   [x] **Evidence weighed.** Sparse weights shrink toward zero by observation count, so a card
+        seen twice cannot outrank one measured over hundreds; exploration anneals toward a floor
+        that stays above zero; dropped forks are counted and logged rather than silently thinning
+        the search.
+-   Later: feature crosses for the key race; a value model over real replays (F3's
+    win-probability graph); per-deck card contribution in the member's report.
+
+**Depends on:** N21. **Feeds** F9 (the practice bots play this policy), F3 and Deep Probe.
+**Acceptance criteria**
+
+-   [x] A real game logs targeting decisions carrying the prompt that asked for them, and a model
+        weight change flips which target is taken.
+-   [x] Candidates at one decision are rolled out under identical futures, pinned on the seed
+        derivation itself because the effect is otherwise only visible as noise.
+-   [x] A strong follow-up position lifts the label of a move the game later wasted, and a
+        position strong for the OPPONENT does not.
+-   [x] A measured search target outranks the outcome-derived label; a deep game returns lessons
+        for roads it rejected as well as the one it took.
+-   [x] Three lucky games do not outweigh three hundred measured ones.
+-   [x] Each arena pairing is played twice on one seed with the seats swapped, and a title
+        settled mid-pair stops the second half.
+
+#### N26 — The model on real games, and the lab made visible _(done)_
+
+**Why:** the value model trained by N21/N25 had only ever looked at the lab's own sparring, and
+three of the most useful things the Challenge produces were never shown to anybody. This points
+the model at real replays, surfaces what the roster's games were already computing, and gives an
+operator a way to see whether the lab is working at all.
+
+**Tasks**
+
+-   [x] **Win-probability curve on real games** (`replayValue.js`), under `advanced_replays` so
+        it reaches the Archon tier rather than staying behind Vault Master. Every recorded board
+        frame scored from one player's seat; the sharpest drops flagged and clickable, jumping
+        the viewer to the frame. Parity is STRUCTURAL: one `stateFeaturesFrom`, two adapters
+        (live engine, recorded frame), because a model read against differently-scaled features
+        produces a confident graph of nothing with no error anywhere. A spec asserts a live
+        position and its recording give identical features.
+-   [x] **The refusals, stated in the panel.** No counterfactual lines — forking a game needs a
+        seed and an input log, which only the bot's own games have — and a drop is a change in
+        the position, not a verdict on a decision. With no trained model there is no curve at
+        all rather than a heuristic stand-in a reader could not tell apart.
+-   [x] **Your decks against each other**: the matchup matrix the mirror lab has been producing
+        since N18, counted from the winner column only, blank where a pair is too thin.
+-   [x] **What the bot makes of your deck**: per-card contribution from the learned model's
+        weights, dropped entirely for cards it has seen fewer than `SHRINK_PRIOR` times, because
+        below that the number is mostly prior and "no view yet" is the truthful answer.
+-   [x] **The sparring partner's history**: every version that took the title and the record it
+        took it on — each one having cleared the sequential test against its predecessor, so the
+        list only ever goes one way.
+-   [x] **Win rates carry their 95% interval.** 5-3 and 300-180 both print "62%".
+-   [x] **Lab health on `/admin/analytics`**: games today, which node holds the sweep lease and
+        whether its heartbeat has gone stale (a dead worker node is otherwise invisible), diary
+        depth, champion version, any title fight, pool against target, last Master Vault fetch,
+        and what the pool could not play — grouped, because one card id at the top of that list
+        is actionable.
+-   Later: an on-demand showcase game; per-turn win probability on the live board for
+    spectators; the curve over a member's whole history as a form graph.
+
+**Depends on:** N21/N25 (the model), N1 (board-state replays). **Feeds F3.**
+**Acceptance criteria**
+
+-   [x] A live position and the recorded frame of that same position produce identical features —
+        the one property that makes the curve mean anything.
+-   [x] A curve rises as the seat's amber lead grows, and reads the same game inverted from the
+        other seat.
+-   [x] No model means no curve, with a reason a member can read.
+-   [x] A matchup pairing is counted once, not twice; a pairing involving a withdrawn deck is not
+        counted at all.
+-   [x] A card the model has barely seen is left out of contribution rather than listed with a
+        confident-looking number.
+-   [x] A stale sweep lease reports as stale, and the health panel survives every one of its
+        queries failing.
+
+#### N27 — SAS on the decks the crawl brings in _(done)_
+
+**Why:** the Gauntlet's SAS window and strategy filters are computed from Decks of KeyForge
+enrichment, so a pool deck with no `DeckSas` row satisfies none of them and can never be
+drawn. The enrichment pass existed but could not make progress: it looked for pool decks with
+no stats, which is also, indistinguishably, what a deck DoK has no rating for looks like — and
+Master Vault registers plenty of those. So it spent its whole per-run budget re-asking the same
+unanswerable decks every sweep and never reached the pool behind them. From the inside that is
+indistinguishable from working.
+
+**Tasks**
+
+-   [x] **Every ask is stamped**, answered or not (`GauntletDecks."SasAskedAt"`, migration 78),
+        ordered never-asked-first and re-asked only after `gauntletEnrichRetryDays` (30) — long,
+        because "DoK does not rate this deck" does not change week to week. The stamp is written
+        _before_ the request, so a timeout still counts as having spent it.
+-   [x] **The pool, not the catalog.** Enrichment asks about decks the crawl brought into the
+        playable pool; the catalog indexes every deck that exists, and at 25 requests a minute
+        that is years of asking for data nothing would read.
+-   [x] **`dok.backgroundHeadroom` (5).** Both sweeps that spend the DoK budget on nobody's
+        behalf now leave part of each minute alone. Peek-and-take protects only whoever asked
+        first: a sweep was entitled to the minute's last slot, and a member arriving a second
+        later saw no SAS at all — from their side, exactly like DoK being down. Clamped so
+        background work always keeps at least one slot, however low the limit is set.
+-   [x] **`enrichDeck` reports whether anything was stored**, so a caller pacing itself can tell
+        "DoK answered" from "DoK had nothing, or we were out of budget".
+-   [x] **Pool SAS coverage in the lab health panel**: how many playable decks are rated, and how
+        many were asked about and came back unrated. Without the pair, a SAS filter matching
+        nothing is unexplainable from the outside — the pool looks full and healthy.
+-   Later: enrich the pool from the deck's own card list rather than asking DoK at all (AERC is
+    a published formula), which would make the strategy filters work with no key at all.
+
+**Depends on:** N24 (the pool), the DoK integration. **Acceptance criteria**
+
+-   [x] A deck DoK cannot answer for is asked about once, not once per sweep, and the decks
+        behind it are reached.
+-   [x] A background sweep cannot take the last requests of a minute; a member's own enrichment
+        can.
+-   [x] Neither sweep can be configured into never running at all.
+
+#### N28 — Three sparring partners, so a rating means more _(done)_
+
+**Why:** every sparring game the lab had ever played was piloted by one policy, so a deck's win
+rate meant "how this deck does against this bot". A deck that punished that bot's particular
+habits carried a rating saying it was strong, and nothing in the output could show it — a tidy
+62% looks the same whether it was earned against a varied field or against one opponent's blind
+spot. ARI is built on those games, so the bias went straight into the platform's deck rating.
+
+**Tasks**
+
+-   [x] **Three pilots, rotated** (`labPersonas.js`): the Racer (runs the amber race), the
+        Bruiser (fights for the board), the Schemer (artifacts, abilities, disruption). Each is
+        the champion model plus a small fixed bias — one learned brain, three styles, no second
+        training loop. Round-robin rather than random, because the per-style records are the
+        point and a coin leaves one pilot short.
+-   [x] **Action biases only.** State features are identical across every candidate at one
+        decision point, so a state bias would look meaningful and change nothing. The spec builds
+        the set of keys the extractor can actually emit and requires every bias to be one of
+        them: a mistyped key is otherwise silently inert, and the lab would report three styles
+        while playing one.
+-   [x] **Both seats share the pilot**, so a game's result stays attributable to the decks;
+        the pilot rotates between games instead. Showcase games and arena games stay unstyled —
+        one is meant to be the best play the site can produce, the other measures brains.
+-   [x] **The pilot is part of the record** (`Persona` on the mirror games, the field games and
+        the diary, migration 79), because a game whose pilot went unrecorded can never be
+        attributed afterwards.
+-   [x] **Per-style records on the page**, with intervals, blank below `MIN_STYLE_GAMES` — and
+        the spread, which is the interesting number: a wide spread means the deck cares what the
+        opponent is trying to do.
+-   [x] **The pilots duel** (`ChallengePersonaDuels`): paired seeds on neutral decks with the
+        pilots swapped between seats, the same instrument the title fight uses. Without it a
+        persona pulled too far by `personaStrength` is just a bad player, and a deck's spread
+        would measure which decks punish bad play. The ladder is on the member's page and beside
+        each pilot's game count in the admin health panel.
+-   Later: personas as opponents a member can pick for a one-off game; a per-persona value model
+    (the diary already records which pilot produced each row); a fourth style trained rather
+    than hand-biased.
+
+**Depends on:** N21/N25 (the learned model), N19 (ARI). **Acceptance criteria**
+
+-   [x] Every persona bias names a feature the extractor really emits.
+-   [x] Two pilots pick different moves from the same position.
+-   [x] A sweep's games are spread across all three pilots, and each row records its own.
+-   [x] `personasEnabled` off restores the single-pilot lab exactly, with no styles shown rather
+        than empty ones.
+-   [x] A duel pair with an abandoned half is dropped whole.
+
+#### N29 — The Gauntlet, reachable on a default install _(done)_
+
+**Why:** the Gauntlet's field is drawn from the Master Vault deck catalog, and the crawl that
+builds that catalog ships **off** — it walks somebody else's API, so turning it on is an
+operator's decision. The result was a feature that looks available and cannot work: a member
+switched the Gauntlet on, saw "0 of 0 pool", and was told "the pool is still being built",
+which is true of a pool that is filling and false of one that never will.
+
+**Tasks**
+
+-   [x] **The member is told which kind of empty this is.** `poolStatus` reports
+        `catalogEmpty`, and the panel says the server is not indexing Master Vault decks rather
+        than promising opponents that are not coming. A failed check assumes the catalog is
+        populated — naming a cause that is not so is worse than saying nothing.
+-   [x] **The crawl's own state in the lab health panel**: on or off, decks indexed, which page
+        the walk has reached, whether it has caught up, last run, last error, and whether the
+        circuit breaker has parked it — which from the outside looks exactly like a crawl nobody
+        turned on.
+-   [x] **A hand-started pass** (`POST /api/champions-challenge/catalog/crawl`, admin, rate
+        limited), so an operator who turns the setting on finds out within seconds instead of
+        waiting for the next scheduled run. It refuses rather than switching the setting on
+        itself: outbound traffic to somebody else's API is a decision made deliberately on the
+        settings page, not a side effect of a diagnostics button.
+
+**Depends on:** N24 (the pool), the deck catalog. **Acceptance criteria**
+
+-   [x] An empty catalog and a filling pool produce different sentences for the member.
+-   [x] The panel reports a parked crawl as parked.
+-   [x] The crawl button is admin-only and cannot enable a disabled crawl.
+
+#### N30 — Reading a deck instead of asking about it _(done)_
+
+**Why:** every Gauntlet strategy filter was computed from Decks of KeyForge's AERC breakdown, so
+the most configurable part of the feature depended on somebody else's API and somebody else's
+key. With no key there was no enrichment, so there was no strategy filter at all: the pool
+answered every strategy with "no opponents" while looking perfectly healthy.
+
+**Tasks**
+
+-   [x] **`deckProfile.js`** — a deck read from its own card list: printed amber, creature power
+        and armour, plus **clause-level** keyword counts on the same axes. Clause level because
+        "destroy a friendly creature" and "destroy an enemy creature" are opposite facts about a
+        deck and card-level matching cannot tell them apart.
+-   [x] **Stored on the pool** (`GauntletDecks."Profile"`, migration 80): computed at hydration
+        while the cards are in hand, and backfilled a batch per sweep from cards already stored.
+        Pure CPU — no Master Vault, no DoK, nobody's rate limit — so it runs before enrichment.
+-   [x] **Two scales, never mixed.** Each strategy carries `thresholds` (DoK's curated per-card
+        dataset, single digits) and `localThresholds` (a keyword count over 36 cards). A deck DoK
+        has rated is judged by DoK; the local reading only answers for decks it has not. "Either
+        passes" would silently loosen the filter for exactly the decks we know most about.
+-   [x] **Calibrated, and re-measured by the spec.** The local bars admit roughly a fifth to a
+        third of decks assembled from the real card pool. A filter that matches everything and
+        one that matches nothing are equally useless and fail identically from the outside, so
+        the test asserts the share rather than the arithmetic.
+-   [x] **Never called AERC or SAS, and never feeds ARI.** It exists to make the filters work
+        without a key, not to replace a rating: a rating built partly on a keyword count would be
+        a worse rating wearing the same clothes. The SAS window still means DoK's SAS, and the
+        panel says which filters are exact, which are estimated, and which need a key.
+-   Later: weight the keyword counts by how often each phrase actually predicts the axis, using
+    the decks DoK HAS rated as labels — the site would then be learning its own AERC from the
+    overlap rather than guessing at one.
+
+**Depends on:** N24 (the pool), N27 (enrichment). **Acceptance criteria**
+
+-   [x] A strategy filter matches decks on a server with no DoK key at all.
+-   [x] Every strategy admits a minority of real decks, not all and not none.
+-   [x] Destroying your own creature is not counted as removal, and the opponent drawing is not
+        counted as your efficiency.
+
+#### N31 — Play the sparring partner yourself _(done)_
+
+**Why:** the three sparring styles (N28) existed only in the background, measuring decks nobody
+could meet. They were built as a bias on one learned brain precisely so they could be shared, and
+the practice bots already play the champion — so the Racer that measured your deck can be the
+Racer you sit down against.
+
+**Tasks**
+
+-   [x] **A style on every practice table**, rotated between tables so a player who keeps coming
+        back meets all three, and named on the pending screen rather than hidden.
+-   [x] **The joiner picks** (`selectbotstyle`): the pending screen is the only place the choice
+        can be made — a bot table starts the instant its joiner picks a deck — so the picker sits
+        beside the deck button and re-resolves the bot's brain in place. Only the human seated at
+        the table may set it, and only before it starts.
+-   [x] **"Its own game" is always an option**: the champion unstyled is a perfectly good
+        opponent and the one every table offered before this existed.
+-   [x] **No champion, no picker.** A style is a bias ON the champion's weights, so before the lab
+        has crowned one a style would change nothing at all — and a picker that visibly does
+        nothing is worse than one that is absent, because a player cannot tell which they are
+        looking at. `bots.styledOpponents` and `bots.styleStrength` are the operator's dials.
+-   Later: show the style on the game board while playing, and record it with the practice game
+    so "I keep losing to the Bruiser" is a fact a player can check.
+
+**Depends on:** N28 (the styles), F9 (the practice bots). **Acceptance criteria**
+
+-   [x] A table opens in a style and the brain that reaches the game node is wearing it.
+-   [x] A player at the table can change it; a player who is not cannot, and neither can anyone
+        once the game is under way.
+-   [x] With no learned champion, no styles are offered at all.
+
+#### N32 — The Vault Tour: a slate against what wins _(done)_
+
+**Why:** the lab could tell a member how a deck did against their own collection and against a
+random slice of everything. Neither is the question somebody picking a deck for an event asks,
+and that field cannot be sampled — winning decks are a list, not a distribution.
+
+**Tasks**
+
+-   [x] **An admin-curated field** (`VaultTourDecks`, migration 81): tournament decks entered by
+        Master Vault or Decks of KeyForge link with their event and finish, cards fetched a few
+        per sweep at the Gauntlet's pacing. A deck this server cannot simulate is stored WITH the
+        reason rather than refused, so an operator's entry never silently fails to appear.
+-   [x] **A three-deck slate** (`VaultTourEntries`), separate from the eight-deck roster: a member
+        testing three decks against tournament decks should not have to withdraw five. No SAS
+        requirement, unlike the roster — this compares a deck with named opponents rather than
+        with what its rating predicted.
+-   [x] **Its own daily budget**: twelve games per deck per day counted from `VaultTourGames`
+        alone, so the two measurements cannot starve each other. Admins exempt.
+-   [x] **Never ARI, never the diary.** A hand-picked field of winners is the opposite of the
+        representative opposition a rating needs, and a rating quietly fed by an operator's choice
+        of opponents cannot be unpicked afterwards.
+-   [x] **The matrix**, which is the whole point: this deck against that deck, both records, with
+        the field total and its interval underneath.
+-   [x] **A starting field of 23 decks**, seeded on first sweep with `placing: unknown` — the list
+        arrived without placings, and "won the event" is not a claim to invent to fill a column.
+-   [x] **From Deep Probe**, where deck choice is being made: a panel offering the Vault Tour,
+        pointing a member without Vault Master at the tier and a member with it straight at the
+        feature.
+-   [x] **Reachable, and offering the whole collection.** Three defects a screenshot found and no
+        spec would have: `/admin/analytics` had a route since N8 and had never been in a menu, so
+        the field editor could only be reached by typing the URL; the sweep returned before the
+        Vault Tour step when nobody had roster decks, so a site with no enrollments never seeded
+        the field; and the slate picker borrowed the roster's candidate query, which requires a
+        SAS rating and sorts by it, so a member saw eight decks instead of their collection.
+-   Later: per-event columns rather than per-deck when a field grows past a screenful; the same
+    matrix against a club's decks.
+
+**Depends on:** N24 (hydration), N28 (the pilots). **Acceptance criteria**
+
+-   [x] A Vault Tour game never moves ARI and never lands in the mirror record.
+-   [x] A deck at its twelve for the day rests; an admin's does not.
+-   [x] The seeded field cannot overwrite an operator's corrections.
+
+#### N33 — The three faults a screenshot found _(done)_
+
+**Why:** a member reported a Vault Tour matrix reading 100% in every cell. It was not a
+display bug, and finding out what it was uncovered two more faults of the same family: things
+that were broken in a way that produced a plausible-looking answer instead of an error.
+
+**Tasks**
+
+-   [x] **The field was playing with no cards.** `GauntletDecks.Cards` and `VaultTourDecks.Cards`
+        store card IDS; the engine's deck builder reads `entry.card` and drops any entry without
+        one (`server/game/deck.js` logs "Corrupt deck" and moves on). Both draws handed the stored
+        rows straight to the engine, so every field opponent — Gauntlet and Vault Tour alike —
+        played an empty deck and lost 3–0 in about nine turns. `masterVault.withCardData` attaches
+        the cards at draw time, and a deck that can no longer be built is withdrawn from the field
+        with its reason rather than served: the draw takes least-recently-played first, so an
+        unbuildable deck that stays playable is drawn every sweep forever.
+-   [x] **The simulator refuses a side that cannot play.** A deck that fails to build is now
+        `{completed: false, reason: 'short-deck'}` before the first input. This is the guard that
+        was missing: every existing spec stubbed the engine, so nothing in the suite could tell an
+        empty deck from a bad one, and the matrix rendered the result with a percentage sign after
+        it. The new specs play real games precisely because that is the only kind that could have
+        caught it.
+-   [x] **The Master Vault crawl was asking the wrong address.** `/api/decks/v2` — no trailing
+        slash — against a Django service, which answers 404. It had indexed nothing, ever, so the
+        Gauntlet pool sat at zero while single-deck fetches (spelled `/<uuid>/?links=cards`, and so
+        carrying the slash by accident) worked the whole time. The crawler now resolves its
+        endpoint: candidates tried in order, a 404 or a non-list 200 moves to the next, the winner
+        is remembered, and the failure it reports names the URL. `catalog.mvApiUrl` is a Site
+        Setting for the day the list moves again, and the crawler identifies itself.
+-   [x] **The hidden gem badge on My Decks**, asked for from the lab rather than recomputed — the
+        confidence rule stays in `labMath`, and one grouped read per page replaces reading every
+        game a roster ever played.
+
+**Acceptance criteria**
+
+-   [x] A field deck drawn for a game arrives with its card data, or is not drawn.
+-   [x] A game one side cannot play is abandoned, never scored.
+-   [x] An operator reading "HTTP 404" can see which URL produced it.
+
+**Cleanup, for an operator upgrading past this.** Every field result recorded before this
+change is a win over an empty deck. Nothing distinguishes those rows from honest ones, so
+they cannot be repaired — only discarded:
+
+```sql
+DELETE FROM "VaultTourGames";
+DELETE FROM "GauntletGames";
+UPDATE "VaultTourDecks" SET "GamesPlayed" = 0, "LastPlayedAt" = NULL;
+UPDATE "GauntletDecks" SET "GamesPlayed" = 0, "LastPlayedAt" = NULL;
+```
+
+Vault Tour games never moved ARI, so clearing them costs nothing but the matrix. Gauntlet
+games DID move it, at the sim rate: a server whose pool never hydrated (the crawl fault above
+left many at zero decks) played none of them and needs nothing further, but one that did will
+carry inflated ARI for the decks involved until enough honest games outweigh it. There is no
+targeted undo — `RatingHistory` is the official record and the lab is forbidden from touching
+it, which is exactly the separation that makes this recoverable at all.
+
+#### N34 — ARI: how sure, and where in the field _(done)_
+
+**Why:** ARI's update was already comparative — Elo against the opponent's ARI, so beating a
+stronger deck moved more than beating a weaker one. Two things were missing, and both made the
+number less useful than the arithmetic behind it deserved.
+
+**Tasks**
+
+-   [x] **A provisional rating moves; a settled one holds.** K was fixed regardless of evidence,
+        so a deck three games in moved exactly as fast as one three hundred games in — wrong in
+        both directions at once. The new deck crept away from its card-math seed one twitch at a
+        time while its results argued otherwise, and the established deck was still shoved about
+        by single games it had long outweighed. `ariConfidence` scales K by a deviation that falls
+        with evidence, and the two sides of a game scale by their OWN deviations: a new deck
+        beating a veteran moves a long way while the veteran barely notices.
+-   [x] **The configured K is what a SETTLED deck gets**, so an operator's tuning of `gameK` means
+        exactly what it meant before this existed. The multiplier decays to one, never below.
+-   [x] **Sparring counts for less** (`simGameWeight`, 0.25): the lab plays hundreds of games a
+        night, and a deck must not be made established by a sweep no human took part in.
+-   [x] **Certainty decays** (`stalenessDays`): a deck rated in one meta and shelved for a year is
+        not still known to that precision, and the game counters can only ever grow. Bounded at
+        the seed — a deck can never become less certain than one nobody has played.
+-   [x] **Where in the field**: `AriDistribution`, a bucketed snapshot of every deck's effective
+        ARI refreshed half-hourly, turns a rating into a ranking — percentile and rank out of the
+        rated field, on the deck list under the ARI and in its tooltip. Snapshotted, not computed
+        per request: the question is asked once per deck row of every deck list, and answering it
+        with a window function over every rated deck is a table scan per page.
+-   Later: the distribution as a curve on the deck page, showing where this deck sits; per-set and
+    per-house fields, since "top 10% of decks" and "top 10% of Mars decks" are different claims.
+
+**Not done, deliberately:** this is not Glicko-2. There is no volatility term, no rating period,
+no posterior — the deviation is a plain function of evidence and recency. It is called a
+deviation because that is what it approximates and what it is used for. Anything needing a real
+confidence interval should not read it.
+
+**Acceptance criteria**
+
+-   [x] A deck with no record moves several times as far as a veteran on the same result.
+-   [x] A deck with an enormous record moves at the configured K, to within a rounding step.
+-   [x] A deck whose rating cannot be placed says so, rather than claiming the middle.
+
+#### N35 — The crawl was asking for page 0 _(done)_
+
+**Why:** N33 fixed the crawl's missing trailing slash and it still indexed nothing: page 0,
+"HTTP 404 from https://www.keyforgegame.com/api/decks/", nine failures, breaker parked. The
+slash was only the first of Django's identical 404s. Master Vault's pages are numbered
+**from 1**, and Django answers an invalid page number — page 0 included — with exactly the
+404 a wrong path gets. So the fixed crawler asked a healthy endpoint for a page that cannot
+exist, read the 404 as "wrong address", "confirmed" it against every candidate URL (which
+all 404ed, being asked for page 0 too), and tripped its own breaker. Forever.
+
+**Tasks**
+
+-   [x] **Pages count from 1.** `crawlOnce` clamps the cursor to a floor of 1; migration 83
+        bumps the persisted 0 that deployed databases still hold and clears the breaker state
+        the bug accumulated, so the fix takes effect on deploy rather than after the stale
+        pause expires. Fresh installs seed `CurrentPage` at 1.
+-   [x] **The page past the tail is not an outage.** The third identical 404: a caught-up
+        list whose length is an exact multiple of the page size steps the cursor past the
+        last page. From the endpoint that has been answering, a 404 on page > 1 is now
+        checked with a probe of page 1 — still a deck list means "caught up, that page has
+        not been registered yet", recorded as an empty page; probe dead means the endpoint
+        died, the memory is dropped, and the failure is reported.
+-   [x] **An auth-walled candidate is "not this address".** A 401/403/410 from one listing
+        variant moves to the next candidate the way a 404 does, instead of ending the walk —
+        insurance for the day Ghost Galaxy puts keys in front of one spelling of the list. A
+        429 or 5xx still stops the walk: that is Master Vault answering, not a wrong door.
+-   [x] **The recovery button works during the pause.** "Crawl Master Vault now" runs with
+        `ignorePause`: the breaker exists to stop a timer hammering a failing service, and an
+        operator's single watched pass — pressed precisely to learn whether the fix worked —
+        was the one thing the pause was making impossible. The panel message now also reports
+        a failed pass as a failure instead of "Indexed 0 deck(s).", which reads as success.
+
+**Acceptance criteria**
+
+-   [x] A crawl from a fresh or a deployed-with-the-bug database asks for page 1 first;
+        page 0 is never requested.
+-   [x] Catching up on a list that ends exactly on a page boundary records `CaughtUp`, no
+        failure, and no pause.
+-   [x] A manual pass while the breaker is open reaches Master Vault and reports what
+        actually happened.
+
+#### N36 — "Rating this game…" _(done)_
+
+**Why:** a player reported the post-game panel sitting on "Rating this game…" and not knowing
+whether anything was happening. The rating path is sound — the reporting around it was not.
+
+**Tasks**
+
+-   [x] **Running out of patience is not a verdict.** The panel polled for fifteen seconds and
+        then said "This game was not rated" — about a game that was in all likelihood being rated
+        as the player read it. The server already distinguishes "never will be, here is why" from
+        "not yet"; the panel now keeps that distinction to the end and says it is still rating.
+-   [x] **Forty-five seconds, not fifteen.** Rating runs after the finished game is persisted and
+        alongside the replay write, on a lobby that may also be running Challenge sweeps. Each
+        poll is one indexed read.
+-   [x] **Slowness is in the log.** A rating that takes over a second is warned about with its
+        duration, and a failure now records how long it took before it failed. The three causes of
+        a spinner — threw, declined, slow — were distinguishable in the logs for the first two
+        only, which is why "is it doing it at all" had no answer.
+
+**Acceptance criteria**
+
+-   [x] A game still pending when the poll budget runs out is never described as unrated.
+-   [x] A practice game says so immediately rather than making anyone wait.
+-   [x] A slow rating names itself, with its duration, in the logs.
+
+#### N37 — Comping a tier, from a screen _(done)_
+
+**Why:** giving somebody a week of Vault Master — to try before an event, or to put something
+right — required a hand-written POST. Everything else was already built.
+
+**Tasks**
+
+-   [x] **A button, at last.** `Memberships."GrantedTier"`/`"GrantedUntil"`, the resolver that
+        folds a comp above any paid membership, the admin endpoint and even the RTK mutation have
+        existed since N12. Nothing rendered them. This is the third time in this project a
+        finished feature turned out to be unreachable (the analytics route, the Vault Tour field,
+        this), so the spec asserts the wiring rather than only the parts.
+-   [x] **The seven-day Vault Master trial is one click**, not a form: username, button. The tier
+        and length pickers sit below for contributors, apologies and open-ended comps.
+-   [x] **Current comps are listed, with a revoke.** A grant screen that cannot show its own
+        grants invites the same comp twice and an expiry nobody can plan around. Revoking clears
+        the comp only — a paid membership underneath is untouched, which is why grants live in
+        their own columns.
+
+**Acceptance criteria**
+
+-   [x] The trial always carries an expiry; a comp that never ends is a free tier given away.
+-   [x] A comp never demotes an account that pays for more.
+-   [x] Revoking a comp leaves a real membership intact.
+
+#### N38 — The bot can read, and hires a tutor _(done)_
+
+**Why:** the learning bot's stated blind spot is that it cannot read a card's text — every
+per-card weight starts at zero and stays shrunk toward zero for its first ~20 sightings, so
+rare cards are played blind for weeks. An LLM can read the cards. The discipline was keeping
+it OUT of the game loop: play stays free and offline, and the tokens go where one spend
+improves thousands of future games.
+
+**Tasks**
+
+-   [x] **Card priors, generated once.** `npm run card-priors` has a language model read every
+        card in the pool (2,710 of them, one Message Batch, a few dollars once) and score its
+        competitive impact 0–10. The scores are a committed file; `labPolicy.shrink` now shrinks
+        toward the prior instead of toward zero, so an unseen card starts from what its text
+        suggests and the evidence takes over on the same schedule zero used to. Priors attach at
+        model load and are stripped before storage — the file is the source of truth, runtime
+        needs no key, and a server without the file plays as it always has. Admin knob
+        `cardPriorWeight` (0 switches them off).
+-   [x] **The AI teacher, on a weekly allowance.** Sparring games quietly capture a few
+        positions a day (readable board summary plus every candidate as a decision record); deep
+        games capture theirs WITH the search's measured value per candidate. A sweep-tail job
+        reviews a budgeted number per week (~1k tokens each, so the default 25 is pennies),
+        turning reviews into ordinary diary rows with explicit targets and their own gradient
+        weight (`llmTargetWeight`, deliberately below the deep bot's).
+-   [x] **The licence.** A teacher must EARN the diary: its reviews of deep-measured positions
+        are exams, and only while its recent agreement with the search clears `llmMinAgreement`
+        do its other reviews become lessons. An unproven or drifting teacher is quietly kept on
+        exam duty — the title fight's conservatism, applied to the teacher itself. And behind it
+        stands the arena anyway: lessons only shape candidates, and no candidate is crowned
+        without beating the champion under the sequential test.
+
+**Acceptance criteria**
+
+-   [x] No LLM call ever happens inside a game; sparring, arena and practice play run with no
+        key configured.
+-   [x] A model trained with priors is stored without them, and play/training score with the
+        same brain (both doors attach).
+-   [x] An unproven teacher writes no lessons; a proven one's lessons carry its configured
+        weight; a failed API call spends nothing and the loop learns on.
+
+#### N39 — How good is the sparring partner? _(done)_
+
+**Why:** every number the Challenge shows is relative — "this deck wins 62%" — and nothing
+anywhere said against what standard of play. The title fight proves a candidate beats the LAST
+champion, which says nothing about whether either can play a key out.
+
+**Tasks**
+
+-   [x] **A ladder of opponents that never learn** (`ChallengeCalibration`, migration 85): the
+        plain heuristic bot the lab started from, each hand-biased persona, and the searching bot
+        the champion was distilled from. Fixed strength is the whole point — a ladder whose rungs
+        move measures nothing.
+-   [x] **Paired seeds, seats swapped**, like the title fight and the persona duels, so first
+        player advantage cancels instead of being averaged over. A pair that cannot finish is
+        dropped whole.
+-   [x] **Per champion version**, so a regression shows against the model that caused it rather
+        than being smeared across a running total.
+-   [x] **`deepSide`**: a calibration game searches on ONE seat. A showcase game searches both —
+        it is a demonstration — but "the fast champion against a searching opponent" is
+        meaningless if the champion's seat is searching too.
+-   [x] **On the member's page**, not just the admin panel, with the plain bot's rung called out
+        in a sentence: a policy that cannot beat the rules of thumb it replaced is a regression,
+        and the page now says so in words.
+-   [x] **Paced**: one switch governs all of calibration, and the expensive deep rung runs every
+        Nth sweep rather than every sweep.
+-   Later: the ladder over time as a graph, so a training run that made the bot worse is visible
+    before anybody has to notice it in their own results.
+
+**Also fixed:** the Deep Probe's "Open the Champion's Challenge" button did nothing.
+`<HeroButton as={Link}>` renders a plain `<button>` — HeroUI forwards neither `as` nor `href`.
+Membership.jsx has carried a comment about this exact trap since N12, and a comment did not stop
+it happening again, so `deadButtons.spec.js` now scans every jsx file for it.
+
+**Acceptance criteria**
+
+-   [x] A calibration pair is the same seed played twice with the seats swapped.
+-   [x] Turning calibration off stops the deep rung too.
+-   [x] No HeroUI Button anywhere is asked to be a link.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
@@ -1563,16 +2571,18 @@ lesson on something specific — a keyword, a house, reading SAS — without pla
 
 #### F7 — Mobile general availability
 
-App Store release of the existing Expo iOS app, Android build, feature parity with the web
-platform (tournaments, community, profiles), push notifications.
-**Depends on:** N2, N6. **Acceptance:** both stores carry a build that can play, enter a
-tournament, and receive pairing pushes.
+App Store release of the existing Expo iOS app and an Android build, then the rest of feature
+parity with the web platform. Tournaments, membership, Archon Intelligence and push notifications
+are already in the app (**N14**/**N23**); community, public profiles and a replay viewer are not.
+**Depends on:** N2 (done), N6, and **N14** for the distribution path in between.
+**Acceptance:** both stores carry a build that can play, enter a tournament, and receive pairing
+pushes.
 
 #### F8 — Scale-out
 
 Redis-backed leaderboard sorted sets, Redis-shared DoK rate-limit counter for multi-process
-deployments, multi-lobby settings invalidation, revisit Kubernetes (charts retained in
-`infrastructure/`) if VPS scaling stops being enough.
+deployments, revisit Kubernetes (charts retained in `infrastructure/`) if VPS scaling stops being
+enough. Multi-lobby settings invalidation is done (**N8**).
 **Depends on:** N10 load testing telling us which ceiling is hit first.
 **Acceptance:** a documented scaling step exists for each ceiling the load test finds.
 
@@ -1586,22 +2596,153 @@ commit to it, and run the engine as a continuous soak test.
 -   [x] An AI player driving the engine through the ordinary player interface (house choice,
         play / use / reap / fight, key timing). Strength can start crude — never stalling
         matters more. **Built as the Champion’s Challenge sparring partner (N18)** —
-        `server/services/championschallenge/SimulatedGame.js`; the showcase reuses it.
+        `server/services/championschallenge/SimulatedGame.js`; the showcase reuses it. The
+        policy was extracted to `server/services/botplayer/BotPolicy.js`, which the practice
+        bots (F9) still play; this lab moved on to a learned policy in **N21**.
+-   [x] **The practice opponents: thirteen bots, one per house** (design:
+        `docs/design/practice-bots.md`). The lobby always has an open table hosted by a bot
+        from the roster — join it, pick a deck, and the game starts itself. Each bot belongs
+        to a house and plays only decks containing it (its own collection first, standalone
+        decks as the zero-setup fallback), so the table that replaces a joined one is a
+        different character playing a different colour of deck. Games run on the real engine
+        on the real game node, answering instantly; wedges end in an honest concede, never a
+        hang, and a pump can never hold the node's event loop.
+-   [x] **The practice bots play the champion model.** The move list and the learned policy
+        are shared with the Champion's Challenge (`server/services/botplayer/decisions.js`,
+        N21's `labPolicy`), so the lab's training shows up in the lobby with no second brain
+        to maintain; a site with no champion yet plays the heuristics. **(admin-config)**
+        `bots.useLearnedPolicy`. The lab's DEEP planner stays in the lab: it plans by forking
+        a seeded replay, which a live table with a person clicking in it cannot provide, and
+        costs about a minute of compute per game. Deep thought at a live table wants seeded
+        practice games and a logged input stream first — the bot-vs-bot showcase is where
+        that pays off, since both seats are ours.
+-   [x] **The bots play sense without a model.** A player watched a bot open on a targeted
+        action with an empty board, and bin an upgrade it had drawn before any creature. Both
+        were real: Discard is a legal action on every card in hand, so a card whose only
+        button was the bin looked like a playable card — and with no champion trained the
+        fallback picked its play at RANDOM, which is every site until the Challenge has run.
+        The shared move list stopped offering discards, and the fallback became a ranked
+        order (creatures, upgrades, artifacts, actions, abilities, fights worth taking, reaps,
+        fights not worth taking) with randomness only inside a rank, so self-play keeps its
+        variety. Fights are scored from the engine's own combat arithmetic — power, armour,
+        elusive, skirmish, assault, hazardous, poison, ward — and only taken when they win the
+        exchange, against the best target the prompt allows. Because it all lives in
+        `services/botplayer/decisions.js`, the lab's unmodelled games train on exactly what a
+        lobby opponent plays. `test/server/services/botgames/botPlayQuality.spec.js`.
+-   [x] **The searched decision now outweighs the guessed one.** N25 made the deep bot's
+        rollouts into training targets and `trainModel` prefer them — but every row still
+        reached the gradient with the same force, and the fast bot outproduces the deep bot by
+        orders of magnitude: about one training decision in four thousand carried a number
+        anybody had measured. `trainingTargetWeight` (default 8) scales the gradient for a
+        measured decision — on the gradient, not the decay, and not the shrinkage counts — and
+        the deep budget rose with it (8 games/day × 20 decisions × 8 candidates, roughly
+        thirteen times the measured rows for about half an hour of CPU). The two only work
+        together, and the budget is guarded by a spec because it is exactly what gets trimmed
+        to reclaim CPU without noticing the trade. **(admin-config)**
+-   [x] **Button prompts are learned, not flipped for.** "Would you like to use this?",
+        "choose a house", which trigger goes first — nearly every optional ability in the game
+        — was answered by picking a button at random, and never recorded as a decision, so no
+        training could reach it. Buttons are decisions now: one weight per (prompt, answer)
+        pair plus one for the button text itself, so `btn:yes` carries what accepting an
+        optional ability is worth across prompts and an unfamiliar prompt beats a coin flip on
+        its first showing. With no model the bot presses Yes — an optional ability is shown to
+        the player it benefits, and concede and cancel never reach the branch.
+-   [x] **The bots play the race, not just the board.** Two facts a KeyForge player reads
+        first and the bot ignored entirely. _Are they about to forge?_ Amber at or above the
+        opponent's key cost is a key already unless it leaves first, so a steal or capture is
+        ranked ahead of everything, and the house call weighs a house that can answer them far
+        above a house with one more card in it. _Can I forge this turn?_ With enough ready
+        creatures to reach the cost, reaping outranks even a won fight, and reverts by itself
+        the moment the amber is there. "Does this card take amber" comes from F3's
+        `cardKnowledge` index over the canonical packs — one answer platform-wide rather than
+        a second parser — warmed at game-node startup so no table pays for it mid-game.
+-   [x] **The bots know their own deck.** The model's state carries the composition of what
+        this seat can still draw: creatures, bonus amber and amber control as fractions of
+        the remaining deck. Fair information — a player built the deck and watched it leave —
+        and the deck's ORDER is never read, nor anything about the opponent's hand.
+-   [x] **Easy, Medium and Hard** (`bots.defaultDifficulty`), chosen from the pending screen
+        beside Copy Game Link and re-dealing the bot's deck until the game starts. Difficulty
+        is the DECK, not the brain: one policy plays every table and the setting picks the ARI
+        band it brings a deck from (45-65 / 66-89 / 90-125). The pool is every deck the site
+        has imported, counted once per Master Vault uuid rather than once per copy — the bot
+        plays the cards, and nothing about whose collection a copy sits in reaches the table.
+        An empty band opens the table with an unbanded deck and logs it.
+-   [x] **A spec's declared timeout now survives the harness.** `integrationhelper` wrapped
+        `it(name, fn)` to bind jasmine-style `this` and dropped every argument after `fn` —
+        so `it('...', fn, 120000)` silently ran under vitest's 5s default. The deep game spec
+        had been asking for 120s and passing only because it happened to finish in 4.3s; any
+        machine under load failed it, and the failure pointed at the test rather than at the
+        wrapper. Forwarded for `it`, `it.skip` and `it.only`.
+-   [x] **A bot always allows manual mode.** It was answering the request from the generic
+        "press something that is not Cancel" branch, which picks at random — so it allowed it
+        once and refused the next time. A bot has nothing to protect and no way to judge the
+        request; the only person who can want it is the one across the table.
+-   [x] **Binning a card is a move, not an accident.** Playing a card and discarding it are
+        enumerated separately and the bot chooses between them: you refill to your hand size
+        either way and the discard pile becomes the deck again, so binning a card you cannot
+        use swaps it for a fresh draw and loses nothing, while holding it is a permanently
+        smaller hand. The plain order bins only once the turn has nothing better left, and
+        never bins a card it could have used — including a board wipe it should not play,
+        which it bins rather than firing over its own board.
+-   [x] **The bots play prophecies.** Prophetic Visions was invisible to them, because a
+        prophecy is not a card click — it comes in through the engine's own `clickProphecy`,
+        which nothing in the bot called. Activating one is now a move in the list, ranked
+        immediately above the plain discard so the card the bot was going to bin buys a
+        prophecy on its way out; and the card it buries is the cheapest it holds — no Fate
+        ability first (Fate abilities are penalties), then nothing it could have played, then
+        a card of the house it is already spending. The lab logs the prophecy click as its
+        own input type so a deep fork replays it.
+-   [x] **What a champion is allowed to notice.** Every candidate at one decision shares a
+        state, so state features contribute identically to all of them and cancel out of the
+        ranking — a model could learn "boards win games" but never "not this card, not here",
+        which is the mistake above. The action kind is now crossed with four coarse board
+        contexts (`x:playAction:noBoard`, `noEnemy`, `behind`, `keyReady`), giving the model
+        weights it can push negative per situation. Feature keys stay a contract: added,
+        never renamed.
+-   [x] **Ordering is learned, not listed.** Ordering is where the strategy in this game
+        lives and it turns on the whole position, so the plain order covers only what it can
+        justify out loud and the rest is the Challenge's to learn. Three more axes make that
+        possible: `creatureInHand` (the difference between the first half of a turn and the
+        second — a wipe played first versus over your own board) and `deepDiscard` join the
+        contexts; each of a card's ROLES is crossed with all of them, so what the model
+        learns about one board wipe it knows about every board wipe; and the card itself is
+        crossed with the two board facts play order turns on (`c:<card>:noBoard`,
+        `c:<card>:noEnemy`). Limited to two per card on purpose — card weights ride to the
+        game node with every table.
+-   [x] **Practice games are recorded, and are never results.** A player wanted to find a bot
+        game again and watch the replay back, so bot games are persisted and replayed like any
+        other — with a `Games."BotGame"` flag (migration 77) that every aggregate excludes, and
+        a spec that reads the source to prove none of the thirty finished-game queries forgets.
+        Listings show them; numbers do not count them; ratings never see one (the router
+        declines, and the rating engine re-checks).
+-   [x] **Bot Settings** (`/admin/bots`, isAdmin): the roster with each bot's name, picture,
+        profile, on/off switch and deck count, plus the knobs that govern all of them. Bots
+        are ordinary accounts, so their pictures and profiles go through the same pipeline a
+        player's do — and are unenterable, house-keyed, and can never capture a real
+        account's name.
+-   [x] Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics
+        aggregate — by the `BotGame` flag every aggregate filters on, not by refusing to
+        record them — and Quick Join never matches into a bot table. Asserted by
+        `test/server/gameRouterBotGames.spec.js`.
 -   A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends, and
-    publishes it to the Watch hub as spectatable.
--   Bot games are excluded from Amber, matchmaking, leaderboards, and every statistics aggregate.
--   **(admin-config)**: how many bot tables run, how their decks are chosen, and whether the
-    showcase is on at all.
--   Later: bots as practice opponents, as the tutorial's sparring partner (**N11**), and as the
-    base for AI analysis (**F3**).
+    publishes it to the Watch hub as spectatable. (The node driver already plays both seats —
+    `test/server/gameserver.botdriver.spec.js` pins a full bot-vs-bot game — so what remains
+    is the supervisor and the Watch listing.)
+-   **(admin-config)**: how many showcase tables run, how their decks are chosen, and whether
+    the showcase is on at all.
+-   Later: the bot as the tutorial's sparring partner (**N11**), and as the base for AI
+    analysis (**F3**).
 
 **Depends on:** N1 (Watch hub). Feeds F3 and N11.
 **Acceptance criteria**
 
 -   A logged-out visitor can watch a live game within seconds of landing on the site.
--   A bot game reaches a legitimate conclusion (three keys or deck-out) without stalling, looping,
-    or throwing; a wedged table is detected and replaced.
--   No bot game appears in any leaderboard, player stat, or meta aggregate — asserted by a test.
+-   [x] A bot game reaches a legitimate conclusion (three keys or deck-out) without stalling,
+        looping, or throwing; a wedged table concedes rather than holds its player — asserted
+        by `test/server/gameserver.botdriver.spec.js`, which plays full games through the real
+        game server wiring.
+-   [x] No bot game appears in any leaderboard, player stat, or meta aggregate — asserted by
+        `test/server/gameRouterBotGames.spec.js`.
 
 ---
 
@@ -1616,8 +2757,9 @@ in a `→` note points to where an unfinished item is scheduled.
 -   [x] Preserve upstream remap path so upstream gameplay/card fixes can be pulled in later
         (documented in `docs/UPSTREAM.md`).
 -   [x] Get server + client building locally (`npm install`, dev build passes).
--   [x] Get test suite running; record baseline pass rate before any changes
-        (docs/TEST-BASELINE.md: 38,221 passed / 0 failed).
+-   [x] Get test suite running; record baseline pass rate before any changes, and re-record it
+        whenever it legitimately moves (docs/TEST-BASELINE.md: 38,221 at the fork, 40,144 as of
+        the misplay review / 0 failed).
 -   [x] CI pipeline (GitHub Actions): `.github/workflows/ci.yml` runs typecheck, lint, build
         and the full test suite on every push and PR; CodeQL runs weekly. TCO deploy jobs pruned.
 -   [x] Dockerfile + docker-compose for one-command local stack (PostgreSQL + Redis).
@@ -1644,9 +2786,13 @@ in a `→` note points to where an unfinished item is scheduled.
         acknowledgement).
 -   [x] **About/Privacy admin-editable**: Site Settings > Site Content accepts Markdown
         that replaces either built-in page (react-markdown, HTML-escaped; empty = built-in).
--   [ ] Terms of Service page → **I6**.
+-   [x] Terms of Service page, admin-editable alongside About and Privacy, and stated at the
+        point of sign-up rather than buried (**I6**). How to Play, About, Privacy and Terms have
+        since been rewritten as Archon Arena's own copy rather than edited inherited text.
 -   [ ] Keep internal code identifiers stable where renaming risks gameplay breakage
-        (rename UI-facing only; engine internals renamed opportunistically later).
+        (rename UI-facing only; engine internals renamed opportunistically later). Still
+        deliberate; `docs/README.md` and `AGENTS.md` are the two _documents_ still addressed to
+        keyteki (see Known defects).
 
 **Why early:** cheap, zero gameplay risk, and everything deployed from day one carries the
 correct identity.
@@ -1663,14 +2809,20 @@ correct identity.
 -   [x] Health-check script covering containers, TLS, game-node wiring, migrations, card data,
         env and disk (`deploy/healthcheck.sh`).
 -   [x] Error tracking wired client + server (Sentry); needs `SENTRY_DSN` set on the host.
--   [x] Legacy MongoDB removed from the running application — all services are PostgreSQL-only.
-        Two unused standalone scripts and the `monk` dependency remain (housekeeping below).
--   [ ] Point ArchonArena.com DNS (Porkbun) at the host — **owner action** → **I1**.
--   [ ] WebSocket pass-through for game server verified end-to-end on the live host → **I1**.
--   [ ] Uptime monitoring configured and alerting → **I1**.
--   [ ] Automated off-host backups + rehearsed restore → **I7**.
+-   [x] Legacy MongoDB removed entirely — all services are PostgreSQL-only, the two dead
+        standalone scripts are deleted and the `monk` dependency is gone (housekeeping below).
+-   [x] Point ArchonArena.com DNS (Porkbun) at the host, and verify WebSocket pass-through for
+        the game server end-to-end on the live host — both done at the soft launch (**I1**).
+-   [x] Scripted production update (`deploy/update.sh`): clean-tree and branch preflight,
+        fast-forward pull, rebuild, migrate, health-check, unrated-game report → **N10**.
+-   [x] Backup and restore scripts, encrypted and off-host capable, with the restore rehearsed
+        in CI against a real PostgreSQL → **I7** (the bucket itself is still an owner action).
+-   [ ] Uptime monitoring configured and alerting → **Q1**.
+-   [ ] `SENTRY_DSN` set on the host (client and server are already wired) → **Q1**.
+-   [ ] Off-host backup destination configured and the first run made → **I7**.
 -   [ ] Staging environment (staging.archonarena.com) deploying from main → **N10**.
--   [ ] Zero-downtime deploy script (drain game node, deploy, restart) → **N10**.
+-   [ ] Zero-downtime deploy (drain game node, deploy, restart) → **N10**. Built once and
+        reverted; a deploy currently ends every game in progress.
 
 ## Phase 3 — Authentication: Keybringer SSO
 
@@ -1693,9 +2845,16 @@ OpenID Connect.
 -   [x] Link/unlink UI in account settings (Connected Services), with orphan
         protection: unlink refused while the account has no password and no other
         identity.
--   [ ] **Owner action:** register the Keycloak client in the keybringer realm (client
-        id/secret, redirect URIs for archonarena.com + localhost) and set OIDC\_\* env vars → **I1**.
--   [ ] Admin setting: SSO-only mode (disable local registration) **(admin-config)**.
+-   [~] **Deferred, not blocked.** Registering the Keycloak client in the keybringer realm
+    (client id/secret, redirect URIs for archonarena.com + localhost) needs Ghost Galaxy's
+    permission, which the platform does not have, so this whole phase is dormant until that
+    changes. `auth.oidc.enabled` is `false` by default, the login page asks
+    `/api/account/oidc/status` before offering the button, and local registration is a complete
+    signup path on its own. When permission arrives this becomes config, not code — so nothing
+    below is worth building first.
+-   [ ] Admin setting: SSO-only mode (disable local registration) **(admin-config)**. One of the
+        two **(admin-config)** promises in this document with no registry section behind it; the
+        other is the matchmaking parameters in Phase 18.
 -   [ ] RP-initiated logout against Keycloak; session revocation on unlink.
 -   [ ] Role mapping: Keycloak roles/groups → Archon Arena roles (admin, TO, moderator).
 -   [ ] Password-set flow for SSO-created accounts.
@@ -1719,10 +2878,19 @@ OpenID Connect.
 -   [x] Tests: enrichment, refresh windows, API failure paths, rate limiting (32 tests).
 -   [x] **Bulk / live import from Decks of KeyForge** (docs/design/dok-import.md), with a live
         progress bar, re-run sync, and a remembered DoK username (Users.DokUsername).
--   [ ] Show SAS on deck _lists_, lobby games, and pre-game screen → **N3**.
+-   [x] Show SAS on deck _lists_ and the pre-game screen (**N3**). The lobby game list is the
+        deliberate exception — decks are not chosen for open games.
 -   [x] **Periodic refresh sweep job** — stalest decks first, yields to live traffic, cadence
         and batch size admin-config (**N3**).
--   [ ] AERC component breakdown display from stored RawData → **N3**.
+-   [x] AERC component breakdown display from stored RawData (**N3**), and AERC-based analysis
+        of a player's own record (**N12**).
+-   [x] **Master Vault deck catalog** — a background crawl building a name → uuid index so decks
+        can be added by name rather than by link; off by default (**N22**,
+        docs/design/deck-catalog.md).
+-   [x] **Stored DoK key with scheduled sync**, sealed at rest, and a **paced import worker** so
+        a large collection import is a job rather than a request (**N22**).
+-   [x] **Deck co-ownership**, and deleting a deck archives its games rather than erasing them
+        (**N22**).
 -   [ ] Redis-backed shared rate-limit counter for multi-process scale → **F8**.
 
 ## Phase 5 — Rating engine: SAS-adjusted Elo
@@ -1749,7 +2917,7 @@ much stronger deck pays less.
         auto-apply schedule (migration 37).
 -   [x] Provisional/placement badge until N games.
 -   [x] Separate rating pools: Archon / Sealed / Alliance, mapped from game format.
--   [ ] Per-game rating delta surfaced to players → **I4**.
+-   [x] Per-game rating delta surfaced to players on the post-game result panel (**I4**).
 -   [x] **Recalculation tool** (replay rating history under a candidate Elo config;
         admin-triggered, dry-run first, seeded from the season archive) — migration 43.
 
@@ -1773,15 +2941,22 @@ much stronger deck pays less.
 -   [x] Public API: GET /api/ratings/leaderboard (paginated, capped limit).
 -   [x] **"Amber" branding**: ratings surfaced as Amber via a shared AmberValue component —
         display only, the Elo math is unchanged. Deck power stays "SAS" to avoid confusion.
--   [x] **Top Players page**: worldwide top 25 by Amber per pool, podium for the top three.
+-   [x] **Top Players page**: worldwide top 25 by Amber per pool, podium for the top three. Since
+        folded into Leaderboards — it was the same ranking query pinned to the top 25 — and the
+        statistics pages gathered from Play, Community and two top-level tabs into one Stats
+        section. Every former path still redirects, because a dead link is worse than a redirect
+        nobody notices.
 -   [x] **Ratings page**: personal Amber per pool with world rank (#N of M), games,
         provisional badge, and a plain "How Amber works" explainer.
 -   [x] **Seasons**: season records, soft reset toward a configurable baseline with a carry
         factor, admin season operations UI (migration 37).
 -   [x] Player rank card on the profile page; Amber shown on lobby player names.
--   [ ] Public player profile pages, with every username on the site linking to one → **I3**.
--   [ ] Season display, archive, and end-of-season summary for players → **N4**.
--   [ ] Activity window on boards **(admin-config)** → **N4**.
+-   [x] Public player profile pages, with every username outside the game board linking to one
+        (**I3**).
+-   [x] Season display, archive, end-of-season summary and season badges for players (**N4**).
+-   [x] Activity window on boards **(admin-config)**, applied to the board and to the rank and
+        field size on a profile so the two cannot disagree (**N4**).
+-   [x] Membership badges beside names on every board and roster (**N12**).
 -   [ ] Redis-backed leaderboard cache (sorted sets) once traffic warrants → **F8**.
 
 ## Phase 7 — Tournament engine
@@ -1857,6 +3032,20 @@ much stronger deck pays less.
 -   [x] **Bounded pairing search**: the rematch-avoiding backtracking now carries an explicit
         work budget and degrades to allowing (and reporting) rematches rather than running
         unboundedly inside the lobby process.
+-   [x] **The deck lock is actually enforced at the table** — the event's registered deck is
+        pinned to the seat, re-checked wherever a tournament game can start, and a "between
+        rounds" window that means something (**N17**).
+-   [x] **Asynchronous events** (migration 55): round deadlines in days, player-to-player
+        scheduling with several offered slots across time zones (migration 65), reminders before
+        the thing happens rather than only after (migration 57), and an overdue-round sweep.
+-   [x] **Prize pools and an entry-fee register** (migrations 59, 64). The platform records what
+        the organizer announced and who has paid; it takes, holds and moves no money.
+-   [x] **Judge deck release** (migration 56), event editing after creation, latecomer admission,
+        desk-side check-in, and judge tools that work on an already-decided match (**N17**).
+-   [x] **Organizer CSV exports** of standings, pairings and the entry list (**N12**).
+-   [x] **A create form that describes the event it is about to build**, and names the settings
+        that will not do anything for the format chosen (**N17**).
+-   [x] **A whole event, every format, run against real PostgreSQL** in CI (**N17**).
 
 ## Phase 8 — Modern UI
 
@@ -1866,8 +3055,10 @@ much stronger deck pays less.
 -   [x] Home page rebuilt as a landing hero (news → Community > News; lobby chat and
         promo banners removed; admin MOTD/banner notices retained).
 -   [x] Placeholder pages routed for Learn and the Community subpages so navigation is
-        complete ahead of the features; Stats, Tournaments, Play IRL and Watch have since
-        shipped.
+        complete ahead of the features; Stats, Tournaments, Play IRL, Watch, Learn, Teams,
+        Clubs, Members, Membership and the Archon+ pages have since shipped. Five placeholders
+        remain: `/mobile/ios` and `/mobile/android` (**N14**), and Articles / Blogs / Forums,
+        which nothing currently plans to build and which the navigation settings can hide.
 -   [x] Design tokens: light/dark palettes, brand amber, typography, table/chat/nav tokens
         (`client/styles/tailwind.css`). The token _mechanism_ is done and is the leverage point
         for the redesign; what was never designed is the visual language sitting on it.
@@ -1880,10 +3071,12 @@ much stronger deck pays less.
         UI carries the most gameplay risk) → **N6**.
 -   [ ] Responsive layouts (desktop-first, tablet functional, mobile readable) → **N6**.
 -   [ ] Accessibility pass (keyboard nav, contrast, screen-reader landmarks) → **N6**.
--   [ ] Replace the `/learn` placeholder with a tutorial that teaches inside a real game →
-        **N11**, then the wider Learn hub → **F6**.
--   [x] Name the card and ability responsible in every prompt ("…because of Gateway to Dis")
-        → **N15**.
+-   [x] Replace the `/learn` placeholder — a 93-step Learn-to-Play walkthrough now plays the
+        starter-set demo game there, on a board styled like the real one (**N11**). The tutorial
+        that teaches inside a _real_ game, and the wider Learn hub, are still open →
+        **N11**/**F6**.
+-   [x] Name the card and ability responsible in every prompt ("…because of Gateway to Dis"),
+        and attribute passive effects on card zoom, on both clients → **N15**.
 
 ## Phase 9 — Player identity & community
 
@@ -1909,14 +3102,24 @@ much stronger deck pays less.
 -   [x] **Teams** (competitive): rosters distinct from clubs, team events, and a team ladder
         earned as a unit rather than averaged from members' Amber.
 -   [x] **Moderation tools**: reports with captured evidence, graduated actions with reason
-        and expiry, and a full audit log **(admin-config policies)** — migration 48.
--   [ ] Friend activity feed, DMs (moderated), block-list integration → **N5**/**N7**.
--   [ ] Store follow-ups: map view, store-hosted event listings, verified/official badges → **N7**.
+        and expiry, a chat content filter, and a full audit log **(admin-config policies)** —
+        migration 48.
+-   [x] **Named club invitations**: an owner invites a player by name from their friends list or
+        by typing one; the invitee gets a notification and an Accept/Decline (**N7**).
+-   [x] **Profile customisation** — accent colour, banner, avatar frame, title, name effect and a
+        longer bio, gated per option by membership tier (**N12**).
+-   [ ] Friend activity feed, DMs (moderated), block-list integration. **Unowned:** no current
+        backlog item covers these; N5 built the moderation the DM feature would have needed, but
+        not the feature. Sequence behind **N16**/**N6** if it is picked up.
+-   [ ] Store follow-ups: map view, store-hosted event listings, verified/official badges.
+        **Unowned** — N7 shipped clubs and teams and did not reach these.
 -   [ ] Onboarding asks each new account how well they know KeyForge, and (if they do) how well
-        they know the platform, then teaches only what is missing → **N11**.
+        they know the platform, then teaches only what is missing → **N11**. Still the open half
+        of that item: the walkthrough exists, the branching does not.
 -   [x] **Track in-person games**: both players report independently, agreeing reports commit
-        into a real game, decks optional (migration 47). Rating them is admin-config and off
-        by default.
+        into a real game, decks optional (migration 47). Rating them is admin-config and now
+        **on** by default (migration 66); a game with no decks attached is still recorded
+        unrated, because the Elo engine needs both decks' SAS.
 
 ## Phase 10 — Match history, replays & spectating
 
@@ -1992,7 +3195,14 @@ much stronger deck pays less.
         twenty games report a game count but no win rate (**N3**).
 -   [x] Deck stats: per-deck W/L, SAS vs. performance deltas, per-opposing-house matchups and
         best/worst deck callouts (**N3**).
--   [x] **Admin analytics**: DAU/MAU, games/day, queue health, funnel metrics (/admin/analytics).
+-   [x] **Admin analytics**: DAU/MAU, games/day, queue health, funnel metrics, and the
+        moderation queue's own health (`/admin/analytics`) — **N8**.
+-   [x] **Premium statistics are gated in one place** (`statsGating.js`): the same cached
+        aggregate is filtered per caller, so a paid column can never be served to a free account
+        and the filtering can never mutate the shared cache — asserted by test (**N12**).
+-   [x] **Set-aware analysis** across the intelligence surfaces: a result from a rotated-out set
+        answers a different question, so the set filter is the first filter rather than a
+        refinement (**N12**).
 -   [ ] Rate limiting + versioning for the public stats API → **F1**.
 
 ## Phase 12 — Platform APIs
@@ -2023,14 +3233,25 @@ much stronger deck pays less.
         reconnect, concede/leave, manual mode). Protocol-identical to the web client.
 -   [x] EAS build config + TestFlight runbook (`mobile/TESTFLIGHT.md`); keep-awake during play;
         mobile network resilience (timeouts, reconnect).
+-   [x] **Push notifications on the device** — Expo push, with the notification taxonomy deciding
+        what is allowed to interrupt (**N2**, migration 61).
+-   [x] **Tournaments in the app**: browse, create, register, report, and the event detail screen.
+-   [x] **Archon+ in the app**: membership status, Archon Intelligence, the Tournament Lab, the
+        set filter, Replay Intelligence, and Patreon linking — with every money surface stripped
+        out of the iOS build rather than merely hidden (**N23**).
+-   [x] **Board completeness**: prophecies, a pile viewer that cannot lock up, hiding your own
+        hand on the opponent's turn, every offered game mode, and passive-effect attribution on
+        card zoom (**N15**).
+-   [x] Account deletion and the safety controls App Store review asks for (**N23**).
 -   [ ] Mobile-responsive web as the baseline → **N6**.
--   [ ] PWA: installable, push notifications for round pairings/turn timers → **N6**/**N2**.
+-   [ ] PWA: installable, **browser** push for round pairings/turn timers → **N6**. Native push
+        is done; this is the web half.
 -   [x] Show each move as it happens in the Expo app, rather than only inside the slide-up log
         sheet → **N15**.
 -   [ ] Turn the `/mobile/android` placeholder into a real link to the beta build, and
         `/mobile/ios` into a TestFlight invite request → **N14**.
--   [ ] App Store release, Android build, platform feature parity (tournaments, community,
-        profiles) → **F7**.
+-   [ ] App Store release, Android build, and the rest of platform feature parity (community,
+        profiles, replay viewer) → **F7**.
 
 ## Phase 15 — Streaming & content tools
 
@@ -2071,11 +3292,28 @@ turns a feature-complete site into a habit.
         still support them, they are simply not offerable. Re-list them by restoring their
         entries in `GameFormats.jsx`, `GameLobby.jsx`, `QuickMatchPanel.jsx`,
         `pages/Tournaments.jsx` and `mobile/app/new-game.tsx`.
--   [ ] Post-game result screen with the Amber change → **I4**.
--   [ ] Matchmaking parameters **(admin-config)**: base tolerance, widening rate, max wait.
+-   [x] Post-game result screen with the Amber change, the pool, the key margin and the SAS gap
+        that shaped it — read back from `RatingHistory`, never recomputed (**I4**).
+-   [x] **Games are rated by default, everywhere** (migration 66). Counting towards the ladder is
+        the normal case, and two of the three ways to play defaulted to the opposite: a
+        tournament created without ticking the box produced games that never reached the ladder —
+        failing quietly, and only discoverable after the event, when it could no longer be
+        fixed — and in-person games were off site-wide. Online games needed nothing; they have no
+        rated flag and have always been rated when the result is a decided two-player game. Only
+        an _absent_ value takes the default, so an organizer's explicit "unrated" is still kept.
+-   [x] **The rematch button no longer deletes the game.** Both handlers broadcast `removegame`
+        and dropped the table as their first two statements, then went looking for six things
+        that could each fail — every one of them after the point of no return, leaving two
+        players holding nothing. The invariant now asserted is that however a rematch fails, the
+        players are never left with no game.
+-   [ ] Matchmaking parameters **(admin-config)**: base tolerance, widening rate, max wait. Still
+        the second **(admin-config)** promise in this document with no registry section behind
+        it (the other is SSO-only mode, Phase 3).
 -   [x] **Queue health telemetry** (depth, wait time) — recorded as it happens, since the
         queue is in-memory and leaves no trace afterwards (migration 45).
--   [ ] Rematch and rated-rematch flow from the result screen → **I4**.
+-   [ ] Rematch, view-replay and back-to-lobby actions alongside the result panel itself → **I4**.
+        The engine's own rematch prompt sits below it and works; these are the deliberate
+        follow-ons.
 
 ## Phase 19 — Sustainability & supporter program
 
@@ -2090,9 +3328,20 @@ competitive advantage.
         reach `pledged`), memberships scoped to our campaign, OAuth `state` added, and the
         Integrations tab surfaced. Dormant until the owner sets credentials; see
         [docs/design/patreon.md](docs/design/patreon.md).
--   [ ] **Patreon supporter program**: campaign + tiers, perks that are cosmetic and convenience
-        only, and a page saying where the money goes → **N12**.
--   [ ] Publish running costs and what supporters cover, so the ask is concrete.
+-   [x] **Archon+ built end to end** (**N12**): four tiers backed by a capability system, a
+        pricing page, per-tier checkout links, badges, cosmetics, a preview programme, and the
+        analytics products the paid tiers are sold on — Archon Intelligence, the Tournament Lab,
+        AERC analysis, replay analysis and the Champion’s Challenge. Every capability is enforced
+        server-side, and a tier that would deliver nothing over the one below it cannot be sold.
+-   [x] **Perks stay clear of competitive fairness**, asserted by the persona specs rather than
+        promised in prose: no capability touches Amber, matchmaking, tournament eligibility or
+        any other competitive outcome.
+-   [x] **The apps sell nothing on iOS** — prices and checkout links are stripped out of the
+        payload rather than merely hidden (**N23**).
+-   [ ] **Owner: a live campaign.** Credentials, tiers and reward ids, then link one real account
+        to prove the round trip. Nothing above has run against a real pledge → **N12**.
+-   [ ] Publish running costs and what supporters cover, so the ask is concrete — the missing
+        "Support Archon Arena" page → **N12**.
 -   [ ] Revisit only if Patreon proves insufficient: one-off donations, or store/organizer
         sponsorship of events. Never anything that touches Amber, matchmaking, or eligibility.
 
@@ -2103,25 +3352,33 @@ competitive advantage.
 -   [x] **Settings service**: typed registry, DB-backed (SiteSettings), in-memory
         snapshot with periodic refresh, who/when audit, defaults in code
         (docs/design/settings-service.md).
--   [x] Admin settings UI at /admin/settings (isAdmin) covering rating (Elo knobs, decay,
-        seasons, leaderboard threshold), DoK (including the background SAS sweep), tournaments,
+-   [x] Admin settings UI at /admin/settings (isAdmin). Sixteen sections: rating (Elo knobs,
+        ARI, decay, seasons, leaderboard threshold), DoK (including the background SAS sweep), the
+        Master Vault catalog crawl, the deck-import worker, the Champion's Challenge, the practice
+        bots, tournaments,
         replays (recording, size cap, retention, purge cadence, sharing), watch (spectator
-        counts, broadcast delay, featured game), regions, site content, and navigation page
-        visibility.
+        counts, broadcast delay, featured game), regions, site content, navigation page
+        visibility, team rating, in-person games, moderation policy, and feature flags.
 -   [x] Admin tooling: user admin (roles, disable, delete, password reset), per-player rating
-        set/reset, season operations, ban list, nodes, MOTD, news, bug reports.
+        set/reset, season operations, ban list, nodes, MOTD, news, bug reports, membership
+        grants, the moderation queue, and the analytics dashboard.
 -   [x] `sectionDefaults()` / `getSectionWithDefaults()`: a registry-only section's code
         defaults are built from the same field descriptors the admin UI renders, so a service
         reading a setting cannot drift from what the admin panel says the default is.
--   [ ] Wire remaining **(admin-config)** flags through the registry: auth SSO-only mode,
-        matchmaking parameters, moderation policy thresholds.
+-   [x] Moderation policy thresholds wired through the registry (**N5**).
+-   [ ] Wire the last two **(admin-config)** promises through the registry: auth SSO-only mode
+        (Phase 3) and matchmaking parameters (Phase 18). Membership perk-to-tier mapping is a
+        third, deliberately deferred — it lives in `tiers.js` (**N12**).
 -   [x] **Redis pub/sub snapshot invalidation** for multi-lobby deployments. An accelerator
         over the interval refresh, never a dependency on it.
 -   [x] **Full audit-log table** (`ModerationAuditLog`, migration 48). Settings changes append
         to it alongside every moderator action, so "who changed this, when, and to what" has an
         answer that the next edit cannot overwrite.
 -   [x] **Feature flags** section for gradual rollout; every flag defaults to current behaviour.
--   [ ] Admin panel coverage for tournaments, moderation, and analytics → **N5**/**N8**.
+        Five today: teams, in-person games, club leaderboards, Adaptive Bo3, hybrid events.
+-   [x] Admin panel coverage for moderation (`/admin/moderation`) and analytics
+        (`/admin/analytics`) — **N5**/**N8**. Tournaments stay reachable from the event list
+        rather than duplicated into the admin panel, deliberately.
 -   [x] **Reset all statistics** (isAdmin, `AdminResetService`): site-wide reset scoped by
         category — ratings, replays, game records, seasons — rather than one opaque button.
         Every call is a dry run unless explicitly confirmed, so the caller can always show
@@ -2150,6 +3407,21 @@ competitive advantage.
         instead of dropping it, so the mobile app no longer falls back to
         "Connecting to the game…" on every blip and every return from the background.
 -   [x] Gameplay regression suite kept green on every PR (the full card suite runs in CI).
+-   [x] **Game randomness comes from `crypto`, not `Math.random`.** Shuffles and the coin flip
+        decided who went first and what everyone drew, out of a PRNG whose state is recoverable
+        from a short run of its own output. On a rated ladder that is a fairness property, not a
+        cryptography preference.
+-   [x] **Closing the site counts as a loss.** An abandoned game used to sit unresolved, which
+        made walking away strictly cheaper than playing on — the one outcome a ladder must not
+        price that way.
+-   [x] **Who went first is recorded** (migration 63). The engine has always known it —
+        `FirstPlayerSelection` sets `game.firstPlayer` during setup — but `getSaveState()` never
+        carried it and there was no column, so "do I win more going first?", one of the few
+        genuinely actionable things a KeyForge player can learn, was thrown away at the end of
+        every game ever played here.
+-   [x] **A player can hide their own hand while the opponent takes their turn** (migration 58)
+        — a stored option rather than a browser toggle, because that is where a player looks for
+        it and because it should follow them to the phone.
 -   [x] **In-app bug reports** (BugReportService, migration 34) with an admin triage page —
         the beta feedback channel.
 -   [x] Data migration/versioning discipline: ledger + runner, one numbered migration per
@@ -2230,3 +3502,47 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         login will refuse them. Verified end to end against a real PostgreSQL 16 — register →
         mail → activate → login, with negative controls for tampered, expired, replayed and
         cross-account links.
+
+-   [x] **"My Decks" sorted one page, not the collection** — the deck list is paged by the
+        server, and the table re-sorted whichever fifteen rows it had been handed, so "highest
+        SAS" meant "highest SAS on this page" and looked identical to the real answer. Three
+        things caused it and all three are fixed: the ordering decision moved out of
+        `ReactTable`'s render into `tableRows.visibleRows`, where remote mode returns the
+        server's page in the server's order; ARI gained a SQL form (`EFFECTIVE_ARI_SQL`, the
+        twin of `effectiveAri`, seed included) so the database can order by the number the
+        column actually shows; and a sort column the query cannot express now logs instead of
+        silently becoming `LastUpdated`. Every ordering also ends `, "Id" ASC` — SAS, ARI, set
+        and win rate all repeat freely, and ties left unordered let a deck appear on two pages
+        while another appeared on none. The card-back column no longer offers a sort it never
+        had.
+
+-   [x] **The Gauntlet's strategy filter never showed what you had chosen, and saving wiped it**
+        — `getLabReport` spread the member's settings (whose `strategies` is their choice) and
+        then set `strategies` to the CATALOGUE, silently overwriting it. The panel therefore
+        compared a list of option objects against a key, so a saved strategy never lit up; and
+        pressing Save posted the catalogue back as the choice, where the server dropped every
+        entry as unrecognised and the filter was cleared. The menu is `strategyOptions` now and
+        the choice stays `strategies`. Found by screenshotting the page.
+
+### Open, and currently true
+
+-   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The
+        game is never recorded, rated or replayed, and nothing tells either player. A fix landed
+        with the zero-downtime work and went back out with the revert, so this is live again.
+        → **N10**.
+-   [ ] **The admin Restart button is inert.** `NodesAdmin` shells out to `pm2 restart`, and pm2
+        is not installed anywhere in this stack — the one control an operator reaches for during
+        an incident does nothing and reports nothing. → **N10**.
+-   [ ] **The per-node game cap is never enforced.** The node reads `config.maxGames` while the
+        config file documents `gameNode.maxGames`, and `numGames >= undefined` is false for every
+        number. It is unset today either way, so the effect is that a node has no ceiling rather
+        than the wrong one. → **N10**.
+-   [ ] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Game three of an
+        Adaptive Bo3 waits for the bid, so a pair who neither bid nor pass leave the round
+        waiting on them. The organizer can still award or take a paper result, which is why this
+        is a defect and not a blocker. → **N9**.
+-   [ ] **`docs/README.md` and `AGENTS.md` still say "Keyteki".** Both describe the project by
+        its pre-fork name and neither lists the platform documentation (`DEVELOPMENT.md`,
+        `DEPLOYMENT.md`, `SECURITY.md`, `UPSTREAM.md`, `docs/design/`) that has been written
+        since. Engine-facing docs, so nothing is wrong in them — they are just addressed to a
+        project this is no longer only a fork of.

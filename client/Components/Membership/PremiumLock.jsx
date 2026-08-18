@@ -45,14 +45,31 @@ const PremiumLock = ({
     inline = false,
     title,
     className = '',
-    minHeight
+    minHeight,
+    granted
 }) => {
     const { t } = useTranslation();
     const navigate = useNavigate();
     const user = useSelector((state) => state.account.user);
     const { data: catalog } = useGetMembershipCatalogQuery();
 
-    const unlocked = hasCapability(user, capability);
+    /**
+     * ARCHON: the server's answer wins when there is one.
+     *
+     * `hasCapability` reads the capability list minted into the JWT at sign-in,
+     * which goes stale the moment a membership changes - a Patreon sync or an
+     * admin grant updates what the server will serve immediately, but the
+     * token keeps saying no until it refreshes. In that window the endpoint
+     * happily returns the data and this component blurs it: the player has
+     * paid, the payload is on the page, and the UI hides it from them.
+     *
+     * So an endpoint that reports per-section entitlement (Archon
+     * Intelligence sends a `locked` list) can pass `granted`, and it is
+     * believed over the token in both directions - it was computed against
+     * live entitlements one request ago. Left undefined, this behaves exactly
+     * as it always has.
+     */
+    const unlocked = granted === undefined ? hasCapability(user, capability) : granted;
 
     // Unlocked - and for an admin this is always the branch taken, because the
     // server put every capability on their user object. There is no admin
@@ -136,6 +153,7 @@ const LockGlyph = ({ className = 'h-3.5 w-3.5' }) => (
 LockGlyph.propTypes = { className: PropTypes.string };
 
 PremiumLock.propTypes = {
+    granted: PropTypes.bool,
     capability: PropTypes.string.isRequired,
     children: PropTypes.node,
     className: PropTypes.string,

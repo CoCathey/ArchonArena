@@ -190,12 +190,23 @@ module.exports.init = function (server, options = {}) {
             // held, and what they failed to do with it, is not this account's
             // to read. Admins see both sides, same reason they see the replay.
             const viewer = req.user.permissions?.isAdmin ? null : req.user.username;
+            // ARCHON (N26): the curve belongs to a seat. A player reads their own
+            // game from their own side; an admin, who is in neither seat, reads
+            // it from the first player's. Board-derived either way, so this
+            // carries no hidden information - unlike the misplay review above.
+            const seat = viewer || replay.firstPlayer || replay.players?.[0]?.name;
 
             res.send({
                 success: true,
                 analysis: {
                     ...replayAnalysis.analyse(replay),
-                    misplays: replayAnalysis.misplaysFor(replay, viewer)
+                    misplays: replayAnalysis.misplaysFor(replay, viewer),
+                    // ARCHON (N26): the curve is an addition to this panel, not
+                    // the panel - so a collaborator that does not provide one
+                    // leaves it out rather than failing the whole analysis.
+                    winProbability: replayAnalysis.winProbability
+                        ? await replayAnalysis.winProbability(replay, seat)
+                        : undefined
                 }
             });
         })
@@ -226,7 +237,20 @@ module.exports.init = function (server, options = {}) {
                 return res.status(404).send({ success: false, message: 'Replay not found' });
             }
 
-            res.send({ success: true, analysis: replayAnalysis.analyse(replay) });
+            // The curve reads only the board, which is exactly what a share
+            // link already shows - so it travels, from the first player's seat,
+            // while the hand-reading misplay review still does not.
+            const seat = replay.firstPlayer || replay.players?.[0]?.name;
+
+            res.send({
+                success: true,
+                analysis: {
+                    ...replayAnalysis.analyse(replay),
+                    winProbability: replayAnalysis.winProbability
+                        ? await replayAnalysis.winProbability(replay, seat)
+                        : undefined
+                }
+            });
         })
     );
 

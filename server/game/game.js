@@ -49,6 +49,9 @@ class Game extends EventEmitter {
         this.cancelPromptUsed = false;
         // ARCHON: tournament linkage rides along so GAMEWIN can auto-report
         this.tournament = details.tournament;
+        // ARCHON (F9): a Helper Bot practice game. Rides into the save state
+        // so the lobby's router can keep it out of Games, replays and rating.
+        this.botGame = !!details.botGame;
         // ARCHON: pre-assigned chains (SAS handicap / Chainbound events);
         // applied once at initialise, before the setup phase draws hands.
         this.startingChains = details.startingChains;
@@ -1914,6 +1917,10 @@ class Game extends EventEmitter {
 
         return {
             adaptive: this.adaptive,
+            // ARCHON (F9): flagged so every persistence path (GAMEWIN,
+            // REMATCH, PLAYERLEFT) can keep practice games out of the record.
+            // Undefined rather than false keeps ordinary saves unchanged.
+            botGame: this.botGame || undefined,
             finishedAt: this.finishedAt,
             gameFormat: this.gameFormat,
             gameId: this.id,
@@ -2432,6 +2439,9 @@ class Game extends EventEmitter {
         return {
             adaptive: this.adaptive,
             allowSpectators: this.allowSpectators,
+            // ARCHON (F9): rides the node sync so a restarted lobby still
+            // counts a running practice game against the Helper Bot's cap.
+            botGame: this.botGame || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,

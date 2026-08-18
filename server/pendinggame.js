@@ -109,6 +109,9 @@ class PendingGame {
         return {
             id: this.id,
             adaptive: this.adaptive,
+            // ARCHON (F9): practice games against the Helper Bot are never
+            // persisted or rated; the flag travels with every save state.
+            botGame: this.botGame || undefined,
             expansions: this.expansions,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
@@ -422,6 +425,22 @@ class PendingGame {
         return {
             adaptive: this.adaptive,
             allowSpectators: this.allowSpectators,
+            // ARCHON (F9): lets the game list say this table is the Helper
+            // Bot's practice table rather than an ordinary player's game.
+            botGame: this.botGame || undefined,
+            // ARCHON (N31): which sparring style the bot is playing, and the
+            // styles a joiner may choose from. Carried on the table rather than
+            // fetched separately because the pending screen is the only place
+            // the choice can be made - the game starts the instant a deck is
+            // picked - and a picker that arrives after the game does is no
+            // picker at all.
+            botStyle: this.botStyle || undefined,
+            botStyles: this.botGame ? this.botStyles : undefined,
+            // ARCHON (F9): and how hard it is - the ARI band its deck came
+            // from. The same window applies for the same reason: style is how
+            // the bot plays, difficulty is what it brought to play with, and
+            // both are settled before the first card is dealt.
+            botDifficulty: this.botDifficulty || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
@@ -496,6 +515,16 @@ class PendingGame {
         return {
             adaptive: this.adaptive,
             allowSpectators: this.allowSpectators,
+            // ARCHON (F9): tells the game node which table this is (and the
+            // node's driver its turn cap); the bot seat itself travels on its
+            // player record as `isBot`.
+            botGame: this.botGame || undefined,
+            botDifficulty: this.botDifficulty || undefined,
+            botMaxTurns: this.botMaxTurns,
+            botThinkMs: this.botThinkMs,
+            // ARCHON (N21): the learned model the bot plays with, or absent
+            // for the heuristics.
+            botPolicy: this.botPolicy || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,

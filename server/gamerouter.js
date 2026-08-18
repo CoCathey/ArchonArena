@@ -52,6 +52,11 @@ class GameRouter extends EventEmitter {
             return undefined;
         }
 
+        // ARCHON (F9): practice games are recorded like any other - a player
+        // wants to find the game again and watch it back - but the row is
+        // flagged, and every aggregate excludes flagged rows. Persisting is
+        // where "it happened" is written; rating is where "it counted" is,
+        // and a bot game is never rated (see GAMEWIN below).
         this.gameService.create(game.getSaveState());
 
         node.numGames++;
@@ -306,7 +311,14 @@ class GameRouter extends EventEmitter {
                                 message.arg.game.gameId,
                                 message.arg.replay
                             ),
-                            this.ratingService.processGame(message.arg.game.gameId)
+                            // ARCHON (F9): a practice game is recorded and
+                            // replayable, and is never a result: no Amber
+                            // moves, no record changes. The guard is here
+                            // rather than inside the rating engine because
+                            // this is where "should this count" is known.
+                            message.arg.game && message.arg.game.botGame
+                                ? Promise.resolve({ skipped: true })
+                                : this.ratingService.processGame(message.arg.game.gameId)
                         ])
                     )
                     .then(([replay, rating]) => {

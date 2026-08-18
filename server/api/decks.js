@@ -11,6 +11,18 @@ const cardService = ServiceFactory.cardService(configService);
 
 const deckService = new DeckService(configService, cardService);
 
+// ARCHON (N33): the lab, for the hidden-gem badge on the deck list. Injected
+// onto the deck service rather than required by it: ChampionsChallengeService
+// constructs DeckService itself, so a require in the other direction is a
+// cycle, and a site with the Challenge switched off must still list decks.
+const ChampionsChallengeService = require('../services/championschallenge/ChampionsChallengeService');
+
+deckService.championsChallengeService = new ChampionsChallengeService(configService);
+
+// ARCHON (N34): ARI's field distribution, for the rank beside the rating.
+const AriService = require('../services/rating/AriService');
+const ariService = new AriService();
+
 // ARCHON: Decks of KeyForge SAS enrichment (see docs/design/deck-sas.md)
 const DokService = require('../services/dok/DokService');
 const dokService = new DokService(configService);
@@ -133,6 +145,7 @@ module.exports.init = function (server) {
 
             // ARCHON: attach cached SAS stats (best effort, non-blocking refresh)
             await dokService.attachStats([deck]);
+            await ariService.attachPlaces([deck]);
 
             // ARCHON: the AERC component breakdown behind the SAS number. Comes
             // from the DoK payload already stored on the deck, so it costs one
@@ -160,6 +173,11 @@ module.exports.init = function (server) {
 
                 // ARCHON: attach cached SAS stats (best effort, non-blocking refresh)
                 await dokService.attachStats(decks);
+
+                // ARCHON (N34): where each deck's ARI sits in the field. One
+                // snapshot read for the page - a rating nobody can place is a
+                // number rather than a ranking.
+                await ariService.attachPlaces(decks);
             }
 
             res.send({ success: true, numDecks: numDecks, decks: decks });

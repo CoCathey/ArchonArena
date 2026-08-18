@@ -133,7 +133,9 @@ describe('DokService', function () {
             mockDokResponse({ sasRating: 70 });
             db.query.mockRejectedValue(new Error('db down'));
 
-            await expect(service.enrichDeck('uuid-1')).resolves.toBeUndefined();
+            // Never throws - and now reports the failure rather than leaving a
+            // caller unable to tell it from a deck that was enriched.
+            await expect(service.enrichDeck('uuid-1')).resolves.toBe(false);
         });
     });
 
@@ -521,6 +523,87 @@ describe('DokService', function () {
             expect(await service.waitForRequestSlot(0, 'user-a')).toBe(false);
         });
 
+        /**
+         * ARCHON (N27): the headroom background work leaves for members.
+         *
+         * Two sweeps spend this budget on nobody's behalf - the stale-SAS
+         * refresh, and the Gauntlet asking about the pool decks the Master Vault
+         * crawl brought in. Both yield rather than queue, but yielding alone only
+         * protects whoever asked FIRST: a sweep is otherwise entitled to the
+         * minute's last slot, and a member arriving a second later gets nothing,
+         * which from their side is indistinguishable from DoK being down.
+         */
+        describe('background headroom', function () {
+            it('stops background work short of the last few requests', function () {
+                config.maxRequestsPerMinute = 10;
+                config.backgroundHeadroom = 3;
+
+                for (let i = 0; i < 7; i++) {
+                    expect(service.reserveRequestSlot(undefined, { headroom: 3 })).toBe(true);
+                }
+
+                expect(service.reserveRequestSlot(undefined, { headroom: 3 })).toBe(false);
+                // The three it left are still there for a member.
+                expect(service.reserveRequestSlot()).toBe(true);
+                expect(service.reserveRequestSlot()).toBe(true);
+                expect(service.reserveRequestSlot()).toBe(true);
+                expect(service.reserveRequestSlot()).toBe(false);
+            });
+
+            it('defaults to holding five back', function () {
+                expect(service.getBackgroundHeadroom()).toBe(5);
+            });
+
+            it('never holds back so much that a sweep cannot move at all', function () {
+                config.maxRequestsPerMinute = 2;
+                config.backgroundHeadroom = 25;
+
+                expect(service.getBackgroundHeadroom()).toBe(1);
+                expect(service.reserveRequestSlot(undefined, { headroom: 25 })).toBe(true);
+            });
+
+            it('takes a headroom of zero at face value', function () {
+                config.maxRequestsPerMinute = 2;
+                config.backgroundHeadroom = 0;
+
+                expect(service.getBackgroundHeadroom()).toBe(0);
+                expect(service.reserveRequestSlot(undefined, { headroom: 0 })).toBe(true);
+                expect(service.reserveRequestSlot(undefined, { headroom: 0 })).toBe(true);
+                expect(service.reserveRequestSlot()).toBe(false);
+            });
+
+            it('spends the headroom on a member-facing enrichment', async function () {
+                config.maxRequestsPerMinute = 2;
+                config.backgroundHeadroom = 1;
+                mockDokResponse({ sasRating: 70 });
+
+                // Background gets one of the two; the second is a member's.
+                expect(await service.enrichDeck('uuid-1', { background: true })).toBe(true);
+                expect(await service.enrichDeck('uuid-2', { background: true })).toBe(false);
+                expect(await service.enrichDeck('uuid-3')).toBe(true);
+            });
+
+            it('reports whether stats were actually stored', async function () {
+                fetchMock.mockResolvedValue({ ok: false, status: 404 });
+
+                // DoK does not rate this deck. The caller has to be able to tell,
+                // or it asks again on every sweep forever.
+                expect(await service.enrichDeck('uuid-1')).toBe(false);
+            });
+
+            it('holds the refresh sweep to the same headroom', async function () {
+                config.maxRequestsPerMinute = 3;
+                config.backgroundHeadroom = 2;
+                mockDokResponse({ sasRating: 70 });
+                vi.spyOn(service, 'findStaleDeckUuids').mockResolvedValue(['a', 'b', 'c']);
+
+                const result = await service.refreshStaleDecks();
+
+                expect(result.attempted).toBe(1);
+                expect(result.budgetExhausted).toBe(true);
+            });
+        });
+
         it('still enriches SAS after a user has spent their own key budget', async function () {
             config.maxRequestsPerMinute = 1;
             fetchMock.mockImplementation(async (url) =>
@@ -765,8 +848,10 @@ describe('DokService background SAS refresh sweep', function () {
 
     it('yields the moment live traffic has taken the per-minute budget', async function () {
         // The load-bearing property: the sweep must never starve a deck import
-        // or a pre-game SAS lookup by queueing ahead of them.
+        // or a pre-game SAS lookup by queueing ahead of them. Headroom off, so
+        // this measures the budget itself; the reserve has its own tests.
         config.maxRequestsPerMinute = 2;
+        config.backgroundHeadroom = 0;
         staleDecks(10);
         dokReturns(60);
 
@@ -781,6 +866,7 @@ describe('DokService background SAS refresh sweep', function () {
         // fetchDeckStats reserves a slot of its own; the sweep already holds
         // one, and double-spending would halve the effective budget.
         config.maxRequestsPerMinute = 3;
+        config.backgroundHeadroom = 0;
         staleDecks(3);
         dokReturns(60);
 

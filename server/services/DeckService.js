@@ -2,7 +2,7 @@ const logger = require('../log');
 const util = require('../util');
 const db = require('../db');
 const { expand, flatten } = require('../Array');
-const { effectiveAri } = require('./rating/AriService');
+const { effectiveAri, EFFECTIVE_ARI_SQL } = require('./rating/AriService');
 const Constants = require('../constants');
 // ARCHON: game-deciding randomness comes from one place - see the module.
 const secureRandom = require('../game/secureRandom');
@@ -59,7 +59,9 @@ const OWNER_COUNT_SQL = `(SELECT COUNT(DISTINCT x."UserId") FROM "Decks" x WHERE
 const globalRecord = (outcome) =>
     '(SELECT COUNT(*) FROM "Games" g ' +
     'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" ' +
-    'WHERE CASE WHEN d."Uuid" IS NULL ' +
+    // ARCHON (F9): a practice game against a bot is recorded and replayable,
+    // and is not a result - it never moves a deck's record.
+    'WHERE g."BotGame" IS NOT TRUE AND CASE WHEN d."Uuid" IS NULL ' +
     'THEN gp."DeckId" IN (SELECT x."Id" FROM "Decks" x WHERE x."Name" = d."Name") ' +
     'ELSE gp."DeckUuid" = d."Uuid" END ' +
     `AND ${outcome})`;
@@ -252,8 +254,8 @@ class DeckService {
                     'CASE WHEN "GlobalWinCount" + "GlobalLoseCount" = 0 THEN 0 ELSE (CAST("GlobalWinCount" AS FLOAT) / ("GlobalWinCount" + "GlobalLoseCount")) * 100 END AS "GlobalWinRate" ' +
                     'FROM ( ' +
                     `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = d."UserId" AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "WinCount", ' +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != d."UserId" AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "LoseCount", ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" = d."UserId" AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "WinCount", ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" != d."UserId" AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = d."UserId" AND gp."DeckId" = d."Id") AS "LoseCount", ' +
                     `${GLOBAL_RECORD_SQL.wins} AS "GlobalWinCount", ` +
                     `${GLOBAL_RECORD_SQL.losses} AS "GlobalLoseCount" ` +
                     'FROM "Decks" d ' +
@@ -388,6 +390,119 @@ class DeckService {
         }
 
         return rows && rows.length > 0 ? rows[0].Id : null;
+    }
+
+    /**
+     * ARCHON (F9): a random deck for a practice bot, from the whole library.
+     *
+     * The pool is every deck this platform has ever imported - each one came
+     * from Master Vault by way of Decks of KeyForge, and a deck is 36 cards
+     * with a uuid, not somebody's property: the bot plays the cards, nothing
+     * about whose collection a copy sits in reaches the table. Counting by
+     * uuid rather than by row is what makes that true in the arithmetic too,
+     * so a deck twenty people own is one deck in the hat, not twenty.
+     *
+     * Drawing from the library rather than from the bot's own collection is
+     * what gives the difficulty settings something to choose from: three ARI
+     * bands need hundreds of decks per house to feel different, and no
+     * hand-stocked account is going to hold them.
+     *
+     * @param {object} options
+     * @param {string} options.house the bot's house; the deck must contain it
+     * @param {number} [options.minAri] inclusive
+     * @param {number} [options.maxAri] inclusive
+     * @param {number} [options.userId] restrict to one account's collection
+     * @returns {Promise<number|null>} a "Decks" row id, or null for an empty pool
+     */
+    async getRandomPracticeDeckId(options = {}) {
+        const { sql, params } = this.practiceDeckPool(options);
+
+        try {
+            const total = await this.countPracticeDecks(options);
+
+            if (total === 0) {
+                return null;
+            }
+
+            // Chosen here rather than by `ORDER BY random()`, for the reason
+            // given on the Lucky Dice roll above.
+            const rows = await db.query(
+                `SELECT "Id" FROM (${sql}) pool ORDER BY "Id" OFFSET $${params.length + 1} LIMIT 1`,
+                [...params, secureRandom.randomInt(total)]
+            );
+
+            return rows && rows.length > 0 ? rows[0].Id : null;
+        } catch (err) {
+            logger.error('Failed to pick a practice deck', err);
+
+            return null;
+        }
+    }
+
+    /**
+     * How many distinct decks that pool holds - what Bot Settings shows, and
+     * the total the random offset is drawn against.
+     */
+    async countPracticeDecks(options = {}) {
+        const { sql, params } = this.practiceDeckPool(options);
+
+        try {
+            const rows = await db.query(
+                `SELECT count(*)::int AS "Total" FROM (${sql}) pool`,
+                params
+            );
+
+            return (rows && rows[0] && rows[0].Total) || 0;
+        } catch (err) {
+            logger.error('Failed to count practice decks', err);
+
+            return 0;
+        }
+    }
+
+    /** The pool query itself, shared by the count and the draw. */
+    practiceDeckPool({ house, minAri, maxAri, userId } = {}) {
+        const params = [];
+        // A deck with no uuid predates the column; it is still one deck, and
+        // its row id is the only identity it has.
+        const identity = 'COALESCE(d."Uuid", \'row:\' || d."Id"::text)';
+        let where =
+            'WHERE d."IsAlliance" = false AND d."Banned" = false ' +
+            'AND COALESCE(d."Flagged", false) = false ' +
+            `AND e."ExpansionId" <> ${UNCHAINED_EXPANSION_ID} `;
+
+        if (userId) {
+            params.push(userId);
+            where += `AND d."UserId" = $${params.length} `;
+        }
+
+        if (house) {
+            params.push(String(house).toLowerCase());
+            where +=
+                'AND EXISTS (SELECT 1 FROM "DeckHouses" dh JOIN "Houses" h ON h."Id" = dh."HouseId" ' +
+                `WHERE dh."DeckId" = d."Id" AND h."Code" = $${params.length}) `;
+        }
+
+        if (minAri !== undefined && minAri !== null) {
+            params.push(minAri);
+            where += `AND ${EFFECTIVE_ARI_SQL} >= $${params.length} `;
+        }
+
+        if (maxAri !== undefined && maxAri !== null) {
+            params.push(maxAri);
+            where += `AND ${EFFECTIVE_ARI_SQL} <= $${params.length} `;
+        }
+
+        return {
+            sql:
+                `SELECT DISTINCT ON (${identity}) d."Id" FROM "Decks" d ` +
+                'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
+                'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                'LEFT JOIN "DeckAri" da ON da."Uuid" = d."Uuid" ' +
+                where +
+                `ORDER BY ${identity}, d."Id"`,
+            params
+        };
     }
 
     async deckExistsForUser(user, deckId) {
@@ -554,6 +669,10 @@ class DeckService {
                 'SELECT COUNT(*) AS "NumDecks" FROM "Decks" d ' +
                     'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
                     'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                    // DeckAri joined for the same reason: every column a filter
+                    // can name has to resolve in the count as well as in the
+                    // page, or the pager promises rows the page cannot show.
+                    'LEFT JOIN "DeckAri" da ON da."Uuid" = d."Uuid" ' +
                     'WHERE "UserId" = $1 ' +
                     filter,
                 params
@@ -583,9 +702,31 @@ class DeckService {
             case 'sasRating':
             case 'sas':
                 return '"SasRating"';
+            // ARCHON: ARI, and specifically the EFFECTIVE ARI - the stored
+            // rating when games have moved it, the SAS/AERC seed otherwise.
+            // Ordering by the stored column alone would bury every deck the
+            // engine has not touched yet behind decks it has, which is most of
+            // a collection and none of what the reader asked for.
+            //
+            // A sort runs outside the subquery, where the computed column is in
+            // scope; a filter would run inside it, where the joins are.
+            case 'ari':
+                return isSort ? '"EffectiveAri"' : EFFECTIVE_ARI_SQL;
             case 'isAlliance':
                 return '"IsAlliance"';
             default:
+                // A sort this query cannot express must not pass for one it can.
+                // Falling through to LastUpdated silently is exactly how "sort
+                // by ARI" came to mean "newest first, then reordered within
+                // whichever fifteen rows the page happened to hold" - an answer
+                // with no way for a reader to tell it was the wrong one.
+                if (column) {
+                    logger.warn(
+                        `Deck query asked to sort by "${column}", which has no column here; ` +
+                            'ordering by LastUpdated instead'
+                    );
+                }
+
                 return '"LastUpdated"';
         }
     }
@@ -694,9 +835,9 @@ class DeckService {
                     // ARCHON: "DeckCount" quoted. Unquoted, Postgres folds the
                     // alias to `deckcount`, so mapDeck's `deck.DeckCount` was
                     // undefined and every deck's usage level computed as 0.
-                    `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ds."AercScore" AS "AercScore", da."Ari" AS "Ari", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
+                    `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ds."SasRating" AS "SasRating", ds."AercScore" AS "AercScore", da."Ari" AS "Ari", ${EFFECTIVE_ARI_SQL} AS "EffectiveAri", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     // ARCHON: SAS joined HERE rather than attached to the page
                     // afterwards. It used to be decorated onto the rows the API
                     // had already fetched, which meant the database could not
@@ -717,7 +858,14 @@ class DeckService {
                     // NULLS LAST in both directions: an unscored deck is not a
                     // zero-SAS deck, and sorting ascending should not open with
                     // every deck DoK has never rated.
-                    `ORDER BY ${sortColumn} ${sortDir} NULLS LAST ` +
+                    //
+                    // "Id" breaks every tie, and it is not decoration: SAS, ARI,
+                    // set and win rate all repeat freely across a collection, and
+                    // an ORDER BY that leaves ties unordered lets Postgres return
+                    // them in a different order for each page - so a deck could
+                    // appear on page one AND page two while another appeared on
+                    // neither. Pagination is only coherent over a total order.
+                    `ORDER BY ${sortColumn} ${sortDir} NULLS LAST, "Id" ASC ` +
                     'LIMIT $2 ' +
                     'OFFSET $3',
                 params
@@ -726,15 +874,44 @@ class DeckService {
             logger.error('Failed to retrieve decks', err);
         }
 
+        // ARCHON (N33): the lab's hidden-gem verdict, on the deck list.
+        //
+        // A member's decks are looked at here far more often than on the
+        // Champion's Challenge page, and "this one wins more than its rating
+        // says it should" is the most useful thing the lab knows about a deck.
+        // The verdict is ASKED FOR, not recomputed: the threshold and the
+        // confidence rule stay in labMath, where they are tested, and the day
+        // they change this list changes with them. One grouped read per page,
+        // and a failure costs a badge rather than the deck list.
+        const gems = await this.hiddenGemDeckIds(user);
+
         for (let deck of decks) {
             let retDeck = this.mapDeck(deck);
 
             await this.getDeckCardsAndHouses(retDeck);
 
+            retDeck.hiddenGem = gems.has(retDeck.id);
+
             retDecks.push(retDeck);
         }
 
         return retDecks;
+    }
+
+    /**
+     * Deck ids the Champion's Challenge currently calls hidden gems, or an
+     * empty set when there is no lab to ask. Injected rather than required at
+     * the top so DeckService keeps no hard dependency on the lab: this is a
+     * badge, and a site running without the Challenge still lists decks.
+     */
+    async hiddenGemDeckIds(user) {
+        const lab = this.championsChallengeService;
+
+        if (!user || !lab || typeof lab.hiddenGemsFor !== 'function') {
+            return new Set();
+        }
+
+        return lab.hiddenGemsFor(user.id);
     }
 
     async getDeckCardsAndHouses(deck, standalone = false) {
@@ -1545,8 +1722,8 @@ class DeckService {
         try {
             decks = await db.query(
                 `SELECT d.*, u."Username", e."ExpansionId" as "Expansion", ${OWNER_COUNT_SQL} AS "DeckCount", ` +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
-                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" = $1 AND gp."DeckId" = d."Id") AS "WinCount", ' +
+                    '(SELECT COUNT(*) FROM "Games" g JOIN "GamePlayers" gp ON gp."GameId" = g."Id" WHERE g."BotGame" IS NOT TRUE AND g."WinnerId" != $1 AND g."WinnerId" IS NOT NULL AND gp."PlayerId" = $1 AND gp."DeckId" = d."Id") AS "LoseCount" ' +
                     'FROM "Decks" d ' +
                     'JOIN "Users" u ON u."Id" = "UserId" ' +
                     'JOIN "Expansions" e on e."Id" = d."ExpansionId" ' +

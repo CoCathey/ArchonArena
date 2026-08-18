@@ -307,6 +307,14 @@ export const api = createApi({
             query: (deckId) => `/intelligence/deck/${deckId}`,
             providesTags: [TAG_TYPES.INTELLIGENCE]
         }),
+        // ARCHON: several of your decks side by side, computed from your own
+        // games only. The ids travel in the order they were picked, and the
+        // server keeps that order so the columns do not shuffle on arrival.
+        getDeckComparison: builder.query({
+            query: (decks = []) =>
+                `/intelligence/deck-comparison?decks=${encodeURIComponent(decks.join(','))}`,
+            providesTags: [TAG_TYPES.INTELLIGENCE]
+        }),
         getPlayerIntelligence: builder.query({
             query: (sets = []) => `/intelligence/player${setsParam(sets)}`,
             providesTags: [TAG_TYPES.INTELLIGENCE]
@@ -366,6 +374,69 @@ export const api = createApi({
                 url: '/champions-challenge/decks',
                 method: 'POST',
                 body: { deckId }
+            }),
+            invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
+        }),
+        // ARCHON (N21): the randomizer - a slot filled with a random eligible
+        // deck that swaps itself for a fresh one after `games` games.
+        enrollRandomChampionsChallengeDeck: builder.mutation({
+            query: ({ games, count = 1 }) => ({
+                url: '/champions-challenge/decks/random',
+                method: 'POST',
+                body: { games, count }
+            }),
+            invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
+        }),
+        // ARCHON (N26): the lab's vital signs, for the operations dashboard.
+        getChampionsChallengeHealth: builder.query({
+            query: () => '/champions-challenge/health'
+        }),
+        // ARCHON (N32): the Vault Tour - a member's three-deck slate, and the
+        // admin-curated field of tournament decks it is measured against.
+        enrollVaultTourDeck: builder.mutation({
+            query: (deckId) => ({
+                url: '/champions-challenge/vault-tour/decks',
+                method: 'POST',
+                body: { deckId }
+            }),
+            invalidatesTags: [{ type: TAG_TYPES.CHAMPIONS_CHALLENGE, id: 'REPORT' }]
+        }),
+        withdrawVaultTourDeck: builder.mutation({
+            query: (deckId) => ({
+                url: `/champions-challenge/vault-tour/decks/${deckId}`,
+                method: 'DELETE'
+            }),
+            invalidatesTags: [{ type: TAG_TYPES.CHAMPIONS_CHALLENGE, id: 'REPORT' }]
+        }),
+        getVaultTourField: builder.query({
+            query: () => '/champions-challenge/vault-tour/field'
+        }),
+        addVaultTourDeck: builder.mutation({
+            query: (entry) => ({
+                url: '/champions-challenge/vault-tour/field',
+                method: 'POST',
+                body: entry
+            })
+        }),
+        removeVaultTourDeck: builder.mutation({
+            query: (uuid) => ({
+                url: `/champions-challenge/vault-tour/field/${uuid}`,
+                method: 'DELETE'
+            })
+        }),
+        // ARCHON (N29): start the Master Vault crawl by hand. The Gauntlet's
+        // field is drawn from the catalog and the crawl ships off, so without
+        // this an operator who turns the setting on has to wait for the next
+        // scheduled run to learn whether anything happened.
+        crawlDeckCatalog: builder.mutation({
+            query: () => ({ url: '/champions-challenge/catalog/crawl', method: 'POST' })
+        }),
+        // ARCHON (N24): the Gauntlet - play the field, and which field.
+        saveChampionsChallengeGauntlet: builder.mutation({
+            query: (settings) => ({
+                url: '/champions-challenge/gauntlet',
+                method: 'POST',
+                body: settings
             }),
             invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
@@ -900,6 +971,18 @@ export const api = createApi({
                 method: 'DELETE'
             })
         }),
+        // ARCHON (F9): the practice bot roster - names, pictures, profiles.
+        // Not a settings section: thirteen accounts with faces.
+        getAdminBots: builder.query({
+            query: () => '/admin/bots'
+        }),
+        saveAdminBot: builder.mutation({
+            query: ({ house, ...changes }) => ({
+                url: `/admin/bots/${house}`,
+                method: 'PUT',
+                body: changes
+            })
+        }),
         getCards: builder.query({
             query: () => '/cards',
             providesTags: [{ type: TAG_TYPES.CARDS, id: 'LIST' }]
@@ -1253,6 +1336,7 @@ export const {
     useGetMembershipPreviewsQuery,
     useSetMembershipPreviewMutation,
     useGetDeckIntelligenceQuery,
+    useGetDeckComparisonQuery,
     useGetPlayerIntelligenceQuery,
     useGetMetaIntelligenceQuery,
     useGetAercIntelligenceQuery,
@@ -1260,6 +1344,16 @@ export const {
     // ARCHON (N18): the Champion’s Challenge.
     useGetChampionsChallengeQuery,
     useEnrollChampionsChallengeDeckMutation,
+    useEnrollRandomChampionsChallengeDeckMutation,
+    useSaveChampionsChallengeGauntletMutation,
+    useGetChampionsChallengeHealthQuery,
+    useCrawlDeckCatalogMutation,
+    // ARCHON (N32): the Vault Tour - the member's slate, and the admin's field.
+    useEnrollVaultTourDeckMutation,
+    useWithdrawVaultTourDeckMutation,
+    useGetVaultTourFieldQuery,
+    useAddVaultTourDeckMutation,
+    useRemoveVaultTourDeckMutation,
     useWithdrawChampionsChallengeDeckMutation,
     // ARCHON (N12): Patreon supporter linking
     useGetPatreonStatusQuery,
@@ -1293,6 +1387,8 @@ export const {
     useGetDeckStatsQuery,
     useGetPlayerProfileQuery,
     useGetAdminSettingsQuery,
+    useGetAdminBotsQuery,
+    useSaveAdminBotMutation,
     useSaveAdminSettingsMutation,
     useResetAdminSettingsMutation,
     useListEventsQuery,

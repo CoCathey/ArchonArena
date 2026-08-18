@@ -21,6 +21,20 @@ import { Constants } from '../../constants';
 import PlayerJoinedMp3 from '../../assets/sound/player-joined.mp3';
 import PlayerJoinedOgg from '../../assets/sound/player-joined.ogg';
 
+/**
+ * ARCHON (F9): how hard the practice bot should be.
+ *
+ * Difficulty is the DECK the bot brings, not its brain - the ARI band it
+ * draws from. Mirrored from `server/services/botgames/difficulty`; the
+ * server normalises anything it does not recognise to Medium, so the two
+ * lists drifting apart cannot break a table.
+ */
+const BOT_DIFFICULTIES = [
+    { key: 'easy', label: 'Easy', range: '45-65' },
+    { key: 'medium', label: 'Medium', range: '66-89' },
+    { key: 'hard', label: 'Hard', range: '90-125' }
+];
+
 function showNotification(notification) {
     if (!window.Notification || Notification.permission !== 'granted') {
         return;
@@ -141,8 +155,24 @@ const PendingGame = () => {
 
     const isLuckyDice = !!currentGame.luckyDice;
 
+    // ARCHON (F9): the Helper Bot owns its practice table but has no hands to
+    // press Start with, so at that table the player who joined holds the
+    // button. Picking a deck normally starts it before they reach for it -
+    // this is what stops the button being a decoration they cannot use.
+    const isBotTable = !!currentGame.botGame;
+    const isSeatedHere = Object.values(currentGame.players || {}).some(
+        (player) => player.name === user?.username
+    );
+    const botDifficulty = currentGame.botDifficulty || 'medium';
+    const selectedDifficulty =
+        BOT_DIFFICULTIES.find((option) => option.key === botDifficulty) || BOT_DIFFICULTIES[1];
+
     const canClickStart = () => {
-        if (!user || !currentGame || currentGame.owner !== user.username || connecting) {
+        if (!user || !currentGame || connecting) {
+            return false;
+        }
+
+        if (currentGame.owner !== user.username && !(isBotTable && isSeatedHere)) {
             return false;
         }
 
@@ -295,6 +325,12 @@ const PendingGame = () => {
             return t('Waiting for players to select decks');
         }
 
+        // ARCHON (F9): nobody is waiting on the bot to press anything - the
+        // table starts itself, and the player can start it too.
+        if (isBotTable && isSeatedHere) {
+            return t('Ready to begin, starting your game against the bot');
+        }
+
         if (currentGame.owner === user.username) {
             return isLuckyDice
                 ? t('Ready to begin, Lucky Dice will roll both decks at start')
@@ -431,6 +467,52 @@ const PendingGame = () => {
                         </AlertPanel>
                     )}
 
+                    {/* ARCHON (N31): pick who you are practising against.
+                        The three styles are the Champion's Challenge's own
+                        sparring pilots - one learned brain wearing a different
+                        plan - and this is the only screen where the choice can
+                        be made, because picking a deck starts the table. */}
+                    {isBotTable && isSeatedHere && currentGame.botStyles?.length > 0 && (
+                        <div className='mb-2 border-t border-border/60 pt-3'>
+                            <div className='mb-1.5 text-[11px] uppercase tracking-wide text-muted'>
+                                {t('Opponent style')}
+                            </div>
+                            <div className='flex flex-wrap gap-1.5'>
+                                {[
+                                    { key: '', label: t('Its own game'), description: null },
+                                    ...currentGame.botStyles
+                                ].map((style) => {
+                                    const active = (currentGame.botStyle || '') === style.key;
+
+                                    return (
+                                        <button
+                                            key={style.key || 'none'}
+                                            className={[
+                                                'rounded-full border px-2.5 py-1 text-xs transition',
+                                                active
+                                                    ? 'border-accent/60 bg-accent/20 text-amber-200'
+                                                    : 'border-border/70 bg-surface-secondary/60 text-foreground hover:border-border'
+                                            ].join(' ')}
+                                            onClick={() =>
+                                                dispatch(
+                                                    lobbySendMessage(
+                                                        'selectbotstyle',
+                                                        currentGame.id,
+                                                        style.key
+                                                    )
+                                                )
+                                            }
+                                            title={style.description || undefined}
+                                            type='button'
+                                        >
+                                            {style.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
                     <div className='flex flex-wrap items-center gap-2 border-t border-border/60 pt-3'>
                         <Button
                             variant='primary'
@@ -453,6 +535,45 @@ const PendingGame = () => {
                         <Button variant='tertiary' onPress={handleCopyGameLink}>
                             <Trans>Copy Game Link</Trans>
                         </Button>
+                        {/* ARCHON (F9): the practice difficulty, for whoever
+                            joined the bot's table. It re-deals the BOT's deck
+                            from a different ARI band, so it only means
+                            anything until the game starts. */}
+                        {isBotTable && isSeatedHere && !currentGame.started && (
+                            <div
+                                className='flex items-center gap-1'
+                                role='group'
+                                aria-label={t('Practice difficulty')}
+                            >
+                                <span className='me-1 text-xs text-foreground/65 dark:text-muted'>
+                                    {t('Difficulty')}
+                                </span>
+                                {BOT_DIFFICULTIES.map((option) => (
+                                    <Button
+                                        key={option.key}
+                                        size='sm'
+                                        variant={
+                                            botDifficulty === option.key ? 'primary' : 'tertiary'
+                                        }
+                                        aria-pressed={botDifficulty === option.key}
+                                        onPress={() =>
+                                            dispatch(
+                                                lobbySendMessage(
+                                                    'botdifficulty',
+                                                    currentGame.id,
+                                                    option.key
+                                                )
+                                            )
+                                        }
+                                    >
+                                        {t(option.label)}
+                                    </Button>
+                                ))}
+                                <span className='ms-1 text-xs text-foreground/65 dark:text-muted'>
+                                    {t('ARI {{range}}', { range: selectedDifficulty.range })}
+                                </span>
+                            </div>
+                        )}
                         <span className='ms-auto text-xs text-foreground/65 dark:text-muted'>
                             {getStartHint()}
                         </span>

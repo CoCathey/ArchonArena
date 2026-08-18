@@ -1,4 +1,64 @@
 const crypto = require('crypto');
+const { AsyncLocalStorage } = require('async_hooks');
+
+/**
+ * ARCHON (N21): a scoped, seedable source for SIMULATED games only.
+ *
+ * The Champion's Challenge's learning bot needs deterministic replay: to ask
+ * "what happens if I play this card instead?", it re-runs a game's recorded
+ * inputs from the start, and that only reconstructs the same game if every
+ * shuffle and random discard draws the same numbers. So a simulation runs
+ * inside `withRandomSource(prng, work)`, and every call that lands here from
+ * that async context - across awaits, but never from unrelated work
+ * interleaved on the event loop - draws from the injected generator instead
+ * of crypto.
+ *
+ * Real games are untouched by construction: they run on the game nodes,
+ * which never enter a scope, and even in the lobby the AsyncLocalStorage
+ * boundary means invite codes, tokens and every other caller keep drawing
+ * from crypto while a bot game is mid-await beside them. Unpredictability
+ * was the whole point of this module; the scope exists precisely so
+ * determinism can be granted to practice games without loaning it to
+ * anything that matters.
+ */
+const randomScope = new AsyncLocalStorage();
+
+/**
+ * Run `work` with all of this module's randomness drawn from `source` - an
+ * object with `next()` returning floats in [0, 1). Returns work's result;
+ * the scope covers everything awaited inside it.
+ *
+ * @template T
+ * @param {{next: () => number}} source
+ * @param {() => T} work
+ * @returns {T}
+ */
+const withRandomSource = (source, work) => randomScope.run(source, work);
+
+/**
+ * A tiny deterministic generator (mulberry32) for simulated games. Fast,
+ * well-distributed, and 32 bits of seed is plenty for practice games -
+ * anything that pays out real fairness still comes from crypto.
+ *
+ * @param {number} seed
+ * @returns {{next: () => number, seed: number}}
+ */
+const seededSource = (seed) => {
+    let state = seed >>> 0;
+
+    return {
+        seed: state,
+        next() {
+            state = (state + 0x6d2b79f5) >>> 0;
+            let t = state;
+
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        }
+    };
+};
 
 /**
  * ARCHON: randomness that decides a game.
@@ -49,6 +109,16 @@ const randomInt = (max) => {
         return 0;
     }
 
+    // ARCHON (N21): a simulated game's scoped source, when one is set. The
+    // float-scaling bias crypto.randomInt's rejection sampling avoids is
+    // ~2^-53 here - meaningless for a practice game - and determinism needs
+    // a fixed number of draws per call, which rejection sampling cannot give.
+    const scoped = randomScope.getStore();
+
+    if (scoped) {
+        return Math.floor(scoped.next() * bound);
+    }
+
     return crypto.randomInt(bound);
 };
 
@@ -89,4 +159,4 @@ const sample = (array, count) => {
     return shuffle(items).slice(0, Math.max(0, count));
 };
 
-module.exports = { randomInt, shuffle, sample };
+module.exports = { randomInt, shuffle, sample, withRandomSource, seededSource };

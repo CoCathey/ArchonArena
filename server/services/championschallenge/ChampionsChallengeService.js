@@ -4,16 +4,36 @@ const RatingService = require('../rating/RatingService');
 const MembershipService = require('../membership/MembershipService');
 const { resolveEntitlements } = require('../membership/entitlements');
 const { CAPABILITIES } = require('../membership/capabilities');
+const crypto = require('node:crypto');
+
 const AriService = require('../rating/AriService');
-const { cloneCard } = require('./packCards');
-const { runSimulatedGame } = require('./SimulatedGame');
+const BotPolicyService = require('./BotPolicyService');
+const LlmTeacherService = require('./LlmTeacherService');
+const GauntletService = require('./GauntletService');
+const VaultTourService = require('./VaultTourService');
+const DeckService = require('../DeckService');
+const DokService = require('../dok/DokService');
+const CatalogService = require('../catalog/CatalogService');
+const { cloneCard, getCardIndex } = require('./packCards');
+const { runSimulatedGame, PLAYER_ONE, PLAYER_TWO } = require('./SimulatedGame');
+const { runDeepGame } = require('./DeepGame');
 const {
     MIN_CONFIDENT_GAMES,
     MIN_OPENING_GAMES,
+    MIN_STYLE_GAMES,
     sasExpectedScore,
     isHiddenGem,
-    buildFindings
+    buildFindings,
+    wilsonInterval
 } = require('./labMath');
+const { shrink, SHRINK_PRIOR } = require('./labPolicy');
+const {
+    PERSONAS,
+    personaByKey,
+    personaModel,
+    personaFor,
+    personaPairFor
+} = require('./labPersonas');
 
 /** Most candidate decks offered for enrollment at once. */
 const MAX_CANDIDATES = 60;
@@ -65,9 +85,146 @@ class ChampionsChallengeService {
         // ARCHON (N19): sparring games move each deck's ARI - the gentler
         // simGameK, but the same index real games move.
         this.ariService = new AriService(db);
-        // Injectable for tests: specs replace this with a stub rather than
-        // playing half a second of real game per assertion.
+        // ARCHON (N21): the learning loop's diary, candidates and champion.
+        this.policyService = new BotPolicyService(configService, db, settingsService);
+        // ARCHON (N38): the AI teacher - samples positions from the games the
+        // sweep plays and, on a small weekly token budget, has an LLM review
+        // them; validated lessons go into the same diary.
+        this.llmTeacherService = new LlmTeacherService(configService, db, settingsService, {
+            policyService: this.policyService
+        });
+        // ARCHON (N24): the Gauntlet - foreign decks drawn from the Master
+        // Vault catalog. Its hydrator parses Master Vault responses with the
+        // member-facing importer's own parser, handed a card index read from
+        // the pack files rather than Redis: the lab is the one workload with
+        // nobody waiting on it, so it must never compete for a shared cache.
+        this.gauntletService = new GauntletService(configService, db, settingsService, {
+            deckService: new DeckService(configService, {
+                getAllCards: async () => getCardIndex()
+            }),
+            // SAS and AERC for pool decks, which is what the SAS and strategy
+            // filters read. Optional: a server with no DoK key still plays the
+            // field, filtered by set and house.
+            dokService: new DokService(configService, db, settingsService)
+        });
+        // ARCHON (N32): the Vault Tour - a slate of three decks against an
+        // admin-curated field of tournament winners. Its own table, its own
+        // budget, its own matrix, and deliberately no ARI.
+        this.vaultTourService = new VaultTourService(configService, db, settingsService, {
+            deckService: new DeckService(configService, {
+                getAllCards: async () => getCardIndex()
+            })
+        });
+        // ARCHON (N29): the crawl the field is drawn FROM. Held here so the lab's
+        // health can report where the walk has got to and an operator can start
+        // it by hand - the Gauntlet is unreachable on a default install without
+        // it, and "the pool is still being built" is not a true account of a
+        // crawl that was never switched on.
+        this.catalogService = new CatalogService(configService, db, settingsService);
+        // ARCHON (N28): which persona pair duels next, kept across sweeps so
+        // every pair is measured about equally often rather than the first pair
+        // being measured every time.
+        this.duelCursor = 0;
+        // ARCHON (N39): which calibration rung the next pair measures. A cursor
+        // rather than a random pick so every reference opponent accumulates
+        // games at the same rate, and the ladder does not end up with one rung
+        // confidently measured and the rest at three games each.
+        this.calibrationCursor = 0;
+        this.deepCalibrationCursor = 0;
+        // Injectable for tests: specs replace these with stubs rather than
+        // playing real games per assertion.
         this.runMatch = runSimulatedGame;
+        this.runDeep = runDeepGame;
+    }
+
+    /** A fresh 32-bit seed for a deterministic, replayable sparring game. */
+    newSeed() {
+        return crypto.randomInt(0x7fffffff);
+    }
+
+    /**
+     * ARCHON (N24): claim the right to be the process that plays.
+     *
+     * Sparring is CPU, and CPU spent on sparring is CPU not spent on the real
+     * games somebody is waiting for - so the sweep can be run on a node of its
+     * own (server/challengeworker) instead of inside the lobby. Which means two
+     * processes can now both believe it is their job, and a doubled sweeper is
+     * not a harmless duplicate: every deck would quietly play twice its daily
+     * budget, invisibly, in results nobody can audit.
+     *
+     * So the right to sweep is a lease, taken in ONE statement - the upsert
+     * either wins or returns nothing, with no read-then-write window for a
+     * second process to slip through. A holder that dies costs one lease period
+     * of idleness; it can never cost a double-played roster.
+     *
+     * @param {string} owner this process's identity, for the operator's benefit
+     * @param {number} [leaseSeconds] how long a silent holder keeps the lease
+     * @returns {Promise<boolean>} whether this process may sweep now
+     */
+    async claimSweepLease(owner, leaseSeconds) {
+        const seconds = Math.max(30, parseInt(leaseSeconds, 10) || 120);
+
+        try {
+            const rows = await this.db.query(
+                'INSERT INTO "ChallengeSweepLease" ("Id", "Owner", "HeartbeatAt") ' +
+                    "VALUES (1, $1, now() AT TIME ZONE 'utc') " +
+                    'ON CONFLICT ("Id") DO UPDATE SET "Owner" = $1, ' +
+                    '"HeartbeatAt" = now() AT TIME ZONE \'utc\' ' +
+                    // Renew our own lease, or take one nobody has refreshed.
+                    'WHERE "ChallengeSweepLease"."Owner" = $1 ' +
+                    'OR "ChallengeSweepLease"."HeartbeatAt" < ' +
+                    "now() AT TIME ZONE 'utc' - ($2 || ' seconds')::interval " +
+                    'RETURNING "Owner"',
+                [owner, seconds]
+            );
+
+            return !!(rows && rows.length);
+        } catch (err) {
+            logger.error('Champion’s Challenge could not claim the sweep lease', err);
+
+            // Refuse rather than risk two sweepers: a quiet lab is recoverable,
+            // a doubled one corrupts the numbers the whole feature sells.
+            return false;
+        }
+    }
+
+    /**
+     * Whether this kind of process is the one configured to sweep.
+     *
+     * `sweepOwner` is the operator's answer to "where do the simulated games
+     * run": the lobby (the default, and how this shipped), a dedicated worker
+     * node, or whichever process gets there first.
+     *
+     * @param {'lobby'|'worker'} role
+     */
+    maySweepAs(role) {
+        const configured = this.getConfig().sweepOwner;
+        // An unrecognised value falls back to the lobby rather than to nobody: a
+        // typo in a setting should leave the lab working as it always has, not
+        // silently stop every member's games with no error anywhere.
+        const owner = ['lobby', 'worker', 'any'].includes(configured) ? configured : 'lobby';
+
+        return owner === 'any' || owner === role;
+    }
+
+    /**
+     * The entry point both hosts use: check this process is the configured
+     * host, take the lease, then sweep. Callers must not reach past this to
+     * `runSweep` - that is what would let two nodes play at once.
+     *
+     * @param {'lobby'|'worker'} role
+     * @param {string} owner process identity for the lease row
+     */
+    async runSweepAs(role, owner) {
+        if (!this.maySweepAs(role)) {
+            return { played: 0, abandoned: 0, skipped: 'not-this-node' };
+        }
+
+        if (!(await this.claimSweepLease(owner, this.getConfig().sweepLeaseSeconds))) {
+            return { played: 0, abandoned: 0, skipped: 'lease-held-elsewhere' };
+        }
+
+        return this.runSweep();
     }
 
     /** Admin-configurable knobs, defaults from the settings registry. */
@@ -91,6 +248,21 @@ class ChampionsChallengeService {
      * @returns {Promise<boolean>}
      */
     async userMayUseLab(userId) {
+        const access = await this.rosterAccess(userId);
+
+        return access.mayUse;
+    }
+
+    /**
+     * Access AND standing: whether this roster's owner may use the lab, and
+     * whether they are a site admin - admins' decks are exempt from the
+     * per-deck daily budget, because the person tuning the lab needs to be
+     * able to flood it.
+     *
+     * @param {number} userId
+     * @returns {Promise<{mayUse: boolean, isAdmin: boolean}>}
+     */
+    async rosterAccess(userId) {
         let isAdmin = false;
 
         try {
@@ -115,7 +287,10 @@ class ChampionsChallengeService {
             membership
         });
 
-        return entitlements.capabilities.includes(CAPABILITIES.CHAMPIONS_CHALLENGE);
+        return {
+            mayUse: entitlements.capabilities.includes(CAPABILITIES.CHAMPIONS_CHALLENGE),
+            isAdmin
+        };
     }
 
     /**
@@ -293,6 +468,23 @@ class ChampionsChallengeService {
         );
 
         if (!enrollments || !enrollments.length) {
+            // ARCHON (N32): the Vault Tour has its OWN slate, so it must not
+            // depend on anybody having roster decks. Returning here left a site
+            // where nobody had enrolled with an unseeded field, and a member
+            // reading "no tournament decks have been entered yet" about a field
+            // that ships with the code.
+            try {
+                await this.runVaultTourStep(config, {
+                    championModel:
+                        config.learningEnabled !== false
+                            ? await this.policyService.champion()
+                            : null,
+                    styling: this.personaStyling(config, null)
+                });
+            } catch (err) {
+                logger.error('Vault Tour: sweep step failed', err);
+            }
+
             return { played: 0, abandoned: 0 };
         }
 
@@ -312,6 +504,20 @@ class ChampionsChallengeService {
             (todayCounts || []).map((count) => [count.DeckId, count.GamesToday])
         );
 
+        // ARCHON (N24): field games count against the same daily budget. A
+        // deck's rest day is a rest day - otherwise turning the Gauntlet on
+        // would quietly double how hard every deck is worked.
+        const fieldToday = await this.db.query(
+            'SELECT "DeckId", COUNT(*)::int AS "GamesToday" FROM "GauntletGames" ' +
+                "WHERE \"FinishedAt\" >= date_trunc('day', now() AT TIME ZONE 'utc') " +
+                'GROUP BY "DeckId"',
+            []
+        );
+
+        for (const count of fieldToday || []) {
+            gamesToday.set(count.DeckId, (gamesToday.get(count.DeckId) || 0) + count.GamesToday);
+        }
+
         const rosters = new Map();
 
         for (const enrollment of enrollments) {
@@ -322,13 +528,40 @@ class ChampionsChallengeService {
             rosters.get(enrollment.UserId).push(enrollment.DeckId);
         }
 
+        // ARCHON (N21): the champion model plays every sparring game; its
+        // games feed the diary that trains its successor.
+        const learning = config.learningEnabled !== false;
+        const championModel = learning ? await this.policyService.champion() : null;
+        const championVersion = championModel ? championModel.version : null;
+        // ARCHON (N25): exploration ANNEALS. A young model needs to try
+        // second-best moves to find out they were best; a model trained on
+        // fifty thousand games is mostly being made worse by the noise. The
+        // temperature decays with the champion's experience toward a floor that
+        // never quite reaches zero, because a policy that stops exploring
+        // entirely can never discover it has grown wrong.
+        const temperature = this.explorationTemperature(config, championModel);
+        // ARCHON (N28): three pilots, rotated. Every deck is played by each of
+        // them, so its rating averages over three styles instead of measuring
+        // one bot's blind spots - and the spread across the three says whether
+        // the deck's result depends on the opponent's plan.
+        const styling = this.personaStyling(config, championModel);
+        // ARCHON (N38): the AI teacher's capture budget for today, shared by
+        // every sampler this sweep creates. Null while the teacher is off -
+        // and capture is free either way; only reviews spend tokens.
+        const teacherBudget =
+            learning && this.llmTeacherService.isEnabled()
+                ? await this.llmTeacherService.captureBudget()
+                : null;
+
         // Rosters are visited round-robin in a shuffled order - one game per
         // member per pass - so one member's full queue cannot starve
         // another's, while a quiet site still gets its full batch from the
         // one roster that wants games. Entitlement verdicts are cached per
         // sweep; budgets are re-read from `gamesToday` as it fills.
         const users = shuffle([...rosters.keys()]);
-        const mayUse = new Map();
+        const access = new Map();
+        // ARCHON (N24): each roster's Gauntlet configuration, read once.
+        const fieldSettings = new Map();
         let played = 0;
         let abandoned = 0;
         let progress = true;
@@ -341,19 +574,80 @@ class ChampionsChallengeService {
                     break;
                 }
 
-                const eligible = rosters
-                    .get(userId)
-                    .filter((deckId) => (gamesToday.get(deckId) || 0) < config.gamesPerDeckPerDay);
+                if (!access.has(userId)) {
+                    access.set(userId, await this.rosterAccess(userId));
+                }
 
-                if (eligible.length < 2) {
+                if (!access.get(userId).mayUse) {
                     continue;
                 }
 
-                if (!mayUse.has(userId)) {
-                    mayUse.set(userId, await this.userMayUseLab(userId));
+                // ARCHON (N20-adjacent): a site admin's decks are exempt from
+                // the daily budget - the person tuning the lab must be able
+                // to flood it. Everyone else's decks rest at the cap.
+                const unlimited = access.get(userId).isAdmin;
+                const eligible = rosters
+                    .get(userId)
+                    .filter(
+                        (deckId) =>
+                            unlimited || (gamesToday.get(deckId) || 0) < config.gamesPerDeckPerDay
+                    );
+
+                if (!eligible.length) {
+                    continue;
                 }
 
-                if (!mayUse.get(userId)) {
+                // ARCHON (N24): mirror game or field game? The member sets the
+                // share; the coin is flipped per game so both measurements
+                // accumulate together rather than in blocks.
+                if (!fieldSettings.has(userId)) {
+                    fieldSettings.set(userId, await this.gauntletService.settingsFor(userId));
+                }
+
+                const field = fieldSettings.get(userId);
+                const wantsField =
+                    field.enabled &&
+                    field.fieldSharePct > 0 &&
+                    crypto.randomInt(100) < field.fieldSharePct;
+
+                if (wantsField) {
+                    // A field game needs one deck of the member's, not two - so
+                    // a single-deck roster, which the mirror lab could never
+                    // give a game at all, plays here.
+                    const mine = shuffle(eligible).sort(
+                        (a, b) => (gamesToday.get(a) || 0) - (gamesToday.get(b) || 0)
+                    )[0];
+                    const outcome = await this.playFieldGame({
+                        userId,
+                        deckId: mine,
+                        settings: field,
+                        config,
+                        championModel,
+                        championVersion,
+                        learning,
+                        ariConfig,
+                        eloConfig,
+                        persona: styling.next()
+                    });
+
+                    if (outcome === 'played') {
+                        gamesToday.set(mine, (gamesToday.get(mine) || 0) + 1);
+                        played++;
+                        progress = true;
+                        continue;
+                    }
+
+                    if (outcome === 'abandoned') {
+                        abandoned++;
+                        continue;
+                    }
+
+                    // 'no-opponent': the pool has nothing matching this
+                    // member's filters yet. Fall through to a mirror game
+                    // rather than spending their tick on nothing.
+                }
+
+                if (eligible.length < 2) {
                     continue;
                 }
 
@@ -382,12 +676,64 @@ class ChampionsChallengeService {
                     continue;
                 }
 
+                // ARCHON (N21): one deep, annotated showcase game per roster
+                // per day (config), when its budget allows; every other game
+                // is the fast bot exploring and logging its decisions.
+                const deepToday = await this.deepGamesToday(userId);
+                const playDeep = learning && deepToday < (config.deepGamesPerDay || 0);
+                // A showcase game is the best play the site can produce, so it
+                // is played by the champion unstyled: a persona is the champion
+                // pulled away from the policy trained to win, and an annotated
+                // exhibition of deliberately stylised play would be a strange
+                // thing to hold up as what the bot can do.
+                const persona = playDeep ? null : styling.next();
+                // ARCHON (N38): the AI teacher's sampler for this game, when
+                // there is capture budget left. In a fast game it watches
+                // through the analyzer hook and never steers; in a deep game
+                // it keeps analyzed decisions WITH their measured values.
+                const sampler =
+                    teacherBudget && teacherBudget.remaining > 0
+                        ? this.llmTeacherService.gameSampler({
+                              policyVersion: championVersion,
+                              budget: teacherBudget
+                          })
+                        : null;
                 let result;
 
                 try {
-                    result = await this.runMatch(alpha.deck, omega.deck, {
-                        maxTurns: config.maxTurnsPerGame
-                    });
+                    result = playDeep
+                        ? await this.runDeep(alpha.deck, omega.deck, {
+                              seed: this.newSeed(),
+                              policy: championModel,
+                              maxTurns: config.maxTurnsPerGame,
+                              // ARCHON (N25): a showcase game is also the best
+                              // training data the site produces, so it goes in
+                              // the diary like any other - and its SEARCH goes
+                              // in too, as lessons.
+                              recordDecisions: learning,
+                              maxAnalyzedDecisions: config.deepMaxAnalyzedDecisions,
+                              candidatesCap: config.deepCandidates,
+                              samplesPerCandidate: config.deepSamples,
+                              rolloutTurns: config.deepRolloutTurns,
+                              positionRecorder: sampler ? sampler.deepRecorder : undefined
+                          })
+                        : await this.runMatch(alpha.deck, omega.deck, {
+                              seed: this.newSeed(),
+                              maxTurns: config.maxTurnsPerGame,
+                              // Both seats share the pilot. That is the point:
+                              // within a game, symmetric piloting keeps the
+                              // result attributable to the DECKS, while across
+                              // games the pilot rotates. Two different pilots in
+                              // one game would put "which bot flew it" into
+                              // every result.
+                              policy: styling.model(persona),
+                              // Exploration keeps the diary honest: a bot
+                              // that never tries second-best moves can never
+                              // learn which ones were actually best.
+                              temperature,
+                              recordDecisions: learning,
+                              analyzer: sampler ? sampler.analyzer : undefined
+                          });
                 } catch (err) {
                     logger.error(
                         `Champion’s Challenge game failed for user ${userId} ` +
@@ -407,7 +753,50 @@ class ChampionsChallengeService {
                     continue;
                 }
 
-                await this.recordGame(userId, result);
+                await this.recordGame(userId, result, persona);
+
+                // ARCHON (N38): whatever the sampler kept, labelled by who
+                // won - abandoned games never reach this line, so a position
+                // is always a moment from a real, finished game.
+                if (sampler) {
+                    await sampler.flush(result.winner);
+                }
+
+                // The diary: this game's decisions, labeled by its outcome.
+                if (learning && result.decisions && result.decisions.length) {
+                    try {
+                        const logged = await this.policyService.recordTrainingGame(
+                            {
+                                policyVersion: championVersion,
+                                winnerSide: result.winner,
+                                decisions: result.decisions,
+                                persona: persona ? persona.key : null
+                            },
+                            config.trainingGamesKept
+                        );
+
+                        if (logged % (config.trainEveryGames || 25) === 0) {
+                            await this.policyService.trainCandidate({
+                                batchGames: (config.trainEveryGames || 25) * 8,
+                                lambda: config.trainingLambda,
+                                targetWeight: config.trainingTargetWeight
+                            });
+                        }
+                    } catch (err) {
+                        logger.error('Challenge bot: failed to log training game', err);
+                    }
+                }
+
+                // ARCHON (N25): the deep bot's search, kept. Every road it
+                // rolled out is a decision whose value was measured, and the
+                // fast policy trains toward those numbers directly - which is
+                // how a minute of forking becomes knowledge that costs nothing
+                // to use afterwards.
+                await this.recordDeepLessons(result, config);
+
+                // The randomizer: a random slot that has served its games
+                // swaps for a fresh random deck.
+                await this.rotateRandomSlots(userId, [pair[0], pair[1]]);
 
                 // ARCHON (N19): a sparring result moves both decks' ARIs at
                 // the sim rate. Best-effort by AriService contract - a failed
@@ -436,17 +825,997 @@ class ChampionsChallengeService {
             }
         }
 
+        // ARCHON (N21): the title fight. If a candidate is in training, it
+        // plays the champion on NEUTRAL decks - never anyone's roster, never
+        // recorded as deck data - and its record decides the crown.
+        if (learning) {
+            try {
+                await this.runArenaStep(config);
+            } catch (err) {
+                logger.error('Challenge bot: arena step failed', err);
+            }
+        }
+
+        // ARCHON (N38): the AI teacher spends a slice of its weekly review
+        // budget. Fully self-gating - the admin switch, a missing key, a
+        // spent budget or an API outage each degrade to "reviewed nothing",
+        // and the loop keeps learning the way it always did.
+        if (learning) {
+            try {
+                await this.llmTeacherService.reviewPending();
+            } catch (err) {
+                logger.error('Challenge AI teacher: review step failed', err);
+            }
+        }
+
+        // ARCHON (N32): the Vault Tour - the slates, against the field somebody
+        // won tournaments with. Its own budget and its own record, so it neither
+        // competes with the roster's games nor touches ARI.
+        try {
+            await this.runVaultTourStep(config, { championModel, styling });
+        } catch (err) {
+            logger.error('Vault Tour: sweep step failed', err);
+        }
+
+        // ARCHON (N28): calibrate the pilots against each other, so "one of the
+        // three is just weaker" is a fact an operator can read rather than a
+        // possibility nobody can rule out.
+        if (styling.active) {
+            try {
+                await this.runPersonaDuels(config, championModel);
+            } catch (err) {
+                logger.error('Challenge bot: persona duel failed', err);
+            }
+        }
+
+        // ARCHON (N39): and measure the champion against opponents that cannot
+        // improve, so every relative number on the page has something absolute
+        // behind it. Both rungs are best effort: a calibration that fails is a
+        // missing measurement, never a missing sweep.
+        try {
+            await this.runCalibration(config, championModel);
+        } catch (err) {
+            logger.error('Challenge bot: calibration failed', err);
+        }
+
+        try {
+            await this.runDeepCalibration(config, championModel);
+        } catch (err) {
+            logger.error('Challenge bot: deep calibration failed', err);
+        }
+
+        // ARCHON (N24): grow the field, after the games rather than before -
+        // hydration waits on Master Vault, and a member's games should not.
+        // Only while somebody actually plays the field: a pool nobody has asked
+        // for is not worth a single outbound request.
+        try {
+            if (await this.gauntletService.anyoneWantsField()) {
+                await this.gauntletService.hydratePool();
+                // ARCHON (N30): read the decks before asking anyone about them.
+                // Profiling is pure CPU over cards already stored, so it costs
+                // nothing and is what the strategy filters fall back to; DoK
+                // enrichment is the outbound request, and it is bounded.
+                await this.gauntletService.profilePool();
+                await this.gauntletService.enrichPool();
+            }
+        } catch (err) {
+            logger.error('Gauntlet: pool upkeep failed', err);
+        }
+
         return { played, abandoned };
     }
 
-    /** Persist one finished simulated game. */
-    async recordGame(userId, result) {
+    /**
+     * ARCHON (N24): one Gauntlet game - a member's deck against a stranger's.
+     *
+     * The opponent is drawn from the hydrated Master Vault pool, filtered by
+     * the member's settings and never including their own or a friend's deck.
+     * The result is recorded as a field result (GauntletGames), kept apart from
+     * the mirror record because they answer different questions, and moves both
+     * decks' ARI at the sim rate - the same evidence a mirror game is, so it is
+     * weighed the same way.
+     *
+     * The member's deck always takes the alpha seat, which is what makes
+     * `winner === PLAYER_ONE` mean "mine won" without consulting the decks.
+     *
+     * @returns {Promise<'played'|'abandoned'|'no-opponent'>}
+     */
+    async playFieldGame({
+        userId,
+        deckId,
+        settings,
+        config,
+        championModel,
+        championVersion,
+        learning,
+        ariConfig,
+        eloConfig,
+        persona = null
+    }) {
+        const opponent = await this.gauntletService.drawOpponent(userId, settings);
+
+        if (!opponent) {
+            return 'no-opponent';
+        }
+
+        const mine = await this.loadEngineDeck(deckId);
+
+        if (mine.missing.length || mine.deck.houses.length !== 3) {
+            logger.warn(`Gauntlet skipped deck ${deckId} of user ${userId}: not simulatable`);
+
+            return 'abandoned';
+        }
+
+        let result;
+
+        try {
+            result = await this.runMatch(mine.deck, opponent.deck, {
+                seed: this.newSeed(),
+                maxTurns: config.maxTurnsPerGame,
+                // One pilot, both seats, rotated across games - the same rule the
+                // mirror lab plays by, for the same reason.
+                policy: personaModel(
+                    championModel,
+                    persona,
+                    this.personaStrength(this.getConfig())
+                ),
+                temperature: 0.7,
+                recordDecisions: learning
+            });
+        } catch (err) {
+            logger.error(
+                `Gauntlet game failed for user ${userId} (deck ${deckId} vs ${opponent.uuid}):`,
+                err
+            );
+
+            return 'abandoned';
+        }
+
+        if (!result || !result.completed) {
+            logger.warn(
+                `Gauntlet abandoned a game for user ${userId} (deck ${deckId} vs ` +
+                    `${opponent.uuid}): ${result && result.reason}`
+            );
+
+            return 'abandoned';
+        }
+
+        const won = result.winner === PLAYER_ONE;
+
+        try {
+            await this.gauntletService.recordGame({
+                userId,
+                deckId,
+                opponent,
+                won,
+                result,
+                persona: persona ? persona.key : null
+            });
+            await this.gauntletService.noteOpponentPlayed(opponent.uuid);
+        } catch (err) {
+            logger.error('Gauntlet: could not record a field game', err);
+
+            return 'abandoned';
+        }
+
+        // The diary does not care whose deck was on the other side: a decision
+        // made against a stranger's deck is training data on the same terms.
+        if (learning && result.decisions && result.decisions.length) {
+            try {
+                const logged = await this.policyService.recordTrainingGame(
+                    {
+                        policyVersion: championVersion,
+                        winnerSide: result.winner,
+                        decisions: result.decisions,
+                        persona: persona ? persona.key : null
+                    },
+                    config.trainingGamesKept
+                );
+
+                if (logged % (config.trainEveryGames || 25) === 0) {
+                    await this.policyService.trainCandidate({
+                        // Same knobs as the sparring path: this one used to
+                        // fall back to the code defaults, so a site that had
+                        // tuned its training got the untuned values here.
+                        batchGames: (config.trainEveryGames || 25) * 8,
+                        lambda: config.trainingLambda,
+                        targetWeight: config.trainingTargetWeight
+                    });
+                }
+            } catch (err) {
+                logger.error('Challenge bot: failed to log training game', err);
+            }
+        }
+
+        await this.rotateRandomSlots(userId, [deckId]);
+
+        if (ariConfig.enabled) {
+            await this.ariService.applyGameResult({
+                winnerUuid: result.winnerDeck.uuid,
+                loserUuid: result.loserDeck.uuid,
+                k: ariConfig.simGameK,
+                sasWeight: eloConfig.sasWeight,
+                sim: true
+            });
+        }
+
+        return 'played';
+    }
+
+    /**
+     * ARCHON (N32): the Vault Tour step - slates against the tournament field.
+     *
+     * A separate pass rather than a branch inside the roster loop, because it is
+     * a separate measurement with a separate budget: these decks are not the
+     * eight, these games are not counted against the eight's twelve a day, and
+     * nothing here reaches ARI. What it shares with the rest of the sweep is the
+     * engine, the sparring pilots and the entitlement.
+     *
+     * Bounded per sweep and per deck per day; a site admin is exempt from the
+     * daily cap, as everywhere else in the lab.
+     *
+     * @returns {Promise<number>} games played
+     */
+    async runVaultTourStep(config, { championModel, styling }) {
+        if (!this.vaultTourService.isEnabled()) {
+            return 0;
+        }
+
+        // The shipped field, and the cards for whatever part of it has none yet.
+        // Seeding is a cheap upsert; hydration is a Master Vault request per
+        // deck, so it is bounded and paced like every other outbound pass here.
+        await this.vaultTourService.seedDefaults();
+
+        const entries = await this.vaultTourService.rosters();
+
+        // Cards are fetched for a field somebody intends to play. The seed above
+        // is free and always runs, so an admin sees the field the moment the lab
+        // ticks; the requests wait for a slate.
+        if (!entries.length) {
+            return 0;
+        }
+
+        await this.vaultTourService.hydrateField();
+
+        const perSweep = Math.max(0, parseInt(config.vaultTourGamesPerSweep, 10) || 0);
+
+        if (!perSweep) {
+            return 0;
+        }
+
+        const slates = new Map();
+
+        for (const entry of entries) {
+            if (!slates.has(entry.UserId)) {
+                slates.set(entry.UserId, []);
+            }
+
+            slates.get(entry.UserId).push(entry.DeckId);
+        }
+
+        const perDay = this.vaultTourService.gamesPerDeckPerDay();
+        const access = new Map();
+        let played = 0;
+
+        for (const userId of shuffle([...slates.keys()])) {
+            if (played >= perSweep) {
+                break;
+            }
+
+            if (!access.has(userId)) {
+                access.set(userId, await this.rosterAccess(userId));
+            }
+
+            if (!access.get(userId).mayUse) {
+                continue;
+            }
+
+            const unlimited = access.get(userId).isAdmin;
+            const today = await this.vaultTourService.gamesToday(userId);
+            // The deck furthest behind on today's games goes first, so a slate
+            // is played evenly rather than one deck taking the whole budget.
+            const eligible = slates
+                .get(userId)
+                .filter((deckId) => unlimited || (today.get(deckId) || 0) < perDay)
+                .sort((left, right) => (today.get(left) || 0) - (today.get(right) || 0));
+
+            if (!eligible.length) {
+                continue;
+            }
+
+            const persona = styling.next();
+            const outcome = await this.playVaultTourGame({
+                userId,
+                deckId: eligible[0],
+                config,
+                championModel,
+                persona
+            });
+
+            if (outcome === 'played') {
+                played++;
+            }
+
+            if (outcome === 'no-opponent') {
+                // Nothing in the field this member can be given. Another member
+                // may still have opponents (the exclusion is per member), so the
+                // pass continues rather than stopping.
+                continue;
+            }
+        }
+
+        return played;
+    }
+
+    /**
+     * One Vault Tour game: a slate deck against a deck that won, or nearly won,
+     * a real event.
+     *
+     * The member's deck takes the alpha seat, which is what makes
+     * `winner === PLAYER_ONE` mean "mine won" without consulting the decks.
+     *
+     * @returns {Promise<'played'|'abandoned'|'no-opponent'>}
+     */
+    async playVaultTourGame({ userId, deckId, config, championModel, persona }) {
+        const opponent = await this.vaultTourService.drawOpponent(userId);
+
+        if (!opponent) {
+            return 'no-opponent';
+        }
+
+        const mine = await this.loadEngineDeck(deckId);
+
+        if (mine.missing.length || mine.deck.houses.length !== 3) {
+            logger.warn(`Vault Tour skipped deck ${deckId} of user ${userId}: not simulatable`);
+
+            return 'abandoned';
+        }
+
+        let result;
+
+        try {
+            result = await this.runMatch(mine.deck, opponent.deck, {
+                seed: this.newSeed(),
+                maxTurns: config.maxTurnsPerGame,
+                policy: personaModel(championModel, persona, this.personaStrength(config)),
+                temperature: 0.7,
+                // Not logged for training: the field is a hand-picked slice of
+                // the game rather than a sample of it, and the diary is what the
+                // champion generalises from.
+                recordDecisions: false
+            });
+        } catch (err) {
+            logger.error(
+                `Vault Tour game failed for user ${userId} (deck ${deckId} vs ${opponent.uuid}):`,
+                err
+            );
+
+            return 'abandoned';
+        }
+
+        if (!result || !result.completed) {
+            logger.warn(
+                `Vault Tour abandoned a game for user ${userId} (deck ${deckId} vs ` +
+                    `${opponent.uuid}): ${result && result.reason}`
+            );
+
+            return 'abandoned';
+        }
+
+        try {
+            await this.vaultTourService.recordGame({
+                userId,
+                deckId,
+                opponent,
+                won: result.winner === PLAYER_ONE,
+                result,
+                persona: persona ? persona.key : null
+            });
+            await this.vaultTourService.noteOpponentPlayed(opponent.uuid);
+        } catch (err) {
+            logger.error('Vault Tour: could not record a game', err);
+
+            return 'abandoned';
+        }
+
+        // Deliberately no ARI. See VaultTourService's header: a curated field of
+        // winners is the opposite of representative opposition, and the rating
+        // it would move is the one the whole platform prices decks with.
+        return 'played';
+    }
+
+    /**
+     * ARCHON (N25): store what a deep game's search measured.
+     *
+     * The lessons go into the diary as a row whose decisions carry explicit
+     * targets - the win probability the rollouts found for each road, taken or
+     * not. `trainModel` prefers a target over any outcome-derived label, so the
+     * next candidate is trained partly on positions whose value was established
+     * by playing them out rather than inferred from who eventually won.
+     *
+     * The rejected roads matter as much as the chosen one: they are the only
+     * negative examples the loop ever gets. Outcome-labelled play can say "this
+     * move appeared in a won game"; only the search can say "this move was
+     * worth 0.62 and that one 0.41 from the same position".
+     *
+     * Best effort - a diary write that fails must never cost the game.
+     */
+    async recordDeepLessons(result, config) {
+        if (!result || !result.deep || !result.lessons || !result.lessons.length) {
+            return;
+        }
+
+        try {
+            await this.policyService.recordTrainingGame(
+                {
+                    policyVersion: null,
+                    // Every decision here carries its own target, so the winner
+                    // is not what labels them - but the row keeps it, because a
+                    // lesson row is still a record of a real game.
+                    winnerSide: result.winner,
+                    decisions: result.lessons
+                },
+                config.trainingGamesKept
+            );
+
+            if (result.forksFailed && result.forksFailed > result.forksPlayed / 4) {
+                // A deep bot quietly running on a quarter of its samples looks
+                // exactly like a deep bot that is thinking hard.
+                logger.warn(
+                    `Challenge deep bot: ${result.forksFailed} of ${result.forksPlayed} forks ` +
+                        'could not be played - the search is running on fewer samples than budgeted'
+                );
+            }
+        } catch (err) {
+            logger.error('Challenge bot: failed to store deep lessons', err);
+        }
+    }
+
+    /**
+     * ARCHON (N25): how adventurously the fast bot plays, given how much the
+     * champion has already seen.
+     *
+     * Decays from `explorationTemperature` toward `explorationFloor` on the
+     * champion's trained-game count, halving every `explorationHalfLife` games.
+     * The floor is deliberately above zero: a policy that stops exploring cannot
+     * notice the day its own habits stopped working, which is exactly what
+     * happens when the card pool changes underneath it.
+     */
+    explorationTemperature(config, championModel) {
+        const start = Number(config.explorationTemperature);
+        const floor = Number(config.explorationFloor);
+        const halfLife = Number(config.explorationHalfLife);
+        const top = Number.isFinite(start) ? start : 0.7;
+        const bottom = Number.isFinite(floor) ? floor : 0.15;
+        const half = Number.isFinite(halfLife) && halfLife > 0 ? halfLife : 20000;
+        const seen = (championModel && championModel.trainedGames) || 0;
+
+        return bottom + (top - bottom) * Math.pow(0.5, seen / half);
+    }
+
+    /** How many deep showcase games this roster has had today (UTC). */
+    async deepGamesToday(userId) {
+        const rows = await this.db.query(
+            'SELECT COUNT(*)::int AS "DeepToday" FROM "ProvingGroundsGames" ' +
+                'WHERE "UserId" = $1 AND "Deep" = true ' +
+                "AND \"FinishedAt\" >= date_trunc('day', now() AT TIME ZONE 'utc')",
+            [userId]
+        );
+
+        return rows && rows[0] ? rows[0].DeepToday : 0;
+    }
+
+    /**
+     * ARCHON (N21): one arena game between the candidate and the champion,
+     * seats alternated by coin flip, on neutral decks built from pack data.
+     * The result goes only to the candidate's record; promotion and
+     * retirement live in BotPolicyService.
+     */
+    async runArenaStep(config) {
+        const candidate = await this.policyService.candidate();
+
+        if (!candidate) {
+            return;
+        }
+
+        const champion = await this.policyService.champion();
+        const [deckA, deckB] = this.neutralArenaDecks();
+        // ARCHON (N25): PAIRED SEEDS. One seed, played twice, seats swapped -
+        // so both brains face the same shuffles, the same draws and the same
+        // first-player advantage, once from each side.
+        //
+        // A coin flip per game (which is what this was) leaves deck and draw
+        // luck in the record, and that noise is most of why a title fight
+        // needed hundreds of games to say anything. Pairing cancels it: what
+        // survives a pair is the difference between the two players, which is
+        // the only thing being measured.
+        const seed = this.newSeed();
+        const halves = [true, false];
+
+        for (const candidateIsAlpha of halves) {
+            const result = await this.runMatch(deckA, deckB, {
+                seed,
+                maxTurns: config.maxTurnsPerGame,
+                // A genuine head-to-head: one brain per seat. A null champion is
+                // the heuristics - exactly the baseline the first candidate has
+                // to dethrone.
+                policies: candidateIsAlpha
+                    ? { alpha: candidate.Model, omega: champion }
+                    : { alpha: champion, omega: candidate.Model },
+                temperature: 0,
+                recordDecisions: false
+            });
+
+            if (!result || !result.completed) {
+                // Drop the whole pair: half a pair is an unpaired game, which
+                // is the noise this is here to remove.
+                return;
+            }
+
+            const candidateWon = candidateIsAlpha
+                ? result.winner === PLAYER_ONE
+                : result.winner !== PLAYER_ONE;
+            const verdict = await this.policyService.recordArenaResult(candidate.Id, candidateWon, {
+                minGames: config.arenaMinGames,
+                decideGames: config.arenaDecideGames
+            });
+
+            // Settled mid-pair: the title has changed hands or the candidate is
+            // gone, and the second half would be scored against a row that no
+            // longer holds the crown it was contesting.
+            if (verdict === 'promoted' || verdict === 'retired') {
+                return;
+            }
+        }
+    }
+
+    /** How far a persona pulls the champion away from its own best play. */
+    personaStrength(config) {
+        if (config.personasEnabled === false) {
+            return 0;
+        }
+
+        const strength = Number(config.personaStrength);
+
+        return Number.isFinite(strength) && strength >= 0 ? strength : 1;
+    }
+
+    /**
+     * ARCHON (N28): the sweep's pilot rotation.
+     *
+     * `next()` hands out the personas round-robin - not at random, because with
+     * three pilots and a few dozen games a day per deck a coin leaves one pilot
+     * with half the games of another often enough to matter, and the per-style
+     * records are the point. `model()` dresses the champion in one.
+     *
+     * Returns a rotation of nulls when personas are off or there is no champion
+     * to bias: with no trained brain the bot plays its heuristics, and a
+     * bias-only model would be a fourth kind of player nobody asked for.
+     */
+    personaStyling(config, championModel) {
+        const strength = this.personaStrength(config);
+        const active = !!championModel && strength > 0;
+
+        if (!active) {
+            return { active: false, next: () => null, model: () => championModel };
+        }
+
+        // A random start, so a site whose sweeps all play the same number of
+        // games does not hand every sweep's first game to the same pilot.
+        let cursor = crypto.randomInt(PERSONAS.length);
+
+        return {
+            active: true,
+            next: () => personaFor(cursor++),
+            model: (persona) => personaModel(championModel, persona, strength)
+        };
+    }
+
+    /**
+     * ARCHON (N28): the personas, measured against each other.
+     *
+     * Each persona is the champion pulled away from the policy trained to win, so
+     * each is a slightly weaker player for it - and one pulled too far is simply
+     * a bad player, which would turn a deck's spread across the three from "this
+     * deck's result depends on the opponent's plan" into "this deck punishes bad
+     * play". That difference has to be visible, and ordinary sparring cannot show
+     * it: both seats there share a pilot, by design.
+     *
+     * So the pilots duel. Neutral decks, PAIRED SEEDS - one seed played twice
+     * with the pilots swapped between seats - which is the same instrument the
+     * champion's title fight uses, and for the same reason: what survives a pair
+     * is the difference between the players rather than the decks or the draws.
+     *
+     * Never touches anyone's deck stats, never moves ARI, never trains anything.
+     */
+    async runPersonaDuels(config, championModel) {
+        const strength = this.personaStrength(config);
+        const pairs = Math.max(0, parseInt(config.personaDuelPairsPerSweep, 10) || 0);
+
+        if (!championModel || !strength || !pairs) {
+            return 0;
+        }
+
+        const [deckA, deckB] = this.neutralArenaDecks();
+        let played = 0;
+
+        for (let pair = 0; pair < pairs; pair++) {
+            const [left, right] = personaPairFor(this.duelCursor++);
+            const models = {
+                left: personaModel(championModel, left, strength),
+                right: personaModel(championModel, right, strength)
+            };
+            const seed = this.newSeed();
+            const results = [];
+
+            for (const leftIsAlpha of [true, false]) {
+                const result = await this.runMatch(deckA, deckB, {
+                    seed,
+                    maxTurns: config.maxTurnsPerGame,
+                    policies: leftIsAlpha
+                        ? { alpha: models.left, omega: models.right }
+                        : { alpha: models.right, omega: models.left },
+                    temperature: 0,
+                    recordDecisions: false
+                });
+
+                if (!result || !result.completed) {
+                    // Drop the pair. Half a pair is an unpaired game, which is
+                    // the noise the pairing exists to remove.
+                    return played;
+                }
+
+                const leftWon = leftIsAlpha
+                    ? result.winner === PLAYER_ONE
+                    : result.winner !== PLAYER_ONE;
+
+                results.push(leftWon);
+            }
+
+            for (const leftWon of results) {
+                await this.policyService.recordPersonaDuel(
+                    leftWon ? left.key : right.key,
+                    leftWon ? right.key : left.key
+                );
+            }
+
+            played++;
+        }
+
+        return played;
+    }
+
+    /**
+     * ARCHON (N39): measure the champion against opponents that never learn.
+     *
+     * The Challenge tells a member "this deck wins 62%", and until now nothing
+     * anywhere said against what standard of play. Every existing measurement
+     * in the lab is RELATIVE - the title fight proves a candidate is better
+     * than the last champion, which says nothing about whether either can play
+     * a key out. So the champion is also played against fixed references whose
+     * strength cannot drift:
+     *
+     *   heuristic  the plain bot the lab started from, no model at all. The
+     *              floor, and the number worth quoting to a member: a learned
+     *              policy that cannot beat the rules-of-thumb it replaced is
+     *              not a sparring partner, it is a regression.
+     *   personas   each hand-biased style at the configured strength, which
+     *              says whether the champion has a blind spot rather than a
+     *              level.
+     *   deep       the searching bot. The CEILING - the champion is a
+     *              distillation of it, so this is how much was lost in the
+     *              distilling, and it is the one rung expected to be below 50%.
+     *
+     * Paired seeds with the seats swapped, like the title fight and the persona
+     * duels: first-player advantage cancels instead of being averaged over and
+     * hoped about. A pair that cannot finish is dropped whole, because half a
+     * pair is an unpaired game - exactly the noise the pairing removes.
+     *
+     * Cheap by design: `calibrationPairsPerSweep` defaults low, and the deep
+     * rung is played at most once per sweep because a searching game costs
+     * orders of magnitude more than a fast one.
+     */
+    async runCalibration(config, championModel) {
+        const pairs = Math.max(0, parseInt(config.calibrationPairsPerSweep, 10) || 0);
+
+        if (!championModel || !pairs) {
+            return 0;
+        }
+
+        const version = championModel.version || 0;
+        const strength = this.personaStrength(config);
+        const [deckA, deckB] = this.neutralArenaDecks();
+        // The rungs, cheapest first. Personas only when styling is configured
+        // to do anything - a persona at zero strength is the champion, and a
+        // ladder rung that is the champion measures nothing.
+        const rungs = [{ key: 'heuristic', policy: null }];
+
+        if (strength) {
+            for (const persona of PERSONAS) {
+                rungs.push({
+                    key: persona.key,
+                    policy: personaModel(championModel, persona, strength)
+                });
+            }
+        }
+
+        let played = 0;
+
+        for (let pair = 0; pair < pairs; pair++) {
+            const rung = rungs[this.calibrationCursor++ % rungs.length];
+            const seed = this.newSeed();
+            const outcomes = [];
+
+            for (const championIsAlpha of [true, false]) {
+                const result = await this.runMatch(deckA, deckB, {
+                    seed,
+                    maxTurns: config.maxTurnsPerGame,
+                    policies: championIsAlpha
+                        ? { alpha: championModel, omega: rung.policy }
+                        : { alpha: rung.policy, omega: championModel },
+                    // Greedy: this is a measurement, and exploration noise is
+                    // the thing being measured through.
+                    temperature: 0,
+                    recordDecisions: false
+                });
+
+                if (!result || !result.completed) {
+                    return played;
+                }
+
+                outcomes.push(
+                    championIsAlpha ? result.winner === PLAYER_ONE : result.winner !== PLAYER_ONE
+                );
+            }
+
+            for (const championWon of outcomes) {
+                await this.policyService.recordCalibration(rung.key, version, championWon);
+            }
+
+            played++;
+        }
+
+        return played;
+    }
+
+    /**
+     * The ceiling rung: the champion against the searching bot it was distilled
+     * from. One pair, at most once per sweep, because a deep game costs orders
+     * of magnitude more than a fast one and the number it produces moves slowly.
+     */
+    async runDeepCalibration(config, championModel) {
+        // One switch governs all of calibration: turning it off must not leave
+        // the most expensive rung still running. And a cadence, because a deep
+        // pair costs orders of magnitude more than a fast one while the number
+        // it produces barely moves - measuring it every sweep would spend the
+        // sweep budget on a figure that changes once a fortnight.
+        const pairs = Math.max(0, parseInt(config.calibrationPairsPerSweep, 10) || 0);
+        const every = Math.max(1, parseInt(config.deepCalibrationEverySweeps, 10) || 10);
+
+        if (!championModel || !pairs || config.deepCalibration === false) {
+            return 0;
+        }
+
+        if (this.deepCalibrationCursor++ % every !== 0) {
+            return 0;
+        }
+
+        const [deckA, deckB] = this.neutralArenaDecks();
+        const seed = this.newSeed();
+        const outcomes = [];
+
+        for (const championIsAlpha of [true, false]) {
+            let result;
+
+            try {
+                result = await this.runDeep(deckA, deckB, {
+                    seed,
+                    maxTurns: config.maxTurnsPerGame,
+                    policy: championModel,
+                    // The deep seat searches; the champion seat does not. Which
+                    // seat that is swaps with the pair.
+                    deepSide: championIsAlpha ? PLAYER_TWO : PLAYER_ONE,
+                    maxAnalyzedDecisions: config.deepMaxAnalyzedDecisions,
+                    candidatesCap: config.deepCandidates,
+                    samplesPerCandidate: config.deepSamples,
+                    rolloutTurns: config.deepRolloutTurns,
+                    recordDecisions: false
+                });
+            } catch (err) {
+                logger.error('Challenge bot: deep calibration failed', err);
+
+                return 0;
+            }
+
+            if (!result || !result.completed) {
+                return 0;
+            }
+
+            outcomes.push(
+                championIsAlpha ? result.winner === PLAYER_ONE : result.winner !== PLAYER_ONE
+            );
+        }
+
+        for (const championWon of outcomes) {
+            await this.policyService.recordCalibration(
+                'deep',
+                championModel.version || 0,
+                championWon
+            );
+        }
+
+        return 1;
+    }
+
+    /**
+     * Two fixed 36-card decks from pack data, for arena games: neutral
+     * ground that no member's stats can be polluted by and every candidate
+     * meets alike.
+     */
+    neutralArenaDecks() {
+        if (this.arenaDecks) {
+            return this.arenaDecks;
+        }
+
+        const build = (name, houses) => {
+            const byHouse = {};
+
+            for (const card of Object.values(getCardIndex())) {
+                if (
+                    houses.includes(card.house) &&
+                    !card.isNonDeck &&
+                    ['creature', 'artifact', 'action', 'upgrade'].includes(card.type)
+                ) {
+                    (byHouse[card.house] = byHouse[card.house] || []).push(card);
+                }
+            }
+
+            const cards = [];
+
+            for (const house of houses) {
+                const pool = byHouse[house];
+
+                for (let i = 0; i < 12; i++) {
+                    const card = pool[(i * 5) % pool.length];
+
+                    cards.push({ id: card.id, count: 1, card: cloneCard(card.id) });
+                }
+            }
+
+            return { name, uuid: `arena-${name}`, expansion: 341, houses, cards };
+        };
+
+        this.arenaDecks = [
+            build('Arena Alpha', ['brobnar', 'dis', 'logos']),
+            build('Arena Omega', ['sanctum', 'shadows', 'untamed'])
+        ];
+
+        return this.arenaDecks;
+    }
+
+    /**
+     * ARCHON (N21): the randomizer's rotation. Any random slot among the
+     * decks that just played, whose games since enrollment have reached its
+     * target, is swapped for a fresh random deck carrying the same target.
+     */
+    async rotateRandomSlots(userId, deckIds) {
+        try {
+            const slots = await this.db.query(
+                'SELECT e."DeckId", e."RandomGamesTarget", e."EnrolledAt", ' +
+                    '(SELECT COUNT(*)::int FROM "ProvingGroundsGames" g ' +
+                    ' WHERE g."UserId" = e."UserId" ' +
+                    ' AND (g."WinnerDeckId" = e."DeckId" OR g."LoserDeckId" = e."DeckId") ' +
+                    ' AND g."FinishedAt" >= e."EnrolledAt") AS "PlayedSince" ' +
+                    'FROM "ProvingGroundsDecks" e ' +
+                    'WHERE e."UserId" = $1 AND e."Random" = true AND e."DeckId" = ANY($2)',
+                [userId, deckIds]
+            );
+
+            for (const slot of slots || []) {
+                if (!slot.RandomGamesTarget || slot.PlayedSince < slot.RandomGamesTarget) {
+                    continue;
+                }
+
+                await this.withdrawDeck(userId, slot.DeckId);
+
+                const swapped = await this.enrollRandomDeck(userId, slot.RandomGamesTarget, {
+                    exclude: [slot.DeckId]
+                });
+
+                logger.info(
+                    `Challenge randomizer: user ${userId} deck ${slot.DeckId} rotated out ` +
+                        `after ${slot.PlayedSince} games` +
+                        (swapped ? ` for deck ${swapped}` : ' (no replacement available)')
+                );
+            }
+        } catch (err) {
+            logger.error('Challenge randomizer rotation failed', err);
+        }
+    }
+
+    /**
+     * Fill several randomizer slots in one go, stopping early when the roster
+     * runs out of room or the collection runs out of eligible decks - a
+     * partial fill is a real answer here ("I asked for five, I own three"),
+     * so the caller gets the list and decides what to say about it.
+     *
+     * Each deck is enrolled before the next is drawn, and the draw excludes
+     * anything already on the roster, so one call cannot pick the same deck
+     * twice.
+     *
+     * @returns {Promise<number[]>} the enrolled deck ids, in the order drawn
+     */
+    async enrollRandomDecks(userId, gamesTarget, count) {
+        const wanted = Math.max(1, Math.min(this.getConfig().maxEnrolledPerUser, count || 1));
+        const enrolled = [];
+
+        for (let slot = 0; slot < wanted; slot++) {
+            const deckId = await this.enrollRandomDeck(userId, gamesTarget, {
+                exclude: enrolled
+            });
+
+            if (!deckId) {
+                break;
+            }
+
+            enrolled.push(deckId);
+        }
+
+        return enrolled;
+    }
+
+    /**
+     * Enroll a random eligible deck into a randomizer slot: owned, rated,
+     * simulatable, not already on the roster, not excluded. A handful of
+     * candidates are drawn and tried in random order, because "simulatable"
+     * can only be proven by loading the deck.
+     *
+     * @returns {Promise<number|null>} the enrolled deck id, or null
+     */
+    async enrollRandomDeck(userId, gamesTarget, { exclude = [] } = {}) {
+        const target = Math.max(1, Math.min(500, parseInt(gamesTarget, 10) || 20));
+        const candidates = await this.db.query(
+            'SELECT d."Id" FROM "Decks" d ' +
+                'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
+                'WHERE d."UserId" = $1 AND NOT COALESCE(d."Banned", false) ' +
+                'AND ds."SasRating" IS NOT NULL ' +
+                'AND NOT (d."Id" = ANY($2)) ' +
+                'AND NOT EXISTS (SELECT 1 FROM "ProvingGroundsDecks" e ' +
+                'WHERE e."UserId" = $1 AND e."DeckId" = d."Id") ' +
+                'ORDER BY random() LIMIT 8',
+            [userId, exclude]
+        );
+
+        for (const row of candidates || []) {
+            const { missing, deck } = await this.loadEngineDeck(row.Id);
+
+            if (missing.length || deck.houses.length !== 3) {
+                continue;
+            }
+
+            await this.db.query(
+                'INSERT INTO "ProvingGroundsDecks" ' +
+                    '("UserId", "DeckId", "EnrolledAt", "Random", "RandomGamesTarget") ' +
+                    "VALUES ($1, $2, now() AT TIME ZONE 'utc', true, $3) " +
+                    'ON CONFLICT ("UserId", "DeckId") DO NOTHING',
+                [userId, row.Id, target]
+            );
+
+            return row.Id;
+        }
+
+        return null;
+    }
+
+    /** Persist one finished simulated game, deep annotations and all. */
+    async recordGame(userId, result, persona = null) {
         await this.db.query(
             'INSERT INTO "ProvingGroundsGames" ' +
                 '("UserId", "WinnerDeckId", "LoserDeckId", "WinnerKeys", "LoserKeys", "Turns", ' +
                 '"WinnerWentFirst", "WinnerFirstHouse", "LoserFirstHouse", "WinnerHouseCalls", ' +
-                '"LoserHouseCalls", "DurationMs", "FinishedAt") ' +
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now() AT TIME ZONE 'utc')",
+                '"LoserHouseCalls", "DurationMs", "Deep", "Annotations", "Persona", "FinishedAt") ' +
+                'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ' +
+                "now() AT TIME ZONE 'utc')",
             [
                 userId,
                 result.winnerDeck.dbId,
@@ -459,7 +1828,13 @@ class ChampionsChallengeService {
                 result.loserFirstHouse,
                 JSON.stringify(result.winnerHouseCalls || {}),
                 JSON.stringify(result.loserHouseCalls || {}),
-                result.durationMs
+                result.durationMs,
+                !!result.deep,
+                result.annotations ? JSON.stringify(result.annotations) : null,
+                // ARCHON (N28): which pilot played it. Part of the result, not a
+                // runtime detail - the per-style records are read off this column,
+                // and a game whose pilot went unrecorded can never be attributed.
+                persona ? persona.key : null
             ]
         );
     }
@@ -470,12 +1845,13 @@ class ChampionsChallengeService {
      * @param {number} userId
      * @returns {Promise<object>}
      */
-    async getLabReport(userId) {
+    async getLabReport(userId, { isAdmin = false } = {}) {
         const config = this.getConfig();
 
         const [enrollmentRows, gameRows, candidateRows] = await Promise.all([
             this.db.query(
-                'SELECT e."DeckId", e."EnrolledAt", d."Name", d."Uuid", ds."SasRating" ' +
+                'SELECT e."DeckId", e."EnrolledAt", e."Random", e."RandomGamesTarget", ' +
+                    'd."Name", d."Uuid", ds."SasRating" ' +
                     'FROM "ProvingGroundsDecks" e ' +
                     'JOIN "Decks" d ON d."Id" = e."DeckId" ' +
                     'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
@@ -550,10 +1926,66 @@ class ChampionsChallengeService {
 
         utcMidnight.setUTCHours(0, 0, 0, 0);
 
+        // ARCHON (N21): the latest deep showcase games, annotations and all,
+        // with names for both seats so the sentences read as decks.
+        const nameByDeck = new Map(
+            enrollmentList.map((enrollment) => [enrollment.DeckId, enrollment.Name])
+        );
+        const showcase = games
+            .filter((game) => game.Deep && game.Annotations)
+            .slice(-5)
+            .reverse()
+            .map((game) => ({
+                playedAt: game.FinishedAt,
+                winner: nameByDeck.get(game.WinnerDeckId) || `Deck ${game.WinnerDeckId}`,
+                loser: nameByDeck.get(game.LoserDeckId) || `Deck ${game.LoserDeckId}`,
+                winnerKeys: game.WinnerKeys,
+                loserKeys: game.LoserKeys,
+                turns: game.Turns,
+                annotations: game.Annotations
+            }));
+
+        const bot = await this.policyService.vitals().catch(() => null);
+        // ARCHON (N26): the three things the roster's own games were already
+        // producing and nothing showed - which of your decks beats which, what
+        // the bot has learned about the cards in your best deck, and the
+        // champion's line of succession.
+        const champion = await this.policyService.champion().catch(() => null);
+        const matchups = this.matchupMatrix(enrollmentList, games);
+        const strengthCurve = await this.policyService.strengthCurve().catch(() => []);
+        const topDeck = decks.find((deck) => deck.games > 0) || null;
+        const cards = topDeck ? await this.cardContribution(topDeck.deckId, champion) : null;
+
+        // ARCHON (N24): the field. Each deck's record against strangers' decks
+        // is attached BESIDE its mirror record, never folded into it - 60%
+        // against your own collection and 60% against the world are different
+        // claims, and their average answers neither.
+        const [fieldSettings, fieldRecords, fieldRecent, vaultTour] = await Promise.all([
+            this.gauntletService.settingsFor(userId),
+            this.gauntletService.recordsFor(userId),
+            this.gauntletService.recentGames(userId),
+            // ARCHON (N32): the Vault Tour rides beside the rest rather than
+            // inside it - a different slate, a different field, its own matrix.
+            this.vaultTourService.reportFor(userId).catch(() => null)
+        ]);
+        const poolStatus = await this.gauntletService.poolStatus(userId, fieldSettings);
+
+        for (const deck of decks) {
+            const record = fieldRecords[deck.deckId];
+
+            deck.field = record || { games: 0, wins: 0, losses: 0, winRate: null };
+            // Whether the field agrees with the mirror lab about this deck. A
+            // deck that beats your collection but not the world is the more
+            // common story, and the one worth telling.
+            deck.field.confident = deck.field.games >= MIN_CONFIDENT_GAMES;
+        }
+
         return {
             running: !!config.enabled,
             maxEnrolled: config.maxEnrolledPerUser,
             gamesPerDeckPerDay: config.gamesPerDeckPerDay,
+            // ARCHON: a site admin's decks are exempt from the daily budget.
+            unlimited: !!isAdmin,
             minConfidentGames: MIN_CONFIDENT_GAMES,
             totals: {
                 games: games.length,
@@ -565,8 +1997,452 @@ class ChampionsChallengeService {
                 sas: candidate.SasRating
             })),
             decks,
-            findings: buildFindings(decks)
+            findings: buildFindings(decks),
+            showcase,
+            bot,
+            matchups,
+            strengthCurve,
+            // ARCHON (N28): who has been flying your decks, and how they rank
+            // against each other. The ladder is what makes a deck's spread
+            // readable: three pilots of roughly equal strength disagreeing about
+            // a deck says something about the deck, and one weak pilot says
+            // nothing at all.
+            personas: {
+                minStyleGames: MIN_STYLE_GAMES,
+                roster: PERSONAS.map((persona) => ({
+                    key: persona.key,
+                    label: persona.label,
+                    description: persona.description
+                })),
+                ladder: await this.policyService.personaLadder().catch(() => [])
+            },
+            // ARCHON (N38): how good the sparring partner is, in absolute
+            // terms. Sent to every member, not just admins: this is the number
+            // that makes the rest of the page worth reading, and hiding it
+            // would leave "your deck wins 62%" hanging in the air exactly as it
+            // was before this existed.
+            calibration: await this.policyService.calibration().catch(() => []),
+            cards: cards ? { ...cards, deckId: topDeck.deckId, deckName: topDeck.name } : null,
+            vaultTour,
+            gauntlet: {
+                ...fieldSettings,
+                pool: poolStatus,
+                recent: fieldRecent,
+                // ARCHON: the catalogue under its OWN name. It used to be sent as
+                // `strategies`, which is also what fieldSettings calls the
+                // member's saved choice - so the spread was overwritten and the
+                // panel read the menu as the selection. Two consequences, both
+                // silent: a saved strategy never showed as chosen, and saving any
+                // other setting posted the whole catalogue back as the choice,
+                // where it was filtered out as unrecognised and wiped.
+                strategyOptions: Object.entries(GauntletService.STRATEGIES).map(
+                    ([key, strategy]) => ({
+                        key,
+                        label: strategy.label,
+                        description: strategy.description
+                    })
+                )
+            }
         };
+    }
+
+    /**
+     * ARCHON (N26): the lab's vital signs, for the operator.
+     *
+     * Everything here already existed - as a counter in a result object, a
+     * warning in a log, a row nobody reads. That is the problem: two features
+     * ship behind operator switches (the Gauntlet's catalog crawl, the worker
+     * node), and an operator deciding whether to turn them on had no way to see
+     * whether the last hour of work went anywhere.
+     *
+     * Read-only, tolerant of every part being absent, and never throws: a health
+     * panel that 500s is worse than no health panel.
+     */
+    async labHealth() {
+        const config = this.getConfig();
+        const ask = async (sql, params = []) => {
+            try {
+                return await this.db.query(sql, params);
+            } catch (err) {
+                logger.error('Challenge health query failed', err);
+
+                return null;
+            }
+        };
+
+        const [lease, sparring, pool, unplayable, diary, pilots, deep, catalog] = await Promise.all(
+            [
+                ask('SELECT "Owner", "HeartbeatAt" FROM "ChallengeSweepLease" WHERE "Id" = 1'),
+                ask(
+                    'SELECT COUNT(*)::int AS "Total", ' +
+                        'COUNT(*) FILTER (WHERE "FinishedAt" >= ' +
+                        "date_trunc('day', now() AT TIME ZONE 'utc'))::int AS \"Today\" " +
+                        'FROM "ProvingGroundsGames"'
+                ),
+                ask(
+                    'SELECT COUNT(*) FILTER (WHERE g."Playable")::int AS "Playable", ' +
+                        'COUNT(*)::int AS "Hydrated", ' +
+                        // ARCHON (N27): how much of the playable pool carries a SAS
+                        // score, and how much has been asked about without getting
+                        // one. Without this pair, a SAS or strategy filter that
+                        // matches nothing is unexplainable from the outside: the
+                        // filters are computed from Decks of KeyForge enrichment, so
+                        // an unenriched pool answers every one of them with "no
+                        // opponents" while looking perfectly healthy.
+                        'COUNT(*) FILTER (WHERE g."Playable" AND ds."Uuid" IS NOT NULL)::int AS "Rated", ' +
+                        'COUNT(*) FILTER (WHERE g."Playable" AND ds."Uuid" IS NULL ' +
+                        'AND g."SasAskedAt" IS NOT NULL)::int AS "Unrated", ' +
+                        // ARCHON (N30): how much of the pool the strategy filters
+                        // can reach with no DoK key at all - read from each deck's
+                        // own cards, so this is the number that should approach
+                        // the playable pool on any server.
+                        'COUNT(*) FILTER (WHERE g."Playable" AND g."Profile" IS NOT NULL)::int ' +
+                        'AS "Profiled", ' +
+                        'MAX(g."FetchedAt") AS "LastFetch" FROM "GauntletDecks" g ' +
+                        'LEFT JOIN "DeckSas" ds ON ds."Uuid" = g."Uuid"'
+                ),
+                ask(
+                    'SELECT "MissingCards", COUNT(*)::int AS "Decks" FROM "GauntletDecks" ' +
+                        'WHERE "Playable" = false AND "MissingCards" IS NOT NULL ' +
+                        'GROUP BY "MissingCards" ORDER BY "Decks" DESC LIMIT 5'
+                ),
+                ask('SELECT COUNT(*)::int AS "Games" FROM "BotTrainingGames"'),
+                // ARCHON (N28): what each pilot has actually played. A persona with a
+                // tenth of the others' games is a rotation that is not rotating, and
+                // an average game length far from the others is a pilot whose bias
+                // has stopped being a style and started being a handicap.
+                ask(
+                    'SELECT "Persona", COUNT(*)::int AS "Played", AVG("Turns")::float AS "Turns" ' +
+                        'FROM "ProvingGroundsGames" WHERE "Persona" IS NOT NULL GROUP BY "Persona"'
+                ),
+                ask(
+                    'SELECT COUNT(*)::int AS "Games", ' +
+                        'AVG(jsonb_array_length("Annotations"))::float AS "Annotations" ' +
+                        'FROM "ProvingGroundsGames" WHERE "Deep" = true AND "Annotations" IS NOT NULL'
+                ),
+                // ARCHON (N29): the catalog the pool is drawn from. Nothing has ever
+                // reported this, and it is the first thing that is wrong when the
+                // Gauntlet has no opponents: the crawl ships off, so a default
+                // install has an empty catalog, an empty pool, and a panel promising
+                // decks that are not coming.
+                ask('SELECT COUNT(*)::int AS "Indexed" FROM "DeckCatalog"')
+            ]
+        );
+        const catalogState = await this.catalogService.getState().catch(() => null);
+
+        const leaseRow = lease && lease[0];
+        const heartbeat = leaseRow ? new Date(leaseRow.HeartbeatAt) : null;
+        const leaseSeconds = Math.max(30, parseInt(config.sweepLeaseSeconds, 10) || 120);
+
+        return {
+            running: !!config.enabled,
+            // Where the games are supposed to run, and who is actually running
+            // them - the two most useful facts when a lab has gone quiet.
+            sweepOwner: config.sweepOwner || 'lobby',
+            lease: leaseRow
+                ? {
+                      owner: leaseRow.Owner,
+                      heartbeatAt: leaseRow.HeartbeatAt,
+                      // A holder that stopped refreshing is the signal that a
+                      // worker node died, and it is invisible without this.
+                      stale: !heartbeat || Date.now() - heartbeat.getTime() > leaseSeconds * 1000
+                  }
+                : null,
+            sparring: {
+                total: (sparring && sparring[0] && sparring[0].Total) || 0,
+                today: (sparring && sparring[0] && sparring[0].Today) || 0
+            },
+            learning: {
+                enabled: config.learningEnabled !== false,
+                diaryGames: (diary && diary[0] && diary[0].Games) || 0,
+                vitals: await this.policyService.vitals().catch(() => null),
+                curve: await this.policyService.strengthCurve(10).catch(() => [])
+            },
+            deep: {
+                games: (deep && deep[0] && deep[0].Games) || 0,
+                avgAnnotations:
+                    deep && deep[0] && deep[0].Annotations
+                        ? Math.round(deep[0].Annotations * 10) / 10
+                        : null
+            },
+            // ARCHON (N28): the three pilots. `pilots` is what they have flown;
+            // `ladder` is how they do against each other, which is the number
+            // that says whether a deck's spread across them means anything.
+            personas: {
+                enabled: this.personaStrength(config) > 0,
+                strength: this.personaStrength(config),
+                duelPairsPerSweep: parseInt(config.personaDuelPairsPerSweep, 10) || 0,
+                pilots: PERSONAS.map((persona) => {
+                    const row = (pilots || []).find((entry) => entry.Persona === persona.key);
+
+                    return {
+                        key: persona.key,
+                        label: persona.label,
+                        games: (row && row.Played) || 0,
+                        avgTurns: row && row.Turns ? Math.round(row.Turns * 10) / 10 : null
+                    };
+                }),
+                ladder: await this.policyService.personaLadder().catch(() => [])
+            },
+            gauntlet: {
+                enabled: config.gauntletEnabled !== false,
+                playable: (pool && pool[0] && pool[0].Playable) || 0,
+                hydrated: (pool && pool[0] && pool[0].Hydrated) || 0,
+                lastFetchAt: (pool && pool[0] && pool[0].LastFetch) || null,
+                target: config.gauntletTargetPoolSize,
+                // How many pool decks the SAS and strategy filters can see, and
+                // how many DoK was asked about and had no rating for - the second
+                // number is a ceiling on the first, not a fault.
+                rated: (pool && pool[0] && pool[0].Rated) || 0,
+                unrated: (pool && pool[0] && pool[0].Unrated) || 0,
+                // Read from their own cards, which needs no key and no request.
+                profiled: (pool && pool[0] && pool[0].Profiled) || 0,
+                // What the pool could NOT play, grouped - an operator seeing one
+                // card id at the top of this list has learned something
+                // actionable about their card data.
+                unplayable: (unplayable || []).map((row) => ({
+                    reason: row.MissingCards,
+                    decks: row.Decks
+                }))
+            },
+            // ARCHON (N29): the Master Vault crawl, which is where the field
+            // comes from and the thing that is switched off on a default install.
+            // An operator whose Gauntlet has no opponents should be able to read
+            // the reason here instead of inferring it.
+            catalog: {
+                enabled: this.catalogService.isEnabled(),
+                indexed: (catalog && catalog[0] && catalog[0].Indexed) || 0,
+                page: catalogState ? catalogState.CurrentPage : 1,
+                caughtUp: !!(catalogState && catalogState.CaughtUp),
+                lastRunAt: catalogState ? catalogState.LastRunAt : null,
+                lastError: catalogState ? catalogState.LastError : null,
+                // The circuit breaker: a crawl parked after repeated Master Vault
+                // failures looks exactly like a crawl nobody turned on.
+                pausedUntil: catalogState ? catalogState.PausedUntil : null,
+                failures: catalogState ? catalogState.ConsecutiveFailures || 0 : 0
+            }
+        };
+    }
+
+    /**
+     * ARCHON (N26): which of your decks beats which.
+     *
+     * The mirror lab has been playing every pair on the roster against each
+     * other for as long as it has been running, and nothing has ever shown the
+     * result. This is the table those games were always producing: rows are the
+     * deck, columns the opponent, cells the record between exactly those two.
+     *
+     * Pure given the games, and read from the WINNER column only - counting a
+     * game from both sides would double every cell.
+     */
+    matchupMatrix(enrollments, games) {
+        const ids = enrollments.map((enrollment) => enrollment.DeckId);
+        const onRoster = new Set(ids);
+        const cells = {};
+
+        for (const game of games) {
+            if (!onRoster.has(game.WinnerDeckId) || !onRoster.has(game.LoserDeckId)) {
+                continue;
+            }
+
+            const forward = `${game.WinnerDeckId}|${game.LoserDeckId}`;
+            const reverse = `${game.LoserDeckId}|${game.WinnerDeckId}`;
+
+            cells[forward] = cells[forward] || { wins: 0, games: 0 };
+            cells[reverse] = cells[reverse] || { wins: 0, games: 0 };
+            cells[forward].wins++;
+            cells[forward].games++;
+            cells[reverse].games++;
+        }
+
+        return {
+            decks: enrollments.map((enrollment) => ({
+                deckId: enrollment.DeckId,
+                name: enrollment.Name
+            })),
+            cells: Object.fromEntries(
+                Object.entries(cells).map(([key, cell]) => [
+                    key,
+                    {
+                        ...cell,
+                        winRate: cell.games ? cell.wins / cell.games : null,
+                        // Same conservatism as everywhere else: a 2-0 between two
+                        // decks is not a matchup, it is two games.
+                        confident: cell.games >= MIN_OPENING_GAMES
+                    }
+                ])
+            ),
+            minGames: MIN_OPENING_GAMES
+        };
+    }
+
+    /**
+     * ARCHON (N26): what the bot has learned about the cards in YOUR deck.
+     *
+     * The learned policy carries a weight per card id and a count of how often
+     * it has seen each one (N25). Intersected with a deck's card list, that is a
+     * genuinely new thing to tell a member: not what a card is worth in the
+     * abstract, but what having played it has been worth across the games this
+     * site has actually played.
+     *
+     * Two refusals keep it honest. A card the model has seen fewer than
+     * SHRINK_PRIOR times is dropped outright - below that, most of what the
+     * number expresses is the prior rather than the card, and "no view yet" is
+     * the truthful thing to say. And a card it HAS seen plenty of but is neutral
+     * about is dropped too, because a list where most rows say nothing teaches a
+     * reader to ignore the rows that do.
+     *
+     * @returns {Promise<object|null>} strongest and weakest cards, or null
+     */
+    async cardContribution(deckId, model) {
+        if (!model || !model.cardWeights) {
+            return null;
+        }
+
+        let rows;
+
+        try {
+            rows = await this.db.query(
+                'SELECT dc."CardId", dc."Count" FROM "DeckCards" dc WHERE dc."DeckId" = $1',
+                [deckId]
+            );
+        } catch (err) {
+            logger.error('Challenge: could not read deck cards for contribution', err);
+
+            return null;
+        }
+
+        const counts = model.cardCounts || {};
+        const scored = [];
+
+        for (const row of rows || []) {
+            const seen = counts[row.CardId] || 0;
+
+            if (seen < SHRINK_PRIOR) {
+                continue;
+            }
+
+            const weight = shrink(model.cardWeights[row.CardId], seen);
+
+            if (Math.abs(weight) < 0.02) {
+                continue;
+            }
+
+            const card = getCardIndex()[row.CardId];
+
+            scored.push({
+                cardId: row.CardId,
+                name: card ? card.name : row.CardId,
+                copies: row.Count,
+                weight: Math.round(weight * 1000) / 1000,
+                games: seen
+            });
+        }
+
+        if (!scored.length) {
+            return null;
+        }
+
+        scored.sort((a, b) => b.weight - a.weight);
+
+        return {
+            modelVersion: model.version || 0,
+            best: scored.slice(0, 5),
+            worst: scored
+                .slice(-5)
+                .reverse()
+                .filter((entry) => entry.weight < 0)
+        };
+    }
+
+    /**
+     * ARCHON (N33): which of a member's decks the lab currently calls hidden
+     * gems, for pages that want the badge without the report behind it.
+     *
+     * The same verdict, from the same `isHiddenGem`, over a GROUPED read rather
+     * than the full game list. The deck list is a paginated page a member loads
+     * constantly, and reading twenty thousand game rows to put a badge on eight
+     * of them is not a trade worth making. Grouping by opponent loses nothing
+     * here: the expectation depends only on the opponent's SAS, so N games
+     * against one opponent are N copies of one number.
+     *
+     * Mirror games only, exactly like the report. Gauntlet and Vault Tour games
+     * are measured against decks whose SAS this site did not set the terms for,
+     * and the claim being made - "beats what SAS predicted" - is a claim about
+     * the sparring record.
+     *
+     * Best effort: a badge is not worth failing a deck list over.
+     *
+     * @param {number} userId
+     * @returns {Promise<Set<number>>} deck ids
+     */
+    async hiddenGemsFor(userId) {
+        const gems = new Set();
+
+        try {
+            // Aliased "Played" rather than "Games" so the spec that forbids the
+            // official tables' names anywhere in lab SQL can stay strict.
+            const rows = await this.db.query(
+                'SELECT x."DeckId", x."OpponentDeckId", COUNT(*)::int AS "Played", ' +
+                    'COUNT(*) FILTER (WHERE x."Won")::int AS "Wins" FROM (' +
+                    'SELECT "WinnerDeckId" AS "DeckId", "LoserDeckId" AS "OpponentDeckId", ' +
+                    'true AS "Won" FROM "ProvingGroundsGames" WHERE "UserId" = $1 ' +
+                    'UNION ALL ' +
+                    'SELECT "LoserDeckId", "WinnerDeckId", false ' +
+                    'FROM "ProvingGroundsGames" WHERE "UserId" = $1' +
+                    ') x GROUP BY x."DeckId", x."OpponentDeckId"',
+                [userId]
+            );
+
+            if (!rows || !rows.length) {
+                return gems;
+            }
+
+            const deckIds = [...new Set(rows.flatMap((row) => [row.DeckId, row.OpponentDeckId]))];
+            const sasRows = await this.db.query(
+                'SELECT d."Id", ds."SasRating" FROM "Decks" d ' +
+                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" WHERE d."Id" = ANY($1)',
+                [deckIds]
+            );
+            const sasByDeck = new Map((sasRows || []).map((row) => [row.Id, row.SasRating]));
+            const eloConfig = this.eloConfig();
+            const totals = new Map();
+
+            for (const row of rows) {
+                const total = totals.get(row.DeckId) || {
+                    games: 0,
+                    wins: 0,
+                    expectedSum: 0,
+                    expectedGames: 0
+                };
+                const sas = sasByDeck.get(row.DeckId);
+                const opponentSas = sasByDeck.get(row.OpponentDeckId);
+
+                total.games += row.Played;
+                total.wins += row.Wins;
+
+                if (sas != null && opponentSas != null) {
+                    total.expectedSum += sasExpectedScore(sas, opponentSas, eloConfig) * row.Played;
+                    total.expectedGames += row.Played;
+                }
+
+                totals.set(row.DeckId, total);
+            }
+
+            for (const [deckId, total] of totals) {
+                const expectedWinRate = total.expectedGames
+                    ? total.expectedSum / total.expectedGames
+                    : null;
+
+                if (isHiddenGem({ games: total.games, wins: total.wins, expectedWinRate })) {
+                    gems.add(deckId);
+                }
+            }
+        } catch (err) {
+            logger.error('Challenge: could not read hidden gems', err);
+        }
+
+        return gems;
     }
 
     /**
@@ -588,7 +2464,15 @@ class ChampionsChallengeService {
         let expectedSum = 0;
         let expectedGames = 0;
         let lastPlayedAt = null;
+        // ARCHON (N21): the randomizer's odometer - games since this slot
+        // was (re)filled, against its swap target.
+        let sinceEnrolled = 0;
+        const enrolledAt = enrollment.EnrolledAt ? new Date(enrollment.EnrolledAt) : null;
         const openings = new Map();
+        // ARCHON (N28): this deck's record under each of the three pilots. Both
+        // seats of a sparring game share the pilot, so a game counts once for
+        // each deck in it and the styles never have to be untangled.
+        const styles = new Map();
 
         for (const game of games) {
             const won = game.WinnerDeckId === deckId;
@@ -633,8 +2517,20 @@ class ChampionsChallengeService {
                 openings.set(firstHouse, opening);
             }
 
+            if (game.Persona) {
+                const style = styles.get(game.Persona) || { games: 0, wins: 0 };
+
+                style.games++;
+                style.wins += won ? 1 : 0;
+                styles.set(game.Persona, style);
+            }
+
             if (!lastPlayedAt || game.FinishedAt > lastPlayedAt) {
                 lastPlayedAt = game.FinishedAt;
+            }
+
+            if (enrolledAt && new Date(game.FinishedAt) >= enrolledAt) {
+                sinceEnrolled++;
             }
         }
 
@@ -643,6 +2539,32 @@ class ChampionsChallengeService {
         const expectedWinRate = expectedGames ? expectedSum / expectedGames : null;
         const secondGames = total - wentFirstGames;
         const secondWins = wins - wentFirstWins;
+
+        const styleRows = [...styles.entries()]
+            .map(([key, record]) => {
+                const persona = personaByKey(key);
+
+                return {
+                    persona: key,
+                    label: persona ? persona.label : key,
+                    description: persona ? persona.description : null,
+                    games: record.games,
+                    wins: record.wins,
+                    losses: record.games - record.wins,
+                    // The interval, because a per-style record is a third of the
+                    // deck's games and a third of the evidence.
+                    ...wilsonInterval(record.wins, record.games)
+                };
+            })
+            .sort((left, right) => right.rate - left.rate || right.games - left.games);
+        // The spread only means something once each style has enough games to
+        // have a rate worth comparing; below that it is the same noise twice.
+        const comparable = styleRows.filter((style) => style.games >= MIN_STYLE_GAMES);
+        const spread =
+            comparable.length > 1
+                ? Math.round((comparable[0].rate - comparable[comparable.length - 1].rate) * 1000) /
+                  1000
+                : null;
 
         const openingRows = [...openings.entries()]
             .map(([house, record]) => ({
@@ -664,6 +2586,9 @@ class ChampionsChallengeService {
             wins,
             losses,
             winRate,
+            // ARCHON (N26): the interval, not just the rate. 5-3 and 300-180 both
+            // print "62%"; only one of them means it.
+            interval: wilsonInterval(wins, total),
             expectedWinRate,
             delta: winRate != null && expectedWinRate != null ? winRate - expectedWinRate : null,
             // ARCHON (N19): the deck's ARI - the platform's living rating,
@@ -679,7 +2604,18 @@ class ChampionsChallengeService {
             firstPlayerWinRate: wentFirstGames >= 5 ? wentFirstWins / wentFirstGames : null,
             secondPlayerWinRate: secondGames >= 5 ? secondWins / secondGames : null,
             openings: openingRows,
-            bestOpening
+            bestOpening,
+            // ARCHON (N28): how the deck did under each pilot, and how far apart
+            // those verdicts are. A wide spread is the interesting case: the
+            // deck's result depends on what the opponent is trying to do, which
+            // one overall win rate cannot say.
+            styles: styleRows,
+            styleSpread: spread,
+            hardestStyle: comparable.length > 1 ? comparable[comparable.length - 1] : null,
+            // ARCHON (N21): randomizer slots and their odometers.
+            random: !!enrollment.Random,
+            randomGamesTarget: enrollment.RandomGamesTarget || null,
+            gamesSinceEnrolled: sinceEnrolled
         };
 
         deck.hiddenGem = isHiddenGem(deck);

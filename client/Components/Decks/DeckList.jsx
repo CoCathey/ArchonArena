@@ -21,6 +21,37 @@ import CardBack from './CardBack';
 import DeckSetFilter from './DeckSetFilter';
 
 /**
+ * ARCHON (N34): a deck's ARI as a share of the field, rounded so it reads.
+ *
+ * The percentile stored is "decks at or below this one", so the headline
+ * number - the one a player wants - is its complement. Floored at 0.1 rather
+ * than rounded to 0: the best deck on the platform is in the top something,
+ * and "top 0%" is not a sentence.
+ */
+const topPercent = (place) => {
+    const top = 100 - place.percentile;
+
+    return top < 0.1 ? '0.1' : String(Math.round(top * 10) / 10);
+};
+
+/** What the ARI cell says when you hover it. */
+const ariTitle = (deck, t) => {
+    const base = t(
+        'Archon Rating Index: starts from SAS and AERC, then moves with this deck’s real and ' +
+            'sparring results.'
+    );
+
+    if (!deck.ariPlace) {
+        return base;
+    }
+
+    return `${base} ${t('Rank {{rank}} of {{of}} rated decks.', {
+        rank: deck.ariPlace.rank.toLocaleString(),
+        of: deck.ariPlace.of.toLocaleString()
+    })}`;
+};
+
+/**
  * @typedef DeckListProps
  * @property {Deck} [activeDeck] The currently selected deck
  * @property {boolean} [noFilter] Whether or not to enable filtering
@@ -158,26 +189,50 @@ const DeckList = ({
                     </div>
                 ),
                 enableColumnFilter: false,
-                meta: { className: 'w-11', colWidth: '44px' }
+                // A card back is not an order. The header used to offer the sort
+                // anyway, and the query had no column for it, so it quietly
+                // ordered by date instead.
+                meta: { className: 'w-11', colWidth: '44px', sortable: false }
             },
             {
                 accessorKey: 'name',
                 header: t('Name'),
                 cell: ({ row }) => (
-                    <span
-                        className={`block max-w-full truncate text-[0.8rem] ${
-                            selectedDeck && row.original.id === selectedDeck.id
-                                ? 'text-foreground font-semibold'
-                                : ''
-                        } ${
-                            row.original.status?.basicRules === false
-                                ? 'text-[color:color-mix(in_oklab,var(--brand)_78%,black)] dark:text-[color:var(--brand-strong)]'
-                                : ''
-                        }`}
-                        title={row.original.name}
-                    >
-                        {row.original.name}
-                    </span>
+                    <div className='flex min-w-0 items-center gap-1.5'>
+                        <span
+                            className={`min-w-0 truncate text-[0.8rem] ${
+                                selectedDeck && row.original.id === selectedDeck.id
+                                    ? 'text-foreground font-semibold'
+                                    : ''
+                            } ${
+                                row.original.status?.basicRules === false
+                                    ? 'text-[color:color-mix(in_oklab,var(--brand)_78%,black)] dark:text-[color:var(--brand-strong)]'
+                                    : ''
+                            }`}
+                            title={row.original.name}
+                        >
+                            {row.original.name}
+                        </span>
+                        {/* ARCHON (N33): the lab's verdict where the collection
+                            is actually read. The badge is the same claim the
+                            Champion's Challenge makes - with confidence, this
+                            deck wins more than its SAS predicted - so it uses
+                            the same violet and the same words, and the title
+                            says what it means rather than assuming the player
+                            has seen the lab. Only decks with enough games ever
+                            carry it, so an unenrolled collection shows none. */}
+                        {row.original.hiddenGem && (
+                            <span
+                                className='shrink-0 rounded-full border border-violet-500/40 bg-violet-500/15 px-1.5 text-[9px] font-semibold uppercase tracking-wide text-violet-300'
+                                title={t(
+                                    'Hidden gem: in the Champion’s Challenge this deck wins ' +
+                                        'more than its SAS predicted.'
+                                )}
+                            >
+                                {t('Gem')}
+                            </span>
+                        )}
+                    </div>
                 ),
                 enableColumnFilter: false,
                 meta: { className: 'min-w-0', colWidth: '44%' }
@@ -216,7 +271,6 @@ const DeckList = ({
                             -
                         </span>
                     ),
-                sortingFn: (a, b) => (a.original.sasRating ?? -1) - (b.original.sasRating ?? -1),
                 enableColumnFilter: false,
                 meta: { className: 'text-center', colWidth: '64px' }
             },
@@ -228,23 +282,32 @@ const DeckList = ({
                 // so it earns the column next to the number it supersedes.
                 accessorKey: 'ari',
                 header: t('ARI'),
+                // ARCHON (N34): the rating with its place in the field under
+                // it. "78" alone is not a ranking - a player has no way to know
+                // whether it is good - and the percentile is the shortest true
+                // answer to the question they are actually asking.
                 cell: ({ row }) =>
                     row.original.ari != null ? (
-                        <span
-                            className='text-center font-bold text-accent'
-                            title={t(
-                                'Archon Rating Index: starts from SAS and AERC, then moves with ' +
-                                    'this deck’s real and sparring results.'
-                            )}
+                        <div
+                            className='text-center leading-tight'
+                            title={ariTitle(row.original, t)}
                         >
-                            {Math.round(row.original.ari)}
-                        </span>
+                            <span className='font-bold text-accent'>
+                                {Math.round(row.original.ari)}
+                            </span>
+                            {row.original.ariPlace && (
+                                <span className='block text-[9px] text-muted'>
+                                    {t('top {{percent}}%', {
+                                        percent: topPercent(row.original.ariPlace)
+                                    })}
+                                </span>
+                            )}
+                        </div>
                     ) : (
                         <span className='text-center text-muted' title={t('ARI not available yet')}>
                             -
                         </span>
                     ),
-                sortingFn: (a, b) => (a.original.ari ?? -1) - (b.original.ari ?? -1),
                 enableColumnFilter: false,
                 meta: { className: 'text-center', colWidth: '64px' }
             },

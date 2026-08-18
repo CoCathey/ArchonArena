@@ -9,8 +9,10 @@ import AlertPanel from '../Components/Site/AlertPanel';
 import PremiumLock from '../Components/Membership/PremiumLock';
 import SetFilter from '../Components/Site/SetFilter';
 import { CAPABILITIES, hasCapability } from '../membership';
+import { deriveFindings } from '../archonFindings';
 import {
     useGetAercIntelligenceQuery,
+    useGetDeckComparisonQuery,
     useGetDeckIntelligenceQuery,
     useGetPlayerIntelligenceQuery,
     useGetMetaIntelligenceQuery,
@@ -47,6 +49,24 @@ const pct = (value) =>
     value === null || value === undefined ? '—' : `${Math.round(value * 100)}%`;
 const num = (value, digits = 1) =>
     value === null || value === undefined ? '—' : Number(value).toFixed(digits);
+const signed = (value, digits = 0) =>
+    value === null || value === undefined
+        ? '—'
+        : `${value >= 0 ? '+' : ''}${Number(value).toFixed(digits)}`;
+
+/**
+ * The decks to offer in a picker, most-played first.
+ *
+ * The rankings arrive sorted by win rate, which is right for a table you read
+ * top-down and wrong for a list you choose from: taking the first twelve of a
+ * win-rate sort offers a player their twelve luckiest decks and opens the
+ * panel on whichever one they happened to win with once. What somebody wants
+ * to inspect is the deck they actually play, so the picker re-sorts on games
+ * and leaves the table's own order alone.
+ */
+const PICKER_LIMIT = 12;
+const mostPlayed = (decks) =>
+    [...decks].sort((a, b) => (b.games || 0) - (a.games || 0)).slice(0, PICKER_LIMIT);
 const duration = (seconds) => {
     if (!seconds && seconds !== 0) {
         return '—';
@@ -421,7 +441,10 @@ EloHistory.propTypes = { history: PropTypes.array, t: PropTypes.func };
  */
 const DeckIntelligence = ({ decks, t }) => {
     const [deckId, setDeckId] = useState(null);
-    const selected = deckId || (decks.length ? decks[0].deckId : null);
+    const offered = mostPlayed(decks);
+    // Opens on the deck with the most games behind it rather than the one at
+    // the top of a win-rate sort, which could be a single lucky game.
+    const selected = deckId || (offered.length ? offered[0].deckId : null);
 
     const { data, isFetching } = useGetDeckIntelligenceQuery(selected, { skip: !selected });
 
@@ -439,7 +462,7 @@ const DeckIntelligence = ({ decks, t }) => {
     return (
         <div className='space-y-3 p-1'>
             <div className='flex flex-wrap gap-1.5'>
-                {decks.slice(0, 12).map((deck) => (
+                {offered.map((deck) => (
                     <button
                         className={[
                             'rounded-full border px-2.5 py-1 text-xs transition',
@@ -486,16 +509,24 @@ const DeckIntelligence = ({ decks, t }) => {
                         />
                     </div>
 
-                    {everyone?.available && everyone.games > mine.overview.games && (
+                    {/* "Is this a good deck" is answered by everybody's
+                        record, not just yours - so when there is no wider
+                        record the panel says that rather than quietly
+                        rendering nothing and leaving the question hanging. */}
+                    {everyone?.available && (
                         <p className='m-0 text-xs text-muted'>
-                            {t(
-                                'Across every player who has used this deck: {{wins}}–{{losses}} ({{rate}}).',
-                                {
-                                    wins: everyone.wins,
-                                    losses: everyone.losses,
-                                    rate: pct(everyone.winRate)
-                                }
-                            )}
+                            {everyone.games > mine.overview.games
+                                ? t(
+                                      'Across every player who has used this deck: {{wins}}–{{losses}} ({{rate}}).',
+                                      {
+                                          wins: everyone.wins,
+                                          losses: everyone.losses,
+                                          rate: pct(everyone.winRate)
+                                      }
+                                  )
+                                : t(
+                                      'Nobody else has played this deck here, so its record is entirely your own.'
+                                  )}
                         </p>
                     )}
 
@@ -510,18 +541,80 @@ const DeckIntelligence = ({ decks, t }) => {
                         </div>
                     )}
 
-                    <div className='text-xs text-muted'>
-                        {mine.byTurnOrder?.available ? (
-                            <span>
-                                {t('Going first: {{first}} · Going second: {{second}}', {
-                                    first: pct(mine.byTurnOrder.first.winRate),
-                                    second: pct(mine.byTurnOrder.second.winRate)
-                                })}
-                            </span>
-                        ) : (
-                            <span>{mine.byTurnOrder?.reason}</span>
-                        )}
-                    </div>
+                    {/* The per-deck question the set dimension actually
+                        answers. The server has computed this on every deck
+                        request since Deck Intelligence shipped and nothing
+                        rendered it, so the query was being paid for and
+                        thrown away. A deck that is 70% into the older sets
+                        and 40% into the newest is telling its owner exactly
+                        what to bring. */}
+                    {mine.byOpposingSet?.available && mine.byOpposingSet.rows.length > 1 && (
+                        <div className='space-y-1.5'>
+                            <div className='text-[11px] uppercase tracking-wide text-muted'>
+                                {t('Against decks from')}
+                            </div>
+                            {mine.byOpposingSet.rows.map((row) => (
+                                <SetRow key={row.set?.id} row={row} showShare={false} t={t} />
+                            ))}
+                            <p className='m-0 text-[11px] text-muted'>
+                                {t(
+                                    'A deck has exactly one set, so unlike the house table above ' +
+                                        'these rows add up to this deck’s real game count.'
+                                )}
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Turn order was a single grey line, which is a waste of
+                        a first/second split the engine records per game. The
+                        gap is the number worth reading, so it is the one shown
+                        largest. */}
+                    {mine.byTurnOrder?.available ? (
+                        <div className='space-y-1'>
+                            <div className='text-[11px] uppercase tracking-wide text-muted'>
+                                {t('Turn order')}
+                            </div>
+                            <div className='grid grid-cols-3 gap-2'>
+                                <Stat
+                                    label={t('Going first')}
+                                    value={pct(mine.byTurnOrder.first.winRate)}
+                                    hint={t('{{count}} games', {
+                                        count: mine.byTurnOrder.first.games
+                                    })}
+                                />
+                                <Stat
+                                    label={t('Going second')}
+                                    value={pct(mine.byTurnOrder.second.winRate)}
+                                    hint={t('{{count}} games', {
+                                        count: mine.byTurnOrder.second.games
+                                    })}
+                                />
+                                <Stat
+                                    label={t('Difference')}
+                                    tone={mine.byTurnOrder.edge >= 0 ? 'good' : 'bad'}
+                                    value={
+                                        mine.byTurnOrder.edge === null
+                                            ? '—'
+                                            : `${mine.byTurnOrder.edge >= 0 ? '+' : ''}${pct(
+                                                  mine.byTurnOrder.edge
+                                              )}`
+                                    }
+                                    hint={t('first minus second')}
+                                />
+                            </div>
+                            {mine.byTurnOrder.gamesWithoutData > 0 && (
+                                <p className='m-0 text-[11px] text-muted'>
+                                    {t(
+                                        '{{count}} older games are left out: turn order was not ' +
+                                            'recorded before it was added to the engine.',
+                                        { count: mine.byTurnOrder.gamesWithoutData }
+                                    )}
+                                </p>
+                            )}
+                        </div>
+                    ) : (
+                        <div className='text-xs text-muted'>{mine.byTurnOrder?.reason}</div>
+                    )}
                 </>
             )}
 
@@ -535,6 +628,303 @@ const DeckIntelligence = ({ decks, t }) => {
 };
 
 DeckIntelligence.propTypes = { decks: PropTypes.array, t: PropTypes.func };
+
+/** Up to this many decks side by side - the same limit the Deep Probe uses. */
+const MAX_COMPARED = 4;
+
+/**
+ * ARCHON: Deck comparison - the `deck_comparison` promise, delivered on the
+ * page whose questions it answers.
+ *
+ * Pick two to four of your decks and read them as columns: record, rating
+ * movement, keys, length, turn order, and how each fares against every house
+ * you have met with it. Everything is your own games. The single-deck panel
+ * above is where one deck's full breakdown lives; the Deep Probe is this
+ * comparison scoped to an event's sets.
+ *
+ * Like the Deep Probe, it refuses to recommend. What it adds instead is the
+ * confidence marker: two records can only be weighed against each other by
+ * someone who knows which of them to believe, so a thin sample is named
+ * rather than ranked as if it were a forty-game record.
+ */
+const DeckComparison = ({ decks, t }) => {
+    const [selected, setSelected] = useState([]);
+
+    // The picker is the page's (set-filtered) rankings, so narrowing the
+    // filter can strand a selection. Filtering at use rather than in state
+    // means a stranded deck is never quietly compared - and comes back on its
+    // own if the filter widens again before the picker is next touched.
+    const offered = mostPlayed(decks);
+    const active = selected.filter((deckId) => offered.some((deck) => deck.deckId === deckId));
+
+    const { data, isFetching } = useGetDeckComparisonQuery(active, { skip: active.length < 2 });
+
+    // Writes the pruned list back, so the cap always counts real chips.
+    const toggle = (deckId) =>
+        setSelected(
+            active.includes(deckId)
+                ? active.filter((id) => id !== deckId)
+                : active.length >= MAX_COMPARED
+                ? active
+                : [...active, deckId]
+        );
+
+    if (!decks.length) {
+        return (
+            <div className='p-3 text-sm text-muted'>
+                {t('Play a few games with two of your decks and you can compare them here.')}
+            </div>
+        );
+    }
+
+    const compared = active.length >= 2 ? data?.decks || [] : [];
+
+    // The union of every opposing house any compared deck has met, widest
+    // sample first - the rows of the matchup half of the table.
+    const houseTotals = new Map();
+
+    for (const deck of compared) {
+        for (const row of deck.byOpposingHouse?.rows || []) {
+            const entry = houseTotals.get(row.house) || {
+                house: row.house,
+                houseName: row.houseName,
+                games: 0
+            };
+
+            entry.games += row.games;
+            houseTotals.set(row.house, entry);
+        }
+    }
+
+    const houses = [...houseTotals.values()].sort((a, b) => b.games - a.games);
+
+    /** One matchup cell: the record where there is one, coloured only when
+        there is enough of it to mean something. */
+    const matchupCell = (deck, house) => {
+        const row = (deck.byOpposingHouse?.rows || []).find(
+            (candidate) => candidate.house === house.house
+        );
+
+        if (!row) {
+            return <span className='text-muted'>—</span>;
+        }
+
+        return (
+            <span
+                className={
+                    row.games < 3
+                        ? 'text-muted'
+                        : row.winRate >= 0.5
+                        ? 'text-emerald-300'
+                        : 'text-red-300'
+                }
+            >
+                {pct(row.winRate)} <span className='text-muted'>({row.games}g)</span>
+            </span>
+        );
+    };
+
+    const thin = compared.filter((deck) => !deck.confident);
+
+    const metricRows = [
+        {
+            label: t('Games'),
+            render: (deck) => <span className='text-muted'>{deck.overview?.games ?? 0}</span>
+        },
+        {
+            label: t('Record'),
+            render: (deck) =>
+                deck.overview?.available ? `${deck.overview.wins}–${deck.overview.losses}` : '—'
+        },
+        {
+            label: t('Win rate'),
+            render: (deck) => <span className='font-semibold'>{pct(deck.overview?.winRate)}</span>
+        },
+        {
+            label: t('Rating swing'),
+            render: (deck) => (
+                <span
+                    className={
+                        deck.rating?.available
+                            ? deck.rating.netSwing >= 0
+                                ? 'text-emerald-300'
+                                : 'text-red-300'
+                            : 'text-muted'
+                    }
+                >
+                    {deck.rating?.available ? signed(deck.rating.netSwing) : '—'}
+                </span>
+            )
+        },
+        {
+            label: t('vs expected'),
+            render: (deck) => (
+                <span
+                    className={
+                        deck.rating?.available && deck.rating.vsExpectation !== null
+                            ? deck.rating.vsExpectation >= 0
+                                ? 'text-emerald-300'
+                                : 'text-red-300'
+                            : 'text-muted'
+                    }
+                >
+                    {deck.rating?.available && deck.rating.vsExpectation !== null
+                        ? signed(deck.rating.vsExpectation, 1)
+                        : '—'}
+                </span>
+            )
+        },
+        {
+            label: t('SAS'),
+            render: (deck) => <span className='text-muted'>{deck.sas ?? '—'}</span>
+        },
+        { label: t('Avg keys at end'), render: (deck) => num(deck.overview?.avgKeysAtEnd) },
+        { label: t('Avg length'), render: (deck) => duration(deck.overview?.avgSeconds) },
+        {
+            label: t('Going first'),
+            render: (deck) =>
+                deck.byTurnOrder?.available ? pct(deck.byTurnOrder.first.winRate) : '—'
+        },
+        {
+            label: t('Going second'),
+            render: (deck) =>
+                deck.byTurnOrder?.available ? pct(deck.byTurnOrder.second.winRate) : '—'
+        }
+    ];
+
+    return (
+        <div className='space-y-3 p-1'>
+            <div className='flex flex-wrap gap-1.5'>
+                {offered.map((deck) => {
+                    const isOn = active.includes(deck.deckId);
+                    const atLimit = !isOn && active.length >= MAX_COMPARED;
+
+                    return (
+                        <button
+                            className={[
+                                'rounded-full border px-2.5 py-1 text-xs transition',
+                                isOn
+                                    ? 'border-amber-500/60 bg-amber-500/15 text-amber-200'
+                                    : 'border-border/70 bg-surface-secondary/60 text-foreground hover:border-border',
+                                atLimit ? 'cursor-not-allowed opacity-40' : ''
+                            ].join(' ')}
+                            disabled={atLimit}
+                            key={deck.deckId}
+                            onClick={() => toggle(deck.deckId)}
+                            type='button'
+                        >
+                            {deck.deckName}
+                            <span className='ml-1.5 text-muted'>{deck.games}g</span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            {isFetching && <div className='text-sm text-muted'>{t('Comparing…')}</div>}
+
+            {active.length < 2 && (
+                <div className='rounded border border-dashed border-border/70 p-4 text-center text-sm text-muted'>
+                    {t('Pick at least two decks to put them side by side — up to {{max}}.', {
+                        max: MAX_COMPARED
+                    })}
+                </div>
+            )}
+
+            {compared.length >= 2 && (
+                <>
+                    <div className='overflow-x-auto'>
+                        <table className='w-full min-w-[480px] text-sm'>
+                            <thead>
+                                <tr className='border-b border-border/70 text-left'>
+                                    <th className='py-1.5 pr-2 font-medium text-muted'> </th>
+                                    {compared.map((deck) => (
+                                        <th
+                                            className='py-1.5 pr-2 font-semibold text-foreground'
+                                            key={deck.deckId}
+                                        >
+                                            <div className='truncate' title={deck.deckName}>
+                                                {deck.deckName}
+                                            </div>
+                                            <div
+                                                className='text-[11px] font-normal text-muted'
+                                                title={deck.set?.name}
+                                            >
+                                                {deck.set?.code || '—'}
+                                            </div>
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {metricRows.map((metric) => (
+                                    <tr className='border-b border-border/40' key={metric.label}>
+                                        <td className='py-1.5 pr-2 text-xs uppercase tracking-wide text-muted'>
+                                            {metric.label}
+                                        </td>
+                                        {compared.map((deck) => (
+                                            <td
+                                                className='py-1.5 pr-2 text-foreground'
+                                                key={deck.deckId}
+                                            >
+                                                {metric.render(deck)}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+
+                                {houses.length > 0 && (
+                                    <tr>
+                                        <td
+                                            className='pb-1 pt-3 text-[11px] uppercase tracking-wide text-muted'
+                                            colSpan={compared.length + 1}
+                                        >
+                                            {t('Against decks containing')}
+                                        </td>
+                                    </tr>
+                                )}
+                                {houses.map((house) => (
+                                    <tr className='border-b border-border/40' key={house.house}>
+                                        <td className='py-1.5 pr-2 text-xs text-foreground'>
+                                            {house.houseName || house.house}
+                                        </td>
+                                        {compared.map((deck) => (
+                                            <td className='py-1.5 pr-2' key={deck.deckId}>
+                                                {matchupCell(deck, house)}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {thin.length > 0 && (
+                        <div className='rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300'>
+                            {t(
+                                '{{decks}}: under {{min}} games — a record this thin is shown, not ranked. {{min}}+ is a usable sample.',
+                                {
+                                    decks: thin.map((deck) => deck.deckName).join(', '),
+                                    min: data?.minConfidentGames ?? 10
+                                }
+                            )}
+                        </div>
+                    )}
+
+                    <p className='m-0 text-[11px] text-muted'>
+                        {t(
+                            'Your own games only, across each deck’s whole record. Matchup cells are ' +
+                                'coloured only from 3 games; a house a deck has never met shows a dash. ' +
+                                'Picking a deck for a specific event is the Deep Probe’s job — it scopes ' +
+                                'this same comparison to the sets an event allows.'
+                        )}
+                    </p>
+                </>
+            )}
+        </div>
+    );
+};
+
+DeckComparison.propTypes = { decks: PropTypes.array, t: PropTypes.func };
 
 /**
  * ARCHON (N12): Replay Intelligence.
@@ -969,6 +1359,136 @@ const TurnOrder = ({ turnOrder, t }) => {
 
 TurnOrder.propTypes = { t: PropTypes.func, turnOrder: PropTypes.object };
 
+/**
+ * ARCHON: "What stands out" - the answer before the evidence.
+ *
+ * Fifteen panels is a lot to hand someone with no statement about which of
+ * them matters. This is the same move the AERC lens already made with its
+ * findings, applied to the page as a whole and to the payload it has already
+ * fetched: no extra request, no number the panels below would disagree with,
+ * and nothing that rests on a sample too thin to mean anything (see
+ * archonFindings.js for the rules).
+ *
+ * It renders nothing at all when there is not enough record to say something
+ * true. An empty panel is a better outcome than a confident sentence about
+ * four games.
+ */
+const WhatStandsOut = ({ player, t }) => {
+    const findings = deriveFindings(player);
+
+    if (!findings.length) {
+        return null;
+    }
+
+    const sentence = (finding) => {
+        const v = finding.values;
+
+        switch (finding.kind) {
+            case 'aheadOfRating':
+                return t(
+                    'You are {{gap}} wins ahead of what your rating predicted, across {{games}} rated games — {{actual}} actual against {{expected}} expected.',
+                    {
+                        actual: pct(v.winRate),
+                        expected: pct(v.expectedWinRate),
+                        games: v.games,
+                        gap: num(v.gap)
+                    }
+                );
+            case 'behindRating':
+                return t(
+                    'You are {{gap}} wins behind what your rating predicted, across {{games}} rated games — {{actual}} actual against {{expected}} expected.',
+                    {
+                        actual: pct(v.winRate),
+                        expected: pct(v.expectedWinRate),
+                        games: v.games,
+                        gap: num(v.gap)
+                    }
+                );
+            case 'houseSpread':
+                return t(
+                    'Decks containing {{worstHouse}} are your hardest matchup at {{worstRate}} over {{worstGames}} games; against {{bestHouse}} you win {{bestRate}} over {{bestGames}}.',
+                    {
+                        bestGames: v.bestGames,
+                        bestHouse: v.bestHouse,
+                        bestRate: pct(v.bestRate),
+                        worstGames: v.worstGames,
+                        worstHouse: v.worstHouse,
+                        worstRate: pct(v.worstRate)
+                    }
+                );
+            case 'strongerFirst':
+                return t(
+                    'Going first is worth {{edge}} to you: {{first}} on the play against {{second}} on the draw.',
+                    {
+                        edge: pct(v.edge),
+                        first: pct(v.firstRate),
+                        second: pct(v.secondRate)
+                    }
+                );
+            case 'strongerSecond':
+                return t(
+                    'You do better going second: {{second}} on the draw against {{first}} on the play, a gap of {{edge}}.',
+                    {
+                        edge: pct(v.edge),
+                        first: pct(v.firstRate),
+                        second: pct(v.secondRate)
+                    }
+                );
+            case 'formUp':
+                return t(
+                    'You are on an upswing — {{recent}} across your last {{games}} games, against {{lifetime}} lifetime.',
+                    {
+                        games: v.recentGames,
+                        lifetime: pct(v.lifetimeRate),
+                        recent: pct(v.recentRate)
+                    }
+                );
+            case 'formDown':
+                return t(
+                    'Your recent form is below your record — {{recent}} across your last {{games}} games, against {{lifetime}} lifetime.',
+                    {
+                        games: v.recentGames,
+                        lifetime: pct(v.lifetimeRate),
+                        recent: pct(v.recentRate)
+                    }
+                );
+            case 'bestDeck':
+                return t(
+                    '{{deck}} is your strongest deck with a real sample behind it: {{rate}} over {{games}} games.',
+                    {
+                        deck: v.deckName,
+                        games: v.games,
+                        rate: pct(v.winRate)
+                    }
+                );
+            default:
+                return null;
+        }
+    };
+
+    return (
+        <div className='space-y-1.5 p-1'>
+            {findings.map((finding) => (
+                <div
+                    className='rounded border border-border/70 bg-surface-secondary/50 px-3 py-2 text-sm'
+                    key={finding.id}
+                >
+                    {sentence(finding)}
+                </div>
+            ))}
+            <p className='m-0 pt-1 text-[11px] text-muted'>
+                {t(
+                    'Ranked by the size of the effect, counting only figures with enough games ' +
+                        'behind them to mean something. These are records, not causes — who you ' +
+                        'happened to play rides along with any of them.'
+                )}
+            </p>
+        </div>
+    );
+};
+
+WhatStandsOut.propTypes = { player: PropTypes.object, t: PropTypes.func };
+
 const ArchonIntelligence = () => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
@@ -1048,6 +1568,23 @@ const ArchonIntelligence = () => {
     // the page never has to guess whether a missing section is locked, empty, or
     // simply not switched on.
     const previews = player?.previews || [];
+    // Derived from the payload already in hand - no request, and empty when
+    // there is not enough record to say anything that would survive scrutiny.
+    const findings = deriveFindings(player);
+    /**
+     * Whether the server served a given player section, for the panels whose
+     * entitlement it reports.
+     *
+     * The payload has always carried `locked` and the page has always ignored
+     * it, re-deciding client-side from the capability list in the JWT. That
+     * list is minted at sign-in, so between a membership changing and the
+     * token refreshing the two disagree - and the disagreement runs the wrong
+     * way: the endpoint returns the data and the page blurs it. Undefined
+     * until the payload arrives, which leaves PremiumLock on its own
+     * judgement rather than flashing a lock over a section that is about to
+     * load.
+     */
+    const served = (section) => (player?.locked ? !player.locked.includes(section) : undefined);
     const filtered = sets.length > 0;
     // Said once, under the filter, rather than repeated on every panel.
     const scopeNote = filtered
@@ -1068,6 +1605,18 @@ const ArchonIntelligence = () => {
             <Panel type='default' compactHeader title={t('Set')}>
                 <SetFilter hint={scopeNote} selected={sets} t={t} onChange={setSets} />
             </Panel>
+
+            {/* ---- What stands out --------------------------------------
+                Above everything, because it is the answer and the rest is the
+                evidence. No PremiumLock: it is derived entirely from sections
+                the payload already contains, so an account sees exactly the
+                findings its own tier's data supports, and renders nothing at
+                all when there is not enough record to say something true. */}
+            {findings.length > 0 && (
+                <Panel type='default' compactHeader title={t('What stands out')}>
+                    <WhatStandsOut player={player} t={t} />
+                </Panel>
+            )}
 
             {/* ---- SAS / AERC lens -------------------------------------- */}
             <Panel type='default' compactHeader title={t('Read this as')}>
@@ -1327,87 +1876,12 @@ const ArchonIntelligence = () => {
                 </Panel>
             )}
 
-            {/* ---- Player Intelligence ---------------------------------- */}
-            <Panel type='default' compactHeader title={t('Player Intelligence')}>
-                <PremiumLock
-                    capability={CAPABILITIES.PERFORMANCE_DASHBOARD}
-                    preview={<SamplePanel />}
-                    minHeight={220}
-                >
-                    {isLoading ? (
-                        <div className='p-3 text-sm text-muted'>{t('Loading…')}</div>
-                    ) : vs?.available ? (
-                        <div className='space-y-3 p-1'>
-                            <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
-                                <Stat label={t('Rated games')} value={vs.games} />
-                                <Stat label={t('Win rate')} value={pct(vs.winRate)} />
-                                <Stat
-                                    label={t('Expected win rate')}
-                                    value={pct(vs.expectedWinRate)}
-                                    hint={t('what your rating predicted')}
-                                />
-                                <Stat
-                                    label={t('vs expectation')}
-                                    tone={vs.vsExpectation >= 0 ? 'good' : 'bad'}
-                                    value={`${vs.vsExpectation >= 0 ? '+' : ''}${num(
-                                        vs.vsExpectation
-                                    )}`}
-                                    hint={t('wins above/below prediction')}
-                                />
-                            </div>
-                            <p className='m-0 text-xs text-muted'>
-                                {t(
-                                    'The rating engine records what it expected before each game was ' +
-                                        'played. The gap between that and what happened is the part ' +
-                                        'that is you rather than the matchup.'
-                                )}
-                            </p>
-                        </div>
-                    ) : (
-                        <div className='p-3 text-sm text-muted'>
-                            {vs?.reason || t('No rated games yet — play a few and come back.')}
-                        </div>
-                    )}
-                </PremiumLock>
-            </Panel>
-
-            {/* ---- Preview programme ------------------------------------
-                No PremiumLock: these are not locked panels with an upgrade
-                prompt behind them, they are sections that either arrived in the
-                payload or did not. The server decides, from the account's tier
-                and its own switches, and an account without them sees nothing
-                here at all rather than a teaser for a thing that is not
-                finished. */}
-            {previews.includes('vsExpectationTrend') && (
-                <PreviewPanel stage={t('Beta')} t={t} title={t('Performance trend')}>
-                    <PerformanceTrend t={t} trend={player?.vsExpectationTrend} />
-                </PreviewPanel>
-            )}
-
-            {previews.includes('form') && (
-                <PreviewPanel stage={t('Experimental')} t={t} title={t('Form and streaks')}>
-                    <FormAndStreaks form={player?.form} t={t} />
-                </PreviewPanel>
-            )}
-
-            {previews.includes('byTurnOrder') && (
-                <PreviewPanel stage={t('Early access')} t={t} title={t('Turn order')}>
-                    <TurnOrder t={t} turnOrder={player?.byTurnOrder} />
-                </PreviewPanel>
-            )}
-
-            {/* ---- Elo history (Supporter) ------------------------------ */}
-            <Panel type='default' compactHeader title={t('Your rating history')}>
-                <PremiumLock
-                    capability={CAPABILITIES.ELO_HISTORY}
-                    preview={<SamplePanel />}
-                    minHeight={200}
-                >
-                    <EloHistory history={player?.ratingHistory} t={t} />
-                </PremiumLock>
-            </Panel>
-
-            {/* ---- Deck Intelligence: is this deck good? ---------------- */}
+            {/* ---- Deck Intelligence (1): is this deck good? -----------
+                The page opens by promising three questions in order - is
+                the deck good, are you good with it, how does it hold up
+                against the field - and then rendered them 2, 1, 3, with
+                Deck Intelligence tenth of sixteen panels and below three
+                betas. The argument and the layout now agree. */}
             <Panel type='default' compactHeader title={t('Deck Intelligence — is this deck good?')}>
                 <PremiumLock
                     capability={CAPABILITIES.ARCHON_INTELLIGENCE}
@@ -1421,6 +1895,7 @@ const ArchonIntelligence = () => {
             <Panel type='default' compactHeader title={t('Deck Intelligence — your decks ranked')}>
                 <PremiumLock
                     capability={CAPABILITIES.PERSONAL_DECK_RANKINGS}
+                    granted={served('rankings')}
                     preview={<SamplePanel />}
                     minHeight={200}
                 >
@@ -1463,8 +1938,36 @@ const ArchonIntelligence = () => {
                                             <td className='py-1.5 pr-2 text-right text-muted'>
                                                 {deck.wins}–{deck.losses}
                                             </td>
-                                            <td className='py-1.5 pr-2 text-right text-foreground'>
+                                            {/* The rate is only rendered as a
+                                                finding when there is a sample
+                                                behind it. Under the threshold
+                                                it is greyed and carries the
+                                                count, so a 1-0 deck at the top
+                                                of the table reads as what it
+                                                is rather than as the best deck
+                                                somebody owns. */}
+                                            <td
+                                                className={`py-1.5 pr-2 text-right ${
+                                                    deck.confident
+                                                        ? 'text-foreground'
+                                                        : 'text-muted'
+                                                }`}
+                                            >
                                                 {pct(deck.winRate)}
+                                                {!deck.confident && (
+                                                    <span
+                                                        className='ml-1 text-amber-300/80'
+                                                        title={t(
+                                                            'Only {{games}} games — too few to rank on. {{min}}+ is a usable sample.',
+                                                            {
+                                                                games: deck.games,
+                                                                min: deck.minConfidentGames ?? 10
+                                                            }
+                                                        )}
+                                                    >
+                                                        *
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className='py-1.5 pr-2 text-right text-muted'>
                                                 {deck.sas ?? '—'}
@@ -1473,6 +1976,21 @@ const ArchonIntelligence = () => {
                                     ))}
                                 </tbody>
                             </table>
+                            {rankings.some((deck) => !deck.confident) && (
+                                <p className='m-0 pt-2 text-[11px] text-muted'>
+                                    {t(
+                                        'Sorted by win rate. A * marks a record with fewer than ' +
+                                            '{{min}} games behind it — shown in place rather than ' +
+                                            'hidden, because “won every game” is worth seeing as ' +
+                                            'long as “twice” is printed beside it.',
+                                        {
+                                            min:
+                                                rankings.find((deck) => deck.minConfidentGames)
+                                                    ?.minConfidentGames ?? 10
+                                        }
+                                    )}
+                                </p>
+                            )}
                         </div>
                     ) : (
                         <div className='p-3 text-sm text-muted'>
@@ -1490,6 +2008,99 @@ const ArchonIntelligence = () => {
                     )}
                 </PremiumLock>
             </Panel>
+
+            {/* ---- Deck comparison: which of these serves me better? ---- */}
+            <Panel type='default' compactHeader title={t('Deck Intelligence — compare your decks')}>
+                <PremiumLock
+                    capability={CAPABILITIES.DECK_COMPARISON}
+                    preview={<SamplePanel />}
+                    minHeight={220}
+                >
+                    <DeckComparison decks={rankings} t={t} />
+                </PremiumLock>
+            </Panel>
+
+            {/* ---- Player Intelligence (2): are you good with it? ------ */}
+            <Panel type='default' compactHeader title={t('Player Intelligence')}>
+                <PremiumLock
+                    capability={CAPABILITIES.PERFORMANCE_DASHBOARD}
+                    granted={served('vsExpectation')}
+                    preview={<SamplePanel />}
+                    minHeight={220}
+                >
+                    {isLoading ? (
+                        <div className='p-3 text-sm text-muted'>{t('Loading…')}</div>
+                    ) : vs?.available ? (
+                        <div className='space-y-3 p-1'>
+                            <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                                <Stat label={t('Rated games')} value={vs.games} />
+                                <Stat label={t('Win rate')} value={pct(vs.winRate)} />
+                                <Stat
+                                    label={t('Expected win rate')}
+                                    value={pct(vs.expectedWinRate)}
+                                    hint={t('what your rating predicted')}
+                                />
+                                <Stat
+                                    label={t('vs expectation')}
+                                    tone={vs.vsExpectation >= 0 ? 'good' : 'bad'}
+                                    value={`${vs.vsExpectation >= 0 ? '+' : ''}${num(
+                                        vs.vsExpectation
+                                    )}`}
+                                    hint={t('wins above/below prediction')}
+                                />
+                            </div>
+                            <p className='m-0 text-xs text-muted'>
+                                {t(
+                                    'The rating engine records what it expected before each game was ' +
+                                        'played. The gap between that and what happened is the part ' +
+                                        'that is you rather than the matchup.'
+                                )}
+                            </p>
+                        </div>
+                    ) : (
+                        <div className='p-3 text-sm text-muted'>
+                            {vs?.reason || t('No rated games yet — play a few and come back.')}
+                        </div>
+                    )}
+                </PremiumLock>
+            </Panel>
+
+            {/* ---- Elo history (Supporter) ------------------------------ */}
+            <Panel type='default' compactHeader title={t('Your rating history')}>
+                <PremiumLock
+                    capability={CAPABILITIES.ELO_HISTORY}
+                    granted={served('ratingHistory')}
+                    preview={<SamplePanel />}
+                    minHeight={200}
+                >
+                    <EloHistory history={player?.ratingHistory} t={t} />
+                </PremiumLock>
+            </Panel>
+
+            {/* ---- Preview programme ------------------------------------
+                No PremiumLock: these are not locked panels with an upgrade
+                prompt behind them, they are sections that either arrived in the
+                payload or did not. The server decides, from the account's tier
+                and its own switches, and an account without them sees nothing
+                here at all rather than a teaser for a thing that is not
+                finished. */}
+            {previews.includes('vsExpectationTrend') && (
+                <PreviewPanel stage={t('Beta')} t={t} title={t('Performance trend')}>
+                    <PerformanceTrend t={t} trend={player?.vsExpectationTrend} />
+                </PreviewPanel>
+            )}
+
+            {previews.includes('form') && (
+                <PreviewPanel stage={t('Experimental')} t={t} title={t('Form and streaks')}>
+                    <FormAndStreaks form={player?.form} t={t} />
+                </PreviewPanel>
+            )}
+
+            {previews.includes('byTurnOrder') && (
+                <PreviewPanel stage={t('Early access')} t={t} title={t('Turn order')}>
+                    <TurnOrder t={t} turnOrder={player?.byTurnOrder} />
+                </PreviewPanel>
+            )}
 
             {/* ---- By set ----------------------------------------------- */}
             <Panel type='default' compactHeader title={t('Your record by set')}>
@@ -1526,6 +2137,7 @@ const ArchonIntelligence = () => {
             >
                 <PremiumLock
                     capability={CAPABILITIES.MATCHUP_ANALYTICS}
+                    granted={served('byHouse')}
                     preview={<SamplePanel />}
                     minHeight={180}
                 >

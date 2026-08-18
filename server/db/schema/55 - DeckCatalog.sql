@@ -53,7 +53,10 @@ TABLESPACE pg_default;
 CREATE TABLE IF NOT EXISTS public."DeckCatalogState"
 (
     "Id" integer NOT NULL DEFAULT 1,
-    "CurrentPage" integer NOT NULL DEFAULT 0,
+    -- Pages count from 1: Master Vault's list is Django-paginated, and Django
+    -- answers `?page=0` with the same 404 a wrong path gets. A cursor seeded
+    -- at 0 pinned the crawl to a page that cannot exist.
+    "CurrentPage" integer NOT NULL DEFAULT 1,
     -- bigint: Master Vault has passed two million decks and only ever grows.
     "TotalIndexed" bigint NOT NULL DEFAULT 0,
     "LastRunAt" timestamp without time zone,

@@ -25,7 +25,7 @@ function keyIdFor(apiKey) {
     return crypto.createHash('sha256').update(String(apiKey)).digest('hex').slice(0, 16);
 }
 
-function reserveOutboundSlot(keyId, limit) {
+function reserveOutboundSlot(keyId, limit, headroom = 0) {
     const now = Date.now();
     const cutoff = now - 60000;
 
@@ -43,7 +43,11 @@ function reserveOutboundSlot(keyId, limit) {
 
     const slots = outboundRequestTimes.get(keyId) || [];
 
-    if (slots.length >= limit) {
+    // `headroom` is how many of this minute's requests the caller agrees not to
+    // touch. Background work passes it so a sweep can never take the last slot
+    // of a minute and leave a member's own deck page with no SAS on it: the
+    // sweeps have another minute, the member is looking at the page now.
+    if (slots.length >= Math.max(1, limit - Math.max(0, headroom))) {
         return false;
     }
 
@@ -151,11 +155,34 @@ class DokService {
         return Math.min(limit, DOK_FREE_TIER_RPM);
     }
 
+    /**
+     * ARCHON: how much of the per-minute budget background work leaves alone.
+     *
+     * Two sweeps now spend this budget on nobody's behalf in particular - the
+     * stale-SAS refresh, and the Gauntlet asking about pool decks the crawl
+     * brought in - and a sweep that empties the minute is indistinguishable, from
+     * a member's side, from DoK being down: their deck page shows no SAS and
+     * their import waits. Peek-and-take alone does not prevent that, because the
+     * sweep is entitled to the last slot. So background callers hold back a few.
+     */
+    getBackgroundHeadroom() {
+        const headroom = parseInt(this.getConfig().backgroundHeadroom, 10);
+
+        if (!Number.isFinite(headroom) || headroom < 0) {
+            return 5;
+        }
+
+        // Never so much headroom that background work can make no progress at
+        // all; the reservation floor keeps at least one slot reachable.
+        return Math.min(headroom, Math.max(0, this.getRateLimit() - 1));
+    }
+
     // Non-blocking: reserve one request against this minute's budget for the
     // key that will be sent. Defaults to the site key, which is what every
-    // SAS caller uses, so those call sites need not name it.
-    reserveRequestSlot(apiKey = this.getConfig().apiKey) {
-        return reserveOutboundSlot(keyIdFor(apiKey), this.getRateLimit());
+    // SAS caller uses, so those call sites need not name it. `headroom` marks
+    // the caller as background work - see getBackgroundHeadroom.
+    reserveRequestSlot(apiKey = this.getConfig().apiKey, { headroom = 0 } = {}) {
+        return reserveOutboundSlot(keyIdFor(apiKey), this.getRateLimit(), headroom);
     }
 
     // Blocking (bounded): for user-initiated calls that should prefer to
@@ -182,7 +209,7 @@ class DokService {
      * Fetch deck statistics from the DoK public API. Returns the extracted
      * stats or null on any failure (never throws).
      */
-    async fetchDeckStats(uuid, { alreadyReserved = false } = {}) {
+    async fetchDeckStats(uuid, { alreadyReserved = false, headroom = 0 } = {}) {
         const config = this.getConfig();
 
         if (!this.isEnabled()) {
@@ -193,7 +220,7 @@ class DokService {
         // and let a later access retry (needsRefresh stays true). Callers that
         // reserved their own slot (the refresh sweep, which has to know whether
         // the budget or the request failed) say so rather than double-spending.
-        if (!alreadyReserved && !this.reserveRequestSlot()) {
+        if (!alreadyReserved && !this.reserveRequestSlot(undefined, { headroom })) {
             return null;
         }
 
@@ -555,10 +582,16 @@ class DokService {
     /**
      * Fetch-and-store for one deck, deduplicating concurrent requests for
      * the same uuid. Best effort: never throws.
+     *
+     * `background: true` marks the call as nobody's page load - the Gauntlet
+     * asking about a pool deck, say - and holds back part of the minute's budget
+     * for the calls that are. Returns whether stats were stored, so a caller
+     * pacing itself can tell "DoK answered" from "DoK had nothing, or we were
+     * out of budget" instead of asking again on every sweep.
      */
-    async enrichDeck(uuid) {
+    async enrichDeck(uuid, { background = false } = {}) {
         if (!uuid || !this.isEnabled() || this.pendingFetches.has(uuid)) {
-            return;
+            return false;
         }
 
         // Skip when we already hold fresh stats - e.g. SAS cached from a
@@ -566,22 +599,28 @@ class DokService {
         // spend one API call per deck on data we already have.
         const stored = await this.getStoredStats([uuid]);
         if (stored[uuid] && !this.needsRefresh(stored[uuid].FetchedAt)) {
-            return;
+            return true;
         }
 
         this.pendingFetches.add(uuid);
 
         try {
-            const stats = await this.fetchDeckStats(uuid);
+            const stats = await this.fetchDeckStats(uuid, {
+                headroom: background ? this.getBackgroundHeadroom() : 0
+            });
 
             if (stats) {
                 await this.upsertStats(uuid, stats);
+
+                return true;
             }
         } catch (err) {
             logger.warn(`Failed to enrich deck ${uuid} with DoK stats: ${err.message}`);
         } finally {
             this.pendingFetches.delete(uuid);
         }
+
+        return false;
     }
 
     /**
@@ -645,10 +684,16 @@ class DokService {
         let attempted = 0;
         let budgetExhausted = false;
 
+        const headroom = this.getBackgroundHeadroom();
+
         for (const uuid of uuids) {
-            // Peek-and-take: if this returns false, live traffic has the budget
-            // and the sweep yields rather than waiting for a slot.
-            if (!this.reserveRequestSlot()) {
+            // Peek-and-take, minus the headroom the sweep leaves for live
+            // traffic: if this returns false, the sweep yields rather than
+            // waiting for a slot. Without the headroom "what is left after live
+            // traffic" was only true in the order the requests happened to
+            // arrive - the sweep could take the minute's last slot and a member
+            // arriving a second later got nothing.
+            if (!this.reserveRequestSlot(undefined, { headroom })) {
                 budgetExhausted = true;
                 break;
             }

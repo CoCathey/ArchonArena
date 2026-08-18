@@ -17,8 +17,14 @@ const POOL_LABELS = {
  * ARCHON: Ratings (Phase 6). A player's Amber across formats - value, world
  * rank, games, provisional status - plus a plain explainer of how Amber is
  * earned. "Amber" is our name for the player rating (see AmberValue).
+ *
+ * This is the "My Stats" view. It no longer has a page to itself: the Stats
+ * overview opens on it (see pages/Stats), which is why `embedded` exists -
+ * the host page already provides the column, so this drops its own.
+ *
+ * @param {{ embedded?: boolean }} props
  */
-const Ratings = () => {
+const Ratings = ({ embedded = false }) => {
     const { t } = useTranslation();
     const user = useSelector((state) => state.account.user);
 
@@ -30,7 +36,7 @@ const Ratings = () => {
     const seasonHistory = data?.seasonHistory || [];
 
     return (
-        <div className='mx-auto w-full max-w-3xl space-y-4'>
+        <div className={embedded ? 'space-y-4' : 'mx-auto w-full max-w-3xl space-y-4'}>
             <Panel
                 title={
                     currentSeason?.number
@@ -107,7 +113,7 @@ const Ratings = () => {
                 {user && ratings.length > 0 && (
                     <p className='mt-3 text-xs text-muted'>
                         {t('See where you stand on the')}{' '}
-                        <Link href='/stats/leaderboards' className='text-amber-300 underline'>
+                        <Link href='/community/leaderboards' className='text-amber-300 underline'>
                             {t('Leaderboards')}
                         </Link>
                         .
@@ -143,7 +149,7 @@ const Ratings = () => {
                                     >
                                         <td className='px-2 py-1.5 text-foreground'>
                                             <Link
-                                                href={`/stats/leaderboards?season=${entry.season}`}
+                                                href={`/community/leaderboards?season=${entry.season}`}
                                                 className='hover:text-amber-300 hover:underline'
                                             >
                                                 {t('Season {{season}}', { season: entry.season })}

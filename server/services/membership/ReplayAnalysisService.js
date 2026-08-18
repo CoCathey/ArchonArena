@@ -1,5 +1,7 @@
 const logger = require('../../log');
 const { findMisplays, filterMisplaysTo } = require('./replayMisplays');
+const { winProbabilityCurve } = require('./replayValue');
+const BotPolicyService = require('../championschallenge/BotPolicyService');
 
 /**
  * ARCHON (N12): replay analysis - the Archon tier's `advanced_replays`.
@@ -405,8 +407,13 @@ function readTheRace(turns, playerNames, winnerName) {
 }
 
 class ReplayAnalysisService {
-    constructor(db = require('../../db')) {
+    constructor(db = require('../../db'), policyService = null) {
         this.db = db;
+        // ARCHON (N26): the Champion's Challenge value model, which is what
+        // turns a recording into a win-probability curve. Injected for tests;
+        // its champion lookup is cached, so asking per replay is cheap.
+        this.policyService =
+            policyService || new BotPolicyService({ getValue: () => ({}) }, db, undefined);
     }
 
     /** Analytics degrade a panel rather than 500 a page. */
@@ -428,6 +435,32 @@ class ReplayAnalysisService {
             logger.error('Replay analysis failed: %s', err.message);
 
             return UNAVAILABLE('This replay could not be analysed.');
+        }
+    }
+
+    /**
+     * ARCHON (N26): the win-probability curve over one recording.
+     *
+     * Read from `seat`'s point of view - the asking player's own seat for their
+     * own game, the first player's for a shared one, because a curve has to
+     * belong to somebody to mean anything. Board-derived throughout, so it
+     * carries no hidden information and is safe on a shared replay.
+     *
+     * Degrades to unavailable rather than throwing: a member's replay page must
+     * not fail because the bot has never trained or a recording is odd.
+     *
+     * @param {object} replay a recording as stored in `GameReplays."Data"`
+     * @param {string} seat
+     */
+    async winProbability(replay, seat) {
+        try {
+            const model = await this.policyService.champion();
+
+            return winProbabilityCurve(replay, model, seat);
+        } catch (err) {
+            logger.error('Win-probability curve failed: %s', err.message);
+
+            return UNAVAILABLE('The win-probability curve could not be computed.');
         }
     }
 
@@ -481,7 +514,7 @@ class ReplayAnalysisService {
                 'FROM "GameReplays" gr ' +
                 'JOIN "Games" g ON g."Id" = gr."GameDbId" ' +
                 'JOIN "GamePlayers" gp ON gp."GameId" = g."Id" AND gp."PlayerId" = $1 ' +
-                'WHERE g."FinishedAt" IS NOT NULL ' +
+                'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE ' +
                 'ORDER BY g."FinishedAt" DESC LIMIT $2',
             [userId, capped],
             'playerInsights'

@@ -5,7 +5,37 @@ const logger = require('../../log');
 // DeckImporterService.kt), so the catalog is built from the registry itself
 // rather than from somebody else's copy of it - and it works on a server that
 // never bought a DoK key.
-const MV_API_URL = 'https://www.keyforgegame.com/api/decks/v2';
+const MV_API_URL = 'https://www.keyforgegame.com/api/decks/v2/';
+
+// Master Vault is a Django service, and Django hands out the same HTTP 404
+// for three different questions, two of which this crawl has now asked:
+//
+//  - `/api/decks/v2?page=1` - no trailing slash - is a 404 while
+//    `/api/decks/v2/?page=1` is the deck list. The crawl asked without the
+//    slash for its whole life and indexed nothing, while single-deck fetches
+//    (spelled `/<uuid>/?links=cards`, carrying one by accident) worked the
+//    entire time.
+//  - `?page=0` is a 404 too: Django's pages are numbered FROM 1, and an
+//    invalid page number gets the same answer as a wrong path. The crawl's
+//    cursor started at 0, so after the slash was fixed it went on asking a
+//    perfectly healthy endpoint for a page that cannot exist, reading the 404
+//    as "wrong address", "failing" on every candidate below, and tripping its
+//    own breaker. Page numbering is crawlOnce's job; it counts from 1.
+//  - A page past the end of the list is the third - see fetchPage, which is
+//    what keeps that one from reading as an outage.
+//
+// Faults like these are invisible to retrying, so the URL is resolved rather
+// than assumed: the shapes below are tried in order until one answers with a
+// deck list, and the winner is remembered for the rest of the process.
+//
+// Ordered most to least specific. An operator override (`catalog.mvApiUrl`)
+// always goes first - it is the escape hatch for the day Master Vault moves
+// again and this list is wrong.
+const MV_API_CANDIDATES = [MV_API_URL, 'https://www.keyforgegame.com/api/decks/'];
+
+// Master Vault is somebody else's service and is entitled to know who is
+// asking. An unidentified client is also the first thing an operator blocks.
+const MV_USER_AGENT = 'ArchonArena/1.0 (+https://archonarena.com)';
 
 /**
  * The Master Vault deck catalog: a name -> uuid index of every deck that
@@ -82,11 +112,11 @@ class CatalogService {
     }
 
     /**
-     * The single crawl cursor row. Returns a zeroed cursor when the row cannot
-     * be read: a crawl that starts from page 0 wastes requests on decks it
-     * already has (they conflict and are dropped), while a crawl that refuses
-     * to start because the database hiccuped stays stopped until someone
-     * notices. Never throws.
+     * The single crawl cursor row. Returns a first-page cursor when the row
+     * cannot be read: a crawl that restarts from page 1 wastes requests on
+     * decks it already has (they conflict and are dropped), while a crawl
+     * that refuses to start because the database hiccuped stays stopped until
+     * someone notices. Never throws.
      */
     async getState() {
         try {
@@ -103,7 +133,7 @@ class CatalogService {
         }
 
         return {
-            CurrentPage: 0,
+            CurrentPage: 1,
             TotalIndexed: 0,
             LastRunAt: null,
             LastError: null,
@@ -114,37 +144,147 @@ class CatalogService {
     }
 
     /**
+     * The endpoint shapes to try, best first: an operator's override, then the
+     * ones known to have been Master Vault's deck list. A URL without a trailing
+     * slash gets one, because that single character is the difference between a
+     * deck list and a 404 and is not worth an operator's afternoon.
+     */
+    apiCandidates() {
+        const configured = this.getConfig().mvApiUrl;
+        const withSlash = (url) => (url.endsWith('/') ? url : `${url}/`);
+        const candidates = configured ? [withSlash(configured)] : [];
+
+        for (const candidate of MV_API_CANDIDATES) {
+            if (!candidates.includes(candidate)) {
+                candidates.push(candidate);
+            }
+        }
+
+        // Once one has answered, it is the only one worth asking.
+        return this.resolvedApiUrl ? [this.resolvedApiUrl] : candidates;
+    }
+
+    /**
      * One page of Master Vault's global deck list, oldest registration first.
+     * Pages are numbered from 1 - Django answers `?page=0` with the same 404
+     * a wrong path gets, so there is no page 0 to ask for.
+     *
      * Returns { decks: [{ uuid, name, expansion, houses }], rowCount } or
      * { error, status } describing the failure so the caller's circuit breaker
      * can tell a rate limit from a timeout. Never throws.
+     *
+     * A "wrong address" answer - a 404, an auth wall in front of one variant,
+     * or a 200 that is not a deck list - moves on to the next candidate; every
+     * other status is Master Vault answering, and is reported as-is. The error
+     * carries the URL, because "HTTP 404" on its own tells an operator nothing
+     * they can act on.
      */
     async fetchPage(page) {
+        const resolved = this.resolvedApiUrl;
+        let last = { error: 'no endpoint to try', status: null };
+
+        for (const baseUrl of this.apiCandidates()) {
+            const attempt = await this.fetchPageFrom(baseUrl, page);
+
+            if (!attempt.error) {
+                if (this.resolvedApiUrl !== baseUrl) {
+                    this.resolvedApiUrl = baseUrl;
+                    logger.info(`Master Vault catalog: reading the deck list from ${baseUrl}`);
+                }
+
+                return attempt;
+            }
+
+            // Django's 404 for a page past the end is indistinguishable from
+            // its 404 for a wrong path. From the endpoint that has been
+            // answering with deck lists, on a page past the first, it usually
+            // means the tail: the last page held exactly page_size decks, the
+            // cursor stepped past it, and the decks that will fill the next
+            // page have not been registered yet. Confirmed against page 1 -
+            // which exists for as long as the list does - and reported as an
+            // empty page, so the crawl records "caught up" rather than an
+            // outage it would break its own circuit over.
+            if (baseUrl === resolved && attempt.status === 404 && page > 1) {
+                const probe = await this.fetchPageFrom(baseUrl, 1);
+
+                if (!probe.error) {
+                    return { decks: [], rowCount: 0 };
+                }
+            }
+
+            last = attempt;
+
+            // Anything other than "that address is not the deck list" means we
+            // found the service and it said no - a rate limit, a timeout, an
+            // outage. Retrying a different spelling would just be three requests
+            // where one was already answered.
+            if (!this.isWrongAddress(attempt)) {
+                break;
+            }
+
+            // A remembered endpoint that has stopped being the deck list is
+            // forgotten again, so the next attempt re-resolves from the full
+            // candidate list instead of failing against a memory.
+            if (baseUrl === resolved) {
+                this.resolvedApiUrl = null;
+            }
+        }
+
+        return last;
+    }
+
+    /**
+     * "That address is not the deck list": a missing path, a listing variant
+     * behind an auth wall this server holds no key for, one Master Vault has
+     * withdrawn, or a 200 serving something else entirely. Distinct from
+     * Master Vault saying no - a 429 or a 500 is the service itself
+     * answering, and asking a second spelling of the same origin would be
+     * hammering a server that has already spoken.
+     */
+    isWrongAddress(attempt) {
+        return !!attempt.wrongAddress || [401, 403, 404, 410].includes(attempt.status);
+    }
+
+    /** One page from one candidate URL. Never throws. */
+    async fetchPageFrom(baseUrl, page) {
         const config = this.getConfig();
-        const baseUrl = config.mvApiUrl || MV_API_URL;
         const url = `${baseUrl}?page=${page}&page_size=${this.getPageSize()}&ordering=date`;
 
         try {
             const response = await fetch(url, {
                 method: 'GET',
-                // The tail of the list is the whole point of a repeat run, and
-                // a cached copy of the last page is by definition the decks
-                // registered before the ones this run came for.
-                headers: { 'cache-control': 'no-cache' },
+                headers: {
+                    // The tail of the list is the whole point of a repeat run,
+                    // and a cached copy of the last page is by definition the
+                    // decks registered before the ones this run came for.
+                    'cache-control': 'no-cache',
+                    'user-agent': MV_USER_AGENT
+                },
                 signal: AbortSignal.timeout(config.requestTimeoutMs || 15000)
             });
 
             if (!response.ok) {
-                logger.warn(`Master Vault catalog returned ${response.status} for page ${page}`);
+                logger.warn(
+                    `Master Vault catalog returned ${response.status} for page ${page} at ${url}`
+                );
 
-                return { error: `HTTP ${response.status}`, status: response.status };
+                return {
+                    error: `HTTP ${response.status} from ${baseUrl}`,
+                    status: response.status
+                };
             }
 
             const body = await response.json();
             const rows = body && Array.isArray(body.data) ? body.data : null;
 
             if (!rows) {
-                return { error: 'unexpected response shape (expected a data array)', status: null };
+                // A 200 that is not a deck list is the same problem a 404 is:
+                // this is not the address. Say so, so the caller tries the next.
+                return {
+                    error: `unexpected response shape from ${baseUrl} (expected a data array)`,
+                    status: null,
+                    wrongAddress: true
+                };
             }
 
             const decks = rows
@@ -288,8 +428,15 @@ class CatalogService {
      * for, and protects the feature players actually depend on.
      *
      * Never throws - a failed crawl must not take a lobby tick with it.
+     *
+     * `ignorePause` is for a human: the breaker exists to stop a TIMER from
+     * hammering a service that keeps saying no, and an operator pressing
+     * "crawl now" on the health panel is the opposite of that - one deliberate
+     * pass, watched, usually to find out whether a fix worked. Without it the
+     * recovery button is inert for exactly as long as the thing it exists to
+     * recover from.
      */
-    async crawlOnce({ pagesPerRun } = {}) {
+    async crawlOnce({ pagesPerRun, ignorePause } = {}) {
         const config = this.getConfig();
 
         if (!this.isEnabled()) {
@@ -306,7 +453,7 @@ class CatalogService {
         const state = await this.getState();
         const pausedUntil = state.PausedUntil ? new Date(state.PausedUntil).getTime() : 0;
 
-        if (pausedUntil > Date.now()) {
+        if (!ignorePause && pausedUntil > Date.now()) {
             return {
                 indexed: 0,
                 pagesRequested: 0,
@@ -322,7 +469,13 @@ class CatalogService {
         const maxFailures = Math.max(1, parseInt(config.maxConsecutiveFailures, 10) || 3);
         const delayMs = config.requestDelayMs == null ? 3000 : config.requestDelayMs;
 
-        let page = Math.max(0, state.CurrentPage || 0);
+        // Clamped to 1, not 0: Master Vault's pages are numbered from 1, and
+        // `?page=0` is answered with the same HTTP 404 as a wrong path. This
+        // floor is also what un-sticks databases from before that was
+        // understood - their persisted cursor still says 0, and the crawl
+        // spent weeks pinned there, reading Django's "Invalid page." as
+        // "wrong address" on every candidate URL it knew.
+        let page = Math.max(1, parseInt(state.CurrentPage, 10) || 1);
         let failures = state.ConsecutiveFailures || 0;
         let indexed = 0;
         let pagesRequested = 0;

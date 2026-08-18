@@ -1,19 +1,22 @@
 const { SidebarMenu } = require('../../client/menus');
 
 /**
- * ARCHON: the Stats section.
+ * ARCHON: the Stats section, and where the rankings live.
  *
  * The statistics pages used to live in four different places - Play > Stats,
  * Community > Top Players, Community > Leaderboards, and a top-level "My
  * Stats" - so finding any one of them meant knowing which of four places it
- * had been filed under. They are one section now, and Top Players (the
- * rankings query pinned to the worldwide top 25) has been folded into
- * Leaderboards as its podium.
+ * had been filed under. They were gathered into one Stats section, and that
+ * section has now collapsed into a single page: the overview opens on your own
+ * numbers and carries the meta beside them, and Leaderboards moved to
+ * Community, where a player goes looking for other players.
  *
- * Two things are worth pinning. First the shape, because a page that quietly
- * ends up listed under two sections lights both up in the sidebar. Second the
- * old paths: they are linked from player profiles and the About page and are
- * the kind of URL people bookmark, so they must still resolve.
+ * Three things are worth pinning. The shape, because a page that quietly ends
+ * up listed under two sections lights both up in the sidebar. The absence of
+ * children under Stats, because that is what makes the tab a destination
+ * rather than a flyout. And the old paths: they are linked from player
+ * profiles and the About page and are the kind of URL people bookmark, so they
+ * must still resolve.
  */
 describe('Stats navigation', function () {
     const sectionTitled = (title) => SidebarMenu.find((section) => section.title === title);
@@ -24,11 +27,15 @@ describe('Stats navigation', function () {
     );
     const allSectionPaths = SidebarMenu.map((section) => section.path).filter(Boolean);
 
-    it('gathers the statistics pages into one section', function () {
+    // The whole point of the collapse: one click on Stats lands on the stats.
+    // A section with childItems renders as a flyout in the sidebar (see
+    // Components/Navigation/Sidebar), so "has no children" IS "has no popout".
+    it('is a single destination with no flyout', function () {
         const stats = sectionTitled('Stats');
 
         expect(stats).toBeDefined();
-        expect(pathsIn(stats)).toEqual(['/stats', '/stats/me', '/stats/leaderboards']);
+        expect(stats.path).toBe('/stats');
+        expect(stats.childItems).toBeUndefined();
     });
 
     // Top Players was the rankings query pinned to the worldwide top 25 - the
@@ -39,29 +46,52 @@ describe('Stats navigation', function () {
         expect(allChildPaths).not.toContain('/community/top-players');
     });
 
-    it('lands on the site stats when the section header itself is clicked', function () {
-        expect(sectionTitled('Stats').landingPath).toBe('/stats');
-    });
-
-    // Your own Amber is meaningless signed out, and the page says so rather
-    // than showing an empty table - so it is hidden until there is a "you".
-    it('shows My Stats only to signed-in players', function () {
-        const myStats = sectionTitled('Stats').childItems.find((item) => item.path === '/stats/me');
-
-        expect(myStats.showOnlyWhenLoggedIn).toBe(true);
-    });
-
-    it('leaves the pages behind in Play and Community', function () {
-        expect(pathsIn(sectionTitled('Play'))).not.toContain('/stats');
-
-        const community = pathsIn(sectionTitled('Community'));
-        expect(community).not.toContain('/community/top-players');
-        expect(community).not.toContain('/leaderboards');
-        expect(community).not.toContain('/community/ratings');
-    });
-
-    it('no longer has a separate top-level My Stats tab', function () {
+    it('no longer lists the stats pages as separate entries', function () {
+        expect(allChildPaths).not.toContain('/stats/me');
         expect(sectionTitled('My Stats')).toBeUndefined();
+        expect(pathsIn(sectionTitled('Play'))).not.toContain('/stats');
+    });
+
+    describe('Community', function () {
+        const community = () => sectionTitled('Community');
+
+        // The people pages, in the order a player looks for them. Leaderboards
+        // sits here rather than under Stats: a ranking is a list of players.
+        it('leads with the people pages', function () {
+            expect(pathsIn(community()).slice(0, 4)).toEqual([
+                '/community/members',
+                '/community/leaderboards',
+                '/community/friends',
+                '/community/clubs'
+            ]);
+        });
+
+        // "Member" means a paid tier on this site; the directory is everyone.
+        it('calls the directory Players', function () {
+            const directory = community().childItems.find(
+                (item) => item.path === '/community/members'
+            );
+
+            expect(directory.title).toBe('Players');
+        });
+
+        it('keeps the admin-toggleable content pages reachable', function () {
+            const paths = pathsIn(community());
+
+            expect(paths).toContain('/community/news');
+            expect(paths).toContain('/community/articles');
+            expect(paths).toContain('/community/blogs');
+            expect(paths).toContain('/community/forums');
+        });
+
+        it('does not list the ranking pages under their old names', function () {
+            const paths = pathsIn(community());
+
+            expect(paths).not.toContain('/community/top-players');
+            expect(paths).not.toContain('/leaderboards');
+            expect(paths).not.toContain('/community/ratings');
+            expect(paths).not.toContain('/stats/leaderboards');
+        });
     });
 
     // The sidebar decides which section is lit by exact path match, so one
@@ -78,7 +108,7 @@ describe('Stats navigation', function () {
      * the kind of thing people bookmark, so they must still resolve.
      *
      * This reads the route table as source because the repo has no component
-     * rendering harness and adding one for four routes would be out of
+     * rendering harness and adding one for a handful of routes would be out of
      * proportion. It is a structural pin, not a behavioural test: it can tell
      * you a route was deleted, not that it works. The redirects themselves
      * (including the season query surviving the move) were exercised in a real
@@ -102,21 +132,23 @@ describe('Stats navigation', function () {
 
         it('serves the new paths', function () {
             expect(hasRoute('/stats')).toBe(true);
-            expect(hasRoute('/stats/me')).toBe(true);
-            expect(hasRoute('/stats/leaderboards')).toBe(true);
+            expect(hasRoute('/community/leaderboards')).toBe(true);
         });
 
         it('still answers on every former path', function () {
+            expect(hasRoute('/stats/me')).toBe(true);
+            expect(hasRoute('/stats/leaderboards')).toBe(true);
+            expect(hasRoute('/stats/top-players')).toBe(true);
             expect(hasRoute('/community/top-players')).toBe(true);
             expect(hasRoute('/community/ratings')).toBe(true);
             expect(hasRoute('/leaderboards')).toBe(true);
-            // Briefly its own page during this move, so it redirects too.
-            expect(hasRoute('/stats/top-players')).toBe(true);
         });
 
         it('sends each former path to its new home', function () {
             expect(redirectsTo('/stats/me')).toBe(true);
-            expect(redirectsTo('/stats/leaderboards')).toBe(true);
+            expect(redirectsTo('/community/leaderboards')).toBe(true);
+            // Not a redirect: /stats/me still names the overview's first tab.
+            expect(redirectsTo('/stats/leaderboards')).toBe(false);
         });
     });
 });

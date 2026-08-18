@@ -205,6 +205,7 @@ const PlayerName = ({
     role,
     cosmetics,
     isNew,
+    isBot,
     link = false,
     plain = false,
     className = '',
@@ -220,6 +221,9 @@ const PlayerName = ({
     // ARCHON (N20): the New pill for fresh accounts, from the payload when it
     // carries one and the badge lookup otherwise.
     const effectiveIsNew = isNew !== undefined ? isNew : looked && looked.isNew;
+    // ARCHON (F9): the BOT pill, from the payload when it carries one and the
+    // badge lookup otherwise - the same two sources as everything else here.
+    const effectiveIsBot = isBot !== undefined ? isBot : looked && looked.isBot;
     // ARCHON (N12): the badge lookup carries these for pages whose payload does
     // not, so a leaderboard gets them without its own query. Only members ever
     // have one, and the server drops it from the badge once a pledge lapses -
@@ -259,6 +263,7 @@ const PlayerName = ({
             )}
             <PlayerBadge
                 cosmetics={effectiveCosmetics}
+                isBot={!!effectiveIsBot}
                 isNew={!!effectiveIsNew}
                 tier={effectiveTier}
                 tierName={effectiveName}
@@ -273,6 +278,7 @@ PlayerName.propTypes = {
     children: PropTypes.node,
     className: PropTypes.string,
     cosmetics: PropTypes.object,
+    isBot: PropTypes.bool,
     isNew: PropTypes.bool,
     link: PropTypes.bool,
     plain: PropTypes.bool,

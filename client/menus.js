@@ -42,15 +42,18 @@ export const LeftMenu = [
             { path: '/privacy', title: 'Privacy Policy' }
         ]
     },
+    // ARCHON: News and Motd are not linked from here. Neither feature is in
+    // use and neither is coming back, so an admin menu that offers them is
+    // three quarters chores nobody does. The pages, routes, permissions and
+    // server code are all still in place - re-adding an entry here is the
+    // whole of turning either back on. Ban List is not listed either: it is a
+    // section of User Admin now, which is where a ban belongs.
     {
         title: 'Admin',
         showOnlyWhenLoggedIn: true,
         childItems: [
-            { path: '/news', title: 'News', permission: 'canEditNews' },
             { path: '/users', title: 'Users', permission: 'canManageUsers' },
-            { path: '/nodes', title: 'Nodes', permission: 'canManageNodes' },
-            { path: '/banlist', title: 'Ban List', permission: 'canManageBanlist' },
-            { path: '/admin/motd', title: 'Motd', permission: 'canManageMotd' }
+            { path: '/nodes', title: 'Nodes', permission: 'canManageNodes' }
         ]
     }
 ];
@@ -100,22 +103,14 @@ export const SidebarMenu = [
     },
     { title: 'Learn', path: '/learn' },
     { title: 'Watch', path: '/watch' },
-    // ARCHON: one home for every number on the site. These pages answer the
-    // same question at different scopes - how is the game going, how am I
-    // going, where does everyone place - and were split across Play, Community
-    // and two separate top-level tabs, so finding any one of them meant
-    // knowing which of four places it had been filed under. Top Players is not
-    // listed because it no longer exists separately: it was the rankings query
-    // pinned to the worldwide top 25, and is now the podium on Leaderboards.
-    {
-        title: 'Stats',
-        landingPath: '/stats',
-        childItems: [
-            { path: '/stats', title: 'Overview' },
-            { path: '/stats/me', title: 'My Stats', showOnlyWhenLoggedIn: true },
-            { path: '/stats/leaderboards', title: 'Leaderboards' }
-        ]
-    },
+    // ARCHON: Stats is a destination, not a menu. It was a section with three
+    // children, which meant two clicks and a decision to reach numbers that
+    // all live on one page anyway: the overview now opens on your own stats
+    // and carries the meta beside them, and the rankings - which are about
+    // where everyone else places - moved to Community, where players look for
+    // other players. Nothing is left to choose from, so the flyout is gone and
+    // the tab goes straight to the page.
+    { title: 'Stats', path: '/stats' },
     // ARCHON (N12): the premium tools get their own section rather than being
     // buried inside Stats. They are a distinct proposition - "understand your
     // decks" rather than "here are numbers" - and a player who never upgrades
@@ -136,13 +131,18 @@ export const SidebarMenu = [
             { path: '/membership', title: 'Membership' }
         ]
     },
+    // ARCHON: the people section. "Players" rather than "Members", because
+    // membership on this site means a paid tier - the directory lists everyone
+    // who plays. Leaderboards sits with them: a ranking is a list of players,
+    // and this is where someone goes looking for one.
     {
         title: 'Community',
         landingPath: '/community/members',
         childItems: [
+            { path: '/community/members', title: 'Players' },
+            { path: '/community/leaderboards', title: 'Leaderboards' },
             { path: '/community/friends', title: 'Friends' },
             { path: '/community/clubs', title: 'Grand Alliance Council' },
-            { path: '/community/members', title: 'Members' },
             { path: '/community/news', title: 'News', pageKey: 'news' },
             { path: '/community/articles', title: 'Articles', pageKey: 'articles' },
             { path: '/community/blogs', title: 'Blogs', pageKey: 'blogs' },
@@ -160,12 +160,22 @@ export const SidebarMenu = [
             { path: '/privacy', title: 'Privacy Policy' },
             { path: '/terms', title: 'Terms of Service' },
             { path: '/admin/settings', title: 'Site Settings', permission: 'isAdmin' },
+            { path: '/admin/bots', title: 'Bot Settings', permission: 'isAdmin' },
+            // ARCHON (N32): /admin/analytics has had a route since N8 and has
+            // never been listed, so the operations dashboard, the lab health
+            // panel and now the Vault Tour field were reachable only by typing
+            // the URL. A page nobody can navigate to is a page that does not
+            // exist, whatever the router says.
+            { path: '/admin/analytics', title: 'Analytics & Lab', permission: 'isAdmin' },
             { path: '/admin/bug-reports', title: 'Bug Reports', permission: 'isAdmin' },
-            { path: '/news', title: 'News Admin', permission: 'canEditNews' },
+            // ARCHON: News Admin, Motd Admin and Ban List used to sit here.
+            // The first two are features this site does not run and does not
+            // intend to; the third moved into User Admin, because banning an
+            // address is something you do while looking at an account. All
+            // three pages still exist and still serve - see the note on the
+            // Admin menu above.
             { path: '/users', title: 'User Admin', permission: 'canManageUsers' },
-            { path: '/nodes', title: 'Node Admin', permission: 'canManageNodes' },
-            { path: '/banlist', title: 'Ban List', permission: 'canManageBanlist' },
-            { path: '/admin/motd', title: 'Motd Admin', permission: 'canManageMotd' }
+            { path: '/nodes', title: 'Node Admin', permission: 'canManageNodes' }
         ]
     }
 ];

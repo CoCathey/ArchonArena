@@ -22,14 +22,23 @@ import { useGetTournamentLabQuery } from '../redux/api';
  * them side by side on record, rating swing, recent form and matchups, with the
  * current meta underneath so the matchup columns mean something.
  *
+ * Since N24 it also says which deck its own evidence favours, and on what
+ * grounds: ARI (the platform's deck rating, which knows about decks the player
+ * has never met), the player's win rate against the meta AS IT STANDS - their
+ * per-house record weighted by how common each house actually is - their own
+ * record shrunk toward that expectation, and what the Champion's Challenge found
+ * playing the deck thousands of times. Win percentage alone was the wrong
+ * headline: it is the number most distorted by who you happened to play.
+ *
  * Two deliberate refusals:
  *
- *  - No recommendation. The Lab does not say "bring this one". It lays the
- *    evidence out and lets the player weigh it, because the thing it cannot
- *    know - who is going to be at this event - is usually the deciding factor.
+ *  - No hidden ranking. Every term of the score is shown, weights included, so
+ *    a player can disagree with it - and it never claims to know the one thing
+ *    that usually decides an event, which is who else turns up.
  *  - No confident-looking numbers over tiny samples. A deck under the game
  *    threshold is shown with its record AND a warning, rather than being
- *    silently ranked next to a deck with forty games.
+ *    silently ranked next to a deck with forty games - and the headline pick
+ *    says so out loud when it is the best of several thin records.
  *
  * The set filter is the first thing on the page rather than a refinement,
  * because most events restrict which sets may be brought and a comparison that
@@ -89,6 +98,14 @@ const DeckColumn = ({ deck, t }) => (
             <div className='text-[11px] text-muted'>
                 {deck.set?.name ? `${deck.set.name} · ` : ''}
                 {deck.sas ? t('SAS {{sas}}', { sas: deck.sas }) : t('SAS unknown')}
+                {deck.ari !== null && deck.ari !== undefined && (
+                    <>
+                        {' · '}
+                        <span className='font-semibold text-accent'>
+                            {t('ARI {{ari}}', { ari: Math.round(deck.ari) })}
+                        </span>
+                    </>
+                )}
             </div>
         </div>
 
@@ -135,6 +152,73 @@ const DeckColumn = ({ deck, t }) => (
                               deck.rating.vsExpectation >= 0 ? '+' : ''
                           }${deck.rating.vsExpectation.toFixed(1)}`
                         : '—'}
+                </div>
+            </div>
+        </div>
+
+        {/* ARCHON (N24): the two measurements this page used to leave out -
+            how the deck does against the meta as it actually stands, and what
+            the Champion's Challenge has found by playing it thousands of
+            times. */}
+        <div className='mb-2 grid grid-cols-2 gap-2'>
+            <div>
+                <div className='text-[10px] uppercase tracking-wide text-muted'>
+                    {t('vs the meta')}
+                </div>
+                <div
+                    className='text-base font-semibold text-foreground'
+                    title={
+                        deck.vsMeta?.winRate != null
+                            ? t(
+                                  'Your record against each house, weighted by how common that house is right now. Covers {{coverage}} of the field across {{houses}} houses.',
+                                  {
+                                      coverage: pct(deck.vsMeta.coverage),
+                                      houses: deck.vsMeta.houses
+                                  }
+                              )
+                            : t('Not enough games against the houses being played right now.')
+                    }
+                >
+                    {pct(deck.vsMeta?.winRate)}
+                    {deck.vsMeta?.coverage ? (
+                        <span className='ml-1 text-[10px] font-normal text-muted'>
+                            {t('({{coverage}} of field)', {
+                                coverage: pct(deck.vsMeta.coverage)
+                            })}
+                        </span>
+                    ) : null}
+                </div>
+            </div>
+            <div>
+                <div className='text-[10px] uppercase tracking-wide text-muted'>
+                    {t('Challenge')}
+                </div>
+                <div className='text-base font-semibold text-foreground'>
+                    {deck.challenge && deck.challenge.field.games ? (
+                        <span
+                            title={t('{{games}} games against decks nobody here owns', {
+                                games: deck.challenge.field.games
+                            })}
+                        >
+                            {pct(deck.challenge.field.winRate)}
+                            <span className='ml-1 text-[10px] font-normal text-muted'>
+                                {t('vs field')}
+                            </span>
+                        </span>
+                    ) : deck.challenge && deck.challenge.mirror.games ? (
+                        <span
+                            title={t('{{games}} sparring games against your own roster', {
+                                games: deck.challenge.mirror.games
+                            })}
+                        >
+                            {pct(deck.challenge.mirror.winRate)}
+                            <span className='ml-1 text-[10px] font-normal text-muted'>
+                                {t('vs roster')}
+                            </span>
+                        </span>
+                    ) : (
+                        <span className='text-muted'>—</span>
+                    )}
                 </div>
             </div>
         </div>
@@ -197,6 +281,58 @@ const DeckColumn = ({ deck, t }) => (
 );
 
 DeckColumn.propTypes = { deck: PropTypes.object, t: PropTypes.func };
+
+/**
+ * ARCHON (N32): the Vault Tour, from the page where somebody is picking a deck
+ * for an event.
+ *
+ * Deep Probe answers "which of these should I bring" from games already played.
+ * The Vault Tour answers the next question - "how does it hold up against what
+ * actually wins" - by playing a slate against a field of tournament decks, and
+ * this is the page where that question is being asked.
+ *
+ * It changes with what the reader already has rather than selling them something
+ * they own: a member without Vault Master is pointed at the tier, a member with
+ * it is pointed straight at the feature. Nobody is asked to buy twice.
+ */
+const VaultTourInvite = ({ t, user }) => {
+    const unlocked = hasCapability(user, CAPABILITIES.CHAMPIONS_CHALLENGE);
+
+    return (
+        <Panel type='default' compactHeader title={t('Prepping for a Vault Tour?')}>
+            <div className='flex flex-wrap items-center justify-between gap-3'>
+                <p className='m-0 max-w-3xl text-sm text-muted'>
+                    {unlocked
+                        ? t(
+                              'Run the Vault Tour gauntlet in the Champion’s Challenge: three of ' +
+                                  'your decks, played over and over against the decks that won ' +
+                                  'real events, with a matrix of how each matchup actually goes.'
+                          )
+                        : t(
+                              'Subscribe to Vault Master and run the Vault Tour gauntlet in the ' +
+                                  'Champion’s Challenge: three of your decks, played over and ' +
+                                  'over against the decks that won real events, with a matrix of ' +
+                                  'how each matchup actually goes.'
+                          )}
+                </p>
+                {/* A Link styled as a button, NOT <HeroButton as={Link}>.
+                    HeroUI's Button renders a plain <button> and forwards
+                    neither `as` nor `href`, so the original of this looked
+                    exactly right and navigated nowhere. Membership.jsx carries
+                    the same warning about the same trap; this is the second
+                    time it has been paid for. */}
+                <Link
+                    className='inline-flex h-9 shrink-0 items-center justify-center rounded-md bg-amber-500 px-3 text-sm font-semibold text-black transition hover:bg-amber-400'
+                    to={unlocked ? '/champions-challenge' : '/membership'}
+                >
+                    {unlocked ? t('Open the Champion’s Challenge') : t('Subscribe to Vault Master')}
+                </Link>
+            </div>
+        </Panel>
+    );
+};
+
+VaultTourInvite.propTypes = { t: PropTypes.func, user: PropTypes.object };
 
 const DeepProbe = () => {
     const { t } = useTranslation();
@@ -273,6 +409,8 @@ const DeepProbe = () => {
                     )}
                 </p>
             </Panel>
+
+            <VaultTourInvite t={t} user={user} />
 
             <PremiumLock
                 capability={CAPABILITIES.TOURNAMENT_LAB}
@@ -375,6 +513,78 @@ const DeepProbe = () => {
                         changes for anyone - but the promise is now enforced
                         where it is delivered, instead of being advertised with
                         nothing checking it. */}
+                    {/* ARCHON (N24): the two headline answers, named. The page
+                        still refuses to say "bring this one" - what it now
+                        refuses to do instead is hide which deck its own
+                        evidence favours behind four columns of numbers. Every
+                        term is shown, so the ranking can be argued with. */}
+                    {decks.length > 0 && data?.ranking && (
+                        <Panel type='default' compactHeader title={t('What the evidence favours')}>
+                            <div className='grid gap-2 sm:grid-cols-2'>
+                                {data.ranking.bestOverall && (
+                                    <div className='rounded-md border border-border/70 bg-surface-secondary/50 p-2.5'>
+                                        <div className='text-[10px] uppercase tracking-wide text-muted'>
+                                            {t('Best all round')}
+                                        </div>
+                                        <div className='text-base font-semibold text-foreground'>
+                                            {data.ranking.bestOverall.deckName}
+                                        </div>
+                                        <div className='text-[11px] text-muted'>
+                                            {t(
+                                                'Weighing ARI, your record against the current meta, ' +
+                                                    'your own results and the Champion’s Challenge.'
+                                            )}
+                                            {!data.ranking.bestOverall.confident && (
+                                                <span className='text-amber-300'>
+                                                    {' '}
+                                                    {t(
+                                                        'Thin sample — the best of several short records.'
+                                                    )}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                                {data.ranking.bestVsMeta && (
+                                    <div className='rounded-md border border-border/70 bg-surface-secondary/50 p-2.5'>
+                                        <div className='text-[10px] uppercase tracking-wide text-muted'>
+                                            {t('Best against the current meta')}
+                                        </div>
+                                        <div className='text-base font-semibold text-foreground'>
+                                            {data.ranking.bestVsMeta.deckName}{' '}
+                                            <span className='text-sm font-normal text-emerald-300'>
+                                                {pct(data.ranking.bestVsMeta.winRate)}
+                                            </span>
+                                        </div>
+                                        <div className='text-[11px] text-muted'>
+                                            {t(
+                                                'Your win rate weighted by how common each house is ' +
+                                                    'right now — covering {{coverage}} of the field ' +
+                                                    'across {{houses}} houses.',
+                                                {
+                                                    coverage: pct(data.ranking.bestVsMeta.coverage),
+                                                    houses: data.ranking.bestVsMeta.houses
+                                                }
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            {data.fieldAri ? (
+                                <p className='m-0 pt-2 text-[11px] text-muted'>
+                                    {t(
+                                        'ARI is read against a field averaging {{fieldAri}}, on the ' +
+                                            'same scale as SAS. Champion’s Challenge games count ' +
+                                            'less than real ones — field games, against decks nobody ' +
+                                            'here owns, count double the sparring against your own ' +
+                                            'roster.',
+                                        { fieldAri: data.fieldAri }
+                                    )}
+                                </p>
+                            ) : null}
+                        </Panel>
+                    )}
+
                     {decks.length > 0 && hasCapability(user, CAPABILITIES.DECK_COMPARISON) && (
                         <div
                             className='grid gap-2'

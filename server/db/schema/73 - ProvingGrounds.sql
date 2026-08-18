@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS public."ProvingGroundsDecks"
     "UserId" integer NOT NULL,
     "DeckId" integer NOT NULL,
     "EnrolledAt" timestamp without time zone NOT NULL,
+    -- ARCHON (N21): randomizer slots - chosen by the randomizer, swapped for
+    -- a fresh random deck once this one has played its target.
+    "Random" boolean NOT NULL DEFAULT false,
+    "RandomGamesTarget" integer,
     CONSTRAINT "PK_ProvingGroundsDecks" PRIMARY KEY ("Id"),
     -- CASCADE both ways: an enrollment is meaningless without its account or
     -- its deck. Results (below) survive deck changes independently.
@@ -77,6 +81,15 @@ CREATE TABLE IF NOT EXISTS public."ProvingGroundsGames"
     -- Wall-clock cost of the simulation, kept so the lab's own overhead can
     -- be watched from the data it produces.
     "DurationMs" integer,
+    -- ARCHON (N21): showcase games - played by the deep planner, carrying
+    -- its per-decision annotations.
+    "Deep" boolean NOT NULL DEFAULT false,
+    "Annotations" jsonb,
+    -- ARCHON (N28): which of the three sparring pilots played this game (both
+    -- seats - a shared pilot is what keeps the result attributable to the decks).
+    -- NULL for a game played before the personas existed, and for showcase games,
+    -- which are played by the champion unstyled. See labPersonas.js.
+    "Persona" text COLLATE pg_catalog."default",
     "FinishedAt" timestamp without time zone NOT NULL,
     CONSTRAINT "PK_ProvingGroundsGames" PRIMARY KEY ("Id"),
     CONSTRAINT "FK_ProvingGroundsGames_Users" FOREIGN KEY ("UserId")

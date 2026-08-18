@@ -35,8 +35,11 @@ describe('CatalogService', function () {
         ...overrides
     });
 
+    // Master Vault's pages are numbered from 1 - Django answers `?page=0`
+    // with the same 404 a wrong path gets, which once pinned this crawl to a
+    // page that cannot exist.
     const stateRow = (overrides = {}) => ({
-        CurrentPage: 0,
+        CurrentPage: 1,
         TotalIndexed: 0,
         LastRunAt: null,
         LastError: null,
@@ -65,6 +68,8 @@ describe('CatalogService', function () {
             return [];
         });
 
+    // Deck-list pages keyed by their 1-based page number, the way Master
+    // Vault numbers them. A page not in the map answers empty.
     const mockPages = (pages) =>
         fetchMock.mockImplementation(async (url) => {
             const page = Number(new URL(url).searchParams.get('page'));
@@ -113,28 +118,33 @@ describe('CatalogService', function () {
 
             const [url, options] = fetchMock.mock.calls[0];
 
-            expect(url).toBe('https://mv.example/api/decks/v2?page=3&page_size=2&ordering=date');
+            // The trailing slash is added: Master Vault is a Django service
+            // and answers 404 without it, which is exactly how this crawl spent
+            // its whole life indexing nothing.
+            expect(url).toBe('https://mv.example/api/decks/v2/?page=3&page_size=2&ordering=date');
             // The catalog stores no cards, and asking for them would multiply
             // every response by two orders of magnitude.
             expect(url).not.toContain('links=cards');
-            expect(options.headers).toEqual({ 'cache-control': 'no-cache' });
+            expect(options.headers['cache-control']).toBe('no-cache');
+            // Somebody else's service is entitled to know who is asking.
+            expect(options.headers['user-agent']).toContain('ArchonArena');
         });
 
         it('falls back to the real Master Vault endpoint when unconfigured', async function () {
             delete config.mvApiUrl;
-            mockPages([[]]);
+            mockPages({ 1: [] });
 
-            await service.fetchPage(0);
+            await service.fetchPage(1);
 
             expect(fetchMock.mock.calls[0][0]).toBe(
-                'https://www.keyforgegame.com/api/decks/v2?page=0&page_size=2&ordering=date'
+                'https://www.keyforgegame.com/api/decks/v2/?page=1&page_size=2&ordering=date'
             );
         });
 
         it('parses the catalog columns and joins the houses', async function () {
-            mockPages([[mvDeck(1, { expansion: '452' })]]);
+            mockPages({ 1: [mvDeck(1, { expansion: '452' })] });
 
-            const result = await service.fetchPage(0);
+            const result = await service.fetchPage(1);
 
             expect(result.decks).toEqual([
                 {
@@ -147,23 +157,23 @@ describe('CatalogService', function () {
         });
 
         it('keeps a deck whose houses Master Vault did not send', async function () {
-            mockPages([[mvDeck(1, { _links: undefined })]]);
+            mockPages({ 1: [mvDeck(1, { _links: undefined })] });
 
-            expect((await service.fetchPage(0)).decks[0].houses).toBeNull();
+            expect((await service.fetchPage(1)).decks[0].houses).toBeNull();
         });
 
         it('drops rows that could not be stored rather than losing the page', async function () {
-            mockPages([
-                [
+            mockPages({
+                1: [
                     mvDeck(1),
                     { id: 12345, name: 'numeric id' },
                     { id: 'not-a-uuid', name: 'junk id' },
                     { id: uuid(9), expansion: 341 },
                     { id: uuid(8), name: 'no expansion' }
                 ]
-            ]);
+            });
 
-            const result = await service.fetchPage(0);
+            const result = await service.fetchPage(1);
 
             expect(result.decks.map((deck) => deck.uuid)).toEqual([uuid(1)]);
             // Fullness is still measured on what Master Vault sent.
@@ -173,13 +183,18 @@ describe('CatalogService', function () {
         it('reports the status so a rate limit can be told from a server error', async function () {
             fetchMock.mockResolvedValue({ ok: false, status: 429 });
 
-            expect(await service.fetchPage(0)).toEqual({ error: 'HTTP 429', status: 429 });
+            const result = await service.fetchPage(1);
+
+            expect(result.status).toBe(429);
+            // The URL is in the message: "HTTP 404" on its own told an operator
+            // nothing they could act on, which cost this crawl a month.
+            expect(result.error).toBe('HTTP 429 from https://mv.example/api/decks/v2/');
         });
 
         it('never throws when the network fails', async function () {
             fetchMock.mockRejectedValue(new Error('getaddrinfo ENOTFOUND'));
 
-            const result = await service.fetchPage(0);
+            const result = await service.fetchPage(1);
 
             expect(result.error).toContain('could not connect');
             expect(result.status).toBeNull();
@@ -188,7 +203,136 @@ describe('CatalogService', function () {
         it('rejects a response that is not a deck list', async function () {
             fetchMock.mockResolvedValue({ ok: true, json: async () => ({ decks: [] }) });
 
-            expect((await service.fetchPage(0)).error).toContain('unexpected response shape');
+            expect((await service.fetchPage(1)).error).toContain('unexpected response shape');
+        });
+    });
+
+    // ARCHON (N32): the crawl asked for `/api/decks/v2` - no trailing slash -
+    // for its entire life. Master Vault is Django and answered 404 every time,
+    // so the catalog stayed at zero decks, the Gauntlet pool stayed empty, and
+    // the health panel said "HTTP 404" without saying to what. A URL that lives
+    // on someone else's service is not a constant to be sure about; it is
+    // something to resolve and then report.
+    describe('finding the deck list', function () {
+        const listPage = () => ({ ok: true, json: async () => ({ data: [mvDeck(1)] }) });
+        const notFound = () => ({ ok: false, status: 404 });
+
+        beforeEach(function () {
+            delete config.mvApiUrl;
+        });
+
+        it('moves on to the next address when one 404s', async function () {
+            fetchMock.mockResolvedValueOnce(notFound()).mockResolvedValueOnce(listPage());
+
+            const result = await service.fetchPage(1);
+
+            expect(result.decks).toHaveLength(1);
+            expect(fetchMock.mock.calls[0][0]).toContain('/api/decks/v2/');
+            expect(fetchMock.mock.calls[1][0]).toContain('/api/decks/');
+        });
+
+        // Ghost Galaxy has talked about putting the Master Vault API behind
+        // keys. If one listing variant ends up walled off, the crawl's answer
+        // is the same as for a 404: not this address, try the next spelling.
+        it('keeps looking past a candidate behind an auth wall', async function () {
+            fetchMock
+                .mockResolvedValueOnce({ ok: false, status: 403 })
+                .mockResolvedValueOnce(listPage());
+
+            const result = await service.fetchPage(1);
+
+            expect(result.decks).toHaveLength(1);
+            expect(fetchMock.mock.calls[1][0]).toContain('/api/decks/?');
+        });
+
+        it('treats a 200 that is not a deck list as the wrong address too', async function () {
+            fetchMock
+                .mockResolvedValueOnce({ ok: true, json: async () => ({ results: [] }) })
+                .mockResolvedValueOnce(listPage());
+
+            expect((await service.fetchPage(1)).decks).toHaveLength(1);
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+        });
+
+        it('asks the one that answered, and only that one, from then on', async function () {
+            fetchMock.mockResolvedValueOnce(notFound()).mockResolvedValue(listPage());
+
+            await service.fetchPage(1);
+            fetchMock.mockClear();
+            await service.fetchPage(2);
+
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(fetchMock.mock.calls[0][0]).toContain('/api/decks/?page=2');
+        });
+
+        it('does not go shopping when Master Vault answers - it said no, not "not here"', async function () {
+            fetchMock.mockResolvedValue({ ok: false, status: 429 });
+
+            const result = await service.fetchPage(1);
+
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(result.status).toBe(429);
+        });
+
+        it('reports the last failure when nothing answers', async function () {
+            fetchMock.mockResolvedValue(notFound());
+
+            const result = await service.fetchPage(1);
+
+            expect(result.status).toBe(404);
+            expect(result.error).toContain('https://www.keyforgegame.com/api/decks/');
+        });
+
+        it('tries the operator’s override first, slash or no slash', async function () {
+            config.mvApiUrl = 'https://mv.example/somewhere/else';
+            fetchMock.mockResolvedValue(listPage());
+
+            await service.fetchPage(1);
+
+            expect(fetchMock.mock.calls[0][0]).toBe(
+                'https://mv.example/somewhere/else/?page=1&page_size=2&ordering=date'
+            );
+        });
+
+        // Django's 404 for a page past the end of the list is the same 404 a
+        // wrong path gets. From an endpoint that has already answered with
+        // deck lists it usually means the tail - the last page held exactly
+        // page_size decks and the cursor stepped past it - and reading it as
+        // an outage would trip the breaker over a list that simply is not
+        // longer yet.
+        it('reads a 404 past the tail as the end of the list, checked against page 1', async function () {
+            fetchMock
+                .mockResolvedValueOnce(listPage())
+                .mockResolvedValueOnce(notFound())
+                .mockResolvedValueOnce(listPage());
+
+            await service.fetchPage(1);
+            const result = await service.fetchPage(2);
+
+            expect(result).toEqual({ decks: [], rowCount: 0 });
+            // Page 2 404ed, page 1 was probed and answered, nothing else asked.
+            expect(fetchMock).toHaveBeenCalledTimes(3);
+            expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get('page')).toBe('1');
+        });
+
+        it('gives up on a remembered endpoint that dies, and reports the failure', async function () {
+            fetchMock.mockResolvedValueOnce(listPage()).mockResolvedValue(notFound());
+
+            await service.fetchPage(1);
+            const result = await service.fetchPage(2);
+
+            // Page 1 no longer answers either: this is not the tail, it is the
+            // endpoint gone, and it is reported rather than glossed as empty.
+            expect(result.status).toBe(404);
+
+            fetchMock.mockClear();
+            await service.fetchPage(2);
+
+            // The memory was dropped, so the next attempt goes shopping again.
+            expect(fetchMock.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
+                '/api/decks/v2/',
+                '/api/decks/'
+            ]);
         });
     });
 
@@ -248,11 +392,11 @@ describe('CatalogService', function () {
             expect(db.query.mock.calls[0][0]).toContain('"DeckCatalogState" WHERE "Id" = 1');
         });
 
-        it('returns a zeroed cursor rather than throwing when the row cannot be read', async function () {
+        it('returns a first-page cursor rather than throwing when the row cannot be read', async function () {
             db.query.mockRejectedValue(new Error('db down'));
 
             expect(await service.getState()).toEqual(
-                expect.objectContaining({ CurrentPage: 0, ConsecutiveFailures: 0, CaughtUp: false })
+                expect.objectContaining({ CurrentPage: 1, ConsecutiveFailures: 0, CaughtUp: false })
             );
         });
     });
@@ -270,22 +414,37 @@ describe('CatalogService', function () {
 
         it('resumes from the persisted cursor', async function () {
             mockState({ CurrentPage: 7 });
-            mockPages([]);
+            mockPages({});
 
             await service.crawlOnce();
 
             expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get('page')).toBe('7');
         });
 
+        // The bug this pins down pinned the crawl: Master Vault's pages are
+        // numbered from 1, and `?page=0` is answered with the same 404 as a
+        // wrong path - so a cursor at 0 "failed" on every candidate URL
+        // forever while the endpoint sat there healthy. Databases from before
+        // the fix still hold that 0.
+        it('asks for page 1 first, even where a deployed cursor still says 0', async function () {
+            mockState({ CurrentPage: 0 });
+            mockPages({ 1: [mvDeck(1)] });
+
+            const result = await service.crawlOnce();
+
+            expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get('page')).toBe('1');
+            expect(result.indexed).toBe(1);
+        });
+
         it('advances and persists the cursor after a full page', async function () {
             mockState();
-            mockPages([[mvDeck(1), mvDeck(2)], [mvDeck(3)]]);
+            mockPages({ 1: [mvDeck(1), mvDeck(2)], 2: [mvDeck(3)] });
 
             const result = await service.crawlOnce();
 
             const progress = updatesMatching('"CurrentPage" = $1');
 
-            expect(progress[0][1]).toEqual([1, 2, false]);
+            expect(progress[0][1]).toEqual([2, 2, false]);
             expect(result.indexed).toBe(3);
             expect(result.pagesRequested).toBe(2);
         });
@@ -294,11 +453,11 @@ describe('CatalogService', function () {
         // we cannot parse reads as the end of the list and pins the crawl.
         it('advances past a full page even when a row could not be parsed', async function () {
             mockState();
-            mockPages([[mvDeck(1), { id: 'junk' }], []]);
+            mockPages({ 1: [mvDeck(1), { id: 'junk' }], 2: [] });
 
             await service.crawlOnce();
 
-            expect(updatesMatching('"CurrentPage" = $1')[0][1]).toEqual([1, 1, false]);
+            expect(updatesMatching('"CurrentPage" = $1')[0][1]).toEqual([2, 1, false]);
         });
 
         it('stops on a short page without advancing past it', async function () {
@@ -338,11 +497,11 @@ describe('CatalogService', function () {
 
         it('spends no more than its page budget per run', async function () {
             mockState();
-            mockPages([
-                [mvDeck(1), mvDeck(2)],
-                [mvDeck(3), mvDeck(4)],
-                [mvDeck(5), mvDeck(6)]
-            ]);
+            mockPages({
+                1: [mvDeck(1), mvDeck(2)],
+                2: [mvDeck(3), mvDeck(4)],
+                3: [mvDeck(5), mvDeck(6)]
+            });
 
             const result = await service.crawlOnce({ pagesPerRun: 2 });
 
@@ -354,13 +513,47 @@ describe('CatalogService', function () {
         it('spaces requests out between pages but not before the first', async function () {
             config.requestDelayMs = 5000;
             mockState();
-            mockPages([[mvDeck(1), mvDeck(2)], [mvDeck(3)]]);
+            mockPages({ 1: [mvDeck(1), mvDeck(2)], 2: [mvDeck(3)] });
             const sleep = vi.spyOn(service, 'sleep').mockResolvedValue();
 
             await service.crawlOnce();
 
             expect(sleep).toHaveBeenCalledTimes(1);
             expect(sleep).toHaveBeenCalledWith(5000);
+        });
+
+        // The tail of a caught-up list, when its length is an exact multiple
+        // of the page size: the last page was full, the cursor stepped past
+        // it, and the page it stepped to has not been registered yet. Django
+        // answers that with the same 404 as a wrong path, and reading it as a
+        // failure would trip the breaker over a list that is simply not
+        // longer yet.
+        it('records the page after the last as caught up, not as an outage', async function () {
+            mockState({ CurrentPage: 3 });
+            fetchMock.mockImplementation(async (url) => {
+                const page = Number(new URL(url).searchParams.get('page'));
+
+                if (page === 4) {
+                    return { ok: false, status: 404 };
+                }
+
+                return {
+                    ok: true,
+                    json: async () => ({ data: page === 3 ? [mvDeck(1), mvDeck(2)] : [mvDeck(9)] })
+                };
+            });
+
+            const result = await service.crawlOnce();
+
+            expect(result).toEqual(
+                expect.objectContaining({ indexed: 2, caughtUp: true, paused: false })
+            );
+            // The failure machinery never engaged.
+            expect(updatesMatching('"ConsecutiveFailures" = $1')).toHaveLength(0);
+            // The cursor holds at page 4, where the next registrations land.
+            const progress = updatesMatching('"CurrentPage" = $1');
+
+            expect(progress[progress.length - 1][1]).toEqual([4, 0, true]);
         });
 
         // The load-bearing property of the breaker: the crawler shares an
@@ -379,7 +572,9 @@ describe('CatalogService', function () {
             const [, params] = updatesMatching('"ConsecutiveFailures" = $1')[0];
 
             expect(params[0]).toBe(1);
-            expect(params[1]).toBe('HTTP 429');
+            // Recorded WITH the URL it asked: this is the string the health
+            // panel shows an operator, and a bare status code is not a lead.
+            expect(params[1]).toBe('HTTP 429 from https://mv.example/api/decks/v2/');
             expect(params[2].getTime()).toBeGreaterThanOrEqual(before + 1000);
         });
 
@@ -434,9 +629,24 @@ describe('CatalogService', function () {
             expect(fetchMock).not.toHaveBeenCalled();
         });
 
+        // The breaker exists to stop a TIMER hammering a failing service. An
+        // operator pressing "crawl now" is one deliberate, watched pass -
+        // usually to learn whether a fix worked - and a recovery button that
+        // silently does nothing for the length of the pause reads as "still
+        // broken" no matter what was deployed.
+        it('runs a manual pass even while the breaker is open', async function () {
+            mockState({ PausedUntil: new Date(Date.now() + 60000), ConsecutiveFailures: 3 });
+            mockPages({ 1: [mvDeck(1)] });
+
+            const result = await service.crawlOnce({ ignorePause: true });
+
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(result).toEqual(expect.objectContaining({ indexed: 1, paused: false }));
+        });
+
         it('resumes once the pause has expired', async function () {
             mockState({ PausedUntil: new Date(Date.now() - 1000), ConsecutiveFailures: 3 });
-            mockPages([[mvDeck(1)]]);
+            mockPages({ 1: [mvDeck(1)] });
 
             const result = await service.crawlOnce();
 
@@ -446,7 +656,7 @@ describe('CatalogService', function () {
 
         it('clears the failure count and the pause on a successful page', async function () {
             mockState({ ConsecutiveFailures: 2, LastError: 'HTTP 500' });
-            mockPages([[mvDeck(1)]]);
+            mockPages({ 1: [mvDeck(1)] });
 
             await service.crawlOnce();
 
@@ -460,7 +670,7 @@ describe('CatalogService', function () {
 
         it('never throws when the database is down', async function () {
             db.query.mockRejectedValue(new Error('db down'));
-            mockPages([[mvDeck(1)]]);
+            mockPages({ 1: [mvDeck(1)] });
 
             await expect(service.crawlOnce()).resolves.toEqual(
                 expect.objectContaining({ indexed: 0, pagesRequested: 1 })

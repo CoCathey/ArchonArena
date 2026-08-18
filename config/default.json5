@@ -213,6 +213,14 @@
         // has that tier is DoK's business, not ours. Raising it is a code
         // change (DOK_FREE_TIER_RPM), made by someone who has checked.
         maxRequestsPerMinute: 25,
+        // ARCHON: requests each minute that background work leaves alone. Two
+        // sweeps spend this budget on nobody's behalf - the stale-SAS refresh and
+        // the Gauntlet asking about pool decks the Master Vault crawl brought in -
+        // and both yield rather than queue. Yielding is not enough on its own:
+        // whichever asks first is entitled to the minute's last slot, so a member
+        // arriving a second later would see no SAS on their own deck page, which
+        // from their side looks exactly like DoK being down.
+        backgroundHeadroom: 5,
         // ARCHON: remembered collections. A player may ask us to keep their DoK
         // key (sealed - see server/services/crypto/secretBox.js) and refresh
         // their collection on this cadence. The sweep only LISTS collections
@@ -223,6 +231,17 @@
         autoSyncIntervalHours: 24,
         autoSyncSweepMinutes: 15,
         autoSyncPerRun: 3
+    },
+
+    // ARCHON (N38): the Claude API, spent by exactly two things - the
+    // Champion's Challenge AI teacher's small weekly review budget, and the
+    // one-time card-priors job (npm run card-priors). Runtime play never
+    // calls an API: priors ship as a committed file, and the teacher without
+    // a key is simply off, whatever the admin switch says.
+    anthropic: {
+        apiKey: '', // set via ANTHROPIC_API_KEY
+        model: 'claude-opus-5',
+        requestTimeoutMs: 60000
     },
 
     // Master Vault deck catalog: an index of every deck that exists - uuid,

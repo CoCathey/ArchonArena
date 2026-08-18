@@ -9,6 +9,17 @@ const { CAPABILITIES } = require('../services/membership/capabilities');
 const configService = new ConfigService();
 const championsChallenge = new ChampionsChallengeService(configService);
 
+// ARCHON (N29): the hand-started catalog crawl walks Master Vault. It is
+// admin-only and bounded per run already, but a button an operator can hold down
+// is still a button pointed at somebody else's API.
+const { rateLimit } = require('./rateLimit');
+const crawlLimit = rateLimit({
+    name: 'catalog-crawl',
+    windowMs: 10 * 60 * 1000,
+    max: 5,
+    message: 'The catalog crawl was just started. Give it a few minutes before starting another.'
+});
+
 /**
  * ARCHON (N18): the Champion’s Challenge - Vault Master's background deck testing.
  *
@@ -28,9 +39,287 @@ module.exports.init = function (server) {
         passport.authenticate('jwt', { session: false }),
         requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
         wrapAsync(async (req, res) => {
-            const report = await championsChallenge.getLabReport(req.user.id);
+            const report = await championsChallenge.getLabReport(req.user.id, {
+                isAdmin: !!(req.user.permissions && req.user.permissions.isAdmin)
+            });
 
             res.send({ success: true, ...report });
+        })
+    );
+
+    // ARCHON (N21): the randomizer - fill roster slots with random eligible
+    // decks, each swapping itself for a fresh one after `games` games.
+    // `count` fills several at once; it is clamped to the slots actually
+    // free rather than refused, because "add 5" with 3 slots left plainly
+    // means "add what fits".
+    server.post(
+        '/api/champions-challenge/decks/random',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
+        wrapAsync(async (req, res) => {
+            const games = parseInt(req.body && req.body.games, 10);
+            const requested =
+                req.body && req.body.count !== undefined ? parseInt(req.body.count, 10) : 1;
+
+            if (!Number.isFinite(games) || games < 1 || games > 500) {
+                return res.status(400).send({
+                    success: false,
+                    message: 'Games before the swap must be between 1 and 500.'
+                });
+            }
+
+            const config = championsChallenge.getConfig();
+
+            if (!Number.isFinite(requested) || requested < 1) {
+                return res.status(400).send({
+                    success: false,
+                    message: 'Number of random decks must be at least 1.'
+                });
+            }
+
+            const enrolled = await championsChallenge.db.query(
+                'SELECT COUNT(*)::int AS "Count" FROM "ProvingGroundsDecks" WHERE "UserId" = $1',
+                [req.user.id]
+            );
+            const used = (enrolled[0] && enrolled[0].Count) || 0;
+            const free = config.maxEnrolledPerUser - used;
+
+            if (free <= 0) {
+                return res.status(400).send({
+                    success: false,
+                    message:
+                        `All ${config.maxEnrolledPerUser} Champion’s Challenge slots are in ` +
+                        'use. Withdraw a deck to add a random one.'
+                });
+            }
+
+            const deckIds = await championsChallenge.enrollRandomDecks(
+                req.user.id,
+                games,
+                Math.min(requested, free)
+            );
+
+            if (!deckIds.length) {
+                return res.status(400).send({
+                    success: false,
+                    message:
+                        'No eligible deck to draw: every rated, simulatable deck you own is ' +
+                        'already enrolled.'
+                });
+            }
+
+            res.send({
+                success: true,
+                deckIds,
+                // Kept for older clients, which asked for one and read one.
+                deckId: deckIds[0],
+                added: deckIds.length,
+                requested
+            });
+        })
+    );
+
+    // ARCHON (N26): the lab's vital signs. Admin-only, and a separate route
+    // from the member report because it is a different question: not "how are my
+    // decks doing" but "is the lab working at all" - the pool, the diary, the
+    // sweep lease and which node holds it.
+    server.get(
+        '/api/champions-challenge/health',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!(req.user.permissions && req.user.permissions.isAdmin)) {
+                return res.status(403).send({ success: false, message: 'Admins only.' });
+            }
+
+            res.send({ success: true, health: await championsChallenge.labHealth() });
+        })
+    );
+
+    /**
+     * ARCHON (N29): start the Master Vault crawl by hand.
+     *
+     * The Gauntlet's field is drawn from the deck catalog, and the crawl that
+     * builds the catalog ships OFF - so a default install has an empty catalog,
+     * an empty pool, and no way to find out whether turning the setting on did
+     * anything short of waiting an hour for the next scheduled run. This runs one
+     * pass and reports what it indexed.
+     *
+     * It does not turn the setting on. Outbound traffic to somebody else's API is
+     * an operator's decision made deliberately on the settings page, not a side
+     * effect of pressing a button on a diagnostics panel - so with the crawl
+     * disabled this says so and sends nothing.
+     *
+     * It DOES run while the circuit breaker has the scheduled crawl parked.
+     * The breaker stops a timer from hammering a failing service; an operator
+     * pressing the button is one deliberate, watched pass - almost always to
+     * learn whether the thing that tripped the breaker is fixed - and a
+     * recovery button that silently does nothing for the length of the pause
+     * reads as "still broken" no matter what was deployed.
+     */
+    server.post(
+        '/api/champions-challenge/catalog/crawl',
+        passport.authenticate('jwt', { session: false }),
+        crawlLimit,
+        wrapAsync(async (req, res) => {
+            if (!(req.user.permissions && req.user.permissions.isAdmin)) {
+                return res.status(403).send({ success: false, message: 'Admins only.' });
+            }
+
+            const catalogService = championsChallenge.catalogService;
+
+            if (!catalogService.isEnabled()) {
+                return res.send({
+                    success: false,
+                    message:
+                        'The Master Vault catalog crawl is switched off. Turn on catalog.enabled ' +
+                        'in Site Settings first — it walks somebody else’s API, so it is an ' +
+                        'operator’s decision rather than a button’s.'
+                });
+            }
+
+            const result = await catalogService.crawlOnce({ ignorePause: true });
+
+            res.send({
+                success: true,
+                crawl: result,
+                health: await championsChallenge.labHealth()
+            });
+        })
+    );
+
+    /**
+     * ARCHON (N32): the Vault Tour.
+     *
+     * Two audiences, two gates. A member chooses their own slate of three decks
+     * (Vault Master, like the rest of the lab); an ADMIN curates the field,
+     * because "which decks won which events" is a fact about the world that one
+     * person maintains for everybody, not a per-member setting.
+     */
+    server.post(
+        '/api/champions-challenge/vault-tour/decks',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
+        wrapAsync(async (req, res) => {
+            const deckId = parseInt(req.body && req.body.deckId, 10);
+
+            if (!Number.isFinite(deckId)) {
+                return res.status(400).send({ success: false, message: 'deckId is required' });
+            }
+
+            try {
+                const entry = await championsChallenge.vaultTourService.enroll(
+                    req.user.id,
+                    deckId,
+                    { loadEngineDeck: (id) => championsChallenge.loadEngineDeck(id) }
+                );
+
+                res.send({ success: true, entry });
+            } catch (error) {
+                res.status(400).send({ success: false, message: error.message });
+            }
+        })
+    );
+
+    server.delete(
+        '/api/champions-challenge/vault-tour/decks/:deckId',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
+        wrapAsync(async (req, res) => {
+            await championsChallenge.vaultTourService.withdraw(
+                req.user.id,
+                parseInt(req.params.deckId, 10)
+            );
+
+            res.send({ success: true });
+        })
+    );
+
+    // The field itself: admin-curated, site-wide.
+    server.get(
+        '/api/champions-challenge/vault-tour/field',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!(req.user.permissions && req.user.permissions.isAdmin)) {
+                return res.status(403).send({ success: false, message: 'Admins only.' });
+            }
+
+            res.send({
+                success: true,
+                field: await championsChallenge.vaultTourService.field(),
+                placings: require('../services/championschallenge/VaultTourService').PLACINGS
+            });
+        })
+    );
+
+    server.post(
+        '/api/champions-challenge/vault-tour/field',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!(req.user.permissions && req.user.permissions.isAdmin)) {
+                return res.status(403).send({ success: false, message: 'Admins only.' });
+            }
+
+            const body = req.body || {};
+            const result = await championsChallenge.vaultTourService.addDeck({
+                link: body.link,
+                event: body.event,
+                placing: body.placing,
+                eventDate: body.eventDate || null,
+                userId: req.user.id
+            });
+
+            if (!result.ok) {
+                return res.status(400).send({ success: false, message: result.message });
+            }
+
+            res.send({
+                success: true,
+                deck: result.deck,
+                message: result.message,
+                field: await championsChallenge.vaultTourService.field()
+            });
+        })
+    );
+
+    server.delete(
+        '/api/champions-challenge/vault-tour/field/:uuid',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            if (!(req.user.permissions && req.user.permissions.isAdmin)) {
+                return res.status(403).send({ success: false, message: 'Admins only.' });
+            }
+
+            await championsChallenge.vaultTourService.removeDeck(req.params.uuid);
+
+            res.send({
+                success: true,
+                field: await championsChallenge.vaultTourService.field()
+            });
+        })
+    );
+
+    // ARCHON (N24): the Gauntlet's own settings - whether to play the field,
+    // how much of the time, and which decks count as the field.
+    server.post(
+        '/api/champions-challenge/gauntlet',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
+        wrapAsync(async (req, res) => {
+            const body = req.body || {};
+            const asList = (value) => (Array.isArray(value) ? value.slice(0, 40) : []);
+
+            const settings = await championsChallenge.gauntletService.saveSettings(req.user.id, {
+                enabled: !!body.enabled,
+                fieldSharePct: body.fieldSharePct,
+                sets: asList(body.sets),
+                houses: asList(body.houses),
+                strategies: asList(body.strategies),
+                minSas: body.minSas,
+                maxSas: body.maxSas
+            });
+            const pool = await championsChallenge.gauntletService.poolStatus(req.user.id, settings);
+
+            res.send({ success: true, gauntlet: { ...settings, pool } });
         })
     );
 
