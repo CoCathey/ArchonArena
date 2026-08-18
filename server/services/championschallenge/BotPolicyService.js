@@ -370,6 +370,89 @@ class BotPolicyService {
             .sort((left, right) => right.rate - left.rate || right.games - left.games);
     }
 
+    // -------------------------------------------------- the calibration ladder
+
+    /**
+     * ARCHON (N38): record one calibrated result for the current champion.
+     *
+     * Kept per champion version rather than as a running total. A ladder that
+     * pooled every model the loop has ever promoted would smear a regression
+     * across the record of the model that caused it - which is exactly the
+     * moment somebody needs to see it.
+     */
+    async recordCalibration(opponent, policyVersion, championWon) {
+        if (!opponent) {
+            return false;
+        }
+
+        try {
+            await this.db.query(
+                'INSERT INTO "ChallengeCalibration" ' +
+                    '("Opponent", "PolicyVersion", "Wins", "Losses", "UpdatedAt") ' +
+                    "VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc') " +
+                    'ON CONFLICT ("Opponent", "PolicyVersion") DO UPDATE SET ' +
+                    '"Wins" = "ChallengeCalibration"."Wins" + EXCLUDED."Wins", ' +
+                    '"Losses" = "ChallengeCalibration"."Losses" + EXCLUDED."Losses", ' +
+                    '"UpdatedAt" = EXCLUDED."UpdatedAt"',
+                [opponent, policyVersion || 0, championWon ? 1 : 0, championWon ? 0 : 1]
+            );
+
+            return true;
+        } catch (err) {
+            logger.error('Challenge bot: could not record a calibration game', err);
+
+            return false;
+        }
+    }
+
+    /**
+     * What the champion can beat, and by how much.
+     *
+     * One row per reference opponent for the version asked about - the current
+     * champion unless a caller wants history. Intervals throughout, because
+     * "beats the heuristic bot 78%" over nine games is a sentence nobody should
+     * read without its error bars.
+     *
+     * Never throws; an empty ladder means the calibration has not run yet,
+     * which is a normal state on a young install and says so on the page.
+     */
+    async calibration(policyVersion = null) {
+        let rows;
+
+        try {
+            rows = await this.db.query(
+                policyVersion === null
+                    ? 'SELECT "Opponent", "PolicyVersion", "Wins", "Losses" ' +
+                          'FROM "ChallengeCalibration" WHERE "PolicyVersion" = ' +
+                          '(SELECT MAX("PolicyVersion") FROM "ChallengeCalibration")'
+                    : 'SELECT "Opponent", "PolicyVersion", "Wins", "Losses" ' +
+                          'FROM "ChallengeCalibration" WHERE "PolicyVersion" = $1',
+                policyVersion === null ? [] : [policyVersion]
+            );
+        } catch (err) {
+            logger.error('Challenge bot: could not read the calibration ladder', err);
+
+            return [];
+        }
+
+        return (rows || [])
+            .map((row) => {
+                const wins = row.Wins || 0;
+                const losses = row.Losses || 0;
+                const games = wins + losses;
+
+                return {
+                    opponent: row.Opponent,
+                    policyVersion: row.PolicyVersion,
+                    wins,
+                    losses,
+                    games,
+                    ...wilsonInterval(wins, games)
+                };
+            })
+            .sort((left, right) => right.rate - left.rate || right.games - left.games);
+    }
+
     /** The learning loop's public vitals, for the Challenge page. */
     async vitals() {
         const rows = await this.db.query(

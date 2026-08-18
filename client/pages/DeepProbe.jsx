@@ -315,14 +315,18 @@ const VaultTourInvite = ({ t, user }) => {
                                   'how each matchup actually goes.'
                           )}
                 </p>
-                <HeroButton
-                    as={Link}
-                    size='sm'
+                {/* A Link styled as a button, NOT <HeroButton as={Link}>.
+                    HeroUI's Button renders a plain <button> and forwards
+                    neither `as` nor `href`, so the original of this looked
+                    exactly right and navigated nowhere. Membership.jsx carries
+                    the same warning about the same trap; this is the second
+                    time it has been paid for. */}
+                <Link
+                    className='inline-flex h-9 shrink-0 items-center justify-center rounded-md bg-amber-500 px-3 text-sm font-semibold text-black transition hover:bg-amber-400'
                     to={unlocked ? '/champions-challenge' : '/membership'}
-                    variant='primary'
                 >
                     {unlocked ? t('Open the Champion’s Challenge') : t('Subscribe to Vault Master')}
-                </HeroButton>
+                </Link>
             </div>
         </Panel>
     );

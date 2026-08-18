@@ -607,6 +607,33 @@ const REGISTRY = {
                 max: 10,
                 default: 1
             },
+            // ARCHON (N38): the champion against opponents that never learn -
+            // the heuristic bot it replaced, each persona, and the searching
+            // bot it was distilled from. Every other measurement in the lab is
+            // relative; this is the only one that says whether the sparring
+            // partner can actually play.
+            calibrationPairsPerSweep: {
+                type: 'number',
+                label: 'Champion-versus-reference pairs per sweep (0 = never)',
+                min: 0,
+                max: 10,
+                default: 1
+            },
+            deepCalibrationEverySweeps: {
+                type: 'number',
+                label: 'Measure against the deep bot every N sweeps',
+                min: 1,
+                max: 500,
+                default: 10
+            },
+            deepCalibration: {
+                type: 'boolean',
+                // The expensive rung, and the only one expected to sit below
+                // 50%: the champion is a distillation of the searching bot, so
+                // this measures what the distilling cost.
+                label: 'Also measure the champion against the deep searching bot',
+                default: true
+            },
             // The deep planner: fewer, slower, annotated showcase games. A
             // deep game costs seconds-to-minutes of CPU where a fast one
             // costs half a second - these knobs are the leash.

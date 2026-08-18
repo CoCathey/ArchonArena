@@ -14,7 +14,7 @@ const DeckService = require('../DeckService');
 const DokService = require('../dok/DokService');
 const CatalogService = require('../catalog/CatalogService');
 const { cloneCard, getCardIndex } = require('./packCards');
-const { runSimulatedGame, PLAYER_ONE } = require('./SimulatedGame');
+const { runSimulatedGame, PLAYER_ONE, PLAYER_TWO } = require('./SimulatedGame');
 const { runDeepGame } = require('./DeepGame');
 const {
     MIN_CONFIDENT_GAMES,
@@ -118,6 +118,12 @@ class ChampionsChallengeService {
         // every pair is measured about equally often rather than the first pair
         // being measured every time.
         this.duelCursor = 0;
+        // ARCHON (N38): which calibration rung the next pair measures. A cursor
+        // rather than a random pick so every reference opponent accumulates
+        // games at the same rate, and the ladder does not end up with one rung
+        // confidently measured and the rest at three games each.
+        this.calibrationCursor = 0;
+        this.deepCalibrationCursor = 0;
         // Injectable for tests: specs replace these with stubs rather than
         // playing real games per assertion.
         this.runMatch = runSimulatedGame;
@@ -816,6 +822,22 @@ class ChampionsChallengeService {
             }
         }
 
+        // ARCHON (N38): and measure the champion against opponents that cannot
+        // improve, so every relative number on the page has something absolute
+        // behind it. Both rungs are best effort: a calibration that fails is a
+        // missing measurement, never a missing sweep.
+        try {
+            await this.runCalibration(config, championModel);
+        } catch (err) {
+            logger.error('Challenge bot: calibration failed', err);
+        }
+
+        try {
+            await this.runDeepCalibration(config, championModel);
+        } catch (err) {
+            logger.error('Challenge bot: deep calibration failed', err);
+        }
+
         // ARCHON (N24): grow the field, after the games rather than before -
         // hydration waits on Master Vault, and a member's games should not.
         // Only while somebody actually plays the field: a pool nobody has asked
@@ -1418,6 +1440,168 @@ class ChampionsChallengeService {
     }
 
     /**
+     * ARCHON (N38): measure the champion against opponents that never learn.
+     *
+     * The Challenge tells a member "this deck wins 62%", and until now nothing
+     * anywhere said against what standard of play. Every existing measurement
+     * in the lab is RELATIVE - the title fight proves a candidate is better
+     * than the last champion, which says nothing about whether either can play
+     * a key out. So the champion is also played against fixed references whose
+     * strength cannot drift:
+     *
+     *   heuristic  the plain bot the lab started from, no model at all. The
+     *              floor, and the number worth quoting to a member: a learned
+     *              policy that cannot beat the rules-of-thumb it replaced is
+     *              not a sparring partner, it is a regression.
+     *   personas   each hand-biased style at the configured strength, which
+     *              says whether the champion has a blind spot rather than a
+     *              level.
+     *   deep       the searching bot. The CEILING - the champion is a
+     *              distillation of it, so this is how much was lost in the
+     *              distilling, and it is the one rung expected to be below 50%.
+     *
+     * Paired seeds with the seats swapped, like the title fight and the persona
+     * duels: first-player advantage cancels instead of being averaged over and
+     * hoped about. A pair that cannot finish is dropped whole, because half a
+     * pair is an unpaired game - exactly the noise the pairing removes.
+     *
+     * Cheap by design: `calibrationPairsPerSweep` defaults low, and the deep
+     * rung is played at most once per sweep because a searching game costs
+     * orders of magnitude more than a fast one.
+     */
+    async runCalibration(config, championModel) {
+        const pairs = Math.max(0, parseInt(config.calibrationPairsPerSweep, 10) || 0);
+
+        if (!championModel || !pairs) {
+            return 0;
+        }
+
+        const version = championModel.version || 0;
+        const strength = this.personaStrength(config);
+        const [deckA, deckB] = this.neutralArenaDecks();
+        // The rungs, cheapest first. Personas only when styling is configured
+        // to do anything - a persona at zero strength is the champion, and a
+        // ladder rung that is the champion measures nothing.
+        const rungs = [{ key: 'heuristic', policy: null }];
+
+        if (strength) {
+            for (const persona of PERSONAS) {
+                rungs.push({
+                    key: persona.key,
+                    policy: personaModel(championModel, persona, strength)
+                });
+            }
+        }
+
+        let played = 0;
+
+        for (let pair = 0; pair < pairs; pair++) {
+            const rung = rungs[this.calibrationCursor++ % rungs.length];
+            const seed = this.newSeed();
+            const outcomes = [];
+
+            for (const championIsAlpha of [true, false]) {
+                const result = await this.runMatch(deckA, deckB, {
+                    seed,
+                    maxTurns: config.maxTurnsPerGame,
+                    policies: championIsAlpha
+                        ? { alpha: championModel, omega: rung.policy }
+                        : { alpha: rung.policy, omega: championModel },
+                    // Greedy: this is a measurement, and exploration noise is
+                    // the thing being measured through.
+                    temperature: 0,
+                    recordDecisions: false
+                });
+
+                if (!result || !result.completed) {
+                    return played;
+                }
+
+                outcomes.push(
+                    championIsAlpha ? result.winner === PLAYER_ONE : result.winner !== PLAYER_ONE
+                );
+            }
+
+            for (const championWon of outcomes) {
+                await this.policyService.recordCalibration(rung.key, version, championWon);
+            }
+
+            played++;
+        }
+
+        return played;
+    }
+
+    /**
+     * The ceiling rung: the champion against the searching bot it was distilled
+     * from. One pair, at most once per sweep, because a deep game costs orders
+     * of magnitude more than a fast one and the number it produces moves slowly.
+     */
+    async runDeepCalibration(config, championModel) {
+        // One switch governs all of calibration: turning it off must not leave
+        // the most expensive rung still running. And a cadence, because a deep
+        // pair costs orders of magnitude more than a fast one while the number
+        // it produces barely moves - measuring it every sweep would spend the
+        // sweep budget on a figure that changes once a fortnight.
+        const pairs = Math.max(0, parseInt(config.calibrationPairsPerSweep, 10) || 0);
+        const every = Math.max(1, parseInt(config.deepCalibrationEverySweeps, 10) || 10);
+
+        if (!championModel || !pairs || config.deepCalibration === false) {
+            return 0;
+        }
+
+        if (this.deepCalibrationCursor++ % every !== 0) {
+            return 0;
+        }
+
+        const [deckA, deckB] = this.neutralArenaDecks();
+        const seed = this.newSeed();
+        const outcomes = [];
+
+        for (const championIsAlpha of [true, false]) {
+            let result;
+
+            try {
+                result = await this.runDeep(deckA, deckB, {
+                    seed,
+                    maxTurns: config.maxTurnsPerGame,
+                    policy: championModel,
+                    // The deep seat searches; the champion seat does not. Which
+                    // seat that is swaps with the pair.
+                    deepSide: championIsAlpha ? PLAYER_TWO : PLAYER_ONE,
+                    maxAnalyzedDecisions: config.deepMaxAnalyzedDecisions,
+                    candidatesCap: config.deepCandidates,
+                    samplesPerCandidate: config.deepSamples,
+                    rolloutTurns: config.deepRolloutTurns,
+                    recordDecisions: false
+                });
+            } catch (err) {
+                logger.error('Challenge bot: deep calibration failed', err);
+
+                return 0;
+            }
+
+            if (!result || !result.completed) {
+                return 0;
+            }
+
+            outcomes.push(
+                championIsAlpha ? result.winner === PLAYER_ONE : result.winner !== PLAYER_ONE
+            );
+        }
+
+        for (const championWon of outcomes) {
+            await this.policyService.recordCalibration(
+                'deep',
+                championModel.version || 0,
+                championWon
+            );
+        }
+
+        return 1;
+    }
+
+    /**
      * Two fixed 36-card decks from pack data, for arena games: neutral
      * ground that no member's stats can be polluted by and every candidate
      * meets alike.
@@ -1786,6 +1970,12 @@ class ChampionsChallengeService {
                 })),
                 ladder: await this.policyService.personaLadder().catch(() => [])
             },
+            // ARCHON (N38): how good the sparring partner is, in absolute
+            // terms. Sent to every member, not just admins: this is the number
+            // that makes the rest of the page worth reading, and hiding it
+            // would leave "your deck wins 62%" hanging in the air exactly as it
+            // was before this existed.
+            calibration: await this.policyService.calibration().catch(() => []),
             cards: cards ? { ...cards, deckId: topDeck.deckId, deckName: topDeck.name } : null,
             vaultTour,
             gauntlet: {
