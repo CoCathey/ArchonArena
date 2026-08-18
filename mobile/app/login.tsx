@@ -107,6 +107,15 @@ export default function LoginScreen() {
                         <Text style={styles.linkText} onPress={() => router.push('/register')}>
                             Create an account
                         </Text>
+                        {/* ARCHON: the login screen used to be a dead end for
+                            a forgotten password — the only way back into an
+                            account was to find a browser. */}
+                        <Text
+                            style={styles.linkText}
+                            onPress={() => router.push('/forgot-password')}
+                        >
+                            Forgot your password?
+                        </Text>
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -149,7 +158,9 @@ const styles = StyleSheet.create({
     },
     links: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         justifyContent: 'center',
+        gap: spacing.lg,
         marginTop: spacing.lg
     },
     linkText: {

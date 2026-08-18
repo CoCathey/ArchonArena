@@ -164,6 +164,18 @@ export default function RootLayout() {
                     options={{ title: 'Notifications', headerBackTitle: 'Back' }}
                 />
                 <Stack.Screen
+                    name='forgot-password'
+                    options={{ title: 'Reset password', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='security'
+                    options={{ title: 'Security', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='profile-edit'
+                    options={{ title: 'Edit profile', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
                     name='deck-import'
                     options={{ title: 'Import decks', headerBackTitle: 'Back' }}
                 />
