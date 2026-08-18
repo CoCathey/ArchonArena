@@ -778,6 +778,126 @@ StylePanel.propTypes = {
     t: PropTypes.func
 };
 
+/** Reference opponents, in the order a reader should meet them. */
+const RUNGS = [
+    {
+        key: 'heuristic',
+        label: 'The plain bot',
+        note: 'sound rules of thumb, no learning at all — the level the lab started from'
+    },
+    { key: 'racer', label: 'The Racer', note: 'the amber-rush style' },
+    { key: 'bruiser', label: 'The Bruiser', note: 'the board-control style' },
+    { key: 'schemer', label: 'The Schemer', note: 'the artifact-and-disruption style' },
+    {
+        key: 'deep',
+        label: 'The searching bot',
+        note: 'plays out futures before choosing — the ceiling, and expected to win'
+    }
+];
+
+/**
+ * ARCHON (N38): how good the sparring partner is.
+ *
+ * Every other number on this page is relative - "your deck wins 62%" - and
+ * until now nothing said against what standard of play. A member could not tell
+ * whether a verdict was worth acting on, and neither could an operator: the
+ * title fight proves a candidate beats the LAST champion, which says nothing
+ * about whether either can play a key out.
+ *
+ * The rungs are fixed opponents that never learn, which is the entire point. A
+ * ladder whose rungs move measures nothing.
+ *
+ * The plain bot is the rung worth reading first: a learned policy that cannot
+ * beat the rules of thumb it replaced is not a sparring partner, it is a
+ * regression, and this is the panel that would say so.
+ */
+const CalibrationPanel = ({ calibration, t }) => {
+    const rows = calibration || [];
+
+    if (!rows.length) {
+        return null;
+    }
+
+    const byOpponent = new Map(rows.map((row) => [row.opponent, row]));
+    const known = RUNGS.filter((rung) => byOpponent.has(rung.key));
+
+    if (!known.length) {
+        return null;
+    }
+
+    const floor = byOpponent.get('heuristic');
+
+    return (
+        <Panel type='default' compactHeader title={t('How good is the sparring partner?')}>
+            <p className='m-0 pb-2 text-sm text-muted'>
+                {t(
+                    'Everything else here is measured against this bot, so here is what it can ' +
+                        'beat. These opponents never learn — that is what makes them a ruler.'
+                )}
+            </p>
+
+            <ul className='m-0 list-none space-y-1 p-0 text-sm'>
+                {known.map((rung) => {
+                    const row = byOpponent.get(rung.key);
+                    const thin = row.games < 20;
+
+                    return (
+                        <li
+                            className='flex flex-wrap items-baseline gap-x-2 border-b border-border/40 py-1 last:border-0'
+                            key={rung.key}
+                        >
+                            <span className='text-foreground'>{t(rung.label)}</span>
+                            <span className='text-[11px] text-muted'>{t(rung.note)}</span>
+                            <span
+                                className={`ms-auto font-semibold tabular-nums ${
+                                    row.rate >= 0.5 ? 'text-emerald-300' : 'text-amber-300'
+                                }`}
+                                title={t('{{wins}}–{{losses}}', {
+                                    wins: row.wins,
+                                    losses: row.losses
+                                })}
+                            >
+                                {Math.round(row.rate * 100)}%
+                            </span>
+                            {/* The interval, not just the rate: a ladder read
+                                off nine games is a ladder nobody should climb. */}
+                            <span className='text-[11px] text-muted tabular-nums'>
+                                {thin
+                                    ? t('{{games}} games so far', { games: row.games })
+                                    : t('±{{margin}}', {
+                                          margin: Math.round(((row.high - row.low) / 2) * 100)
+                                      })}
+                            </span>
+                        </li>
+                    );
+                })}
+            </ul>
+
+            {floor && floor.games >= 20 && (
+                <p className='m-0 pt-2 text-[11px] text-muted'>
+                    {floor.rate >= 0.5
+                        ? t(
+                              'The bot flying your decks beats the plain rules-of-thumb bot ' +
+                                  '{{rate}}% of the time, so a verdict here is a verdict about ' +
+                                  'competent play.',
+                              { rate: Math.round(floor.rate * 100) }
+                          )
+                        : t(
+                              'The bot flying your decks is currently NO BETTER than the plain ' +
+                                  'rules-of-thumb bot. Treat these verdicts with caution until ' +
+                                  'that number climbs.'
+                          )}
+                </p>
+            )}
+        </Panel>
+    );
+};
+
+CalibrationPanel.propTypes = {
+    calibration: PropTypes.array,
+    t: PropTypes.func
+};
+
 /**
  * ARCHON (N32): the Vault Tour - three of your decks against a field somebody
  * won a tournament with.
@@ -1351,6 +1471,7 @@ const ChampionsChallenge = () => {
                         }}
                     />
                     <StylePanel personas={data?.personas} decks={data?.decks} t={t} />
+                    <CalibrationPanel calibration={data?.calibration} t={t} />
                     <MatchupMatrix matchups={data?.matchups} t={t} />
                     <CardContribution cards={data?.cards} t={t} />
                     <StrengthCurve curve={data?.strengthCurve} t={t} />

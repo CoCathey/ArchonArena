@@ -44,6 +44,7 @@ class DeepGame {
      * @param {number} [options.samplesPerCandidate] futures averaged per road
      * @param {number} [options.rolloutTurns] how far each future is played
      * @param {number} [options.maxTurns] inherited game cap
+     * @param {string} [options.deepSide] only this seat searches; both by default
      */
     constructor(deckAlpha, deckOmega, options = {}) {
         this.deckAlpha = deckAlpha;
@@ -55,6 +56,9 @@ class DeepGame {
         this.samplesPerCandidate = options.samplesPerCandidate || 3;
         this.rolloutTurns = options.rolloutTurns || 6;
         this.maxTurns = options.maxTurns || 80;
+        // Which seat searches. Null (the default) means both, which is what a
+        // showcase game wants; a calibration game names one.
+        this.deepSide = options.deepSide || null;
 
         this.analyzed = 0;
         this.forksPlayed = 0;
@@ -108,6 +112,17 @@ class DeepGame {
      */
     async analyze({ sim, game, player, kind, candidates }) {
         if (this.analyzed >= this.maxAnalyzedDecisions) {
+            return null;
+        }
+
+        // ARCHON (N38): one seat only, when a caller asks for one.
+        //
+        // A showcase game searches both sides - it is a demonstration, and both
+        // seats thinking makes the better game to watch. A CALIBRATION game is
+        // the opposite: the whole question is what the fast champion scores
+        // against a searching opponent, and that number is meaningless if the
+        // champion's seat is searching too.
+        if (this.deepSide && player.name !== this.deepSide) {
             return null;
         }
 

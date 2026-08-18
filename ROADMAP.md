@@ -2401,6 +2401,45 @@ right — required a hand-written POST. Everything else was already built.
 -   [x] A comp never demotes an account that pays for more.
 -   [x] Revoking a comp leaves a real membership intact.
 
+#### N38 — How good is the sparring partner? _(done)_
+
+**Why:** every number the Challenge shows is relative — "this deck wins 62%" — and nothing
+anywhere said against what standard of play. The title fight proves a candidate beats the LAST
+champion, which says nothing about whether either can play a key out.
+
+**Tasks**
+
+-   [x] **A ladder of opponents that never learn** (`ChallengeCalibration`, migration 84): the
+        plain heuristic bot the lab started from, each hand-biased persona, and the searching bot
+        the champion was distilled from. Fixed strength is the whole point — a ladder whose rungs
+        move measures nothing.
+-   [x] **Paired seeds, seats swapped**, like the title fight and the persona duels, so first
+        player advantage cancels instead of being averaged over. A pair that cannot finish is
+        dropped whole.
+-   [x] **Per champion version**, so a regression shows against the model that caused it rather
+        than being smeared across a running total.
+-   [x] **`deepSide`**: a calibration game searches on ONE seat. A showcase game searches both —
+        it is a demonstration — but "the fast champion against a searching opponent" is
+        meaningless if the champion's seat is searching too.
+-   [x] **On the member's page**, not just the admin panel, with the plain bot's rung called out
+        in a sentence: a policy that cannot beat the rules of thumb it replaced is a regression,
+        and the page now says so in words.
+-   [x] **Paced**: one switch governs all of calibration, and the expensive deep rung runs every
+        Nth sweep rather than every sweep.
+-   Later: the ladder over time as a graph, so a training run that made the bot worse is visible
+    before anybody has to notice it in their own results.
+
+**Also fixed:** the Deep Probe's "Open the Champion's Challenge" button did nothing.
+`<HeroButton as={Link}>` renders a plain `<button>` — HeroUI forwards neither `as` nor `href`.
+Membership.jsx has carried a comment about this exact trap since N12, and a comment did not stop
+it happening again, so `deadButtons.spec.js` now scans every jsx file for it.
+
+**Acceptance criteria**
+
+-   [x] A calibration pair is the same seed played twice with the seats swapped.
+-   [x] Turning calibration off stops the deep rung too.
+-   [x] No HeroUI Button anywhere is asked to be a link.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
