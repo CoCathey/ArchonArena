@@ -3,13 +3,19 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import {
     ActivityIndicator,
     Alert,
+    Pressable,
     RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
     View
 } from 'react-native';
-import { deleteDeck, fetchDeck } from '../../src/api/client';
+import {
+    deleteDeck,
+    fetchDeck,
+    refreshDeckAccolades,
+    setAccoladeShown
+} from '../../src/api/client';
 import type { AercBreakdown, Deck } from '../../src/api/types';
 import DeckCardList from '../../src/decks/DeckCardList';
 import { expansionLabel } from '../../src/decks/expansions';
@@ -44,6 +50,7 @@ export default function DeckDetailScreen() {
     const [error, setError] = useState<string | undefined>();
     const [zoomCard, setZoomCard] = useState<CardSummary | undefined>();
     const [deleting, setDeleting] = useState(false);
+    const [refreshingAccolades, setRefreshingAccolades] = useState(false);
 
     const dictionary = useCardsStore((state) => state.cards);
     const cardsError = useCardsStore((state) => state.error);
@@ -109,6 +116,53 @@ export default function DeckDetailScreen() {
                 }
             ]
         );
+    };
+
+    const refreshAccolades = async () => {
+        if (!deck) {
+            return;
+        }
+        setRefreshingAccolades(true);
+        setError(undefined);
+        try {
+            const result = await refreshDeckAccolades(deck.id);
+            if (!result.success) {
+                setError(result.message ?? 'Could not check for accolades');
+                return;
+            }
+            await load();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Could not check for accolades');
+        } finally {
+            setRefreshingAccolades(false);
+        }
+    };
+
+    /**
+     * Optimistic: the toggle is the only thing on screen that changes, and a
+     * pill that waits on a round trip before moving feels broken.
+     */
+    const toggleAccolade = async (accoladeId: string, shown: boolean) => {
+        if (!deck) {
+            return;
+        }
+
+        const before = deck.accolades ?? [];
+        setDeck({
+            ...deck,
+            accolades: before.map((accolade) =>
+                accolade.id === accoladeId ? { ...accolade, shown } : accolade
+            )
+        });
+
+        try {
+            const result = await setAccoladeShown(deck.id, accoladeId, shown);
+            if (!result.success) {
+                setDeck({ ...deck, accolades: before });
+            }
+        } catch {
+            setDeck({ ...deck, accolades: before });
+        }
     };
 
     const houses = deck?.houses ?? [];
@@ -179,6 +233,60 @@ export default function DeckDetailScreen() {
                                     : ''}
                             </Text>
                         ) : null}
+                    </View>
+                ) : null}
+
+                {/* ARCHON: tournament placings Master Vault records against
+                    this deck. `shown` is the owner's choice of which ones
+                    ride on the deck's card back in game, so the toggle is the
+                    point of the panel rather than decoration on it. */}
+                {deck && (deck.accolades ?? []).length > 0 ? (
+                    <View style={styles.summary}>
+                        <View style={styles.accoladeHeader}>
+                            <Text style={styles.sectionTitle}>Accolades</Text>
+                            <Button
+                                small
+                                variant='secondary'
+                                title='Refresh'
+                                loading={refreshingAccolades}
+                                onPress={refreshAccolades}
+                            />
+                        </View>
+                        {(deck.accolades ?? []).map((accolade) => (
+                            <Pressable
+                                key={accolade.id}
+                                onPress={() => toggleAccolade(accolade.id, !accolade.shown)}
+                                style={styles.accoladeRow}
+                            >
+                                <Text style={styles.accoladeName} numberOfLines={2}>
+                                    {accolade.name}
+                                </Text>
+                                <Text
+                                    style={[
+                                        styles.accoladeToggle,
+                                        accolade.shown && { color: colors.brand }
+                                    ]}
+                                >
+                                    {accolade.shown ? 'shown' : 'hidden'}
+                                </Text>
+                            </Pressable>
+                        ))}
+                    </View>
+                ) : deck ? (
+                    <View style={styles.summary}>
+                        <View style={styles.accoladeHeader}>
+                            <Text style={styles.sectionTitle}>Accolades</Text>
+                            <Button
+                                small
+                                variant='secondary'
+                                title='Check'
+                                loading={refreshingAccolades}
+                                onPress={refreshAccolades}
+                            />
+                        </View>
+                        <Text style={styles.aercFootnote}>
+                            No tournament placings recorded for this deck.
+                        </Text>
                     </View>
                 ) : null}
 
@@ -329,6 +437,32 @@ const styles = StyleSheet.create({
         fontVariant: ['tabular-nums'],
         width: 34,
         textAlign: 'right'
+    },
+    accoladeHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 4
+    },
+    accoladeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: spacing.md,
+        paddingVertical: 7,
+        borderTopColor: colors.border,
+        borderTopWidth: StyleSheet.hairlineWidth
+    },
+    accoladeName: {
+        color: colors.text,
+        fontSize: 13,
+        flex: 1
+    },
+    accoladeToggle: {
+        color: colors.textFaint,
+        fontSize: 11,
+        fontWeight: '700',
+        textTransform: 'uppercase'
     },
     aercFootnote: {
         color: colors.textFaint,

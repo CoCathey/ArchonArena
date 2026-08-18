@@ -2,14 +2,16 @@ import React, { useCallback, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     Keyboard,
+    Pressable,
     RefreshControl,
     StyleSheet,
     Text,
     View
 } from 'react-native';
-import { importDeck, parseDeckUuid } from '../../src/api/client';
+import { bulkDeleteDecks, importDeck, parseDeckUuid } from '../../src/api/client';
 import DeckFilterBar from '../../src/decks/DeckFilterBar';
 import DeckRow from '../../src/decks/DeckRow';
 import { useDeckLibrary } from '../../src/decks/useDeckLibrary';
@@ -36,6 +38,72 @@ export default function DecksScreen() {
     const [importing, setImporting] = useState(false);
     const [importError, setImportError] = useState<string | undefined>();
     const [notice, setNotice] = useState<string | undefined>();
+    // ARCHON: selection mode. Off by default — tapping a deck opens it, which
+    // is what a tap on a deck means everywhere else in the app.
+    const [selecting, setSelecting] = useState(false);
+    const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [deleting, setDeleting] = useState(false);
+
+    const toggleSelected = (id: string) =>
+        setSelected((current) => {
+            const next = new Set(current);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+
+            return next;
+        });
+
+    const leaveSelection = () => {
+        setSelecting(false);
+        setSelected(new Set());
+    };
+
+    const confirmBulkDelete = () => {
+        const ids = [...selected];
+        if (ids.length === 0) {
+            return;
+        }
+
+        Alert.alert(
+            `Delete ${ids.length} deck${ids.length === 1 ? '' : 's'}`,
+            'Games you played with them are kept. A deck registered for a live event is left alone.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        setDeleting(true);
+                        setImportError(undefined);
+                        try {
+                            const result = await bulkDeleteDecks(ids);
+                            if (!result.success) {
+                                setImportError(result.message ?? 'Could not delete those decks');
+                                return;
+                            }
+                            const skipped = result.skipped?.length ?? 0;
+                            setNotice(
+                                skipped > 0
+                                    ? `${result.deleted ?? ids.length - skipped} deleted · ${skipped} left alone`
+                                    : `${result.deleted ?? ids.length} deleted`
+                            );
+                            leaveSelection();
+                            await library.refresh();
+                        } catch (err) {
+                            setImportError(
+                                err instanceof Error ? err.message : 'Could not delete those decks'
+                            );
+                        } finally {
+                            setDeleting(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
 
     const doImport = async () => {
         setImportError(undefined);
@@ -81,6 +149,44 @@ export default function DecksScreen() {
                 <Button title='Import' onPress={doImport} loading={importing} />
             </View>
 
+            {/* The rest of the import surface — a whole collection, a name
+                search, a pasted CSV — plus the alliance builder. Both are too
+                much for the header of a list. */}
+            <View style={styles.toolRow}>
+                <Pressable onPress={() => router.push('/deck-import')} hitSlop={6}>
+                    <Text style={styles.toolLink}>Bulk import</Text>
+                </Pressable>
+                <Pressable onPress={() => router.push('/decks/alliance')} hitSlop={6}>
+                    <Text style={styles.toolLink}>Build alliance</Text>
+                </Pressable>
+                <View style={{ flex: 1 }} />
+                {selecting ? (
+                    <>
+                        <Pressable onPress={leaveSelection} hitSlop={6}>
+                            <Text style={styles.toolLink}>Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                            onPress={confirmBulkDelete}
+                            disabled={selected.size === 0 || deleting}
+                            hitSlop={6}
+                        >
+                            <Text
+                                style={[
+                                    styles.toolDanger,
+                                    (selected.size === 0 || deleting) && { opacity: 0.4 }
+                                ]}
+                            >
+                                Delete {selected.size > 0 ? selected.size : ''}
+                            </Text>
+                        </Pressable>
+                    </>
+                ) : (
+                    <Pressable onPress={() => setSelecting(true)} hitSlop={6}>
+                        <Text style={styles.toolLink}>Select</Text>
+                    </Pressable>
+                )}
+            </View>
+
             <DeckFilterBar
                 search={library.searchInput}
                 onSearchChange={library.setSearchInput}
@@ -103,7 +209,15 @@ export default function DecksScreen() {
                 keyboardShouldPersistTaps='handled'
                 keyboardDismissMode='on-drag'
                 renderItem={({ item }) => (
-                    <DeckRow deck={item} onPress={() => router.push(`/deck/${item.id}`)} />
+                    <DeckRow
+                        deck={item}
+                        selected={selecting && selected.has(String(item.id))}
+                        onPress={() =>
+                            selecting
+                                ? toggleSelected(String(item.id))
+                                : router.push(`/deck/${item.id}`)
+                        }
+                    />
                 )}
                 contentContainerStyle={{ padding: spacing.md, paddingBottom: 48 }}
                 refreshControl={
@@ -162,5 +276,22 @@ const styles = StyleSheet.create({
         color: '#7ed494',
         fontSize: 13,
         marginBottom: spacing.sm
+    },
+    toolRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.md,
+        paddingHorizontal: spacing.md,
+        paddingTop: spacing.sm
+    },
+    toolLink: {
+        color: colors.accent,
+        fontSize: 13,
+        fontWeight: '600'
+    },
+    toolDanger: {
+        color: colors.danger,
+        fontSize: 13,
+        fontWeight: '700'
     }
 });

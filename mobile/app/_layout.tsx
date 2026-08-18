@@ -163,6 +163,14 @@ export default function RootLayout() {
                     name='notifications'
                     options={{ title: 'Notifications', headerBackTitle: 'Back' }}
                 />
+                <Stack.Screen
+                    name='deck-import'
+                    options={{ title: 'Import decks', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='decks/alliance'
+                    options={{ title: 'Build alliance', headerBackTitle: 'Back' }}
+                />
                 {/* ARCHON: the people section. Stack screens rather than a
                     sixth tab — the tab bar is full, and these are places you
                     go from a name you tapped rather than places you live. */}

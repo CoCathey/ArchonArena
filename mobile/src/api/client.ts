@@ -378,6 +378,179 @@ export async function deleteDeck(id: Deck['id']) {
     return apiFetch<ApiResponse>(`/api/decks/${id}`, { method: 'DELETE' });
 }
 
+/**
+ * Remove several decks at once. Separate from the single delete because the
+ * server reports per-deck outcomes — a deck committed to a live event refuses,
+ * and the rest of the selection still goes.
+ */
+export async function bulkDeleteDecks(deckIds: Deck['id'][]) {
+    return apiFetch<ApiResponse & { deleted?: number; skipped?: { id: number; reason: string }[] }>(
+        '/api/decks/bulk-delete',
+        { method: 'POST', body: { deckIds } }
+    );
+}
+
+// ---- Bulk import (Decks of KeyForge, CSV, and pasted ids) ----
+
+/**
+ * A running (or finished) bulk import. `total`/`done` drive the progress line;
+ * `reasons` is the server's top three failure categories, so a job that ends
+ * with failures can say what kind rather than just how many.
+ */
+export interface ImportJob {
+    id: number;
+    status: 'pending' | 'running' | 'complete' | 'cancelled' | 'failed' | string;
+    total: number;
+    done: number;
+    imported: number;
+    alreadyOwned: number;
+    failed: number;
+    reasons?: [string, number][];
+    pausedUntil?: string;
+    lastError?: string;
+    updatedAt?: string;
+}
+
+/** Whether a stored Decks of KeyForge key exists — never the key itself. */
+export interface DokLinkStatus {
+    linked?: boolean;
+    autoSync?: boolean;
+    lastSyncedAt?: string;
+    lastError?: string;
+    [key: string]: unknown;
+}
+
+export async function fetchDokLink() {
+    return apiFetch<ApiResponse & { link?: DokLinkStatus }>('/api/decks/import/dok/link');
+}
+
+/**
+ * Import a whole collection with a Decks of KeyForge API key.
+ *
+ * `remember` is deliberately separate from using the key: pasting one to
+ * import once must not quietly enrol somebody in storing their credential on
+ * the server. Same split the website makes.
+ */
+export async function prepareDokImport(options: {
+    dokApiKey: string;
+    remember?: boolean;
+    autoSync?: boolean;
+}) {
+    return apiFetch<ApiResponse & { job?: ImportJob; link?: DokLinkStatus; remembered?: boolean }>(
+        '/api/decks/import/dok/prepare',
+        { method: 'POST', body: options }
+    );
+}
+
+/** Sync again with the key already stored, so a linked account never re-pastes. */
+export async function syncDokNow() {
+    return apiFetch<ApiResponse & { job?: ImportJob }>('/api/decks/import/dok/sync', {
+        method: 'POST'
+    });
+}
+
+export async function forgetDokLink() {
+    return apiFetch<ApiResponse & { link?: DokLinkStatus }>('/api/decks/import/dok/link', {
+        method: 'DELETE'
+    });
+}
+
+/** Queue an arbitrary list of Master Vault ids — the paste box. */
+export async function queueDeckImport(uuids: string[]) {
+    return apiFetch<ApiResponse & { job?: ImportJob }>('/api/decks/import/queue', {
+        method: 'POST',
+        body: { uuids }
+    });
+}
+
+export async function fetchImportStatus() {
+    return apiFetch<ApiResponse & { job?: ImportJob | null }>('/api/decks/import/status');
+}
+
+export async function cancelDeckImport() {
+    return apiFetch<ApiResponse & { cancelled?: boolean }>('/api/decks/import/cancel', {
+        method: 'POST'
+    });
+}
+
+/** Every Master Vault uuid in a blob of pasted text or a CSV export. */
+export function extractDeckUuids(text: string): string[] {
+    const matches =
+        (text || '').match(
+            /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g
+        ) ?? [];
+
+    return [...new Set(matches.map((uuid) => uuid.toLowerCase()))];
+}
+
+// ---- Deck catalog search ----
+
+export interface CatalogDeck {
+    uuid: string;
+    name: string;
+    expansion?: number;
+    houses?: string[];
+    sasRating?: number;
+    owned?: boolean;
+}
+
+/**
+ * Find a deck by name in the Master Vault catalog — deck discovery for players
+ * who do not use Decks of KeyForge at all. They know their deck's name, not
+ * its uuid, and Master Vault has no way to look one up.
+ *
+ * `catalogEmpty` distinguishes "no such deck" from "this server has never run
+ * the crawl", which is the default and otherwise indistinguishable.
+ */
+export async function searchDeckCatalog(query: string, options: { expansion?: number } = {}) {
+    const params = new URLSearchParams();
+    params.set('q', query);
+    if (options.expansion) {
+        params.set('expansion', String(options.expansion));
+    }
+
+    return apiFetch<ApiResponse & { decks?: CatalogDeck[]; catalogEmpty?: boolean }>(
+        `/api/decks/catalog/search?${params.toString()}`
+    );
+}
+
+// ---- Alliance decks ----
+
+export interface AllianceRequest {
+    name: string;
+    /** Exactly three, each "deckUuid:house", with three different houses. */
+    pods: string[];
+    /** WoE and ToC decks bring a token creature; it comes from one chosen deck. */
+    token?: { id: string };
+    tokenSourceDeck?: string;
+    /** Prophecy sets (PV) need one deck named as the prophecy source. */
+    prophecySourceDeck?: string;
+}
+
+export async function createAllianceDeck(body: AllianceRequest) {
+    return apiFetch<ApiResponse & { deck?: Deck }>('/api/decks/alliance', {
+        method: 'POST',
+        body
+    });
+}
+
+// ---- Accolades ----
+
+/** Ask Master Vault for this deck's accolades again (tournament placings). */
+export async function refreshDeckAccolades(id: Deck['id']) {
+    return apiFetch<ApiResponse & { deck?: Deck }>(`/api/decks/${id}/refresh-accolades`, {
+        method: 'POST'
+    });
+}
+
+/** Show or hide one accolade on the deck's card back. */
+export async function setAccoladeShown(id: Deck['id'], accoladeId: string, shown: boolean) {
+    return apiFetch<ApiResponse>(`/api/decks/${id}/accolades/${accoladeId}/shown`, {
+        method: 'POST',
+        body: { shown }
+    });
+}
+
 export interface StandaloneDecksResult extends ApiResponse {
     decks: Deck[];
 }

@@ -96,7 +96,19 @@ export interface Deck {
      */
     sasRating?: number;
     aercScore?: number;
+    /**
+     * Tournament placings Master Vault records against a deck. `shown` is the
+     * owner's choice of which ones ride on the deck's card back.
+     */
+    accolades?: DeckAccolade[];
     [key: string]: unknown;
+}
+
+export interface DeckAccolade {
+    id: string;
+    name: string;
+    image?: string;
+    shown?: boolean;
 }
 
 /** One AERC component of a deck's SAS score, from GET /api/decks/:id. */
