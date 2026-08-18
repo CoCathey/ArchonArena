@@ -353,6 +353,87 @@ describe('set-aware intelligence, against real PostgreSQL', function () {
         });
     });
 
+    describe('sample confidence in the rankings', function () {
+        /**
+         * The rankings sort by win rate with no minimum, which is right for a
+         * table you read top-down and dangerous without a marker: Alice's CotA
+         * deck is 3-0 and sorts above her 4-game 25% one, so the headline
+         * ranking of the tier is led by a deck played three times.
+         *
+         * The service docblock has always said "the UI needs to be able to say
+         * so". This is the field that lets it.
+         */
+        it('flags every row that is too thin to rank on', async function () {
+            if (skipUnlessPg()) {
+                return;
+            }
+
+            const rankings = await intelligence.playerDeckRankings(ALICE, {});
+
+            // Nothing in the seed reaches ten games.
+            expect(rankings.length).toBeGreaterThan(0);
+
+            for (const deck of rankings) {
+                expect(deck.confident).toBe(false);
+                expect(deck.minConfidentGames).toBe(10);
+            }
+        });
+
+        it('agrees with the comparison about what a believable record is', async function () {
+            if (skipUnlessPg()) {
+                return;
+            }
+
+            const rankings = await intelligence.playerDeckRankings(ALICE, {});
+            const comparison = await intelligence.deckComparison(ALICE, [10, 11]);
+
+            // One threshold, or the table and the panel above it can disagree
+            // about the same deck.
+            expect(comparison.minConfidentGames).toBe(rankings[0].minConfidentGames);
+        });
+
+        // The top row really is the 3-0 deck, which is why the marker matters
+        // rather than being a nicety.
+        it('still sorts the thin 100% deck to the top', async function () {
+            if (skipUnlessPg()) {
+                return;
+            }
+
+            const rankings = await intelligence.playerDeckRankings(ALICE, {});
+
+            expect(rankings[0].deckId).toBe(10);
+            expect(rankings[0].winRate).toBe(1);
+            expect(rankings[0].games).toBe(3);
+            expect(rankings[0].confident).toBe(false);
+        });
+    });
+
+    describe('turn order', function () {
+        /**
+         * The deck and player answers to one question arrived in two shapes -
+         * the player one carried `edge`, the deck one made the caller subtract.
+         * Two renderers computing the same gap two ways is how they end up
+         * disagreeing.
+         */
+        it('reports the gap on a deck the same way it does on a player', async function () {
+            if (skipUnlessPg()) {
+                return;
+            }
+
+            const deck = await intelligence.deckByTurnOrder(11, { userId: ALICE });
+            const player = await intelligence.playerByTurnOrder(ALICE, {});
+
+            // WentFirst is not seeded, so both are unavailable - but the shape
+            // has to match either way.
+            expect(Object.prototype.hasOwnProperty.call(deck, 'edge')).toBe(
+                deck.available === true
+            );
+            expect(Object.prototype.hasOwnProperty.call(player, 'edge')).toBe(
+                player.available === true
+            );
+        });
+    });
+
     describe('deck comparison', function () {
         it('compares only decks the caller has actually played, in the order asked', async function () {
             if (skipUnlessPg()) {

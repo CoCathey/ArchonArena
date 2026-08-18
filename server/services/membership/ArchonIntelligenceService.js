@@ -90,11 +90,66 @@ const MIN_CONFIDENT_GAMES = 10;
 /** Side-by-side columns a comparison serves; the work fans out per deck. */
 const MAX_COMPARED_DECKS = 4;
 
+/**
+ * How long a site-wide meta aggregate is held. A minute, matching the stats
+ * endpoints: the meta window is measured in days, so a page that is sixty
+ * seconds behind it is showing the same answer.
+ */
+const META_CACHE_TTL_MS = 60000;
+
 const UNAVAILABLE = (reason) => ({ available: false, reason });
 
 class ArchonIntelligenceService {
-    constructor(db = require('../../db')) {
+    constructor(db = require('../../db'), options = {}) {
         this.db = db;
+        // ARCHON: a TTL cache for the site-wide aggregates only. See `cached`.
+        this.ttlMs = options.ttlMs ?? META_CACHE_TTL_MS;
+        // Injectable clock so cache expiry is deterministic under test, the
+        // same shape StatisticsService uses.
+        this.now = options.now || (() => Date.now());
+        this.cache = new Map();
+    }
+
+    /**
+     * ARCHON: memoise a site-wide aggregate for `ttlMs`.
+     *
+     * Deliberately used ONLY by the meta queries, and that restriction is the
+     * whole design. The meta window is one answer shared by every viewer, so
+     * one player's read warms it for everybody and a minute of staleness on
+     * "what the field played over 30 days" is not a number anybody can act on
+     * differently. Everything else on this page is one person's own record:
+     * caching that would mean holding one account's games in memory keyed by
+     * their id, which is a privacy surface and a correctness problem (a
+     * player who just finished a game expects to see it) in exchange for a
+     * hit rate of roughly zero.
+     *
+     * In-process rather than Redis, matching StatisticsService: several lobby
+     * processes each keeping their own copy of a public aggregate is fine,
+     * and it removes the failure mode where the cache is down and the page is
+     * not.
+     */
+    async cached(key, producer) {
+        const now = this.now();
+        const hit = this.cache.get(key);
+
+        if (hit && hit.expires > now) {
+            return hit.value;
+        }
+
+        const value = await producer();
+
+        // A failed aggregate is never cached: safeQuery degrades to an
+        // unavailable panel, and holding that for a minute would turn one
+        // blip into a minute of blank cards.
+        if (value && value.available !== false) {
+            this.cache.set(key, { value, expires: now + this.ttlMs });
+        }
+
+        return value;
+    }
+
+    clearCache() {
+        this.cache.clear();
     }
 
     /**
@@ -404,10 +459,21 @@ class ArchonIntelligenceService {
             };
         };
 
+        const first = forOrder(true);
+        const second = forOrder(false);
+
         return {
             available: true,
-            first: forOrder(true),
-            second: forOrder(false),
+            first,
+            second,
+            // The gap, and null when one side has no games and a difference
+            // would be a comparison with nothing. Same field, same meaning as
+            // `playerByTurnOrder` - the deck and player answers to one
+            // question should not arrive in two different shapes.
+            edge:
+                first.winRate === null || second.winRate === null
+                    ? null
+                    : first.winRate - second.winRate,
             gamesWithoutData: unknown ? unknown.games : 0
         };
     }
@@ -420,6 +486,16 @@ class ArchonIntelligenceService {
      *
      * Ordered by win rate but carrying the game count, because a 100% win rate
      * over two games is not a ranking and the UI needs to be able to say so.
+     *
+     * Saying so is what `confident` is for. The comment above has been true
+     * since this shipped and the table below it was not acting on it: a 1-0
+     * deck sorted above a 40-game 65% one with nothing to tell them apart, so
+     * the headline ranking of the tier could be led by a deck played once.
+     * Every row now carries the same sample marker the Tournament Lab and the
+     * AERC bands use, and the row order is unchanged - a thin record is
+     * flagged where it sits rather than hidden, because "you have won every
+     * game with this deck" is worth seeing as long as "once" is printed
+     * beside it.
      */
     async playerDeckRankings(userId, { minGames = 1, limit = 100, sets = [] } = {}) {
         const params = [userId];
@@ -469,7 +545,12 @@ class ArchonIntelligenceService {
             winRate: row.games ? row.wins / row.games : null,
             avgKeysAtEnd: row.avgKeys,
             lastPlayed: row.lastPlayed,
-            sas: row.sas
+            sas: row.sas,
+            // The marker the docblock promises. Same threshold as the
+            // Tournament Lab and the comparison, so the three cannot disagree
+            // about which of a player's records is worth believing.
+            confident: row.games >= MIN_CONFIDENT_GAMES,
+            minConfidentGames: MIN_CONFIDENT_GAMES
         }));
     }
 
@@ -920,9 +1001,40 @@ class ArchonIntelligenceService {
     // ---- Meta Intelligence --------------------------------------------------
 
     /**
+     * The three site-wide reads, memoised.
+     *
+     * The cache key carries every argument that changes the answer - the
+     * window and the set filter - so two players looking at different formats
+     * cannot be served each other's numbers. `parseSets` normalises and sorts
+     * nothing, so the codes are sorted here: `sets=800,341` and `sets=341,800`
+     * are the same question and should be one cache entry, not two.
+     */
+    metaCacheKey(name, { days, sets = [] } = {}) {
+        return `${name}:${days}:${[...parseSets(sets)].sort((a, b) => a - b).join(',')}`;
+    }
+
+    async metaHouses({ days = 30, sets = [] } = {}) {
+        return this.cached(this.metaCacheKey('houses', { days, sets }), () =>
+            this.computeMetaHouses({ days, sets })
+        );
+    }
+
+    async metaSummary({ days = 30, sets = [] } = {}) {
+        return this.cached(this.metaCacheKey('summary', { days, sets }), () =>
+            this.computeMetaSummary({ days, sets })
+        );
+    }
+
+    async metaSets({ days = 30 } = {}) {
+        return this.cached(this.metaCacheKey('sets', { days }), () =>
+            this.computeMetaSets({ days })
+        );
+    }
+
+    /**
      * What the field is playing, and how it is doing - site-wide, over a window.
      */
-    async metaHouses({ days = 30, sets = [] } = {}) {
+    async computeMetaHouses({ days = 30, sets = [] } = {}) {
         const params = [Math.max(1, Number(days) || 30)];
         // The most important filter on this page. House prevalence is a
         // property OF a set - each one ships a different distribution - so a
@@ -970,7 +1082,7 @@ class ArchonIntelligenceService {
     }
 
     /** Overall shape of the meta window, for context under the house table. */
-    async metaSummary({ days = 30, sets = [] } = {}) {
+    async computeMetaSummary({ days = 30, sets = [] } = {}) {
         const params = [Math.max(1, Number(days) || 30)];
         const setFilter = setPredicate(parseSets(sets), params, 'd');
 
@@ -1015,7 +1127,7 @@ class ArchonIntelligenceService {
      * predominantly by experienced players will read strong. It is a map of the
      * field, not a power ranking, and the UI says so.
      */
-    async metaSets({ days = 30 } = {}) {
+    async computeMetaSets({ days = 30 } = {}) {
         const rows = await this.safeQuery(
             `SELECT ${SET_COLUMNS}, ` +
                 '  COUNT(*)::int AS "games", ' +
