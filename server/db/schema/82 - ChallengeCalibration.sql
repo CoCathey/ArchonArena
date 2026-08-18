@@ -1,4 +1,4 @@
--- ARCHON (N38): how good the sparring partner actually is.
+-- ARCHON (N39): how good the sparring partner actually is.
 --
 -- Every number the Champion's Challenge shows a member is relative: "this deck
 -- wins 62%". Against what standard of play? The lab could not say. A member

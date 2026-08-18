@@ -6,7 +6,7 @@ const {
 } = require('../../../../server/services/championschallenge/SimulatedGame');
 
 /**
- * ARCHON (N38): the only measurement in the lab that is not relative.
+ * ARCHON (N39): the only measurement in the lab that is not relative.
  *
  * The title fight proves a candidate beats the LAST champion. The persona duels
  * prove the three pilots are of comparable strength. A deck's win rate is

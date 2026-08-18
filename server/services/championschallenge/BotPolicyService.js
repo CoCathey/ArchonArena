@@ -2,6 +2,8 @@ const logger = require('../../log');
 const { emptyModel, trainModel } = require('./labPolicy');
 const { sprt, wilsonInterval } = require('./labMath');
 const { personaByKey, duelPairKey } = require('./labPersonas');
+const { withCardPriors, stripCardPriors } = require('./cardPriors');
+const { sectionDefaults } = require('../settings/registry');
 
 /**
  * ARCHON (N21): the learning loop's bookkeeping - training diary, candidate
@@ -39,7 +41,39 @@ class BotPolicyService {
         this.championCache = { model: null, at: 0 };
     }
 
-    /** The reigning model, or null while the heuristics still hold the title. */
+    /**
+     * ARCHON (N38): how strongly the card-text priors pull, from the admin
+     * knob. Composed from registry defaults the way getSectionWithDefaults
+     * does, so a stubbed settings service in a spec reads as the defaults
+     * rather than as an error. Zero (or a broken read) means priors off.
+     */
+    priorWeight() {
+        try {
+            const section = {
+                ...sectionDefaults('championsChallenge'),
+                ...((this.settingsService.getSection &&
+                    this.settingsService.getSection('championsChallenge')) ||
+                    {})
+            };
+            const weight = Number(section.cardPriorWeight);
+
+            return Number.isFinite(weight) && weight > 0 ? weight : 0;
+        } catch (err) {
+            logger.error('Challenge bot: could not read the card prior weight', err);
+
+            return 0;
+        }
+    }
+
+    /**
+     * The reigning model, or null while the heuristics still hold the title.
+     *
+     * ARCHON (N38): priors attach HERE, at load - every consumer (sparring,
+     * arena, personas, the practice bots) goes through this method or through
+     * candidate(), so attaching at the two doors keeps play and training
+     * scoring with the same brain. Stored rows never carry priors; the file
+     * is the source of truth (see cardPriors.js).
+     */
     async champion() {
         const now = Date.now();
 
@@ -51,8 +85,9 @@ class BotPolicyService {
             'SELECT "Model" FROM "BotPolicies" WHERE "Status" = \'champion\' ' +
                 'ORDER BY "Version" DESC LIMIT 1'
         );
+        const model = rows && rows[0] ? rows[0].Model : null;
 
-        this.championCache = { model: rows && rows[0] ? rows[0].Model : null, at: now };
+        this.championCache = { model: withCardPriors(model, this.priorWeight()), at: now };
 
         return this.championCache.model;
     }
@@ -64,8 +99,16 @@ class BotPolicyService {
                 'FROM "BotPolicies" WHERE "Status" = \'candidate\' ' +
                 'ORDER BY "Version" DESC LIMIT 1'
         );
+        const row = rows && rows[0] ? rows[0] : null;
 
-        return rows && rows[0] ? rows[0] : null;
+        if (row) {
+            // The same door as champion(): a candidate trained with priors
+            // must also FIGHT with them, or the arena measures a brain nobody
+            // will ever play.
+            row.Model = withCardPriors(row.Model, this.priorWeight());
+        }
+
+        return row;
     }
 
     /**
@@ -123,7 +166,10 @@ class BotPolicyService {
             winnerSide: row.WinnerSide,
             decisions: row.Decisions || []
         }));
-        const base = (await this.champion()) || emptyModel();
+        // champion() arrives with priors attached; the very first candidate
+        // (no champion yet) gets them attached to the blank slate, so version
+        // one already knows what the cards say.
+        const base = (await this.champion()) || withCardPriors(emptyModel(), this.priorWeight());
         // lambda: how far a label leans on the value of what came next rather
         // than on the final result alone (labPolicy.decisionTarget).
         // targetWeight: how much harder a decision the deep bot MEASURED
@@ -150,7 +196,14 @@ class BotPolicyService {
         const inserted = await this.db.query(
             'INSERT INTO "BotPolicies" ("Version", "Status", "Model", "TrainedGames", "CreatedAt") ' +
                 "VALUES ($1, 'candidate', $2, $3, now() AT TIME ZONE 'utc') RETURNING \"Id\"",
-            [version, JSON.stringify(trained), trained.trainedGames || games.length]
+            // Stored WITHOUT priors: the file is the source of truth, and a
+            // copy in the row would go stale while looking authoritative.
+            // candidate()/champion() re-attach at every load.
+            [
+                version,
+                JSON.stringify(stripCardPriors(trained)),
+                trained.trainedGames || games.length
+            ]
         );
 
         logger.info(`Challenge bot: trained candidate v${version} on ${games.length} games`);
@@ -373,7 +426,7 @@ class BotPolicyService {
     // -------------------------------------------------- the calibration ladder
 
     /**
-     * ARCHON (N38): record one calibrated result for the current champion.
+     * ARCHON (N39): record one calibrated result for the current champion.
      *
      * Kept per champion version rather than as a running total. A ladder that
      * pooled every model the loop has ever promoted would smear a regression

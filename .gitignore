@@ -39,6 +39,9 @@ server/logs/*.gz
 build/
 !tsconfig.json
 data
+# The challenge bot's committed data files (card priors) live under a
+# directory that would otherwise match the bare `data` rule above.
+!server/services/championschallenge/data/
 mongodb
 keyteki-json-data
 

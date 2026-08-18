@@ -67,6 +67,11 @@
         apiKey: 'DOK_API_KEY'
     },
 
+    anthropic: {
+        apiKey: 'ANTHROPIC_API_KEY',
+        model: 'ANTHROPIC_MODEL'
+    },
+
     patreon: {
         // __format json so PATREON_ENABLED=false arrives as the boolean false
         // rather than the string "false", which is truthy.

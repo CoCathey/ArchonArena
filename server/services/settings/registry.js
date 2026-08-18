@@ -557,6 +557,68 @@ const REGISTRY = {
                 max: 50,
                 default: 8
             },
+            // ARCHON (N38): what shrinkage shrinks toward. The model's per-card
+            // weights start at zero - "an unseen card is average" - and stay
+            // shrunk toward zero for a card's first ~20 sightings. With a
+            // generated priors file (scripts/generate-card-priors.js, committed
+            // as data/cardPriors.json) an unseen card starts instead from what
+            // its printed text suggests, and the evidence takes over on the
+            // same schedule zero used to. This is the logit value of a
+            // perfect-10 card; zero switches priors off without touching the
+            // file, and a server without the file plays as it always has.
+            cardPriorWeight: {
+                type: 'number',
+                label: 'How strongly card-text priors guide unseen cards (0 = off)',
+                min: 0,
+                max: 1,
+                default: 0.25
+            },
+            // ARCHON (N38): the AI teacher - an LLM that reviews a small
+            // weekly budget of sampled positions and coaches the bot. Off by
+            // default: it spends real money (cents, but somebody's cents) and
+            // needs the ANTHROPIC_API_KEY environment variable; without the
+            // key the switch does nothing. Its lessons only enter the diary
+            // while its recent agreement with the deep bot's measurements
+            // clears the bar below - an unproven teacher just sits exams.
+            llmTeacherEnabled: {
+                type: 'boolean',
+                label: 'AI teacher: review sampled positions with an LLM (needs ANTHROPIC_API_KEY)',
+                default: false
+            },
+            llmPositionsPerDay: {
+                type: 'number',
+                label: 'Positions captured from games per day for the AI teacher',
+                min: 0,
+                max: 200,
+                default: 12
+            },
+            llmReviewsPerWeek: {
+                type: 'number',
+                // The token budget, in the only unit that matters: one review
+                // is one small API request (~1k tokens). 25 a week is pennies.
+                label: 'Positions the AI teacher reviews per week (the token budget)',
+                min: 0,
+                max: 1000,
+                default: 25
+            },
+            llmTargetWeight: {
+                type: 'number',
+                // Deliberately below trainingTargetWeight: the deep bot
+                // MEASURED its targets by playing them out, the teacher
+                // ESTIMATED its own - a proven teacher still speaks with less
+                // authority than an experiment.
+                label: 'How hard an AI-taught decision pulls in training',
+                min: 0,
+                max: 50,
+                default: 3
+            },
+            llmMinAgreement: {
+                type: 'number',
+                label: 'Agreement with the deep bot required before AI lessons count (0-1)',
+                min: 0,
+                max: 1,
+                default: 0.5
+            },
             arenaMinGames: {
                 type: 'number',
                 // ARCHON (N25): a floor under the sequential test, not a sample
@@ -607,7 +669,7 @@ const REGISTRY = {
                 max: 10,
                 default: 1
             },
-            // ARCHON (N38): the champion against opponents that never learn -
+            // ARCHON (N39): the champion against opponents that never learn -
             // the heuristic bot it replaced, each persona, and the searching
             // bot it was distilled from. Every other measurement in the lab is
             // relative; this is the only one that says whether the sparring

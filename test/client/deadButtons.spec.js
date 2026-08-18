@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * ARCHON (N38): buttons that navigate nowhere.
+ * ARCHON (N39): buttons that navigate nowhere.
  *
  * HeroUI's Button renders a plain <button> and forwards neither `href` nor
  * `as`. So `<HeroButton as={Link} to='/somewhere'>` compiles, renders, styles

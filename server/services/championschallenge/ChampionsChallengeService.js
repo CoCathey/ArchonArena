@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 
 const AriService = require('../rating/AriService');
 const BotPolicyService = require('./BotPolicyService');
+const LlmTeacherService = require('./LlmTeacherService');
 const GauntletService = require('./GauntletService');
 const VaultTourService = require('./VaultTourService');
 const DeckService = require('../DeckService');
@@ -86,6 +87,12 @@ class ChampionsChallengeService {
         this.ariService = new AriService(db);
         // ARCHON (N21): the learning loop's diary, candidates and champion.
         this.policyService = new BotPolicyService(configService, db, settingsService);
+        // ARCHON (N38): the AI teacher - samples positions from the games the
+        // sweep plays and, on a small weekly token budget, has an LLM review
+        // them; validated lessons go into the same diary.
+        this.llmTeacherService = new LlmTeacherService(configService, db, settingsService, {
+            policyService: this.policyService
+        });
         // ARCHON (N24): the Gauntlet - foreign decks drawn from the Master
         // Vault catalog. Its hydrator parses Master Vault responses with the
         // member-facing importer's own parser, handed a card index read from
@@ -118,7 +125,7 @@ class ChampionsChallengeService {
         // every pair is measured about equally often rather than the first pair
         // being measured every time.
         this.duelCursor = 0;
-        // ARCHON (N38): which calibration rung the next pair measures. A cursor
+        // ARCHON (N39): which calibration rung the next pair measures. A cursor
         // rather than a random pick so every reference opponent accumulates
         // games at the same rate, and the ladder does not end up with one rung
         // confidently measured and the rest at three games each.
@@ -538,6 +545,13 @@ class ChampionsChallengeService {
         // one bot's blind spots - and the spread across the three says whether
         // the deck's result depends on the opponent's plan.
         const styling = this.personaStyling(config, championModel);
+        // ARCHON (N38): the AI teacher's capture budget for today, shared by
+        // every sampler this sweep creates. Null while the teacher is off -
+        // and capture is free either way; only reviews spend tokens.
+        const teacherBudget =
+            learning && this.llmTeacherService.isEnabled()
+                ? await this.llmTeacherService.captureBudget()
+                : null;
 
         // Rosters are visited round-robin in a shuffled order - one game per
         // member per pass - so one member's full queue cannot starve
@@ -673,6 +687,17 @@ class ChampionsChallengeService {
                 // exhibition of deliberately stylised play would be a strange
                 // thing to hold up as what the bot can do.
                 const persona = playDeep ? null : styling.next();
+                // ARCHON (N38): the AI teacher's sampler for this game, when
+                // there is capture budget left. In a fast game it watches
+                // through the analyzer hook and never steers; in a deep game
+                // it keeps analyzed decisions WITH their measured values.
+                const sampler =
+                    teacherBudget && teacherBudget.remaining > 0
+                        ? this.llmTeacherService.gameSampler({
+                              policyVersion: championVersion,
+                              budget: teacherBudget
+                          })
+                        : null;
                 let result;
 
                 try {
@@ -689,7 +714,8 @@ class ChampionsChallengeService {
                               maxAnalyzedDecisions: config.deepMaxAnalyzedDecisions,
                               candidatesCap: config.deepCandidates,
                               samplesPerCandidate: config.deepSamples,
-                              rolloutTurns: config.deepRolloutTurns
+                              rolloutTurns: config.deepRolloutTurns,
+                              positionRecorder: sampler ? sampler.deepRecorder : undefined
                           })
                         : await this.runMatch(alpha.deck, omega.deck, {
                               seed: this.newSeed(),
@@ -705,7 +731,8 @@ class ChampionsChallengeService {
                               // that never tries second-best moves can never
                               // learn which ones were actually best.
                               temperature,
-                              recordDecisions: learning
+                              recordDecisions: learning,
+                              analyzer: sampler ? sampler.analyzer : undefined
                           });
                 } catch (err) {
                     logger.error(
@@ -727,6 +754,13 @@ class ChampionsChallengeService {
                 }
 
                 await this.recordGame(userId, result, persona);
+
+                // ARCHON (N38): whatever the sampler kept, labelled by who
+                // won - abandoned games never reach this line, so a position
+                // is always a moment from a real, finished game.
+                if (sampler) {
+                    await sampler.flush(result.winner);
+                }
 
                 // The diary: this game's decisions, labeled by its outcome.
                 if (learning && result.decisions && result.decisions.length) {
@@ -802,6 +836,18 @@ class ChampionsChallengeService {
             }
         }
 
+        // ARCHON (N38): the AI teacher spends a slice of its weekly review
+        // budget. Fully self-gating - the admin switch, a missing key, a
+        // spent budget or an API outage each degrade to "reviewed nothing",
+        // and the loop keeps learning the way it always did.
+        if (learning) {
+            try {
+                await this.llmTeacherService.reviewPending();
+            } catch (err) {
+                logger.error('Challenge AI teacher: review step failed', err);
+            }
+        }
+
         // ARCHON (N32): the Vault Tour - the slates, against the field somebody
         // won tournaments with. Its own budget and its own record, so it neither
         // competes with the roster's games nor touches ARI.
@@ -822,7 +868,7 @@ class ChampionsChallengeService {
             }
         }
 
-        // ARCHON (N38): and measure the champion against opponents that cannot
+        // ARCHON (N39): and measure the champion against opponents that cannot
         // improve, so every relative number on the page has something absolute
         // behind it. Both rungs are best effort: a calibration that fails is a
         // missing measurement, never a missing sweep.
@@ -1440,7 +1486,7 @@ class ChampionsChallengeService {
     }
 
     /**
-     * ARCHON (N38): measure the champion against opponents that never learn.
+     * ARCHON (N39): measure the champion against opponents that never learn.
      *
      * The Challenge tells a member "this deck wins 62%", and until now nothing
      * anywhere said against what standard of play. Every existing measurement

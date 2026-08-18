@@ -796,7 +796,7 @@ const RUNGS = [
 ];
 
 /**
- * ARCHON (N38): how good the sparring partner is.
+ * ARCHON (N39): how good the sparring partner is.
  *
  * Every other number on this page is relative - "your deck wins 62%" - and
  * until now nothing said against what standard of play. A member could not tell
