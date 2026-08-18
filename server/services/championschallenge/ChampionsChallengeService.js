@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 
 const AriService = require('../rating/AriService');
 const BotPolicyService = require('./BotPolicyService');
+const LlmTeacherService = require('./LlmTeacherService');
 const GauntletService = require('./GauntletService');
 const VaultTourService = require('./VaultTourService');
 const DeckService = require('../DeckService');
@@ -86,6 +87,12 @@ class ChampionsChallengeService {
         this.ariService = new AriService(db);
         // ARCHON (N21): the learning loop's diary, candidates and champion.
         this.policyService = new BotPolicyService(configService, db, settingsService);
+        // ARCHON (N38): the AI teacher - samples positions from the games the
+        // sweep plays and, on a small weekly token budget, has an LLM review
+        // them; validated lessons go into the same diary.
+        this.llmTeacherService = new LlmTeacherService(configService, db, settingsService, {
+            policyService: this.policyService
+        });
         // ARCHON (N24): the Gauntlet - foreign decks drawn from the Master
         // Vault catalog. Its hydrator parses Master Vault responses with the
         // member-facing importer's own parser, handed a card index read from
@@ -532,6 +539,13 @@ class ChampionsChallengeService {
         // one bot's blind spots - and the spread across the three says whether
         // the deck's result depends on the opponent's plan.
         const styling = this.personaStyling(config, championModel);
+        // ARCHON (N38): the AI teacher's capture budget for today, shared by
+        // every sampler this sweep creates. Null while the teacher is off -
+        // and capture is free either way; only reviews spend tokens.
+        const teacherBudget =
+            learning && this.llmTeacherService.isEnabled()
+                ? await this.llmTeacherService.captureBudget()
+                : null;
 
         // Rosters are visited round-robin in a shuffled order - one game per
         // member per pass - so one member's full queue cannot starve
@@ -667,6 +681,17 @@ class ChampionsChallengeService {
                 // exhibition of deliberately stylised play would be a strange
                 // thing to hold up as what the bot can do.
                 const persona = playDeep ? null : styling.next();
+                // ARCHON (N38): the AI teacher's sampler for this game, when
+                // there is capture budget left. In a fast game it watches
+                // through the analyzer hook and never steers; in a deep game
+                // it keeps analyzed decisions WITH their measured values.
+                const sampler =
+                    teacherBudget && teacherBudget.remaining > 0
+                        ? this.llmTeacherService.gameSampler({
+                              policyVersion: championVersion,
+                              budget: teacherBudget
+                          })
+                        : null;
                 let result;
 
                 try {
@@ -683,7 +708,8 @@ class ChampionsChallengeService {
                               maxAnalyzedDecisions: config.deepMaxAnalyzedDecisions,
                               candidatesCap: config.deepCandidates,
                               samplesPerCandidate: config.deepSamples,
-                              rolloutTurns: config.deepRolloutTurns
+                              rolloutTurns: config.deepRolloutTurns,
+                              positionRecorder: sampler ? sampler.deepRecorder : undefined
                           })
                         : await this.runMatch(alpha.deck, omega.deck, {
                               seed: this.newSeed(),
@@ -699,7 +725,8 @@ class ChampionsChallengeService {
                               // that never tries second-best moves can never
                               // learn which ones were actually best.
                               temperature,
-                              recordDecisions: learning
+                              recordDecisions: learning,
+                              analyzer: sampler ? sampler.analyzer : undefined
                           });
                 } catch (err) {
                     logger.error(
@@ -721,6 +748,13 @@ class ChampionsChallengeService {
                 }
 
                 await this.recordGame(userId, result, persona);
+
+                // ARCHON (N38): whatever the sampler kept, labelled by who
+                // won - abandoned games never reach this line, so a position
+                // is always a moment from a real, finished game.
+                if (sampler) {
+                    await sampler.flush(result.winner);
+                }
 
                 // The diary: this game's decisions, labeled by its outcome.
                 if (learning && result.decisions && result.decisions.length) {
@@ -793,6 +827,18 @@ class ChampionsChallengeService {
                 await this.runArenaStep(config);
             } catch (err) {
                 logger.error('Challenge bot: arena step failed', err);
+            }
+        }
+
+        // ARCHON (N38): the AI teacher spends a slice of its weekly review
+        // budget. Fully self-gating - the admin switch, a missing key, a
+        // spent budget or an API outage each degrade to "reviewed nothing",
+        // and the loop keeps learning the way it always did.
+        if (learning) {
+            try {
+                await this.llmTeacherService.reviewPending();
+            } catch (err) {
+                logger.error('Challenge AI teacher: review step failed', err);
             }
         }
 

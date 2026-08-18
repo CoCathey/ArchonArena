@@ -55,17 +55,27 @@ function emptyModel() {
  * happened to appear in three winning games outranks one measured over
  * thousands - which is the same mistake the hidden-gem badge refuses to make
  * with decks, applied to the model's own parameters.
+ *
+ * ARCHON (N38): shrinkage now has somewhere to shrink TO. Zero was always a
+ * statement - "an unseen card is average" - and for the first twenty sightings
+ * of every one of thousands of cards, the statement was doing the scoring. A
+ * model may now carry `cardPriors` (from the one-time card reading job, see
+ * cardPriors.js): a card with no games behind it contributes its prior, and
+ * every observed game moves the contribution from what the text suggested
+ * toward what the games measured. The evidence still wins; it just no longer
+ * starts from a shrug.
  */
 const SHRINK_PRIOR = 20;
 
-function shrink(weight, count) {
-    if (!weight) {
+function shrink(weight, count, prior = 0) {
+    if (!weight && !prior) {
         return 0;
     }
 
     const seen = count || 0;
+    const confidence = seen / (seen + SHRINK_PRIOR);
 
-    return weight * (seen / (seen + SHRINK_PRIOR));
+    return prior + ((weight || 0) - prior) * confidence;
 }
 
 /**
@@ -87,7 +97,11 @@ function scoreDecision(model, decision) {
     }
 
     if (decision.cardId) {
-        z += shrink(model.cardWeights[decision.cardId], (model.cardCounts || {})[decision.cardId]);
+        z += shrink(
+            model.cardWeights[decision.cardId],
+            (model.cardCounts || {})[decision.cardId],
+            (model.cardPriors || {})[decision.cardId] || 0
+        );
     }
 
     if (decision.promptKey) {
@@ -172,7 +186,14 @@ function trainModel(
         promptWeights: { ...(model.promptWeights || {}) },
         cardCounts: { ...(model.cardCounts || {}) },
         promptCounts: { ...(model.promptCounts || {}) },
-        trainedGames: (model.trainedGames || 0) + games.length
+        trainedGames: (model.trainedGames || 0) + games.length,
+        // ARCHON (N38): priors ride along so training predictions score the
+        // way play will - a card weight learned against its prior is a
+        // CORRECTION to the prior, and correcting against nothing would leave
+        // the two double-counting at play time. Shared by reference: priors
+        // are read-only here, and the service strips them before a model is
+        // stored (the file is the source of truth, not the row).
+        ...(model.cardPriors ? { cardPriors: model.cardPriors } : {})
     };
     // Frozen for the whole batch: a bootstrapped target computed from the
     // weights currently being updated would chase its own tail.
@@ -181,7 +202,8 @@ function trainModel(
         cardWeights: { ...model.cardWeights },
         promptWeights: { ...(model.promptWeights || {}) },
         cardCounts: { ...(model.cardCounts || {}) },
-        promptCounts: { ...(model.promptCounts || {}) }
+        promptCounts: { ...(model.promptCounts || {}) },
+        ...(model.cardPriors ? { cardPriors: model.cardPriors } : {})
     };
     const valueOf = (state) => scoreState(frozen, state);
 
@@ -235,8 +257,21 @@ function trainModel(
                  * inflating them would under-shrink a card seen once.
                  */
                 const measured = typeof decision.target === 'number';
+                // ARCHON (N38): a lesson may carry its own pull. The deep
+                // bot's rows all deserve `targetWeight` because they were all
+                // measured the same way; the LLM teacher's rows carry an
+                // explicit `weight` set from how well that teacher has been
+                // agreeing with the deep bot's measurements - a provisional
+                // teacher pulls gently, a proven one harder, and the dial
+                // lives with the evidence for it rather than in this file.
+                const pull =
+                    typeof decision.weight === 'number' && decision.weight >= 0
+                        ? decision.weight
+                        : measured
+                        ? targetWeight
+                        : 1;
                 // Logistic loss gradient: (p - y) times each feature.
-                const gradient = (predicted - label) * (measured ? targetWeight : 1);
+                const gradient = (predicted - label) * pull;
 
                 for (const [key, value] of Object.entries(decision.state || {})) {
                     const weightKey = `s:${key}`;

@@ -23,6 +23,7 @@
         "lint:fix": "prettier --write --ignore-unknown '!**/*.{js,jsx,ts,tsx}' . && eslint --fix --ext=js,jsx,ts,tsx .",
         "build": "vite build --config vite.config.mjs",
         "typecheck:client": "tsc -p client/tsconfig.json --noEmit",
+        "card-priors": "node server/scripts/generate-card-priors.js",
         "migrate": "node server/scripts/migrate.js",
         "sync:upstream": "node server/scripts/upstream-sync.js",
         "check:email": "node server/scripts/check-email.js",
@@ -56,6 +57,7 @@
     },
     "homepage": "https://archonarena.com",
     "dependencies": {
+        "@anthropic-ai/sdk": "^0.117.1",
         "@aws-sdk/client-sesv2": "^3.887.0",
         "@fortawesome/fontawesome-svg-core": "^7.2.0",
         "@fortawesome/free-solid-svg-icons": "^7.2.0",

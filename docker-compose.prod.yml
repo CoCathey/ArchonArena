@@ -60,6 +60,9 @@ services:
             - SENTRY_DSN=${SENTRY_DSN:-}
             - CAPTCHA_KEY=${CAPTCHA_KEY:-}
             - DOK_API_KEY=${DOK_API_KEY:-}
+            # ARCHON (N38): the Champion's Challenge AI teacher's key. Unset
+            # means the teacher is off and the bot learns from self-play only.
+            - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
             # ARCHON: transactional email. These were documented in
             # .env.production.example but never forwarded here, so nothing set on
             # the server reached the app. That was invisible rather than loud:

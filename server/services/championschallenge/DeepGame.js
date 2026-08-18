@@ -56,6 +56,11 @@ class DeepGame {
         this.rolloutTurns = options.rolloutTurns || 6;
         this.maxTurns = options.maxTurns || 80;
 
+        // ARCHON (N38): an observer for analyzed decisions - the AI teacher's
+        // sampler, keeping (position, candidates, measured values) together
+        // as calibration material. Never steers; failures never cost a game.
+        this.positionRecorder = options.positionRecorder || null;
+
         this.analyzed = 0;
         this.forksPlayed = 0;
         this.forksFailed = 0;
@@ -145,6 +150,14 @@ class DeepGame {
 
         if (!scored.length) {
             return null;
+        }
+
+        if (this.positionRecorder) {
+            try {
+                this.positionRecorder({ game, player, kind, candidates, scored });
+            } catch (err) {
+                // An observer must never cost the game it is observing.
+            }
         }
 
         const best = scored.reduce((a, b) => (b.winProb > a.winProb ? b : a));
