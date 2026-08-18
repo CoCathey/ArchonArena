@@ -94,7 +94,12 @@ function seatViewFromFrame(player, cards) {
         if (identity.type === 'creature') {
             creatures.push({
                 power: typeof entry.power === 'number' ? entry.power : identity.power || 0,
-                exhausted: !!entry.exhausted
+                exhausted: !!entry.exhausted,
+                // ARCHON (N41): captured amber, when the recording carries the
+                // token counts. A frame without them reads as zero, which is
+                // the graceful half of the N26 parity contract - a missing
+                // fact must degrade a feature, never invent one.
+                amber: (entry.tokens && entry.tokens.amber) || 0
             });
         } else if (identity.type === 'artifact') {
             artifacts++;

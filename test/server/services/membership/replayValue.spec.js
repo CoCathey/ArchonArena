@@ -161,7 +161,7 @@ describe('replay win probability', function () {
                 'me'
             );
 
-            expect(view.me.creatures).toEqual([{ power: 7, exhausted: false }]);
+            expect(view.me.creatures).toEqual([{ power: 7, exhausted: false, amber: 0 }]);
         });
 
         it('counts a per-colour key map the way the engine counts keys', function () {

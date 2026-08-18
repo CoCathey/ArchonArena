@@ -2543,6 +2543,32 @@ as a dropdown and as nothing else.
 -   [x] A practice game against a styled bot records which style.
 -   [x] An ordinary game between two people claims no style.
 
+#### N41 — Board sense _(done)_
+
+**Why:** the model class caps intelligence at what the features let it see, and three classic
+KeyForge facts were invisible: eight 1-power tokens and one giant summed to the same board,
+amber captured on creatures appeared nowhere, and "a wipe is waiting in my hand" — the ordering
+question every turn asks — was an identical state to every non-wipe candidate.
+
+**Tasks**
+
+-   [x] **Board quality.** `myMaxPower`/`oppMaxPower`: the single biggest body on each side —
+        the fight that cannot be won and the removal target that decides the game.
+-   [x] **Captured amber.** `myCapturedAmber`/`oppCapturedAmber`: bounty on their board (kill
+        the body, collect the amber), liability on ours. Read from token counts in both view
+        builders; a recording without them degrades to zero rather than inventing a fact.
+-   [x] **The wipe in hand, and the bounty.** Two new contexts, crossed with every action kind
+        the way N25's were: `wipeInHand` (via the platform's own BOARD_WIPE classifier) lets
+        `x:playCreature:wipeInHand` go negative without touching what playing creatures is
+        worth; `bountyOnBoard` lets a kill that also collects rank above a kill that trades.
+
+**Acceptance criteria**
+
+-   [x] Keys are added, never renamed: old models read new features as absent, new models read
+        old diary rows the same way, and no migration touches a stored brain.
+-   [x] Engine seat and recorded frame produce the same view (the N26 parity contract).
+-   [x] A stand-in seat with no hand and no opponent computes calmly.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

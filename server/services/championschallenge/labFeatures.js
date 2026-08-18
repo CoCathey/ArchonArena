@@ -38,7 +38,7 @@ const { ROLES, rolesFor } = require('../membership/cardKnowledge');
  *
  * A view is:
  *   { round, me: SEAT, them: SEAT|null }
- *   SEAT = { amber, keys, keyCost, creatures: [{power, exhausted}],
+ *   SEAT = { amber, keys, keyCost, creatures: [{power, exhausted, amber}],
  *            artifacts, hand, archives, deck }
  * where `artifacts`, `hand`, `archives` and `deck` are COUNTS - a replay knows
  * how many cards a deck holds but not which, and the model never needed to know.
@@ -51,6 +51,11 @@ function stateFeaturesFrom({ round, me, them }) {
     const oppCreatures = (them && them.creatures) || [];
     const myPower = myCreatures.reduce((sum, c) => sum + (c.power || 0), 0);
     const oppPower = oppCreatures.reduce((sum, c) => sum + (c.power || 0), 0);
+    // ARCHON (N41): board sense. Quality and bounty, not just quantity -
+    // computed here so both view builders (engine and replay) get them for
+    // free from the creature lists they already carry.
+    const maxPower = (creatures) => creatures.reduce((max, c) => Math.max(max, c.power || 0), 0);
+    const captured = (creatures) => creatures.reduce((sum, c) => sum + (c.amber || 0), 0);
     const myKeys = me.keys || 0;
     const oppKeys = (them && them.keys) || 0;
     const myCost = me.keyCost;
@@ -75,6 +80,24 @@ function stateFeaturesFrom({ round, me, them }) {
         myPower: Math.min(1, myPower / 30),
         oppPower: Math.min(1, oppPower / 30),
         powerDiff: clamp11((myPower - oppPower) / 20),
+        /**
+         * ARCHON (N41): the board's QUALITY, not just its totals. Eight
+         * 1-power tokens and one giant summed the same to this model, and
+         * they are opposite boards: the giant is the fight that cannot be
+         * won and the removal target that decides the game. The single
+         * biggest body on each side is the coarsest honest measure of that.
+         */
+        myMaxPower: Math.min(1, maxPower(myCreatures) / 12),
+        oppMaxPower: Math.min(1, maxPower(oppCreatures) / 12),
+        /**
+         * ARCHON (N41): amber sitting ON creatures, which the pools never
+         * showed. Amber captured on an ENEMY creature is a bounty - kill the
+         * body, collect the amber - and on a FRIENDLY one a liability paid
+         * out to the opponent the moment it dies. Both change what a fight,
+         * a removal target and a race are worth, and both were invisible.
+         */
+        myCapturedAmber: Math.min(1, captured(myCreatures) / 6),
+        oppCapturedAmber: Math.min(1, captured(oppCreatures) / 6),
         myArtifacts: Math.min(1, (me.artifacts || 0) / 5),
         myHand: Math.min(1, (me.hand || 0) / 10),
         oppHand: them ? Math.min(1, (them.hand || 0) / 10) : 0,
@@ -111,7 +134,10 @@ function seatView(player) {
         keyCost: player.getCurrentKeyCost(),
         creatures: (player.creaturesInPlay || []).map((card) => ({
             power: card.power,
-            exhausted: !!card.exhausted
+            exhausted: !!card.exhausted,
+            // ARCHON (N41): captured amber rides on the card's tokens. Public
+            // information - it sits on the table for both players to count.
+            amber: (card.tokens && card.tokens.amber) || 0
         })),
         artifacts: (player.cardsInPlay || []).filter((card) => card.type === 'artifact').length,
         hand: player.hand.length,
@@ -260,7 +286,35 @@ const ACTION_CONTEXTS = {
     deckAmber: (player) =>
         deckShare(player, (card) => ((card.cardData && card.cardData.amber) || 0) > 0) >= 0.25,
     deckControl: (player) =>
-        deckShare(player, (card) => rolesFor(card.id).has(ROLES.AMBER_CONTROL)) >= 0.1
+        deckShare(player, (card) => rolesFor(card.id).has(ROLES.AMBER_CONTROL)) >= 0.1,
+    /**
+     * ARCHON (N41): a board wipe is waiting in this hand.
+     *
+     * The ordering question every KeyForge turn asks - creatures first or
+     * the sweeper first - was invisible from the CREATURE's side. The role
+     * crosses (x:boardWipe:...) already teach when playing the wipe itself
+     * is right, but "dump my board now" and "hold, I am about to wipe" were
+     * identical states to every OTHER candidate. Crossed with the kind,
+     * this is the weight that lets x:playCreature:wipeInHand go negative
+     * without touching what playing creatures is worth in general.
+     *
+     * Deliberately not gated on the active house: a wipe playable only next
+     * turn still argues against overextending into it this turn.
+     */
+    wipeInHand: (player) =>
+        (player.hand || []).some((card) => rolesFor(card.id).has(ROLES.BOARD_WIPE)),
+    /**
+     * ARCHON (N41): an enemy creature is carrying captured amber.
+     *
+     * A kill that also collects is a different move from a kill that only
+     * trades - crossed with fight and select, this is how the model can
+     * learn to send removal at the piggy bank.
+     */
+    bountyOnBoard: (player) =>
+        !!player.opponent &&
+        (player.opponent.creaturesInPlay || []).some(
+            (card) => ((card.tokens && card.tokens.amber) || 0) > 0
+        )
 };
 
 /** What fraction of the cards still to be drawn answer to `test`. */
