@@ -556,6 +556,10 @@ class PendingGame {
             started: this.started,
             startingChains: this.startingChains,
             swap: this.swap,
+            // ARCHON: the node greets a rematch with "The rematch is ready",
+            // and never got to - `onStartGame` reads this flag off the start
+            // details and the start details did not carry it.
+            rematch: this.rematch,
             tournament: this.tournament,
             useGameTimeLimit: this.useGameTimeLimit
         };

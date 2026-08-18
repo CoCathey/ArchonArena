@@ -1650,6 +1650,42 @@ class Lobby {
             return;
         }
 
+        // ARCHON: a socket that has already been replaced is not a player
+        // leaving.
+        //
+        // A lobby connection can be superseded while the old one is still
+        // open: a network blip reconnects the client in a second or two, but
+        // the server does not declare the old socket dead until its ping
+        // times out, which is much later. A second tab does the same thing
+        // deliberately. When that late `disconnect` finally arrived, this
+        // handler tore down the user's CURRENT state - it deleted
+        // `socketsByName[username]` and `users[username]`, and announced them
+        // as gone - even though they were sitting right there on a live
+        // socket, and nothing ever put them back.
+        //
+        // The visible cost was the rematch. `rematchSeating` looks players up
+        // by name, so the moment that entry was missing the rematch was
+        // refused as "no longer connected" - and refusing means the game node
+        // has already torn the finished game down, so both players land back
+        // at a pending table having pressed Rematch and been dropped out of
+        // their game. The deck swap they had just agreed to went with it.
+        //
+        // It also removed them from a table they were still sitting at, and
+        // from the online user list, both for the rest of the session.
+        //
+        // The game node has guarded against exactly this since it was written
+        // (see `supersededSocket` in gameserver.seatConnection); the lobby
+        // never did.
+        const current = this.socketsByName[socket.user.username];
+
+        if (current && current !== socket) {
+            logger.info(
+                `ignoring the disconnect of ${socket.user.username}'s superseded lobby socket: ${reason}`
+            );
+
+            return;
+        }
+
         this.matchmaking?.dequeue(socket.user.username);
 
         this.broadcastUserMessage(socket.user, 'userleft');
@@ -3332,9 +3368,12 @@ class Lobby {
                 continue;
             }
 
-            const socket = this.socketsByName[player.name];
+            // By name first, then by the socket id the table itself recorded:
+            // the two can disagree after a reconnect, and either one being
+            // right is enough to seat the player.
+            const socket = this.socketsByName[player.name] || this.sockets[player.id];
 
-            if (!socket) {
+            if (!socket || !socket.user) {
                 return { error: `${player.name} is no longer connected` };
             }
 
@@ -3370,19 +3409,36 @@ class Lobby {
      * sitting at the table they had, with their decks, one Start away from
      * playing - which is the worst outcome a failed rematch should have.
      *
+     * ARCHON: and it keeps the arrangement the players agreed to. A refused
+     * "Rematch: Trade Decks" used to hand back a table with `swap` untouched,
+     * so pressing Start replayed the game with the same decks in the same
+     * hands - the players had agreed to trade, been dropped out of their game,
+     * and then been given the very thing they had just voted against, with
+     * nothing saying so.
+     *
      * @param {import('./pendinggame')} game
      * @param {string} reason
+     * @param {object} [agreed]
+     * @param {boolean} [agreed.swap] whether the rematch was to trade decks
      */
-    refuseRematch(game, reason) {
+    refuseRematch(game, reason, { swap } = {}) {
         logger.warn(`Could not set up a rematch for game ${game.id}: ${reason}`);
 
         game.started = false;
         game.node = undefined;
 
+        if (swap !== undefined) {
+            game.swap = !!swap;
+        }
+
         game.addMessage(
-            'The rematch could not be set up ({0}), so here is your table back',
+            'The rematch could not be set up ({0}), so here is your table back - press Start to play again',
             reason
         );
+
+        if (swap) {
+            game.addMessage('You agreed to trade decks, so this game still swaps them over');
+        }
 
         this.sendGameState(game);
         this.broadcastGameMessage('updategame', game);
@@ -3417,7 +3473,7 @@ class Lobby {
         const seating = this.rematchSeating(game);
 
         if (seating.error) {
-            this.refuseRematch(game, seating.error);
+            this.refuseRematch(game, seating.error, { swap: oldGame.swap });
 
             return;
         }
@@ -3437,7 +3493,16 @@ class Lobby {
             allowSpectators: game.allowSpectators,
             spectators: game.spectators,
             swap: oldGame.swap,
-            useGameTimeLimit: game.useGameTimeLimit
+            useGameTimeLimit: game.useGameTimeLimit,
+            // ARCHON: and so does the rest of what the table was. Dropping
+            // these silently changed the game underneath the players: an
+            // unlisted game became listed, a sealed game lost the sets it
+            // deals from, spectators who had been muted could talk again, and
+            // the table lost the name both players had been looking at.
+            expansions: game.expansions,
+            gamePrivate: game.gamePrivate,
+            muteSpectators: game.muteSpectators,
+            name: game.name
         });
         newGame.rematch = true;
         newGame.previousWinner = oldGame.winner;
@@ -3545,7 +3610,7 @@ class Lobby {
         const seating = this.rematchSeating(game, { requireDecks: false });
 
         if (seating.error) {
-            this.refuseRematch(game, seating.error);
+            this.refuseRematch(game, seating.error, { swap: false });
 
             return;
         }
@@ -3565,7 +3630,12 @@ class Lobby {
             allowSpectators: game.allowSpectators,
             spectators: game.spectators,
             swap: false,
-            useGameTimeLimit: game.useGameTimeLimit
+            useGameTimeLimit: game.useGameTimeLimit,
+            // See onGameRematch: the rest of what the table was comes too.
+            expansions: game.expansions,
+            gamePrivate: game.gamePrivate,
+            muteSpectators: game.muteSpectators,
+            name: game.name
         });
         newGame.rematch = true;
         newGame.previousWinner = oldGame.winner;

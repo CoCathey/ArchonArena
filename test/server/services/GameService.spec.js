@@ -332,14 +332,20 @@ describe('GameService deck recording', function () {
     let service;
 
     beforeEach(function () {
+        // Both writes run inside a transaction on one held connection, so the
+        // statements arrive through queryTran (client, sql, params).
         db = {
-            query: vi.fn(async (sql) => (/INSERT INTO "Games"/.test(sql) ? [{ Id: 99 }] : []))
+            query: vi.fn().mockResolvedValue([]),
+            startTransaction: vi.fn().mockResolvedValue({ release: vi.fn() }),
+            queryTran: vi.fn(async (client, sql) =>
+                /INSERT INTO "Games"/.test(sql) ? [{ Id: 99 }] : []
+            )
         };
         service = new GameService(db);
     });
 
     const sqlFor = (pattern) =>
-        db.query.mock.calls.map((call) => call[0]).find((sql) => pattern.test(sql));
+        db.queryTran.mock.calls.map((call) => call[1]).find((sql) => pattern.test(sql));
 
     /*
      * ARCHON: a game's record of which deck was played must outlive the deck
@@ -378,5 +384,138 @@ describe('GameService deck recording', function () {
         // game has to its deck.
         expect(update).toContain('"DeckUuid" = COALESCE(');
         expect(update).toContain('"GamePlayers"."DeckUuid"');
+    });
+});
+
+/**
+ * ARCHON: `create` and `update` used to run `BEGIN`, their writes and `COMMIT`
+ * through `db.query`, which is `pool.query` - a different pooled connection per
+ * statement. So there was no transaction: the writes auto-committed one at a
+ * time, the COMMIT went somewhere else, and the BEGIN's own connection went
+ * back to the pool with a transaction left open on it, for the next unrelated
+ * request to inherit. These are the two writes on the game path, so what that
+ * cost was games whose winner never got recorded (the post-game panel sits on
+ * "Rating this game..." because rating runs after that write) and exceptions on
+ * the start path.
+ */
+describe('GameService game records are written in one transaction', function () {
+    let db;
+    let client;
+    let service;
+
+    const game = {
+        gameId: 'game-uuid',
+        gameFormat: 'archon',
+        startedAt: '2026-07-01T10:00:00Z',
+        finishedAt: '2026-07-01T10:20:00Z',
+        winner: 'alice',
+        winReason: 'keys',
+        players: [
+            { name: 'alice', deck: 'alice-identity', keys: { red: true, yellow: true }, turn: 9 },
+            { name: 'bob', deck: 'bob-identity', keys: { red: true }, turn: 9 }
+        ]
+    };
+
+    beforeEach(function () {
+        client = { id: 'client-1', release: vi.fn() };
+        db = {
+            query: vi.fn().mockResolvedValue([]),
+            startTransaction: vi.fn().mockResolvedValue(client),
+            queryTran: vi.fn().mockResolvedValue([{ Id: 7 }])
+        };
+        service = new GameService(db);
+    });
+
+    /** Every statement the call issued, in order. */
+    const statements = () => db.queryTran.mock.calls.map((call) => call[1]);
+
+    describe('create', function () {
+        it('runs every statement on the one connection it took', async function () {
+            await service.create(game);
+
+            expect(db.startTransaction).toHaveBeenCalledTimes(1);
+            // Nothing on the pool: a BEGIN sent that way is the whole bug.
+            expect(db.query).not.toHaveBeenCalled();
+            expect(db.queryTran.mock.calls.every((call) => call[0] === client)).toBe(true);
+        });
+
+        it('inserts the game and a row per player, then commits', async function () {
+            await service.create(game);
+
+            const sent = statements();
+
+            expect(sent.filter((sql) => sql.includes('INSERT INTO "Games"')).length).toBe(1);
+            expect(sent.filter((sql) => sql.includes('INSERT INTO "GamePlayers"')).length).toBe(2);
+            expect(sent[sent.length - 1]).toBe('COMMIT');
+        });
+
+        it('rolls back and hands the connection back when a write fails', async function () {
+            db.queryTran
+                .mockResolvedValueOnce([{ Id: 7 }])
+                .mockRejectedValueOnce(new Error('deadlock'))
+                .mockResolvedValue([]);
+
+            await expect(service.create(game)).rejects.toThrow('Failed to create game');
+
+            expect(statements()).toContain('ROLLBACK');
+            expect(client.release).toHaveBeenCalled();
+        });
+
+        it('hands the connection back after a successful write too', async function () {
+            await service.create(game);
+
+            expect(client.release).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('update', function () {
+        it('runs every statement on the one connection it took', async function () {
+            await service.update(game);
+
+            expect(db.startTransaction).toHaveBeenCalledTimes(1);
+            expect(db.query).not.toHaveBeenCalled();
+            expect(db.queryTran.mock.calls.every((call) => call[0] === client)).toBe(true);
+        });
+
+        it('records the result and both players, then commits', async function () {
+            await service.update(game);
+
+            const sent = statements();
+
+            expect(sent.filter((sql) => sql.includes('UPDATE "Games"')).length).toBe(1);
+            expect(sent.filter((sql) => sql.includes('UPDATE "GamePlayers"')).length).toBe(2);
+            expect(sent[sent.length - 1]).toBe('COMMIT');
+        });
+
+        it('counts the keys each player finished on', async function () {
+            await service.update(game);
+
+            const playerWrites = db.queryTran.mock.calls.filter((call) =>
+                String(call[1]).includes('UPDATE "GamePlayers"')
+            );
+
+            expect(playerWrites.map((call) => call[2][0])).toEqual([2, 1]);
+        });
+
+        it('rolls back and hands the connection back when a write fails', async function () {
+            db.queryTran.mockRejectedValueOnce(new Error('connection reset'));
+
+            await expect(service.update(game)).rejects.toThrow('Failed to update game');
+
+            expect(statements()).toContain('ROLLBACK');
+            expect(client.release).toHaveBeenCalled();
+        });
+
+        it('still reports the failure when the rollback cannot be sent either', async function () {
+            // The connection is already gone; the caller still needs the error
+            // that started it, not a second one from the tidying up.
+            db.queryTran
+                .mockRejectedValueOnce(new Error('connection reset'))
+                .mockRejectedValueOnce(new Error('connection reset'));
+
+            await expect(service.update(game)).rejects.toThrow('Failed to update game');
+
+            expect(client.release).toHaveBeenCalled();
+        });
     });
 });

@@ -1,3 +1,5 @@
+const Sentry = require('@sentry/node');
+
 const Server = require('./server');
 const Lobby = require('./lobby');
 const UserService = require('./services/UserService');
@@ -89,7 +91,44 @@ function warnIfVerificationCannotWork() {
     logger.info('Verify email actually sends with: npm run check:email -- you@example.com');
 }
 
+/**
+ * ARCHON: keep one stray promise from taking every game on the site with it.
+ *
+ * Node's default behaviour on an uncaught exception - and, since v15, on an
+ * unhandled promise REJECTION - is to kill the process. This process is the
+ * lobby: it holds every table, every player's socket, and the router that
+ * hands finished games to the database. Killing it disconnects everyone
+ * playing, everywhere, and their tables are gone with it. What a player sees
+ * is their game vanishing, usually at the moment they pressed something.
+ *
+ * The lobby is full of deliberately fire-and-forget writes (persist a finished
+ * game, save a replay, rate it), and a database hiccup in any of them is a
+ * rejection nobody is awaiting. The game node has had this guard since it was
+ * built - for exactly the same reason, and its blast radius is one node's
+ * games. The lobby, which is worse, had none.
+ *
+ * A loud log and a living process is strictly better here: whatever failed has
+ * already failed, and taking the site down does not un-fail it.
+ */
+function installCrashGuards() {
+    const report = (kind, error) => {
+        // Logged first and unconditionally, so the reason the lobby nearly
+        // died is in the log whatever else goes wrong after this.
+        logger.error(`${kind} in the lobby process`, error);
+
+        try {
+            Sentry.captureException(error);
+        } catch (sentryError) {
+            logger.error('Failed to report the error to Sentry', sentryError);
+        }
+    };
+
+    process.on('uncaughtException', (error) => report('Uncaught exception', error));
+    process.on('unhandledRejection', (reason) => report('Unhandled rejection', reason));
+}
+
 async function runServer() {
+    installCrashGuards();
     assertSecureSecrets();
     warnIfVerificationCannotWork();
 

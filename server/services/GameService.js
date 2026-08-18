@@ -20,13 +20,36 @@ class GameService {
         return this.settingsService.getSectionWithDefaults('replay');
     }
 
+    /**
+     * ARCHON: one connection for the whole transaction.
+     *
+     * `db.query` is `pool.query`, which takes a fresh connection per
+     * statement, so `BEGIN`, the inserts and `COMMIT` each landed on a
+     * DIFFERENT connection. Nothing here was ever transactional: the writes
+     * auto-committed one by one and the `COMMIT`/`ROLLBACK` went somewhere
+     * else entirely. Worse, the `BEGIN` left its own connection sitting in the
+     * pool with an open transaction, and the next unrelated query to be handed
+     * that connection ran inside it - so one failed statement anywhere could
+     * put a pooled connection into "current transaction is aborted, commands
+     * ignored until end of transaction block" and every query that borrowed it
+     * afterwards failed too.
+     *
+     * That is the shape of every symptom this fixes. `update()` failing is a
+     * finished game whose winner is never recorded, which is what leaves the
+     * post-game panel saying "Rating this game..." forever - rating runs after
+     * that write and never gets to. `create()` failing is an exception on the
+     * game-start path, which is where the lobby handed it to a bare promise.
+     *
+     * `startTransaction`/`queryTran` are what the rest of the services use
+     * (see UserService, RatingService, ClubService); these two predate it.
+     */
     async create(game) {
+        const client = await this.db.startTransaction();
         let gameId;
 
-        await this.db.query('BEGIN');
-
         try {
-            let newGame = await this.db.query(
+            let newGame = await this.db.queryTran(
+                client,
                 // ARCHON (F9): practice games are recorded so a player can
                 // find them again and watch the replay - and flagged, because
                 // a recorded game is not a result. Every aggregate on this
@@ -47,24 +70,14 @@ class GameService {
             );
 
             if (!newGame || newGame.length === 0) {
-                logger.error('Failed to create game');
-                await this.db.query('ROLLBACK');
-
                 throw new Error('Failed to create game');
             }
 
             gameId = newGame[0].Id;
-        } catch (err) {
-            logger.error('Failed to create game', err);
 
-            await this.db.query('ROLLBACK');
-
-            throw new Error('Failed to create game');
-        }
-
-        for (let player of game.players) {
-            try {
-                await this.db.query(
+            for (let player of game.players) {
+                await this.db.queryTran(
+                    client,
                     // ARCHON: the deck lookup is scoped to the player who owns
                     // it. "Decks" is unique on ("Identity","UserId"), not on
                     // "Identity" alone - a deck identity is shared by every
@@ -88,51 +101,49 @@ class GameService {
                         '(SELECT "Uuid" FROM "Decks" WHERE "Identity" = $3 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $2)))',
                     [gameId, player.name, player.deck]
                 );
-            } catch (err) {
-                logger.error('Failed to create game player', err);
-
-                await this.db.query('ROLLBACK');
-
-                throw new Error('Failed to create game player');
             }
-        }
 
-        await this.db.query('COMMIT');
+            await this.db.queryTran(client, 'COMMIT');
+        } catch (err) {
+            logger.error(`Failed to create game ${game && game.gameId}`, err);
+
+            await this.rollback(client);
+
+            throw new Error('Failed to create game');
+        } finally {
+            this.release(client);
+        }
     }
 
     async update(game) {
-        await this.db.query('BEGIN');
+        const client = await this.db.startTransaction();
 
         try {
-            await this.db.query(
+            await this.db.queryTran(
+                client,
                 'UPDATE "Games" SET "StartedAt" = $2, "WinnerId" = (SELECT "Id" FROM "Users" WHERE "Username" = $3), "WinReason" = $4, "FinishedAt" = $5 WHERE "GameId" = $1',
                 [game.gameId, game.startedAt, game.winner, game.winReason, game.finishedAt]
             );
-        } catch (err) {
-            await this.db.query('ROLLBACK');
 
-            throw new Error('Failed to update game');
-        }
+            for (let player of game.players) {
+                let keys = 0;
 
-        for (let player of game.players) {
-            let keys = 0;
+                if (player.keys && player.keys.red !== undefined) {
+                    if (player.keys.red) {
+                        keys++;
+                    }
 
-            if (player.keys && player.keys.red !== undefined) {
-                if (player.keys.red) {
-                    keys++;
+                    if (player.keys.yellow) {
+                        keys++;
+                    }
+
+                    if (player.keys.blue) {
+                        keys++;
+                    }
                 }
 
-                if (player.keys.yellow) {
-                    keys++;
-                }
-
-                if (player.keys.blue) {
-                    keys++;
-                }
-            }
-
-            try {
-                await this.db.query(
+                await this.db.queryTran(
+                    client,
                     'UPDATE "GamePlayers" SET "Keys" = $1, ' +
                         '"DeckId" = (SELECT "Id" FROM "Decks" WHERE "Identity" = $5 AND "UserId" = (SELECT "Id" FROM "Users" WHERE "Username" = $4)), ' +
                         // COALESCE for the same reason as "WentFirst": if the
@@ -157,19 +168,38 @@ class GameService {
                         player.wentFirst === undefined ? null : !!player.wentFirst
                     ]
                 );
-            } catch (err) {
-                logger.error(
-                    `Failed to update game player ${game.gameId}, ${player.name} ${player.deck}`,
-                    err
-                );
-
-                await this.db.query('ROLLBACK');
-
-                throw new Error('Failed to update game player');
             }
-        }
 
-        await this.db.query('COMMIT');
+            await this.db.queryTran(client, 'COMMIT');
+        } catch (err) {
+            logger.error(`Failed to update game ${game && game.gameId}`, err);
+
+            await this.rollback(client);
+
+            throw new Error('Failed to update game');
+        } finally {
+            this.release(client);
+        }
+    }
+
+    /**
+     * Undo the transaction, and never let the undo be the thing that throws:
+     * the caller is already handling a failure and the rollback is best-effort
+     * housekeeping on a connection that is about to go back to the pool.
+     */
+    async rollback(client) {
+        try {
+            await this.db.queryTran(client, 'ROLLBACK');
+        } catch (err) {
+            logger.error('Failed to roll back a game transaction', err);
+        }
+    }
+
+    /** Hand the connection back. Tolerates the fakes used in tests. */
+    release(client) {
+        if (client && client.release) {
+            client.release();
+        }
     }
 
     getAllGames(from, to) {

@@ -90,6 +90,69 @@ describe('GameWonPrompt', function () {
         });
     });
 
+    /**
+     * ARCHON: two players who both want a rematch reach for the button at the
+     * same time. Whoever is second is clicking a menu the server has already
+     * replaced with the first player's request - and the rematch prompt used
+     * to answer that click, reading anything that was not 'yes' as a refusal.
+     * So the way two people who agreed asked for a rematch was the way it got
+     * cancelled.
+     */
+    describe('a click meant for the menu the request replaced', function () {
+        const staleButton = (player, arg) =>
+            player.currentPrompt().buttons.find((button) => button.arg === arg);
+
+        it('is ignored rather than read as a refusal', function () {
+            const inFlight = staleButton(this.player2, 'rematch-same-decks');
+
+            this.player1.clickPrompt('Rematch: Trade Decks');
+            this.game.menuButton(
+                this.player2.player.name,
+                inFlight.arg,
+                inFlight.uuid,
+                inFlight.method
+            );
+            this.game.continue();
+
+            expect(this.game.router.rematch).not.toHaveBeenCalled();
+            expect(this.player2.currentButtons).toContain('Yes');
+            expect(this.player2.currentButtons).toContain('No');
+        });
+
+        it('leaves the request standing, so agreeing still trades the decks', function () {
+            this.game.swap = false;
+            const inFlight = staleButton(this.player2, 'rematch-same-decks');
+
+            this.player1.clickPrompt('Rematch: Trade Decks');
+            this.game.menuButton(
+                this.player2.player.name,
+                inFlight.arg,
+                inFlight.uuid,
+                inFlight.method
+            );
+            this.game.continue();
+            this.player2.clickPrompt('Yes');
+
+            expect(this.game.router.rematch).toHaveBeenCalledWith(this.game);
+            expect(this.game.swap).toBe(true);
+        });
+
+        it('does not let the requester answer their own question', function () {
+            // Their menu offers Back and nothing else, but a click already on
+            // its way from the menu before carries a 'yes'-shaped arg. Taking
+            // it would start a rematch the opponent never agreed to.
+            this.player1.clickPrompt('Rematch: Same Decks');
+
+            const prompt = this.game.pipeline.getCurrentStep();
+
+            this.game.menuButton(this.player1.player.name, 'yes', prompt.uuid, 'menuButton');
+            this.game.continue();
+
+            expect(this.game.router.rematch).not.toHaveBeenCalled();
+            expect(this.player1.currentButtons).toContain('Back');
+        });
+    });
+
     describe('rematch (change decks)', function () {
         it('routes to rematchWithNewDecks and clears swap', function () {
             this.game.swap = true;

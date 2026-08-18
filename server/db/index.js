@@ -39,12 +39,40 @@ const pool = new Pool({
     port: configService.getValue('dbPort')
 });
 
+/**
+ * ARCHON: transaction control sent to the POOL is always a bug.
+ *
+ * `pool.query` takes a connection per statement, so a `BEGIN` sent this way
+ * starts a transaction on a connection nobody is holding - the statements it
+ * was meant to protect run on other connections and auto-commit one at a time,
+ * the `COMMIT` lands somewhere else again, and the connection carrying the open
+ * transaction goes back to the pool for the next unrelated request to inherit.
+ * If anything then errors on that connection it becomes "current transaction is
+ * aborted, commands ignored until end of transaction block", and every query
+ * unlucky enough to borrow it fails too, nowhere near the code that caused it.
+ *
+ * Four services had written transactions this way, including both of the writes
+ * on the game path. Refusing it here means the next one fails loudly, at the
+ * call, instead of quietly corrupting an unrelated request minutes later.
+ *
+ * `startTransaction()` + `queryTran(client, ...)` is how a transaction is
+ * written against this module.
+ */
+const TRANSACTION_CONTROL = /^\s*(BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|END)\s*;?\s*$/i;
+
 module.exports = {
     /**
      * @param {string} text
      * @param {any[]} params
      */
     query: async (text, params = []) => {
+        if (TRANSACTION_CONTROL.test(text)) {
+            throw new Error(
+                `Refusing to send "${String(text).trim()}" to the connection pool: it would run ` +
+                    'on a connection nobody holds. Use startTransaction()/queryTran(client, ...).'
+            );
+        }
+
         logger.debug(text, params);
         let res = await pool.query(text, params);
 

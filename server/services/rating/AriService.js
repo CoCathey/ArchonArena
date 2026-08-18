@@ -363,13 +363,21 @@ class AriService {
 
             // Replaced wholesale in one transaction: a half-written
             // distribution would quote percentiles from two different days.
-            await this.db.query('BEGIN');
+            //
+            // ARCHON: on one connection, held for the whole transaction.
+            // `db.query` is `pool.query` and takes a fresh connection per
+            // statement, so a `BEGIN` sent that way opened a transaction on a
+            // connection nobody kept and then handed it back to the pool still
+            // open - leaving whichever unrelated request borrowed it next
+            // running inside a transaction it knew nothing about.
+            const client = await this.db.startTransaction();
 
             try {
-                await this.db.query('DELETE FROM "AriDistribution"');
+                await this.db.queryTran(client, 'DELETE FROM "AriDistribution"');
 
                 if (values.length) {
-                    await this.db.query(
+                    await this.db.queryTran(
+                        client,
                         'INSERT INTO "AriDistribution" ("Bucket", "Decks", "AtOrBelow") ' +
                             'SELECT * FROM UNNEST($1::int[], $2::int[], $3::bigint[])',
                         [
@@ -380,16 +388,21 @@ class AriService {
                     );
                 }
 
-                await this.db.query(
+                await this.db.queryTran(
+                    client,
                     'UPDATE "AriDistributionState" SET "TotalDecks" = $1, ' +
                         '"UpdatedAt" = now() AT TIME ZONE \'utc\' WHERE "Id" = 1',
                     [running]
                 );
-                await this.db.query('COMMIT');
+                await this.db.queryTran(client, 'COMMIT');
             } catch (err) {
-                await this.db.query('ROLLBACK');
+                await this.db.queryTran(client, 'ROLLBACK').catch(() => {});
 
                 throw err;
+            } finally {
+                if (client.release) {
+                    client.release();
+                }
             }
 
             return running;

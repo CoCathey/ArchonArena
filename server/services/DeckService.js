@@ -113,6 +113,13 @@ const sealedExpansionIds = {
     vm2026: 964
 };
 
+/** Hand a transaction's connection back to the pool. */
+function releaseClient(client) {
+    if (client && client.release) {
+        client.release();
+    }
+}
+
 class DeckService {
     /**
      * ARCHON: the set-code map a sealed table needs, from the expansion ids an
@@ -1451,14 +1458,37 @@ class DeckService {
         return ret && ret.length > 0;
     }
 
+    /**
+     * ARCHON: one connection, held for the whole transaction.
+     *
+     * `db.query` is `pool.query` and takes a fresh connection per statement, so
+     * this function's `BEGIN` opened a transaction on a connection nobody kept
+     * and then returned it to the pool still open, while the inserts it was
+     * meant to protect auto-committed one at a time somewhere else. The open
+     * transaction then travelled with that connection into whatever borrowed it
+     * next, which is how one failed import could start breaking queries that
+     * had nothing to do with decks.
+     *
+     * The connection is taken and given back here, so no exit from the import
+     * itself - including one nobody wrote a handler for - can leak it.
+     */
     async insertDeck(deck, user) {
+        const client = await db.startTransaction();
+
+        try {
+            return await this.insertDeckInTransaction(client, deck, user);
+        } finally {
+            releaseClient(client);
+        }
+    }
+
+    async insertDeckInTransaction(client, deck, user) {
         let ret;
 
         try {
-            await db.query('BEGIN');
-
             if (user) {
-                ret = await db.query(
+                ret = await db.queryTran(
+                    client,
                     'INSERT INTO "Decks" ("UserId", "Uuid", "Identity", "Name", "IncludeInSealed", "LastUpdated", "Verified", "ExpansionId", "Flagged", "Banned", "IsAlliance", "AlliancePods") ' +
                         'VALUES ($1, $2, $3, $4, $5, $6, false, (SELECT "Id" FROM "Expansions" WHERE "ExpansionId" = $7), false, false, $8, $9) RETURNING "Id"',
                     [
@@ -1474,7 +1504,8 @@ class DeckService {
                     ]
                 );
             } else {
-                ret = await db.query(
+                ret = await db.queryTran(
+                    client,
                     'INSERT INTO "StandaloneDecks" ("Identity", "Name", "LastUpdated", "ExpansionId") ' +
                         'VALUES ($1, $2, $3, (SELECT "Id" FROM "Expansions" WHERE "ExpansionId" = $4)) RETURNING "Id"',
                     [deck.identity, deck.name, deck.lastUpdated || new Date(), deck.expansion]
@@ -1483,7 +1514,7 @@ class DeckService {
         } catch (err) {
             logger.error('Failed to add deck', err);
 
-            await db.query('ROLLBACK');
+            await db.queryTran(client, 'ROLLBACK').catch(() => {});
 
             throw new Error('Failed to import deck');
         }
@@ -1512,7 +1543,8 @@ class DeckService {
 
         try {
             if (user) {
-                await db.query(
+                await db.queryTran(
+                    client,
                     `INSERT INTO "DeckCards" ("CardId", "Count", "Maverick", "Anomaly", "ImageUrl", "HouseId", "Enhancements", "IsNonDeck", "ProphecyId", "DeckId") VALUES ${expand(
                         deck.cards.length,
                         10
@@ -1520,7 +1552,8 @@ class DeckService {
                     params
                 );
             } else {
-                await db.query(
+                await db.queryTran(
+                    client,
                     `INSERT INTO "StandaloneDeckCards" ("CardId", "Count", "Maverick", "Anomaly", "DeckId", "Enhancements") VALUES ${expand(
                         deck.cards.length,
                         6
@@ -1531,14 +1564,15 @@ class DeckService {
         } catch (err) {
             logger.error('Failed to add deck', err);
 
-            await db.query('ROLLBACK');
+            await db.queryTran(client, 'ROLLBACK').catch(() => {});
 
             throw new Error('Failed to import deck');
         }
 
         let deckHouseTable = user ? '"DeckHouses"' : '"StandaloneDeckHouses"';
         try {
-            await db.query(
+            await db.queryTran(
+                client,
                 `INSERT INTO ${deckHouseTable} ("DeckId", "HouseId") VALUES ($1, (SELECT "Id" FROM "Houses" WHERE "Code" = $2)), ` +
                     '($1, (SELECT "Id" FROM "Houses" WHERE "Code" = $3)), ($1, (SELECT "Id" FROM "Houses" WHERE "Code" = $4))',
                 flatten([deck.id, deck.houses])
@@ -1551,7 +1585,8 @@ class DeckService {
                     const shown = i < 3;
                     accoladeParams.push(deck.id, accolade.id, accolade.name, accolade.image, shown);
                 }
-                await db.query(
+                await db.queryTran(
+                    client,
                     `INSERT INTO "DeckAccolades" ("DeckId", "AccoladeId", "Name", "ImageUrl", "Shown") VALUES ${expand(
                         deck.accolades.length,
                         5
@@ -1576,18 +1611,19 @@ class DeckService {
             // owner's games belong to their copy, and a row that still has a
             // "DeckId" is not orphaned and must not be moved.
             if (user && deck.uuid) {
-                await db.query(
+                await db.queryTran(
+                    client,
                     'UPDATE "GamePlayers" SET "DeckId" = $1 ' +
                         'WHERE "PlayerId" = $2 AND "DeckId" IS NULL AND "DeckUuid" = $3',
                     [deck.id, user.id, deck.uuid]
                 );
             }
 
-            await db.query('COMMIT');
+            await db.queryTran(client, 'COMMIT');
         } catch (err) {
             logger.error('Failed to add deck', err);
 
-            await db.query('ROLLBACK');
+            await db.queryTran(client, 'ROLLBACK').catch(() => {});
 
             throw new Error('Failed to import deck');
         }
@@ -2084,9 +2120,14 @@ class DeckService {
         }
 
         const resultShownMap = {};
-        await db.query('BEGIN');
+        // ARCHON: one connection, held for the whole transaction. `db.query` is
+        // `pool.query` and takes a fresh connection per statement, so a `BEGIN`
+        // sent that way opened a transaction on a connection nobody kept and
+        // handed it back to the pool still open - and the next unrelated query
+        // to borrow that connection ran inside it.
+        const client = await db.startTransaction();
         try {
-            await db.query('DELETE FROM "DeckAccolades" WHERE "DeckId" = $1', [deckId]);
+            await db.queryTran(client, 'DELETE FROM "DeckAccolades" WHERE "DeckId" = $1', [deckId]);
 
             if (accolades.length > 0) {
                 let shownCount = 0;
@@ -2102,7 +2143,8 @@ class DeckService {
                     resultShownMap[accolade.id] = shown;
                     accoladeParams.push(deckId, accolade.id, accolade.name, accolade.image, shown);
                 }
-                await db.query(
+                await db.queryTran(
+                    client,
                     `INSERT INTO "DeckAccolades" ("DeckId", "AccoladeId", "Name", "ImageUrl", "Shown") VALUES ${expand(
                         accolades.length,
                         5
@@ -2111,11 +2153,13 @@ class DeckService {
                 );
             }
 
-            await db.query('COMMIT');
+            await db.queryTran(client, 'COMMIT');
         } catch (err) {
-            await db.query('ROLLBACK');
+            await db.queryTran(client, 'ROLLBACK').catch(() => {});
             logger.error('Failed to refresh accolades', err);
             throw new Error('Failed to update accolades in database');
+        } finally {
+            releaseClient(client);
         }
 
         return accolades.map((a) => ({

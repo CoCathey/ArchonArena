@@ -43,7 +43,12 @@ describe('ARI in the field', function () {
         db = {
             query: vi
                 .fn()
-                .mockImplementation(async (sql) => (sql.includes('FROM "DeckSas"') ? sasRows : []))
+                .mockImplementation(async (sql) => (sql.includes('FROM "DeckSas"') ? sasRows : [])),
+            // A transaction holds one connection for its whole life. The
+            // statements inside it are routed through the same spy, so a test
+            // can assert on the SQL without caring which way it was sent.
+            startTransaction: vi.fn(async () => ({ release: vi.fn() })),
+            queryTran: vi.fn((client, sql, params) => db.query(sql, params))
         };
         service = new AriService(db, null);
     });
@@ -208,15 +213,18 @@ describe('ARI in the field', function () {
 
             await service.refreshDistribution();
 
-            const statements = db.query.mock.calls.map(([sql]) => sql);
+            const statements = db.queryTran.mock.calls.map(([, sql]) => sql);
+            const clients = db.queryTran.mock.calls.map(([client]) => client);
 
-            expect(statements).toContain('BEGIN');
+            // On ONE connection, held for the whole thing. Sending `BEGIN`
+            // through the pool - which is what this used to do - starts a
+            // transaction on a connection nobody keeps, so a half-written
+            // distribution could still be read, and the connection went back
+            // to the pool with the transaction still open on it.
+            expect(db.startTransaction).toHaveBeenCalledTimes(1);
+            expect(new Set(clients).size).toBe(1);
             expect(statements).toContain('COMMIT');
-            // A half-written distribution would quote percentiles from two
-            // different days.
-            expect(statements.indexOf('BEGIN')).toBeLessThan(
-                statements.findIndex((sql) => sql.includes('DELETE FROM "AriDistribution"'))
-            );
+            expect(statements[0]).toContain('DELETE FROM "AriDistribution"');
         });
 
         it('rolls back rather than leaving a partial field', async function () {

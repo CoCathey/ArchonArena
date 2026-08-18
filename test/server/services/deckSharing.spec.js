@@ -20,6 +20,8 @@ describe('shared decks', function () {
     let DeckService;
     let queries;
     let originalQuery;
+    let originalStartTransaction;
+    let originalQueryTran;
     let flagSharedDecks;
 
     const configService = {
@@ -37,6 +39,14 @@ describe('shared decks', function () {
         queries = [];
         flagSharedDecks = false;
         originalQuery = db.query;
+
+        // Transactional writes are held on one connection now, so the fake has
+        // to answer `startTransaction`/`queryTran` too. Both route back through
+        // the stub above, so every assertion here still reads one recorder.
+        originalStartTransaction = db.startTransaction;
+        originalQueryTran = db.queryTran;
+        db.startTransaction = vi.fn(async () => ({ release: vi.fn() }));
+        db.queryTran = vi.fn((client, sql, params) => db.query(sql, params));
 
         db.query = vi.fn(async (sql, params) => {
             queries.push({ sql, params });
@@ -76,6 +86,8 @@ describe('shared decks', function () {
 
     afterEach(function () {
         db.query = originalQuery;
+        db.startTransaction = originalStartTransaction;
+        db.queryTran = originalQueryTran;
     });
 
     describe('who counts as an owner', function () {

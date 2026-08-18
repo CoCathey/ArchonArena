@@ -63,6 +63,11 @@ describe('Lobby rematch', function () {
         lobby = {
             games: { [table.id]: table },
             socketsByName: sockets,
+            // Keyed by socket id, the way the real lobby keeps it. Seating
+            // falls back to this when the by-name entry is missing.
+            sockets: Object.fromEntries(
+                Object.values(sockets).map((socket) => [socket.id, socket])
+            ),
             broadcastGameMessage: (msg, game) => broadcasts.push({ msg, id: game.id }),
             sendGameState: () => {},
             started: null,
@@ -179,7 +184,13 @@ describe('Lobby rematch', function () {
 
     describe('when the rematch cannot be built', function () {
         const cases = [
-            ['the opponent lost their lobby socket', () => delete lobby.socketsByName.bob],
+            [
+                'the opponent lost their lobby socket',
+                () => {
+                    delete lobby.socketsByName.bob;
+                    delete lobby.sockets['sock-bob'];
+                }
+            ],
             ['the opponent has no deck on the table', () => delete table.players.bob.deck],
             ['the opponent left the game first', () => table.leave('bob')],
             ['the owner left the game first', () => table.leave('alice')]
@@ -209,6 +220,54 @@ describe('Lobby rematch', function () {
                 });
             });
         }
+    });
+
+    describe('a player whose name lookup has gone stale', function () {
+        it('is still seated from the socket the table recorded', async function () {
+            // A lobby socket that was replaced (a reconnect, a second tab)
+            // used to take the by-name entry with it when the old one finally
+            // timed out, and the rematch was then refused as "no longer
+            // connected" - dropping two people who had just agreed to play
+            // again out of their game.
+            delete lobby.socketsByName.bob;
+
+            await rematch();
+
+            const game = onlyGame();
+
+            expect(game.id).not.toBe(table.id);
+            expect(Object.keys(game.players).sort()).toEqual(['alice', 'bob']);
+            expect(lobby.started).toBe(game.id);
+        });
+    });
+
+    describe('a refused trade-decks rematch', function () {
+        beforeEach(async function () {
+            delete lobby.socketsByName.bob;
+            delete lobby.sockets['sock-bob'];
+
+            // What the node publishes once both players have agreed to trade:
+            // it has already toggled the flag.
+            lobby.onGameRematch({ ...nodeSaveState(table), swap: true });
+            await new Promise((resolve) => setImmediate(resolve));
+        });
+
+        it('keeps the trade the players agreed to', function () {
+            // The table comes back so they can press Start - and pressing it
+            // has to do what they voted for. It used to hand back a table with
+            // the swap dropped, so the game they got was the one they had just
+            // agreed not to play.
+            expect(onlyGame().swap).toBe(true);
+        });
+
+        it('says so, rather than leaving them to notice', function () {
+            const messages = table.gameChat.messages.map((message) =>
+                JSON.stringify(message.message)
+            );
+
+            expect(messages.some((message) => message.includes('press Start'))).toBe(true);
+            expect(messages.some((message) => message.includes('swaps them over'))).toBe(true);
+        });
     });
 
     describe('a deck selection that fails', function () {
@@ -271,6 +330,7 @@ describe('Lobby rematch', function () {
 
         it('still keeps the table when a player cannot be seated', async function () {
             delete lobby.socketsByName.bob;
+            delete lobby.sockets['sock-bob'];
 
             await rematch('onGameRematchWithNewDecks');
 

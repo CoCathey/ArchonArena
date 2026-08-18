@@ -63,25 +63,69 @@ class AgreementPrompt extends AllPlayerPrompt {
         };
     }
 
-    onMenuCommand(player, arg) {
-        if (arg === 'back' && player === this.requestingPlayer) {
+    /**
+     * ARCHON: `menuCommand`, not `onMenuCommand`.
+     *
+     * `UiPrompt.onMenuCommand` is where a click is checked against the uuid of
+     * the prompt it was drawn for, and this class used to override it - so the
+     * check never ran, and this prompt answered clicks meant for the prompt
+     * BEFORE it. That is not a rare case: the rematch request is raised from
+     * the Game Won menu, and the opponent is looking at that menu, with its
+     * four buttons, at the instant the request replaces it. Both players
+     * reaching for "Rematch" at the same time is the normal way two people who
+     * both want a rematch behave.
+     *
+     * What happened then was the worst available reading. The old code treated
+     * anything that was not 'back' or 'yes' as a decline, so the opponent's
+     * click on "Rematch: Same Decks" - a click asking FOR a rematch - was
+     * taken as refusing one, and both players were dropped back to the menu
+     * with no explanation. A second click on the button you had just pressed
+     * cancelled your own request the same way.
+     *
+     * Going through `menuCommand` means a click for a prompt that is no longer
+     * on screen is simply ignored, and the player sees the Yes/No they were
+     * being shown all along.
+     */
+    menuCommand(player, arg) {
+        if (arg === 'back') {
+            // Only the player who asked can withdraw the question.
+            if (player !== this.requestingPlayer) {
+                return false;
+            }
+
             this.addCancelAlert(player);
             this.cancelled = true;
             this.callbacks.onCancel?.();
+
             return true;
+        }
+
+        // The requester is shown Back and nothing else; an answer from them is
+        // not an answer. Accepting one would let the request complete without
+        // the opponent ever agreeing to it.
+        if (player === this.requestingPlayer) {
+            return false;
         }
 
         if (arg === 'yes') {
             this.addAcceptAlert(player);
             this.completedPlayers.add(player);
             this.callbacks.onAccept?.();
-        } else {
+
+            return true;
+        }
+
+        if (arg === 'no') {
             this.addDeclineAlert(player);
             this.cancelled = true;
             this.callbacks.onCancel?.();
+
+            return true;
         }
 
-        return true;
+        // Not one of this prompt's buttons. Leave the request standing rather
+        // than inventing an answer for it.
+        return false;
     }
 
     /* --- abstract hooks --- */

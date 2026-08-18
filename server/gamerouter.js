@@ -57,7 +57,16 @@ class GameRouter extends EventEmitter {
         // flagged, and every aggregate excludes flagged rows. Persisting is
         // where "it happened" is written; rating is where "it counted" is,
         // and a bot game is never rated (see GAMEWIN below).
-        this.gameService.create(game.getSaveState());
+        //
+        // ARCHON: caught, like persistFinishedGame. `create()` rejects on any
+        // database fault, and bare it was an unhandled rejection on the path
+        // every game start runs through - which, under Node's default policy,
+        // ends the lobby process and every game on it. The game is still worth
+        // playing without its row: losing the record of a game costs a replay,
+        // and refusing to start it costs the game.
+        Promise.resolve(this.gameService.create(game.getSaveState())).catch((err) =>
+            logger.error(`Failed to record the start of game ${game.id}`, err)
+        );
 
         node.numGames++;
 
