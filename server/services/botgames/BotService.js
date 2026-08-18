@@ -476,6 +476,34 @@ class BotService {
     }
 
     /**
+     * ARCHON (F9): two distinct hosts for a bot-vs-bot showcase table.
+     *
+     * `pickHost` already refuses a bot that is busy elsewhere; calling it
+     * twice against a widening busy set is what keeps a showcase table from
+     * ever seating the same character against itself. Returns
+     * `{ home, away }`, each shaped like `pickHost`'s own result, or null the
+     * moment either seat cannot find an opponent.
+     *
+     * @param {string[]} [busyUsernames]
+     * @param {string} [difficulty]
+     */
+    async pickShowcasePair(busyUsernames = [], difficulty = DEFAULT_DIFFICULTY) {
+        const home = await this.pickHost(busyUsernames, difficulty);
+
+        if (!home) {
+            return null;
+        }
+
+        const away = await this.pickHost([...busyUsernames, home.bot.user.username], difficulty);
+
+        if (!away) {
+            return null;
+        }
+
+        return { home, away };
+    }
+
+    /**
      * A random deck for this bot to play, at the strength the table asked for.
      *
      * Where the deck comes from, in order:

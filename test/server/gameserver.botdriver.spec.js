@@ -68,13 +68,14 @@ const buildServer = () => {
     return server;
 };
 
-const buildPendingGame = ({ id, players, botMaxTurns }) => ({
+const buildPendingGame = ({ id, players, botMaxTurns, showcaseGame }) => ({
     id,
     name: 'Play against HelperBot!',
     owner: makeUser(Object.keys(players)[0]),
     gameFormat: 'normal',
     allowSpectators: false,
     botGame: true,
+    showcaseGame,
     botMaxTurns,
     players,
     spectators: {}
@@ -350,4 +351,81 @@ describe('game node bot driver', function () {
         expect(game.winner).toBeDefined();
         expect(game.winReason).toBe('concede');
     }, 30000);
+
+    /**
+     * ARCHON (F9): the bug the showcase supervisor exists to avoid. Both of a
+     * showcase table's seats are the platform's 'TBA' sentinel - there is no
+     * human to ever hold a socket - and isEmpty() has always read that
+     * sentinel as absence, because that is exactly what lets a PRACTICE table
+     * close itself the moment its one human leaves. Left alone, the same rule
+     * would read a showcase table as empty from the instant it starts and the
+     * node's 30-second sweep (clearStaleAndFinishedGames) would close it
+     * before a single turn completed.
+     */
+    describe('isEmpty, with no human ever seated', function () {
+        it('is never empty when the table is a showcase game', function () {
+            const server = buildServer();
+
+            server.onStartGame(
+                buildPendingGame({
+                    id: 'showcase-table',
+                    showcaseGame: true,
+                    players: {
+                        HelperBot: botSeat('HelperBot', alphaDeck),
+                        Sparring: botSeat('Sparring', omegaDeck)
+                    }
+                })
+            );
+
+            expect(server.games['showcase-table'].isEmpty()).toBe(false);
+        });
+
+        it('is still empty for an ordinary two-bot game (no showcase flag)', function () {
+            const server = buildServer();
+
+            server.onStartGame(
+                buildPendingGame({
+                    id: 'plain-table',
+                    players: {
+                        HelperBot: botSeat('HelperBot', alphaDeck),
+                        Sparring: botSeat('Sparring', omegaDeck)
+                    }
+                })
+            );
+
+            expect(server.games['plain-table'].isEmpty()).toBe(true);
+        });
+
+        it('still closes an ordinary practice table once its one human leaves', function () {
+            const server = buildServer();
+
+            server.onStartGame(
+                buildPendingGame({
+                    id: 'practice-table-empty',
+                    players: {
+                        HelperBot: botSeat('HelperBot', alphaDeck),
+                        Human: botSeat('Human', omegaDeck, false)
+                    }
+                })
+            );
+
+            const game = server.games['practice-table-empty'];
+            const human = game.getPlayerByName('Human');
+
+            // botSeat() gives every seat 'TBA' for simplicity; give the human
+            // a real connection id here, because that distinction - not the
+            // showcase flag - is what isEmpty() actually keys on.
+            human.id = 'socket-human';
+
+            // Unchanged behaviour: the bot's 'TBA' seat still counts as
+            // absent by design, and a real human still has to clear the
+            // disconnect grace window before the table follows it into
+            // "empty".
+            expect(game.isEmpty()).toBe(false);
+
+            human.disconnectedAt = new Date(Date.now() - 31 * 1000);
+
+            expect(game.isEmpty()).toBe(true);
+        });
+    });
 });

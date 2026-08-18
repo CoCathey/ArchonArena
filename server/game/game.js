@@ -52,6 +52,12 @@ class Game extends EventEmitter {
         // ARCHON (F9): a Helper Bot practice game. Rides into the save state
         // so the lobby's router can keep it out of Games, replays and rating.
         this.botGame = !!details.botGame;
+        // ARCHON (F9): a bot-vs-bot showcase table - no human ever sits at
+        // either seat. Read by isEmpty() below, because that check otherwise
+        // treats a bot's 'TBA' seat as absent by design (see isEmpty), which
+        // would close a showcase table on the very first empty-game sweep
+        // after it starts.
+        this.showcaseGame = !!details.showcaseGame;
         // ARCHON: pre-assigned chains (SAS handicap / Chainbound events);
         // applied once at initialise, before the setup phase draws hands.
         this.startingChains = details.startingChains;
@@ -1316,8 +1322,18 @@ class Game extends EventEmitter {
 
     isEmpty() {
         return Object.values(this.playersAndSpectators).every((player) => {
-            if (player.left || player.id === 'TBA') {
+            if (player.left) {
                 return true;
+            }
+
+            if (player.id === 'TBA') {
+                // A practice table's bot seat is absent by design, and that is
+                // what lets the table close itself the moment its one human
+                // leaves. A showcase table has no human seat at all - every
+                // seat is 'TBA' from the first tick - so the same rule would
+                // close it 30 seconds after it started rather than let it run
+                // to a finish nobody is there to walk away from.
+                return !this.showcaseGame;
             }
 
             if (!player.disconnectedAt) {

@@ -136,10 +136,6 @@ ends games in progress.
 -   **Self-serve app distribution.** `/mobile/ios` and `/mobile/android` are still `Placeholder`
     pages, so the only way into the beta is knowing the owner (**N14**).
 -   **Staging and load testing** (**N10**).
--   **Something to _watch_ on an empty site.** The empty-lobby problem is half solved: thirteen
-    practice bots keep an open table you can join at any hour (**F9**). What is still missing is
-    the bot-vs-bot showcase — the node driver already plays both seats, so what remains is the
-    supervisor that keeps one live and lists it on the Watch hub.
 -   **PWA, a responsive pass, an accessibility pass** (**N6**) and the **visual redesign**
     (**N16**).
 -   **Versioned public API**, **Discord**, **coaching and AI analysis** beyond the shipped
@@ -2586,7 +2582,7 @@ enough. Multi-lobby settings invalidation is done (**N8**).
 **Depends on:** N10 load testing telling us which ceiling is hit first.
 **Acceptance:** a documented scaling step exists for each ceiling the load test finds.
 
-#### F9 — Bot showcase: two AI players in a permanent watchable game
+#### F9 — Bot showcase: two AI players in a permanent watchable game _(done)_
 
 **Why:** an empty lobby is the hardest problem a new platform has. Two bots playing each other
 around the clock give the Watch hub content from day one, let a visitor see the game before they
@@ -2724,19 +2720,52 @@ commit to it, and run the engine as a continuous soak test.
         aggregate — by the `BotGame` flag every aggregate filters on, not by refusing to
         record them — and Quick Join never matches into a bot table. Asserted by
         `test/server/gameRouterBotGames.spec.js`.
--   A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends, and
-    publishes it to the Watch hub as spectatable. (The node driver already plays both seats —
-    `test/server/gameserver.botdriver.spec.js` pins a full bot-vs-bot game — so what remains
-    is the supervisor and the Watch listing.)
--   **(admin-config)**: how many showcase tables run, how their decks are chosen, and whether
-    the showcase is on at all.
+-   [x] **A supervisor that keeps a bot-vs-bot table live, starts a fresh game when one ends,
+        and publishes it to the Watch hub as spectatable** (`Lobby.runShowcaseSweep` /
+        `createShowcaseTable` / `retireShowcaseTable`, `server/lobby.js`). The node driver
+        already played both seats — `test/server/gameserver.botdriver.spec.js` pinned a full
+        bot-vs-bot game — so this is the supervisor and the Watch listing, the two pieces that
+        were missing.
+    -   **`Game.isEmpty()` would have closed a showcase table 30 seconds after it started.**
+        The bot's `'TBA'` seat id has always counted as absent by design — that is what lets a
+        practice table close itself the moment its one human leaves — but a showcase table has
+        no human seat at all, so both seats are `'TBA'` from the first tick and the node's
+        empty-game sweep (`clearStaleAndFinishedGames`, every 30s) would have torn the table
+        down before a single turn completed. Fixed with a `showcaseGame` flag threaded from
+        `PendingGame` through the `STARTGAME` payload to the node's `Game` instance, read only
+        inside `isEmpty()`'s `'TBA'` branch — a practice table's one bot seat is untouched.
+        Pinned by `test/server/gameserver.botdriver.spec.js`: a showcase table with two `'TBA'`
+        seats is never empty; an otherwise-identical two-bot game without the flag still is
+        (the pre-existing behaviour, unchanged); an ordinary practice table still closes once
+        its one real human clears the disconnect grace window.
+    -   Both hosts and decks come from `BotService.pickShowcasePair` — `pickHost` called twice
+        against a widening busy set, so a showcase table is never a bot against itself and
+        never reuses a bot already seated elsewhere in the lobby. The table is seeded and
+        started immediately (no joiner to wait on), reusing `applyDeckSelection` and
+        `startBotGameIfReady` unchanged.
+    -   A finished table is retired the moment it wins (`onShowcaseGameWin`, a second listener
+        on the router's existing `onGameWin` event) rather than left on the Watch hub as a dead
+        board; the sweep (15s, same cadence as the practice-table sweep) is what replaces it,
+        heals a table that never got a game node, and enforces the count and the off switch —
+        read fresh every tick, so all three work without a restart.
+    -   Showcase games are ordinary `botGame: true` rows, so every existing exclusion already
+        covers them: never rated, never in a leaderboard or meta aggregate, recorded and
+        replayable like any bot game (`test/server/gameRouterBotGames.spec.js`,
+        `botGamesAreNotResults.spec.js`).
+-   [x] **(admin-config)**: `bots.showcaseEnabled` (off by default), `bots.showcaseTableCount`
+        (0-5, default 1), and `bots.showcaseDifficulty` (the same Easy/Medium/Hard ARI bands
+        the practice tables use) — a new subsection of the existing `bots` registry section, on
+        the same `/admin/bots` page as the roster it draws from.
 -   Later: the bot as the tutorial's sparring partner (**N11**), and as the base for AI
     analysis (**F3**).
 
 **Depends on:** N1 (Watch hub). Feeds F3 and N11.
 **Acceptance criteria**
 
--   A logged-out visitor can watch a live game within seconds of landing on the site.
+-   [x] A logged-out visitor can watch a live game within seconds of landing on the site, once
+        an admin turns the showcase on: the table is created and started server-side with no
+        human required, and appears on `/watch` through the same live-lobby filter every other
+        spectatable game does — no new data path needed.
 -   [x] A bot game reaches a legitimate conclusion (three keys or deck-out) without stalling,
         looping, or throwing; a wedged table concedes rather than holds its player — asserted
         by `test/server/gameserver.botdriver.spec.js`, which plays full games through the real

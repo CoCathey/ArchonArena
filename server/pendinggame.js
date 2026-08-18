@@ -428,6 +428,10 @@ class PendingGame {
             // ARCHON (F9): lets the game list say this table is the Helper
             // Bot's practice table rather than an ordinary player's game.
             botGame: this.botGame || undefined,
+            // ARCHON (F9): a bot-vs-bot showcase table - both seats are bots,
+            // so the Watch hub can badge it and nobody is offered a seat to
+            // join.
+            showcaseGame: this.showcaseGame || undefined,
             // ARCHON (N31): which sparring style the bot is playing, and the
             // styles a joiner may choose from. Carried on the table rather than
             // fetched separately because the pending screen is the only place
@@ -519,6 +523,9 @@ class PendingGame {
             // node's driver its turn cap); the bot seat itself travels on its
             // player record as `isBot`.
             botGame: this.botGame || undefined,
+            // ARCHON (F9): tells the node's Game instance not to treat both
+            // bot seats' 'TBA' ids as an empty table - see Game.isEmpty().
+            showcaseGame: this.showcaseGame || undefined,
             botDifficulty: this.botDifficulty || undefined,
             botMaxTurns: this.botMaxTurns,
             botThinkMs: this.botThinkMs,

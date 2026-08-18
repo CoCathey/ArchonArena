@@ -14,5 +14,6 @@ moves (new cards, new tests).
 | 2026-08-17 | merged with main (Proving Grounds, ARI)   | 2791 passed, 3 skipped | 40,245       | 0      | 66      |
 | 2026-08-18 | + forge denial, calibration, habits       | 2792 passed, 3 skipped | 40,253       | 0      | 66      |
 | 2026-08-18 | merged with main (challenge bot, priors)  | 2833 passed, 3 skipped | 40,852       | 0      | 66      |
+| 2026-08-18 | + bot-vs-bot showcase supervisor (F9)     | 2836 passed, 3 skipped | 40,880       | 0      | 66      |
 
 Command: `npx vitest run` (~2.5 min). The skips are inherited from upstream.

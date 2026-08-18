@@ -881,7 +881,9 @@ const REGISTRY = {
             'different bot. Difficulty is the deck the bot brings, not how well it plays - the ' +
             'ARI band it draws from, chosen by whoever joins the table. Practice games are ' +
             'recorded and replayable but are never results: they can never touch Amber, deck ' +
-            'records, ratings or any statistic. Nobody can log into a bot account.',
+            'records, ratings or any statistic. Nobody can log into a bot account. The showcase ' +
+            'below is the same roster playing itself: bot-vs-bot tables nobody can join, kept ' +
+            'running for the Watch hub.',
         fields: {
             enabled: {
                 type: 'boolean',
@@ -970,6 +972,37 @@ const REGISTRY = {
                 min: 20,
                 max: 200,
                 default: 80
+            },
+            // ARCHON (F9): the bot-vs-bot showcase - the other half of the
+            // empty-lobby answer. A logged-out visitor gets something to watch
+            // within seconds of landing on the site, with nobody at either
+            // seat. Off by default: a site turns this on once it has decks
+            // imported for enough houses to make two distinct opponents.
+            showcaseEnabled: {
+                type: 'boolean',
+                label: 'Run a bot-vs-bot showcase table, watchable on the Watch hub',
+                default: false
+            },
+            showcaseTableCount: {
+                type: 'number',
+                label: 'Showcase tables to keep running at once',
+                min: 0,
+                max: 5,
+                default: 1
+            },
+            // The same ARI-band mechanism as defaultDifficulty, applied to
+            // both showcase seats - it is still the honest lever KeyForge
+            // already has, and a showcase watched by strangers should not be
+            // a mismatch.
+            showcaseDifficulty: {
+                type: 'select',
+                label: 'ARI band the showcase decks are drawn from',
+                default: 'medium',
+                options: [
+                    { value: 'easy', label: 'Easy (ARI 45-65)' },
+                    { value: 'medium', label: 'Medium (ARI 66-89)' },
+                    { value: 'hard', label: 'Hard (ARI 90-125)' }
+                ]
             }
         }
     },

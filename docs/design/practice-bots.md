@@ -111,6 +111,8 @@ server/services/championschallenge/SimulatedGame.js  the lab's driver, delegatin
 server/gamenode/botdriver.js                 the bot's seat at a real table (pump per event)
 server/gamenode/gameserver.js                pumps the driver at start, per input, per sweep
 server/lobby.js  runBotTableSweep            hosts/recycles the table, auto-starts on deck pick
+server/lobby.js  runShowcaseSweep            keeps N bot-vs-bot tables live for the Watch hub
+server/game/game.js  isEmpty()               showcaseGame carve-out - a 'TBA' pair is not absence
 server/gamerouter.js                         skips create/update/replay/rating for bot games
 server/api/bots.js                           the Bot Settings API (isAdmin)
 client/pages/BotAdmin.jsx                    the Bot Settings screen, at /admin/bots
@@ -416,23 +418,71 @@ has none, because a bot with nothing of its house cannot host however enabled
 it is. The shipped standalone decks cover nine houses, so Ekwidon, Geistoid,
 Skyborn and Unfathomable need decks imported before those four can play.
 
+## The showcase: the other half of the empty lobby answer
+
+The practice table answers "what do I play against"; the showcase answers
+"what do I watch before I decide to play at all" - a bot-vs-bot table nobody
+can join, kept running for the Watch hub, off by default
+(`bots.showcaseEnabled`).
+
+It reuses everything above rather than building a second path: the node
+driver already plays an arbitrary number of bot seats (the same
+`BotDriver`/`botdriver.js` a practice table uses, just with two names instead
+of one), and `BotService.pickShowcasePair` is `pickHost` called twice against
+a widening busy set - the roster's own "who is free right now" logic, so a
+showcase table is never a bot against itself and never reuses a bot already
+seated elsewhere. `Lobby.runShowcaseSweep` mirrors `runBotTableSweep`'s
+shape: read `bots.showcaseEnabled` / `bots.showcaseTableCount` /
+`bots.showcaseDifficulty` fresh every tick (15s, the same cadence), open
+`createShowcaseTable`s to reach the count, retire extras when it drops.
+
+**One real gap had to be closed for it to work at all.** A bot's seat has
+always been given the platform's `'TBA'` "no socket" id, and `Game.isEmpty()`
+has always read `'TBA'` as absence - that is precisely what lets a _practice_
+table close itself the moment its one human leaves. A showcase table has no
+human seat at all, so both seats are `'TBA'` from the instant it starts, and
+the node's empty-game sweep (`clearStaleAndFinishedGames`, every 30 seconds)
+would have read that as "everybody left" and torn the table down before a
+single turn completed - the opposite of what "keep a table live" means.
+Fixed with a `showcaseGame` flag carried the same way `botGame` already is
+(`PendingGame` → the `STARTGAME` payload → the node's `Game` instance),
+consulted only inside `isEmpty()`'s existing `'TBA'` branch: a practice
+table's one bot seat is completely untouched by the change, and a real human
+who disconnects from a showcase table (which should never happen, since none
+is ever seated) would still be read as absent after the usual 30-second
+grace window. Pinned by `test/server/gameserver.botdriver.spec.js`.
+
+There is no joiner to wait on, so `createShowcaseTable` seats both bots and
+calls `startBotGameIfReady` itself rather than waiting for a deck-selection
+hook that will never fire. A finished table is retired the moment it wins
+(`onShowcaseGameWin`, a second listener on the router's `onGameWin` event
+alongside the tournament one) rather than left on the Watch hub as a dead
+board; the sweep is what opens its replacement, and what heals a table that
+never got a game node because every worker was busy. Publishing to the Watch
+hub needed no new code at all: `/watch` is already a filter over the live
+lobby list (started, spectatable, non-private), and a showcase table is all
+three the moment it starts.
+
+Showcase games are ordinary `botGame: true` rows underneath, so every
+exclusion that already keeps practice games out of Amber, deck records,
+leaderboards and every statistics aggregate covers them for free - there was
+nothing new to exclude.
+
 ## Admin config
 
-**Bot Settings** (`/admin/bots`, isAdmin) holds both halves: the roster - each
-bot's name, picture, profile, on/off switch and deck count - and the knobs
-that govern all of them (keep a table open at all, most concurrent games, the
-joiner grace period, spectators, the pause between plays, whether they play
-the learned policy, the concede cap). The knobs are an ordinary
-settings section (`bots`) stored, validated and audited like every other; the
-registry's `page` field is what moves it off the general Site Settings screen
-and onto this one, next to the roster it governs. All of it is read per sweep
-tick, so nothing needs a restart.
+**Bot Settings** (`/admin/bots`, isAdmin) holds three things: the roster -
+each bot's name, picture, profile, on/off switch and deck count - the knobs
+that govern the practice table (keep one open at all, most concurrent games,
+the joiner grace period, spectators, the pause between plays, whether they
+play the learned policy, the concede cap), and the showcase's own three
+knobs (on/off, how many tables, the ARI band their decks are drawn from). All
+of it is one settings section (`bots`), stored, validated and audited like
+every other; the registry's `page` field is what moves it off the general
+Site Settings screen and onto this one, next to the roster it governs. All
+of it is read per sweep tick, so nothing needs a restart.
 
 ## Future
 
--   The F9 showcase: a supervisor keeping a bot-vs-bot table spectatable is
-    the remaining half; the driver already plays both seats (the spec plays
-    full bot-vs-bot games through the real game server).
 -   A first-class rematch that reseats the human at a fresh bot table with
     one click.
 -   Per-bot personality: a policy weighting per house, so Brobnar's bot
