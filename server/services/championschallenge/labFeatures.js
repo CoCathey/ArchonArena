@@ -24,6 +24,9 @@
 // ARCHON (F3): what a card does, from the canonical card data - the misplay
 // review's classifier, so "this card steals" has one answer platform-wide.
 const { ROLES, rolesFor } = require('../membership/cardKnowledge');
+// ARCHON (N43): how MUCH of it a card does - graded AERC-style axes from the
+// committed traits file, absent-tolerant like every other card data source.
+const { traitsFor } = require('./cardTraits');
 
 /**
  * ARCHON (N26): the features, computed from a plain VIEW of a position.
@@ -51,7 +54,7 @@ function stateFeaturesFrom({ round, me, them }) {
     const oppCreatures = (them && them.creatures) || [];
     const myPower = myCreatures.reduce((sum, c) => sum + (c.power || 0), 0);
     const oppPower = oppCreatures.reduce((sum, c) => sum + (c.power || 0), 0);
-    // ARCHON (N41): board sense. Quality and bounty, not just quantity -
+    // ARCHON (N42): board sense. Quality and bounty, not just quantity -
     // computed here so both view builders (engine and replay) get them for
     // free from the creature lists they already carry.
     const maxPower = (creatures) => creatures.reduce((max, c) => Math.max(max, c.power || 0), 0);
@@ -81,7 +84,7 @@ function stateFeaturesFrom({ round, me, them }) {
         oppPower: Math.min(1, oppPower / 30),
         powerDiff: clamp11((myPower - oppPower) / 20),
         /**
-         * ARCHON (N41): the board's QUALITY, not just its totals. Eight
+         * ARCHON (N42): the board's QUALITY, not just its totals. Eight
          * 1-power tokens and one giant summed the same to this model, and
          * they are opposite boards: the giant is the fight that cannot be
          * won and the removal target that decides the game. The single
@@ -90,7 +93,7 @@ function stateFeaturesFrom({ round, me, them }) {
         myMaxPower: Math.min(1, maxPower(myCreatures) / 12),
         oppMaxPower: Math.min(1, maxPower(oppCreatures) / 12),
         /**
-         * ARCHON (N41): amber sitting ON creatures, which the pools never
+         * ARCHON (N42): amber sitting ON creatures, which the pools never
          * showed. Amber captured on an ENEMY creature is a bounty - kill the
          * body, collect the amber - and on a FRIENDLY one a liability paid
          * out to the opponent the moment it dies. Both change what a fight,
@@ -135,7 +138,7 @@ function seatView(player) {
         creatures: (player.creaturesInPlay || []).map((card) => ({
             power: card.power,
             exhausted: !!card.exhausted,
-            // ARCHON (N41): captured amber rides on the card's tokens. Public
+            // ARCHON (N42): captured amber rides on the card's tokens. Public
             // information - it sits on the table for both players to count.
             amber: (card.tokens && card.tokens.amber) || 0
         })),
@@ -288,7 +291,7 @@ const ACTION_CONTEXTS = {
     deckControl: (player) =>
         deckShare(player, (card) => rolesFor(card.id).has(ROLES.AMBER_CONTROL)) >= 0.1,
     /**
-     * ARCHON (N41): a board wipe is waiting in this hand.
+     * ARCHON (N42): a board wipe is waiting in this hand.
      *
      * The ordering question every KeyForge turn asks - creatures first or
      * the sweeper first - was invisible from the CREATURE's side. The role
@@ -304,7 +307,7 @@ const ACTION_CONTEXTS = {
     wipeInHand: (player) =>
         (player.hand || []).some((card) => rolesFor(card.id).has(ROLES.BOARD_WIPE)),
     /**
-     * ARCHON (N41): an enemy creature is carrying captured amber.
+     * ARCHON (N42): an enemy creature is carrying captured amber.
      *
      * A kill that also collects is a different move from a kill that only
      * trades - crossed with fight and select, this is how the model can
@@ -399,6 +402,23 @@ function actionFeatures({ kind, card, house, player, button }) {
 
             for (const context of live) {
                 features[`x:${key}:${context}`] = 1;
+            }
+        }
+
+        /**
+         * ARCHON (N43): the graded version of the roles above. A role says
+         * "this card answers creatures"; the axis says how hard, on a shared
+         * 0-1 scale borrowed from AERC's taxonomy (scores our own - see
+         * cardTraits.js). One `card:ax:creatureControl` weight generalizes
+         * across every card that answers creatures, learned from all of them
+         * together, where per-card weights need ~20 sightings each to say
+         * less. Zeros are omitted, the features' sparse convention.
+         */
+        const traits = traitsFor(card.id);
+
+        if (traits) {
+            for (const [axis, value] of Object.entries(traits)) {
+                features[`card:ax:${axis}`] = value;
             }
         }
 

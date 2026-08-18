@@ -27,6 +27,7 @@
         "challenger:export": "node server/scripts/challenge-challenger.js export",
         "challenger:enter": "node server/scripts/challenge-challenger.js enter",
         "card-priors": "node server/scripts/generate-card-priors.js",
+        "card-traits": "node server/scripts/generate-card-traits.js",
         "migrate": "node server/scripts/migrate.js",
         "sync:upstream": "node server/scripts/upstream-sync.js",
         "check:email": "node server/scripts/check-email.js",

@@ -7,7 +7,7 @@ const { ROLES, rolesIndex } = require('../../../../server/services/membership/ca
 const { seatViewFromFrame } = require('../../../../server/services/membership/replayValue');
 
 /**
- * ARCHON (N41): board sense - the facts the model could not see.
+ * ARCHON (N42): board sense - the facts the model could not see.
  *
  * Three blindnesses, each pinned: board QUALITY (eight tokens and one giant
  * summed the same), captured amber (bounty on their board, liability on
@@ -16,7 +16,7 @@ const { seatViewFromFrame } = require('../../../../server/services/membership/re
  * Plus the two contracts every feature must honor: an old view without the
  * new facts reads as zero, and a recorded frame reads like the live game.
  */
-describe('board sense (N41)', function () {
+describe('board sense (N42)', function () {
     const creature = (power, overrides = {}) => ({ power, exhausted: false, ...overrides });
     const view = (mine, theirs) => ({
         round: 5,

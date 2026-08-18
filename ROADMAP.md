@@ -2543,7 +2543,7 @@ as a dropdown and as nothing else.
 -   [x] A practice game against a styled bot records which style.
 -   [x] An ordinary game between two people claims no style.
 
-#### N41 — Board sense _(done)_
+#### N42 — Board sense _(done)_
 
 **Why:** the model class caps intelligence at what the features let it see, and three classic
 KeyForge facts were invisible: eight 1-power tokens and one giant summed to the same board,
@@ -2568,6 +2568,33 @@ question every turn asks — was an identical state to every non-wipe candidate.
         old diary rows the same way, and no migration touches a stored brain.
 -   [x] Engine seat and recorded frame produce the same view (the N26 parity contract).
 -   [x] A stand-in seat with no hand and no opponent computes calmly.
+
+#### N43 — What kind of good: AERC-style card axes _(done)_
+
+**Why:** the role crosses (F3) are binary — "this card answers creatures" — and the per-card
+weights need ~20 sightings each before they mean anything. Decks of KeyForge's AERC framework
+is the field's proven vocabulary for what a KeyForge card does, in degrees. Their curated
+numbers are theirs (AGPL service, data in their database); their taxonomy is the part worth
+borrowing, with our own homework done in it.
+
+**Tasks**
+
+-   [x] **Six axes, our scores.** `npm run card-traits` has a language model score every card
+        0–4 on expectedAmber, amberControl, creatureControl, artifactControl, efficiency and
+        disruption — the same batch-job pattern as the priors (~$4–5 once, resumable), the
+        output a committed file (`data/cardTraits.json`).
+-   [x] **Graded card features.** `card:ax:<axis>` values ride into every candidate whose card
+        is scored. One shared `card:ax:creatureControl` weight generalizes across every card
+        that answers creatures, learned from all of them together — where per-card weights
+        learn each card separately and slowly.
+-   [x] **Absent-tolerant like every card data source:** no file, no axis features, no crash;
+        zeros omitted per the sparse convention; keys add-only.
+
+**Acceptance criteria**
+
+-   [x] A server without the traits file plays exactly as before.
+-   [x] Scores clamp into the 0–4 scale and map to [0, 1] features.
+-   [x] The taxonomy is credited; the scores are generated, not imported.
 
 ### Future — differentiation
 

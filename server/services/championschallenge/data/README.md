@@ -23,3 +23,18 @@ set releases only pays for the new cards.
 
 Commit the generated file: it ships with the code so that servers need no API
 key at runtime. A server without the file simply plays without priors.
+
+## `cardTraits.json`
+
+AERC-style axis scores per card (expected amber, amber control, creature
+control, artifact control, efficiency, disruption — the taxonomy is Decks of
+KeyForge's shared vocabulary; the scores are this platform's own). Feeds the
+graded `card:ax:*` features via `../cardTraits.js`.
+
+```
+ANTHROPIC_API_KEY=... npm run card-traits
+```
+
+Same shape as the priors job: one Message Batch (~$3–4 once), resumable,
+`--dry-run` and `--limit` for previews. Commit the result; a server without
+the file simply emits no axis features.
