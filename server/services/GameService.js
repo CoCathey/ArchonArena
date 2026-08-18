@@ -31,9 +31,19 @@ class GameService {
                 // find them again and watch the replay - and flagged, because
                 // a recorded game is not a result. Every aggregate on this
                 // site excludes the flagged ones.
-                'INSERT INTO "Games" ("GameId", "GameFormat", "StartedAt", "BotGame") ' +
-                    'VALUES ($1, $2, $3, $4) RETURNING "Id"',
-                [game.gameId, game.gameFormat, game.startedAt, !!game.botGame]
+                // ARCHON (N41): and WHICH pilot, when there was one. The style
+                // was chosen on the pending screen and then forgotten by
+                // everything downstream, so "which one keeps beating me" had
+                // no answer for the player and no answer for the site.
+                'INSERT INTO "Games" ("GameId", "GameFormat", "StartedAt", "BotGame", ' +
+                    '"BotStyle") VALUES ($1, $2, $3, $4, $5) RETURNING "Id"',
+                [
+                    game.gameId,
+                    game.gameFormat,
+                    game.startedAt,
+                    !!game.botGame,
+                    game.botStyle || null
+                ]
             );
 
             if (!newGame || newGame.length === 0) {

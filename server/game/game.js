@@ -52,6 +52,12 @@ class Game extends EventEmitter {
         // ARCHON (F9): a Helper Bot practice game. Rides into the save state
         // so the lobby's router can keep it out of Games, replays and rating.
         this.botGame = !!details.botGame;
+        // ARCHON (N41): which pilot the human chose to face. Rides with the
+        // game so the board can name it while it is being played and the save
+        // state can record it afterwards - the choice was made on the pending
+        // screen and then lost by everything downstream.
+        this.botStyle = details.botStyle;
+        this.botStyleLabel = details.botStyleLabel;
         // ARCHON: pre-assigned chains (SAS handicap / Chainbound events);
         // applied once at initialise, before the setup phase draws hands.
         this.startingChains = details.startingChains;
@@ -1921,6 +1927,7 @@ class Game extends EventEmitter {
             // REMATCH, PLAYERLEFT) can keep practice games out of the record.
             // Undefined rather than false keeps ordinary saves unchanged.
             botGame: this.botGame || undefined,
+            botStyle: this.botStyle || undefined,
             finishedAt: this.finishedAt,
             gameFormat: this.gameFormat,
             gameId: this.id,
@@ -2368,6 +2375,12 @@ class Game extends EventEmitter {
 
             return {
                 adaptive: this.adaptive,
+                // ARCHON (N41): the pilot the human chose to face, named on the
+                // board rather than only on the pending screen. A style picked
+                // and then never mentioned again is a setting, not an opponent
+                // - and "which one keeps beating me" was a question the player
+                // had no way to ask.
+                botStyleLabel: this.botStyleLabel || undefined,
                 cancelPromptUsed: this.cancelPromptUsed,
                 // ARCHON: player-level lasting effects (Befuddle and friends),
                 // which otherwise leave no trace on the board.

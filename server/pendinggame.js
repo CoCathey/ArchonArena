@@ -525,6 +525,13 @@ class PendingGame {
             // ARCHON (N21): the learned model the bot plays with, or absent
             // for the heuristics.
             botPolicy: this.botPolicy || undefined,
+            // ARCHON (N41): and WHICH pilot that model was bent into, by key
+            // for the record and by label for the board. Travelling with the
+            // table is the only way the node can name it: the node has no
+            // database to ask, which is the same reason the policy itself
+            // rides along rather than being looked up per move.
+            botStyle: this.botStyle || undefined,
+            botStyleLabel: this.botStyleLabel || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,

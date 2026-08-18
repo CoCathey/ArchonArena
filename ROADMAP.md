@@ -2480,6 +2480,69 @@ it happening again, so `deadButtons.spec.js` now scans every jsx file for it.
 -   [x] Turning calibration off stops the deep rung too.
 -   [x] No HeroUI Button anywhere is asked to be a link.
 
+#### N40 — Answers in minutes _(done)_
+
+**Why:** the lab plays a dozen games a deck a day against a twenty-game confidence threshold,
+so a member enrolled a deck, read "still proving", and had to remember to come back in two
+days. Most did not. A tool people forget is a tool that is not working, however correct its
+arithmetic.
+
+**Tasks**
+
+-   [x] **A queue, not work in the request** (`ChallengeBurstRuns`, migration 86). Simulated
+        games are CPU and the lobby serves live tables on the same event loop; thirty games
+        inside an HTTP handler would freeze every game on the site for half a minute. The
+        request writes a row; whichever process holds the sweep lease drains it — which also
+        means a burst cannot double-run across two nodes, for free.
+-   [x] **Claimed atomically** (`FOR UPDATE SKIP LOCKED`), for the same reason the sweep lease
+        is one statement: a read-then-write window lets two nodes play one run, and a member's
+        daily allowance buys one answer twice.
+-   [x] **Its own allowance**, not the trickle's per-deck cap. That cap spreads a shared
+        background budget across members who did not ask for anything; making a burst eat it
+        would mean asking for an answer cost you the answers you would have had anyway.
+-   [x] **Against any of the three oppositions** — your own roster, the Gauntlet field, the
+        Vault Tour — and it runs before the trickle and before the no-roster early return,
+        because somebody is watching a progress bar and the background roster is not.
+-   [x] **Stopping short says why.** "2 of 30" with no explanation reads as the feature being
+        broken; an empty pool, an unplayable field and a one-deck roster each name themselves.
+-   [x] **Entitlement re-checked at play time**, not only when queued — a membership can lapse
+        between the asking and the running.
+-   [x] **Runs a restart orphaned are reclaimed** after a window, so a member is never blocked
+        behind a progress bar that will never move.
+-   Later: a burst against one named deck (paste a link) for somebody who knows exactly who
+    they are about to play.
+
+**Acceptance criteria**
+
+-   [x] A burst never plays inside the HTTP request.
+-   [x] Two nodes cannot claim the same run.
+-   [x] A run that finds no opponent stops, explains itself, and does not keep asking.
+
+#### N41 — The pilot you are facing _(done)_
+
+**Why:** N31 let a player choose a sparring style on the pending screen and then every layer
+downstream forgot it. Nothing named it on the board; nothing recorded it. The feature existed
+as a dropdown and as nothing else.
+
+**Tasks**
+
+-   [x] **Named on the board** while the game is played, so a style is an opponent rather than
+        a setting.
+-   [x] **Recorded with the game** (`Games."BotStyle"`, migration 87), so "which one keeps
+        beating me" is answerable — and so the site can eventually say how each pilot does
+        against PEOPLE, which it has never known while knowing exactly how they do against
+        simulated decks.
+-   [x] **Asserted link by link.** The chain runs pending game → start details → engine → live
+        state → save state → insert, each in a different file, and a style that stops one hop
+        short is invisible in precisely the way the original was.
+-   Later: per-pilot records on a player's own stats page, and the pilots' human win rates
+    beside their simulated ones on the calibration ladder.
+
+**Acceptance criteria**
+
+-   [x] A practice game against a styled bot records which style.
+-   [x] An ordinary game between two people claims no style.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

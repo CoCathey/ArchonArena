@@ -387,6 +387,15 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.CHAMPIONS_CHALLENGE]
         }),
+        // ARCHON (N40): run a batch on demand. Its own endpoint rather than a
+        // slice of the report, because the page polls it every couple of
+        // seconds while a run is going and the report is a dozen queries.
+        getChallengeBurst: builder.query({
+            query: () => '/champions-challenge/burst'
+        }),
+        startChallengeBurst: builder.mutation({
+            query: (body) => ({ url: '/champions-challenge/burst', method: 'POST', body })
+        }),
         // ARCHON (N26): the lab's vital signs, for the operations dashboard.
         getChampionsChallengeHealth: builder.query({
             query: () => '/champions-challenge/health'
@@ -1346,6 +1355,8 @@ export const {
     useEnrollChampionsChallengeDeckMutation,
     useEnrollRandomChampionsChallengeDeckMutation,
     useSaveChampionsChallengeGauntletMutation,
+    useGetChallengeBurstQuery,
+    useStartChallengeBurstMutation,
     useGetChampionsChallengeHealthQuery,
     useCrawlDeckCatalogMutation,
     // ARCHON (N32): the Vault Tour - the member's slate, and the admin's field.
