@@ -2543,6 +2543,40 @@ as a dropdown and as nothing else.
 -   [x] A practice game against a styled bot records which style.
 -   [x] An ordinary game between two people claims no style.
 
+#### N42 — The race, before anybody is at the line _(done)_
+
+**Why:** the calibration ladder found a defect the moment it existed. A persona flying a flat
+`reap +0.6` beat the trained champion 57–43, and the three pilots ranked in exact order of how
+much their bias pushed toward reaping. That is a gradient, not noise.
+
+**What it was NOT.** The first diagnosis — that the model adds state and action scores and never
+crosses them — was wrong. `labFeatures` has always emitted `x:kind:context`, so "reap when X"
+was expressible. The hole was narrower and more interesting.
+
+**Tasks**
+
+-   [x] **The approach, not just the line.** Every race-related context was an endpoint:
+        `keyReady` (I can forge now) and `oppAtCheck` (they forge next turn). By the time either
+        holds, the decision that produced it was three turns ago — so the model could say what to
+        do AT check and never how to play toward one. `closingIn` / `oppClosingIn` name the
+        approach.
+-   [x] **Who is ahead.** Every context described a single seat, so "they are nearer their key
+        than I am to mine" — the fact that decides race-or-disrupt — could not be represented at
+        all. `losingRace` / `winningRace` compare the two.
+-   [x] **Measured in what is owed, not what is held.** The key cost rises; two seats on eight
+        amber are not in the same position when one of them owes eleven. Asserted, because
+        comparing raw amber gets it exactly backwards in precisely the positions that matter.
+-   [x] **A dead heat is neither.** Claiming one would be a lie the loop learns from.
+-   Later: re-read the ladder after the loop has trained on the new contexts. If the Racer stops
+    beating the champion, this was the defect; if it does not, the next suspect is the
+    self-play distribution rather than the feature set.
+
+**Acceptance criteria**
+
+-   [x] A seat within three amber of a key is closing in, at any key cost.
+-   [x] The race contexts cross with the ACTION — a state fact cancels out of a ranking and could
+        never change a move.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

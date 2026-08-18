@@ -215,6 +215,43 @@ const ACTION_CONTEXTS = {
     /** Enough amber to forge now - one more is worth much less than a key. */
     keyReady: (player) => player.amber >= keyCostOf(player),
     /**
+     * ARCHON (N42): the RACE, before anybody is at the line.
+     *
+     * `keyReady` and `oppAtCheck` are both "already there". By the time
+     * either holds, the decision that produced it was made three turns
+     * earlier - so the model could express "what to do at check" and never
+     * "how to play the approach", which is where most of a game happens.
+     *
+     * This is the hole the calibration ladder found. A persona with a flat
+     * `reap +0.6` beat the trained champion, and the reason is that a fixed
+     * bias approximates "reap harder when the race is on" better than a
+     * model which cannot see a race until somebody has already won it. The
+     * fix is not more crossing - the machinery has always crossed kind with
+     * context - it is a context vocabulary that includes the approach.
+     *
+     * Within a turn or two of forging: close enough that amber is the
+     * currency and the board is a means to it.
+     */
+    closingIn: (player) => player.amber >= keyCostOf(player) - 3,
+    oppClosingIn: (player) =>
+        !!player.opponent && player.opponent.amber >= keyCostOf(player.opponent) - 3,
+    /**
+     * And who is AHEAD in it, which no context could say before: every one
+     * of them describes a single seat, so "they are nearer their key than I
+     * am to mine" - the fact that decides whether to race or to disrupt -
+     * was not expressible at all.
+     *
+     * Measured in amber still needed rather than amber held, because the key
+     * cost rises and two seats at eight amber are not in the same position
+     * when one of them owes eleven.
+     */
+    losingRace: (player) =>
+        !!player.opponent &&
+        keyCostOf(player.opponent) - player.opponent.amber < keyCostOf(player) - player.amber,
+    winningRace: (player) =>
+        !!player.opponent &&
+        keyCostOf(player) - player.amber < keyCostOf(player.opponent) - player.opponent.amber,
+    /**
      * They forge at the start of their next turn. The context that decides
      * whether a move is worth making at all: crossed with the kind, it is
      * how the model can learn "when they are at check, THIS is what you
