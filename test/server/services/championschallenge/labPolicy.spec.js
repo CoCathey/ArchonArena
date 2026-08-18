@@ -147,5 +147,73 @@ describe('labPolicy', function () {
             // against one measured target, and the outcomes win.
             expect(scoreAfter(games, { epochs: 1, targetWeight: 1 })).toBeGreaterThan(0.5);
         });
+
+        // ARCHON (N38): a lesson may carry its own pull, so a provisional
+        // teacher's rows can be turned down without touching the deep bot's.
+        it('honors a per-decision weight over the batch targetWeight', function () {
+            const weighted = (weight) => [
+                {
+                    winnerSide: 'challenger-alpha',
+                    decisions: [{ ...decision('reap'), target: 0, weight }]
+                }
+            ];
+            const gentle = scoreAfter(weighted(1), { epochs: 1 });
+            const firm = scoreAfter(weighted(8), { epochs: 1 });
+
+            expect(Math.abs(firm - 0.5)).toBeGreaterThan(Math.abs(gentle - 0.5));
+            // Weight zero is a row that teaches nothing at all.
+            expect(scoreAfter(weighted(0), { epochs: 1 })).toBeCloseTo(0.5, 5);
+        });
+    });
+
+    /**
+     * ARCHON (N38): the card priors - what shrinkage shrinks TOWARD.
+     *
+     * A model may carry `cardPriors` from the one-time card reading job. An
+     * unseen card contributes its prior in full; each observed game moves the
+     * contribution from what the text suggested toward what the games
+     * measured; and a model with no priors behaves exactly as before.
+     */
+    describe('card priors', function () {
+        const {
+            shrink,
+            SHRINK_PRIOR
+        } = require('../../../../server/services/championschallenge/labPolicy');
+
+        it('an unseen card scores its prior in full', function () {
+            expect(shrink(0, 0, 0.3)).toBeCloseTo(0.3, 10);
+            expect(shrink(undefined, undefined, -0.2)).toBeCloseTo(-0.2, 10);
+        });
+
+        it('evidence pulls the contribution from the prior toward the weight', function () {
+            // At exactly SHRINK_PRIOR observations the answer is halfway.
+            expect(shrink(0.5, SHRINK_PRIOR, 0.1)).toBeCloseTo(0.3, 10);
+            // Heavily seen: nearly all learned weight, prior nearly gone.
+            expect(shrink(0.5, 2000, 0.1)).toBeGreaterThan(0.49 * 0.98);
+        });
+
+        it('no prior is exactly the old shrinkage', function () {
+            expect(shrink(0.5, 10, 0)).toBeCloseTo(0.5 * (10 / (10 + SHRINK_PRIOR)), 10);
+            expect(shrink(0, 5, 0)).toBe(0);
+        });
+
+        it('scoreDecision reads a prior for a card the model never saw', function () {
+            const blank = emptyModel();
+            const primed = { ...emptyModel(), cardPriors: { 'unseen-card': 0.8 } };
+            const move = decision('playCreature', 'unseen-card');
+
+            expect(scoreDecision(primed, move)).toBeGreaterThan(scoreDecision(blank, move));
+        });
+
+        it('training carries priors forward and still learns past them', function () {
+            const primed = { ...emptyModel(), cardPriors: { 'poor-card': 0.5 } };
+            const trained = trainModel(primed, plantedGames(200));
+
+            expect(trained.cardPriors).toEqual({ 'poor-card': 0.5 });
+            // The games say the card loses; enough of them outvote the prior.
+            expect(
+                scoreDecision(trained, decision('playCreature', 'poor-card', 'challenger-omega'))
+            ).toBeLessThan(0.5);
+        });
     });
 });

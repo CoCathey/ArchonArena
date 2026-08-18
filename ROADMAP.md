@@ -2401,6 +2401,46 @@ right — required a hand-written POST. Everything else was already built.
 -   [x] A comp never demotes an account that pays for more.
 -   [x] Revoking a comp leaves a real membership intact.
 
+#### N38 — The bot can read, and hires a tutor _(done)_
+
+**Why:** the learning bot's stated blind spot is that it cannot read a card's text — every
+per-card weight starts at zero and stays shrunk toward zero for its first ~20 sightings, so
+rare cards are played blind for weeks. An LLM can read the cards. The discipline was keeping
+it OUT of the game loop: play stays free and offline, and the tokens go where one spend
+improves thousands of future games.
+
+**Tasks**
+
+-   [x] **Card priors, generated once.** `npm run card-priors` has a language model read every
+        card in the pool (2,710 of them, one Message Batch, a few dollars once) and score its
+        competitive impact 0–10. The scores are a committed file; `labPolicy.shrink` now shrinks
+        toward the prior instead of toward zero, so an unseen card starts from what its text
+        suggests and the evidence takes over on the same schedule zero used to. Priors attach at
+        model load and are stripped before storage — the file is the source of truth, runtime
+        needs no key, and a server without the file plays as it always has. Admin knob
+        `cardPriorWeight` (0 switches them off).
+-   [x] **The AI teacher, on a weekly allowance.** Sparring games quietly capture a few
+        positions a day (readable board summary plus every candidate as a decision record); deep
+        games capture theirs WITH the search's measured value per candidate. A sweep-tail job
+        reviews a budgeted number per week (~1k tokens each, so the default 25 is pennies),
+        turning reviews into ordinary diary rows with explicit targets and their own gradient
+        weight (`llmTargetWeight`, deliberately below the deep bot's).
+-   [x] **The licence.** A teacher must EARN the diary: its reviews of deep-measured positions
+        are exams, and only while its recent agreement with the search clears `llmMinAgreement`
+        do its other reviews become lessons. An unproven or drifting teacher is quietly kept on
+        exam duty — the title fight's conservatism, applied to the teacher itself. And behind it
+        stands the arena anyway: lessons only shape candidates, and no candidate is crowned
+        without beating the champion under the sequential test.
+
+**Acceptance criteria**
+
+-   [x] No LLM call ever happens inside a game; sparring, arena and practice play run with no
+        key configured.
+-   [x] A model trained with priors is stored without them, and play/training score with the
+        same brain (both doors attach).
+-   [x] An unproven teacher writes no lessons; a proven one's lessons carry its configured
+        weight; a failed API call spends nothing and the loop learns on.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

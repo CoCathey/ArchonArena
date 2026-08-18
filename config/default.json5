@@ -233,6 +233,17 @@
         autoSyncPerRun: 3
     },
 
+    // ARCHON (N38): the Claude API, spent by exactly two things - the
+    // Champion's Challenge AI teacher's small weekly review budget, and the
+    // one-time card-priors job (npm run card-priors). Runtime play never
+    // calls an API: priors ship as a committed file, and the teacher without
+    // a key is simply off, whatever the admin switch says.
+    anthropic: {
+        apiKey: '', // set via ANTHROPIC_API_KEY
+        model: 'claude-opus-5',
+        requestTimeoutMs: 60000
+    },
+
     // Master Vault deck catalog: an index of every deck that exists - uuid,
     // name, expansion, houses, no cards - so a player can find their decks by
     // typing a name instead of pasting a Master Vault link. Master Vault has no
