@@ -10,11 +10,13 @@ import PremiumLock from '../Components/Membership/PremiumLock';
 import { CAPABILITIES, hasCapability } from '../membership';
 import { Constants } from '../constants';
 import {
+    useGetChallengeBurstQuery,
     useGetChampionsChallengeQuery,
     useEnrollChampionsChallengeDeckMutation,
     useEnrollRandomChampionsChallengeDeckMutation,
     useEnrollVaultTourDeckMutation,
     useSaveChampionsChallengeGauntletMutation,
+    useStartChallengeBurstMutation,
     useWithdrawChampionsChallengeDeckMutation,
     useWithdrawVaultTourDeckMutation
 } from '../redux/api';
@@ -899,6 +901,185 @@ CalibrationPanel.propTypes = {
 };
 
 /**
+ * ARCHON (N40): answers in minutes.
+ *
+ * The lab plays a dozen games a deck a day, against a twenty-game threshold
+ * below which the page will not commit to a verdict. So a member enrolled a
+ * deck, read "still proving", and had to remember to come back in two days.
+ * Most did not, and a tool people forget is a tool that is not working however
+ * correct its arithmetic.
+ *
+ * A run is queued, not played in the request: simulated games are CPU and the
+ * lobby serves live tables on the same event loop. So the honest thing to show
+ * is a queue position turning into a progress bar, rather than a spinner that
+ * implies something is happening this second when the next sweep tick is up to
+ * a minute away.
+ *
+ * Polls only while a run is live. A page left open on a finished result should
+ * not keep asking.
+ */
+const BurstPanel = ({ decks, t }) => {
+    const { data, refetch } = useGetChallengeBurstQuery(undefined, {
+        pollingInterval: 3000
+    });
+    const [startBurst, { isLoading: starting }] = useStartChallengeBurstMutation();
+    const [deckId, setDeckId] = useState('');
+    const [opposition, setOpposition] = useState('roster');
+    const [message, setMessage] = useState(null);
+
+    const run = data?.run;
+    const live = run && (run.status === 'queued' || run.status === 'running');
+    const budget = data?.budget;
+    const roster = decks || [];
+
+    const start = async () => {
+        setMessage(null);
+
+        try {
+            const result = await startBurst({
+                deckId: parseInt(deckId, 10),
+                opposition
+            }).unwrap();
+
+            if (!result.success) {
+                setMessage(result.message);
+
+                return;
+            }
+
+            refetch();
+        } catch (error) {
+            setMessage(error?.data?.message || t('That run could not be started.'));
+        }
+    };
+
+    const deckName = (id) => (roster.find((deck) => deck.deckId === id) || {}).name;
+    const oppositionLabel = (key) =>
+        ((data?.oppositions || []).find((entry) => entry.key === key) || {}).label || key;
+
+    return (
+        <Panel type='default' compactHeader title={t('Run a batch now')}>
+            <p className='m-0 pb-2 text-sm text-muted'>
+                {t(
+                    'The background sweep plays a few games a day per deck. If you have a ' +
+                        'question now — an event this weekend, a deck you just picked up — ask ' +
+                        'for a batch and watch it fill in.'
+                )}
+            </p>
+
+            {live ? (
+                <div>
+                    <div className='flex flex-wrap items-baseline gap-x-2 pb-1 text-sm'>
+                        <span className='text-foreground'>
+                            {deckName(run.deckId) || t('Your deck')}
+                        </span>
+                        <span className='text-[11px] text-muted'>
+                            {t('vs {{opposition}}', {
+                                opposition: oppositionLabel(run.opposition)
+                            })}
+                        </span>
+                        <span className='ms-auto tabular-nums text-muted'>
+                            {t('{{played}} of {{requested}}', {
+                                played: run.played,
+                                requested: run.requested
+                            })}
+                        </span>
+                    </div>
+                    <div className='h-2 w-full overflow-hidden rounded-full bg-surface-secondary'>
+                        <div
+                            className='h-full rounded-full bg-amber-400 transition-all'
+                            style={{ width: `${Math.round(run.progress * 100)}%` }}
+                        />
+                    </div>
+                    <p className='m-0 pt-1 text-[11px] text-muted'>
+                        {run.status === 'queued'
+                            ? // Named honestly: the sweep tick is up to a minute
+                              // away, and a spinner would imply otherwise.
+                              t('Queued — the lab picks it up on its next pass.')
+                            : t('{{wins}}–{{losses}} so far', {
+                                  wins: run.wins,
+                                  losses: run.losses
+                              })}
+                    </p>
+                </div>
+            ) : (
+                <div className='flex flex-wrap items-end gap-2'>
+                    <label>
+                        <span className='mb-0.5 block text-[10px] uppercase tracking-wide text-muted'>
+                            {t('Deck')}
+                        </span>
+                        <select
+                            className='max-w-[14rem] rounded border border-border/70 bg-surface-secondary/60 px-2 py-1 text-sm text-foreground'
+                            onChange={(e) => setDeckId(e.target.value)}
+                            value={deckId}
+                        >
+                            <option value=''>{t('Pick a deck')}</option>
+                            {roster.map((deck) => (
+                                <option key={deck.deckId} value={deck.deckId}>
+                                    {deck.name}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label>
+                        <span className='mb-0.5 block text-[10px] uppercase tracking-wide text-muted'>
+                            {t('Against')}
+                        </span>
+                        <select
+                            className='rounded border border-border/70 bg-surface-secondary/60 px-2 py-1 text-sm text-foreground'
+                            onChange={(e) => setOpposition(e.target.value)}
+                            value={opposition}
+                        >
+                            {(data?.oppositions || []).map((entry) => (
+                                <option key={entry.key} title={entry.note} value={entry.key}>
+                                    {entry.label}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <button
+                        className='rounded-md border border-accent/60 bg-accent/20 px-3 py-1 text-xs font-semibold text-amber-200 disabled:opacity-40'
+                        disabled={starting || !deckId}
+                        onClick={start}
+                        type='button'
+                    >
+                        {t('Play {{games}} games now', { games: data?.games || 30 })}
+                    </button>
+                    {budget && !budget.unlimited && (
+                        <span className='text-[11px] text-muted'>
+                            {t('{{remaining}} of {{perDay}} left today', {
+                                remaining: budget.remaining,
+                                perDay: budget.perDay
+                            })}
+                        </span>
+                    )}
+                </div>
+            )}
+
+            {message && <p className='m-0 pt-2 text-[11px] text-amber-300'>{message}</p>}
+
+            {/* A finished run keeps its result until the next one replaces it,
+                including WHY it stopped short. A run that quietly reports two
+                games out of thirty reads as the feature being broken. */}
+            {!live && run && (
+                <p className='m-0 pt-2 text-[11px] text-muted'>
+                    {t('Last run: {{wins}}–{{losses}} over {{played}} games', {
+                        wins: run.wins,
+                        losses: run.losses,
+                        played: run.played
+                    })}
+                    {run.abandoned > 0 &&
+                        ` · ${t('{{count}} unfinished', { count: run.abandoned })}`}
+                    {run.note ? ` · ${run.note}` : ''}
+                </p>
+            )}
+        </Panel>
+    );
+};
+
+BurstPanel.propTypes = { decks: PropTypes.array, t: PropTypes.func };
+
+/**
  * ARCHON (N32): the Vault Tour - three of your decks against a field somebody
  * won a tournament with.
  *
@@ -1471,6 +1652,7 @@ const ChampionsChallenge = () => {
                         }}
                     />
                     <StylePanel personas={data?.personas} decks={data?.decks} t={t} />
+                    <BurstPanel decks={data?.decks} t={t} />
                     <CalibrationPanel calibration={data?.calibration} t={t} />
                     <MatchupMatrix matchups={data?.matchups} t={t} />
                     <CardContribution cards={data?.cards} t={t} />

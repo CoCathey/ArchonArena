@@ -16,6 +16,7 @@ const DokService = require('../dok/DokService');
 const CatalogService = require('../catalog/CatalogService');
 const { cloneCard, getCardIndex } = require('./packCards');
 const { runSimulatedGame, PLAYER_ONE, PLAYER_TWO } = require('./SimulatedGame');
+const BurstService = require('./BurstService');
 const { runDeepGame } = require('./DeepGame');
 const {
     MIN_CONFIDENT_GAMES,
@@ -124,6 +125,10 @@ class ChampionsChallengeService {
         // ARCHON (N28): which persona pair duels next, kept across sweeps so
         // every pair is measured about equally often rather than the first pair
         // being measured every time.
+        // ARCHON (N40): the on-demand queue. Constructed here rather than
+        // injected because the sweep is the only thing that drains it, and the
+        // API reaches it through this service for the same reason.
+        this.burstService = new BurstService(configService, db, settingsService);
         this.duelCursor = 0;
         // ARCHON (N39): which calibration rung the next pair measures. A cursor
         // rather than a random pick so every reference opponent accumulates
@@ -467,6 +472,24 @@ class ChampionsChallengeService {
             'SELECT "UserId", "DeckId" FROM "ProvingGroundsDecks"'
         );
 
+        // ARCHON (N40): the burst queue FIRST, before the trickle and before
+        // the no-roster early return. Somebody is watching a progress bar; the
+        // background roster is not, and a burst against the Vault Tour or the
+        // field needs no roster enrolment at all.
+        let burstPlayed = 0;
+
+        try {
+            const burstChampion =
+                config.learningEnabled !== false ? await this.policyService.champion() : null;
+
+            burstPlayed = await this.runBurstStep(config, {
+                championModel: burstChampion,
+                styling: this.personaStyling(config, burstChampion)
+            });
+        } catch (err) {
+            logger.error('Burst: sweep step failed', err);
+        }
+
         if (!enrollments || !enrollments.length) {
             // ARCHON (N32): the Vault Tour has its OWN slate, so it must not
             // depend on anybody having roster decks. Returning here left a site
@@ -485,7 +508,7 @@ class ChampionsChallengeService {
                 logger.error('Vault Tour: sweep step failed', err);
             }
 
-            return { played: 0, abandoned: 0 };
+            return { played: burstPlayed, abandoned: 0 };
         }
 
         // Aliased "GamesToday" rather than "Games" so the spec that forbids
@@ -930,7 +953,12 @@ class ChampionsChallengeService {
         learning,
         ariConfig,
         eloConfig,
-        persona = null
+        persona = null,
+        // ARCHON (N40): an optional listener for who won. The sweep does not
+        // care - it counts games - but a burst is showing a member a running
+        // record, and reading it back out of the tables afterwards would be a
+        // second definition of the same result.
+        onResult = null
     }) {
         const opponent = await this.gauntletService.drawOpponent(userId, settings);
 
@@ -981,6 +1009,10 @@ class ChampionsChallengeService {
         }
 
         const won = result.winner === PLAYER_ONE;
+
+        if (onResult) {
+            onResult({ won });
+        }
 
         try {
             await this.gauntletService.recordGame({
@@ -1156,7 +1188,7 @@ class ChampionsChallengeService {
      *
      * @returns {Promise<'played'|'abandoned'|'no-opponent'>}
      */
-    async playVaultTourGame({ userId, deckId, config, championModel, persona }) {
+    async playVaultTourGame({ userId, deckId, config, championModel, persona, onResult = null }) {
         const opponent = await this.vaultTourService.drawOpponent(userId);
 
         if (!opponent) {
@@ -1200,6 +1232,10 @@ class ChampionsChallengeService {
             );
 
             return 'abandoned';
+        }
+
+        if (onResult) {
+            onResult({ won: result.winner === PLAYER_ONE });
         }
 
         try {
@@ -1483,6 +1519,203 @@ class ChampionsChallengeService {
         }
 
         return played;
+    }
+
+    // ------------------------------------------------------- burst runs
+
+    /**
+     * ARCHON (N40): drain the burst queue.
+     *
+     * Runs at the top of the sweep, before the trickle, because a member is
+     * watching a progress bar and the background roster is not. One run per
+     * tick: the queue is per-member-bounded already, and taking two would let
+     * one member's burst delay another's by the length of a whole batch.
+     *
+     * The games are the ordinary ones - the same runners, the same tables, the
+     * same ARI - so nothing here is a second, subtly different notion of a
+     * sparring game that could drift from the real one.
+     *
+     * @returns {Promise<number>} games played
+     */
+    async runBurstStep(config, { championModel, styling }) {
+        if (!this.burstService.isEnabled()) {
+            return 0;
+        }
+
+        await this.burstService.releaseStuck();
+
+        const run = await this.burstService.claimNext();
+
+        if (!run) {
+            return 0;
+        }
+
+        // Entitlement is re-checked at PLAY time, not just at queue time: a
+        // membership can lapse between asking and running, and a burst is
+        // exactly the sort of long-lived request that would outlive it.
+        const access = await this.rosterAccess(run.userId);
+
+        if (!access.mayUse) {
+            await this.burstService.finish(run.id, {
+                status: 'failed',
+                note: 'This run needs a Vault Master membership.'
+            });
+
+            return 0;
+        }
+
+        let played = 0;
+
+        try {
+            played = await this.playBurstRun(run, config, { championModel, styling });
+        } catch (err) {
+            logger.error(`Burst: run ${run.id} failed`, err);
+            await this.burstService.finish(run.id, {
+                status: 'failed',
+                note: 'Something went wrong partway through. The games it finished still count.'
+            });
+
+            return played;
+        }
+
+        return played;
+    }
+
+    /** One queued run, played to its requested count. */
+    async playBurstRun(run, config, { championModel, styling }) {
+        const fieldSettings =
+            run.opposition === 'field' ? await this.gauntletService.settingsFor(run.userId) : null;
+        let played = 0;
+        let note = null;
+
+        for (let game = 0; game < run.requested; game++) {
+            const persona = styling.next();
+            let won = false;
+            const onResult = (result) => {
+                won = !!result.won;
+            };
+            let outcome;
+
+            if (run.opposition === 'field') {
+                outcome = await this.playFieldGame({
+                    userId: run.userId,
+                    deckId: run.deckId,
+                    settings: fieldSettings,
+                    config,
+                    championModel,
+                    championVersion: championModel ? championModel.version : null,
+                    learning: false,
+                    ariConfig: (this.ratingService.getConfig() || {}).ari || {},
+                    eloConfig: this.eloConfig(),
+                    persona,
+                    onResult
+                });
+            } else if (run.opposition === 'vaulttour') {
+                outcome = await this.playVaultTourGame({
+                    userId: run.userId,
+                    deckId: run.deckId,
+                    config,
+                    championModel,
+                    persona,
+                    onResult
+                });
+            } else {
+                outcome = await this.playBurstMirrorGame(run, config, { styling, persona });
+                won = outcome === 'won';
+                outcome = outcome === 'won' || outcome === 'lost' ? 'played' : outcome;
+            }
+
+            if (outcome === 'no-opponent') {
+                // Nothing to play against, and another game would find the same
+                // nothing. Stop and SAY so - a run that quietly reports two
+                // games out of thirty reads as the feature being broken.
+                note =
+                    run.opposition === 'field'
+                        ? 'The Gauntlet pool has nothing matching your filters yet.'
+                        : run.opposition === 'vaulttour'
+                        ? 'There are no playable Vault Tour decks yet.'
+                        : 'This needs a second simulatable deck on your roster.';
+                break;
+            }
+
+            if (outcome === 'abandoned') {
+                await this.burstService.noteGame(run.id, { abandoned: true });
+                continue;
+            }
+
+            played++;
+            await this.burstService.noteGame(run.id, { won });
+        }
+
+        await this.burstService.finish(run.id, { status: 'done', note });
+
+        return played;
+    }
+
+    /**
+     * One burst game against the member's own roster.
+     *
+     * Deliberately simpler than the sweep's mirror game, and the differences
+     * are the point: no deep showcase (a burst is for volume, and one searching
+     * game would eat the whole batch's time), no LLM sampling and no training
+     * trigger (those are the background loop's pacing, not a member's request),
+     * no exploration temperature (this is a measurement, and the diary is not
+     * being fed). What it shares is what matters: the same engine, the same
+     * recordGame, the same ARI.
+     *
+     * @returns {Promise<'won'|'lost'|'abandoned'|'no-opponent'>}
+     */
+    async playBurstMirrorGame(run, config, { styling, persona }) {
+        const rows = await this.db.query(
+            'SELECT e."DeckId" FROM "ProvingGroundsDecks" e WHERE e."UserId" = $1 ' +
+                'AND e."DeckId" <> $2',
+            [run.userId, run.deckId]
+        );
+        const others = (rows || []).map((row) => row.DeckId);
+
+        if (!others.length) {
+            return 'no-opponent';
+        }
+
+        const opponentId = others[crypto.randomInt(others.length)];
+        const [mine, theirs] = await Promise.all([
+            this.loadEngineDeck(run.deckId),
+            this.loadEngineDeck(opponentId)
+        ]);
+
+        if (
+            mine.missing.length ||
+            theirs.missing.length ||
+            mine.deck.houses.length !== 3 ||
+            theirs.deck.houses.length !== 3
+        ) {
+            return 'abandoned';
+        }
+
+        let result;
+
+        try {
+            result = await this.runMatch(mine.deck, theirs.deck, {
+                seed: this.newSeed(),
+                maxTurns: config.maxTurnsPerGame,
+                policy: styling.model(persona),
+                temperature: 0,
+                recordDecisions: false
+            });
+        } catch (err) {
+            logger.error(`Burst: mirror game failed for user ${run.userId}`, err);
+
+            return 'abandoned';
+        }
+
+        if (!result || !result.completed) {
+            return 'abandoned';
+        }
+
+        await this.recordGame(run.userId, result, persona);
+
+        // The member's deck took the alpha seat, so this is "did mine win".
+        return result.winner === PLAYER_ONE ? 'won' : 'lost';
     }
 
     /**

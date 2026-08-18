@@ -953,6 +953,7 @@ class Lobby {
         const style = this.botService.nextStyle();
 
         game.botStyle = style ? style.key : undefined;
+        game.botStyleLabel = style ? style.label : undefined;
         game.botStyles = await this.botService.availableStyles();
         game.botPolicy = await this.botService.championModel(style);
         // 'TBA' is the platform's existing "no socket" id: the lobby and the
@@ -2436,6 +2437,9 @@ class Lobby {
         const style = this.botService.styleFor(styleKey);
 
         game.botStyle = style ? style.key : undefined;
+        // ARCHON (N41): the label travels too, so the board can name the pilot
+        // without the game node holding a copy of the persona roster.
+        game.botStyleLabel = style ? style.label : undefined;
 
         try {
             game.botPolicy = await this.botService.championModel(style);

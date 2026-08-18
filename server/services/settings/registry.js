@@ -674,6 +674,29 @@ const REGISTRY = {
             // bot it was distilled from. Every other measurement in the lab is
             // relative; this is the only one that says whether the sparring
             // partner can actually play.
+            // ARCHON (N40): run it now. The trickle is the right pace for a
+            // background service and the wrong pace for somebody with a
+            // question, so a member can spend a bounded allowance to get a
+            // batch played at the next tick instead of over two days.
+            burstEnabled: {
+                type: 'boolean',
+                label: 'Members may request a batch of games on demand',
+                default: true
+            },
+            burstGames: {
+                type: 'number',
+                label: 'Games in one on-demand batch',
+                min: 1,
+                max: 200,
+                default: 30
+            },
+            burstRunsPerDay: {
+                type: 'number',
+                label: 'On-demand batches one member may start per day (admins exempt)',
+                min: 0,
+                max: 50,
+                default: 2
+            },
             calibrationPairsPerSweep: {
                 type: 'number',
                 label: 'Champion-versus-reference pairs per sweep (0 = never)',

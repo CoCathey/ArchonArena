@@ -365,6 +365,17 @@ export const GameBoard = () => {
                     onClose={() => setShowModal(false)}
                 />
             )}
+            {/* ARCHON (N41): name the pilot you are facing, on the board.
+                The style is chosen on the pending screen and was then never
+                mentioned again, which made it a setting rather than an
+                opponent - and left "which one keeps beating me" a question a
+                player had no way to ask. Absent for every game without a
+                styled bot in it, which is almost all of them. */}
+            {currentGame.botStyleLabel && (
+                <div className='pointer-events-none absolute left-1/2 top-1 z-10 -translate-x-1/2 rounded-full border border-amber-400/40 bg-black/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-200'>
+                    {t('Facing {{style}}', { style: currentGame.botStyleLabel })}
+                </div>
+            )}
             <div className='stats-top'>
                 <PlayerStats
                     activeHouse={otherPlayer.activeHouse}

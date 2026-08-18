@@ -5,6 +5,7 @@ const ConfigService = require('../services/ConfigService');
 const ChampionsChallengeService = require('../services/championschallenge/ChampionsChallengeService');
 const { requireCapability } = require('./requireCapability');
 const { CAPABILITIES } = require('../services/membership/capabilities');
+const { OPPOSITIONS } = require('../services/championschallenge/BurstService');
 
 const configService = new ConfigService();
 const championsChallenge = new ChampionsChallengeService(configService);
@@ -183,6 +184,56 @@ module.exports.init = function (server) {
                 success: true,
                 crawl: result,
                 health: await championsChallenge.labHealth()
+            });
+        })
+    );
+
+    /**
+     * ARCHON (N40): run a batch now.
+     *
+     * POST queues; GET reports progress. Deliberately two small endpoints
+     * rather than folding progress into the report: the page polls this every
+     * couple of seconds while a run is going, and the report is a dozen
+     * queries.
+     */
+    server.post(
+        '/api/champions-challenge/burst',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
+        wrapAsync(async (req, res) => {
+            const access = await championsChallenge.rosterAccess(req.user.id);
+            const result = await championsChallenge.burstService.enqueue(req.user.id, {
+                deckId: req.body && req.body.deckId,
+                opposition: req.body && req.body.opposition,
+                isAdmin: access.isAdmin
+            });
+
+            if (result.error) {
+                // 200 with a message, not a 4xx: "that is today's runs used" is
+                // a normal answer to a reasonable request, and the page shows
+                // it as a sentence rather than an error state.
+                return res.send({ success: false, message: result.error });
+            }
+
+            res.send({ success: true, run: result.run });
+        })
+    );
+
+    server.get(
+        '/api/champions-challenge/burst',
+        passport.authenticate('jwt', { session: false }),
+        requireCapability(CAPABILITIES.CHAMPIONS_CHALLENGE),
+        wrapAsync(async (req, res) => {
+            const access = await championsChallenge.rosterAccess(req.user.id);
+
+            res.send({
+                success: true,
+                run: await championsChallenge.burstService.latestFor(req.user.id),
+                budget: await championsChallenge.burstService.budgetFor(req.user.id, {
+                    isAdmin: access.isAdmin
+                }),
+                games: championsChallenge.burstService.gamesPerRun(),
+                oppositions: OPPOSITIONS
             });
         })
     );
