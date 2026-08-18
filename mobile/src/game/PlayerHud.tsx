@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, spacing } from '../theme';
 import HouseIcon from '../ui/HouseIcon';
 import { DropZone, useDragDrop, type DropZoneName } from './DragDrop';
-import type { PlayerState } from './types';
+import type { CardSummary, PlayerState } from './types';
 
 const KEY_IMAGES: Record<string, { forged: number; unforged: number }> = {
     red: {
@@ -56,6 +56,13 @@ export default function PlayerHud(props: {
     isMe?: boolean;
     active?: boolean;
     onPilePress?: (pile: 'discard' | 'archives' | 'purged' | 'hand' | 'deck') => void;
+    /**
+     * Open the deck's token card. Sets from Winds of Exchange on give a deck a
+     * token creature that is made over and over; the web client keeps it
+     * permanently on screen in the reference pane, and without it a player has
+     * no way to read what they are about to make.
+     */
+    onTokenPress?: (card: CardSummary) => void;
 }) {
     const { player } = props;
     const stats = player.stats;
@@ -139,6 +146,25 @@ export default function PlayerHud(props: {
                         onPress={() => props.onPilePress?.('purged')}
                         dropZone={dropZonesActive ? 'purged' : undefined}
                     />
+                ) : null}
+                {/* Not a pile — a card you keep making. It carries no count,
+                    so it reads as the reference it is rather than as a
+                    fourth place cards can be. */}
+                {player.tokenCard ? (
+                    <Pressable
+                        onPress={() => props.onTokenPress?.(player.tokenCard as CardSummary)}
+                        hitSlop={8}
+                        style={({ pressed }) => [
+                            styles.pileChip,
+                            styles.pileChipInteractive,
+                            pressed && { opacity: 0.6 }
+                        ]}
+                    >
+                        <Text style={styles.pileChipLabel}>Token</Text>
+                        <Text style={styles.tokenName} numberOfLines={1}>
+                            {player.tokenCard.name ?? '?'}
+                        </Text>
+                    </Pressable>
                 ) : null}
             </View>
         </View>
@@ -247,5 +273,11 @@ const styles = StyleSheet.create({
         color: colors.text,
         fontSize: 11,
         fontWeight: '800'
+    },
+    tokenName: {
+        color: colors.text,
+        fontSize: 11,
+        fontWeight: '700',
+        maxWidth: 96
     }
 });

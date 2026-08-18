@@ -159,6 +159,65 @@ export default function RootLayout() {
                     name='deck/[id]'
                     options={{ title: 'Deck', headerBackTitle: 'Back' }}
                 />
+                <Stack.Screen
+                    name='notifications'
+                    options={{ title: 'Notifications', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='forgot-password'
+                    options={{ title: 'Reset password', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='security'
+                    options={{ title: 'Security', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='profile-edit'
+                    options={{ title: 'Edit profile', headerBackTitle: 'Back' }}
+                />
+                {/* ARCHON (N13/N9): playing across a table. The phone is the
+                    device you have AT the table, so these belong here more
+                    than they belong in a browser. */}
+                <Stack.Screen
+                    name='in-person'
+                    options={{ title: 'Paper games', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='stores'
+                    options={{ title: 'Into the Fray', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='check-in'
+                    options={{ title: 'Event check-in', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen name='welcome' options={{ headerShown: false }} />
+                <Stack.Screen
+                    name='deck-import'
+                    options={{ title: 'Import decks', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='decks/alliance'
+                    options={{ title: 'Build alliance', headerBackTitle: 'Back' }}
+                />
+                {/* ARCHON: the people section. Stack screens rather than a
+                    sixth tab — the tab bar is full, and these are places you
+                    go from a name you tapped rather than places you live. */}
+                <Stack.Screen
+                    name='community'
+                    options={{ title: 'Community', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='players/[username]'
+                    options={{ title: 'Player', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='club/[id]'
+                    options={{ title: 'Club', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='team/[id]'
+                    options={{ title: 'Team', headerBackTitle: 'Back' }}
+                />
                 {/* ARCHON (N12): Archon+ and the tools it unlocks. Stack
                     screens rather than tabs — six tabs is already the most a
                     phone reads comfortably, and these are places you go to
@@ -176,6 +235,10 @@ export default function RootLayout() {
                 <Stack.Screen
                     name='intelligence'
                     options={{ title: 'Archon Intelligence', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='champions-challenge'
+                    options={{ title: "Champion's Challenge", headerBackTitle: 'Back' }}
                 />
                 <Stack.Screen
                     name='tournament-lab'

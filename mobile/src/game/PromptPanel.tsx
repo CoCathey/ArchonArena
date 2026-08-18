@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Image } from 'expo-image';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ChatMessage } from '../api/types';
@@ -6,8 +6,10 @@ import { colors, radius, spacing } from '../theme';
 import HouseIcon from '../ui/HouseIcon';
 import { CARD_ASPECT, cardImageUrl } from './cardImages';
 import { LogLine } from './LogMessages';
+import NameLookup, { useCardNames, useTraitNames } from './NameLookup';
+import { useCardsStore } from '../stores/cardsStore';
 import { formatButtonText, formatPromptText } from './promptText';
-import type { CardSummary, PlayerState, PromptButton } from './types';
+import type { CardSummary, PlayerState, PromptButton, PromptControl } from './types';
 
 const HOUSE_NAMES = new Set([
     'brobnar',
@@ -29,6 +31,45 @@ const HOUSE_NAMES = new Set([
 
 /** How many of the latest log lines to surface while waiting on the opponent. */
 const WAITING_FEED_LINES = 5;
+
+/**
+ * A prompt that asks the player to NAME something rather than pick it off the
+ * board: `card-name` (Etan's Jar, Dark Discovery, Varghast's Vengeance) and
+ * `trait-name` (Harvest Time, Congregate).
+ *
+ * These arrive as a control with no buttons attached, so before this the app
+ * showed a title and nothing to answer it with — the turn could not proceed
+ * from either side. The answer goes back the way the web client sends it
+ * (`ActivePlayerPrompt.onControlSelected`): the control's own command, with
+ * the typed name in the argument slot.
+ */
+function NameControl(props: {
+    control: PromptControl;
+    onAnswer: (control: PromptControl, value: string) => void;
+}) {
+    const isTrait = props.control.type === 'trait-name';
+    const cardNames = useCardNames();
+    const traitNames = useTraitNames();
+    const loading = useCardsStore((state) => state.loading);
+    const loadCards = useCardsStore((state) => state.load);
+
+    // The dictionary is cached for the session, so this is a no-op in a game
+    // reached through the deck list. It is not a no-op for a game joined from
+    // a push notification, which is exactly when a player is least able to go
+    // and open some other screen to warm the cache.
+    useEffect(() => {
+        loadCards();
+    }, [loadCards]);
+
+    return (
+        <NameLookup
+            values={isTrait ? traitNames : cardNames}
+            placeholder={isTrait ? 'Search traits' : 'Search cards'}
+            loading={loading}
+            onSelect={(value) => props.onAnswer(props.control, value)}
+        />
+    );
+}
 
 function CardThumb(props: {
     card: CardSummary;
@@ -127,6 +168,16 @@ export default function PromptPanel(props: {
     onOpenLog?: () => void;
     onCardPress?: (card: CardSummary) => void;
 }) {
+    // A named answer travels as a button whose `arg` is the name — the same
+    // shape `onButton` already sends, so the socket call has one caller.
+    const answerNameControl = (control: PromptControl, value: string) =>
+        props.onButton({
+            command: typeof control.command === 'string' ? control.command : 'menuButton',
+            arg: value,
+            uuid: typeof control.uuid === 'string' ? control.uuid : undefined,
+            method: typeof control.method === 'string' ? control.method : undefined
+        });
+
     const { me } = props;
     if (!me) {
         return null;
@@ -158,13 +209,24 @@ export default function PromptPanel(props: {
     const title = formatPromptText(me.menuTitle, sourceCard);
     const promptTitle = formatPromptText(me.promptTitle, sourceCard);
 
+    // Controls the player answers by typing rather than by tapping the board.
+    const nameControls = controls.filter(
+        (control) => control.type === 'card-name' || control.type === 'trait-name'
+    );
+
     // A prompt with nothing for us to do means the opponent is acting; show
     // the tail of the game log so each play is easy to follow.
     const waiting =
         buttons.length === 0 && controls.length === 0 && !me.selectCard && !me.selectOrder;
     const feed = waiting ? (props.messages ?? []).slice(-WAITING_FEED_LINES) : [];
 
-    if (!title && buttons.length === 0 && feed.length === 0 && !sourceCard) {
+    if (
+        !title &&
+        buttons.length === 0 &&
+        nameControls.length === 0 &&
+        feed.length === 0 &&
+        !sourceCard
+    ) {
         return null;
     }
 
@@ -182,6 +244,14 @@ export default function PromptPanel(props: {
                     onCardPress={props.onCardPress}
                 />
             ) : null}
+
+            {nameControls.map((control, index) => (
+                <NameControl
+                    key={`${control.type}-${index}`}
+                    control={control}
+                    onAnswer={answerNameControl}
+                />
+            ))}
 
             {houseButtons.length > 0 ? (
                 <View style={styles.houseRow}>

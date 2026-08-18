@@ -27,6 +27,11 @@ import type {
 import DeckStatsSection from '../../src/stats/DeckStatsSection';
 import MetaSection from '../../src/stats/MetaSection';
 import { useAuthStore } from '../../src/stores/authStore';
+import {
+    fetchSeasons,
+    fetchSeasonStandings,
+    type SeasonSummary
+} from '../../src/api/community';
 import { colors, radius, spacing } from '../../src/theme';
 import BarList, { type BarItem } from '../../src/ui/BarList';
 import HouseIcon from '../../src/ui/HouseIcon';
@@ -79,12 +84,42 @@ function RankingsSection(props: { username?: string }) {
     const [loading, setLoading] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState<string | undefined>();
+    // ARCHON (N4): the season archive. `undefined` is the live ladder; a
+    // number is the final standings recorded when that season ended, which is
+    // a different query and cannot be paged the same way.
+    const [seasons, setSeasons] = useState<SeasonSummary[]>([]);
+    const [season, setSeason] = useState<number | undefined>();
+
+    useEffect(() => {
+        fetchSeasons()
+            .then((result) => setSeasons((result.seasons ?? []).filter((entry) => !entry.current)))
+            .catch(() => {
+                // The archive is an extra; the live ladder is the screen.
+            });
+    }, []);
 
     const load = useCallback(
         async (reset: boolean, offset: number) => {
             reset ? setLoading(true) : setLoadingMore(true);
             setError(undefined);
             try {
+                if (season !== undefined) {
+                    const archived = await fetchSeasonStandings(season, { pool, limit: 100 });
+                    setHasMore(false);
+                    setEntries(
+                        (archived.standings ?? []).map((row, index) => ({
+                            rank: row.rank ?? index + 1,
+                            username: row.username,
+                            rating: Math.round(row.rating ?? 0),
+                            gamesPlayed: row.gamesPlayed ?? 0,
+                            wins: row.wins,
+                            losses: row.losses
+                        })) as LeaderboardEntry[]
+                    );
+
+                    return;
+                }
+
                 // Over-fetch by one row to learn whether another page exists —
                 // the API has no total count (same trick as the web client).
                 const result = await fetchLeaderboard({
@@ -104,7 +139,7 @@ function RankingsSection(props: { username?: string }) {
                 setLoadingMore(false);
             }
         },
-        [pool]
+        [pool, season]
     );
 
     useEffect(() => {
@@ -120,6 +155,42 @@ function RankingsSection(props: { username?: string }) {
                 value={pool}
                 onChange={setPool}
             />
+            {seasons.length > 0 ? (
+                <View style={styles.seasonRow}>
+                    <Pressable
+                        onPress={() => setSeason(undefined)}
+                        style={[styles.seasonChip, season === undefined && styles.seasonChipOn]}
+                    >
+                        <Text
+                            style={[
+                                styles.seasonChipText,
+                                season === undefined && styles.seasonChipTextOn
+                            ]}
+                        >
+                            Live
+                        </Text>
+                    </Pressable>
+                    {seasons.map((entry) => (
+                        <Pressable
+                            key={entry.number}
+                            onPress={() => setSeason(entry.number)}
+                            style={[
+                                styles.seasonChip,
+                                season === entry.number && styles.seasonChipOn
+                            ]}
+                        >
+                            <Text
+                                style={[
+                                    styles.seasonChipText,
+                                    season === entry.number && styles.seasonChipTextOn
+                                ]}
+                            >
+                                S{entry.number}
+                            </Text>
+                        </Pressable>
+                    ))}
+                </View>
+            ) : null}
             <View style={{ paddingHorizontal: spacing.md }}>
                 <ErrorBanner message={error} />
             </View>
@@ -140,15 +211,26 @@ function RankingsSection(props: { username?: string }) {
                         <View style={[styles.rankRow, isMe && styles.rankRowMe]}>
                             <Text style={styles.rankNumber}>#{item.rank}</Text>
                             <View style={{ flex: 1 }}>
-                                <Text
-                                    style={[styles.rankName, isMe && { color: colors.brand }]}
-                                    numberOfLines={1}
+                                {/* Every name on the site links to its
+                                    profile; the app had nowhere to send one. */}
+                                <Pressable
+                                    onPress={() =>
+                                        router.push(
+                                            `/players/${encodeURIComponent(item.username)}`
+                                        )
+                                    }
+                                    hitSlop={4}
                                 >
-                                    {item.username}
-                                    {item.provisional ? (
-                                        <Text style={styles.provisional}> · provisional</Text>
-                                    ) : null}
-                                </Text>
+                                    <Text
+                                        style={[styles.rankName, isMe && { color: colors.brand }]}
+                                        numberOfLines={1}
+                                    >
+                                        {item.username}
+                                        {item.provisional ? (
+                                            <Text style={styles.provisional}> · provisional</Text>
+                                        ) : null}
+                                    </Text>
+                                </Pressable>
                                 <Text style={styles.rankRecord}>
                                     {item.wins ?? 0}W – {item.losses ?? 0}L ·{' '}
                                     {item.gamesPlayed} rated
@@ -670,6 +752,33 @@ const styles = StyleSheet.create({
     segmentTextActive: {
         color: colors.text,
         fontWeight: '800'
+    },
+    seasonRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+        paddingHorizontal: spacing.md,
+        paddingBottom: spacing.sm
+    },
+    seasonChip: {
+        borderColor: colors.border,
+        borderWidth: 1,
+        borderRadius: radius.pill,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        backgroundColor: colors.bgElevated
+    },
+    seasonChipOn: {
+        borderColor: colors.brand,
+        backgroundColor: colors.surfaceHover
+    },
+    seasonChipText: {
+        color: colors.textFaint,
+        fontSize: 11,
+        fontWeight: '700'
+    },
+    seasonChipTextOn: {
+        color: colors.brand
     },
     rankRow: {
         flexDirection: 'row',

@@ -30,6 +30,7 @@ import EffectsBar from '../src/game/EffectsBar';
 import PlayerHud from '../src/game/PlayerHud';
 import PromptPanel from '../src/game/PromptPanel';
 import LogSheet from '../src/game/LogSheet';
+import TimeLimitClock from '../src/game/TimeLimitClock';
 import { DragDropProvider, DropZone, type DropZoneName } from '../src/game/DragDrop';
 import { useVerticalSwipe } from '../src/game/gestures';
 import { groupHandByHouse } from '../src/game/handOrder';
@@ -461,6 +462,15 @@ export default function GameScreen() {
                         </Pressable>
                     </View>
 
+                    {rootState.useGameTimeLimit ? (
+                        <TimeLimitClock
+                            timeLimit={rootState.gameTimeLimitTime}
+                            started={rootState.gameTimeLimitStarted}
+                            startedAt={rootState.gameTimeLimitStartedAt}
+                            paused={!!rootState.winner}
+                        />
+                    ) : null}
+
                     {winnerBanner}
 
                     {/* Opponent */}
@@ -469,6 +479,7 @@ export default function GameScreen() {
                             player={opponent}
                             active={!!opponent.activePlayer}
                             onPilePress={(pile) => setPileView({ player: 'opponent', pile })}
+                            onTokenPress={setZoomCard}
                         />
                     ) : null}
                     {showProphecies && opponent ? (
@@ -588,6 +599,7 @@ export default function GameScreen() {
                         isMe={!isSpectator}
                         active={!!perspective.activePlayer}
                         onPilePress={(pile) => setPileView({ player: 'me', pile })}
+                        onTokenPress={setZoomCard}
                     />
 
                     {/* Hand */}

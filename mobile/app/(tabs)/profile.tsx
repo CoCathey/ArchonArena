@@ -16,6 +16,7 @@ import { unregisterPush } from '../../src/push';
 import { closeGameSocket } from '../../src/net/gameSocket';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
+import { updateAccount } from '../../src/api/account';
 import { TIER_COLORS } from '../../src/membership/capabilities';
 import { currentTier, currentTierName, isAdmin, isMember } from '../../src/membership/entitlements';
 import { colors, radius, spacing } from '../../src/theme';
@@ -63,6 +64,44 @@ export default function ProfileScreen() {
 
     const [busy, setBusy] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const [optionError, setOptionError] = useState<string | undefined>();
+
+    // The account's own game options, as the engine reads them.
+    const settings = (user?.settings ?? {}) as Record<string, unknown>;
+    const optionSettings = (settings.optionSettings ?? {}) as Record<string, boolean>;
+
+    /**
+     * Flip one engine option. Optimistic through the auth store, then written
+     * back — the whole settings object goes with it, because the server
+     * replaces what it holds with what it is sent.
+     */
+    const setOption = async (key: string, value: boolean) => {
+        if (!user) {
+            return;
+        }
+
+        setOptionError(undefined);
+        const next = {
+            ...settings,
+            optionSettings: { ...optionSettings, [key]: value }
+        };
+        const revert = () => useAuthStore.getState().setAuth({ user: { ...user, settings } });
+
+        // Show the flip immediately; a switch that waits on a round trip reads
+        // as a switch that did not work.
+        await useAuthStore.getState().setAuth({ user: { ...user, settings: next } });
+
+        try {
+            const result = await updateAccount({ settings: next });
+            if (!result.success) {
+                setOptionError(result.message ?? 'Could not save that setting');
+                await revert();
+            }
+        } catch (err) {
+            setOptionError(err instanceof Error ? err.message : 'Could not save that setting');
+            await revert();
+        }
+    };
     const [preferences, setPreferences] = useState<NotificationPreference[]>([]);
     const [error, setError] = useState<string | undefined>();
     const [notice, setNotice] = useState<string | undefined>();
@@ -271,6 +310,19 @@ export default function ProfileScreen() {
                         <Text style={styles.linkText}>Deep Probe</Text>
                         <Text style={styles.linkHint}>Which of your decks should you bring?</Text>
                     </Pressable>
+                    {/* ARCHON (N18): the Vault Master lab. Listed for everyone
+                        rather than hidden behind the tier — the screen shows
+                        its locked state, which is what makes it an upgrade
+                        moment instead of a dead end. */}
+                    <Pressable
+                        onPress={() => router.push('/champions-challenge')}
+                        style={styles.linkItem}
+                    >
+                        <Text style={styles.linkText}>Champion’s Challenge</Text>
+                        <Text style={styles.linkHint}>
+                            Let the platform test your decks around the clock.
+                        </Text>
+                    </Pressable>
                 </View>
             </Card>
 
@@ -288,6 +340,37 @@ export default function ProfileScreen() {
                     value={hideHandOnOpponentTurn}
                     onChange={setHideHandOnOpponentTurn}
                 />
+
+                {/* ARCHON: the four options the website has had all along and
+                    the app never carried. These live on the ACCOUNT rather
+                    than on the device — the engine reads them while resolving
+                    a game, so a setting that only existed on the phone would
+                    not change how the game behaves. */}
+                <SettingRow
+                    label='Prompt to order simultaneous abilities'
+                    hint='When several abilities trigger at once, choose the order instead of letting the engine pick.'
+                    value={!!optionSettings.orderForcedAbilities}
+                    onChange={(value) => setOption('orderForcedAbilities', value)}
+                />
+                <SettingRow
+                    label='Confirm one-click abilities'
+                    hint='Asks before firing an ability that would otherwise resolve on the first tap.'
+                    value={!!optionSettings.confirmOneClick}
+                    onChange={(value) => setOption('confirmOneClick', value)}
+                />
+                <SettingRow
+                    label='Half-sized card images'
+                    hint='Smaller cards on the board, so more of it fits at once.'
+                    value={!!optionSettings.useHalfSizedCards}
+                    onChange={(value) => setOption('useHalfSizedCards', value)}
+                />
+                <SettingRow
+                    label='Show deck accolades'
+                    hint='Tournament placings ride on the deck card back during a game.'
+                    value={optionSettings.showAccolades !== false}
+                    onChange={(value) => setOption('showAccolades', value)}
+                />
+                {optionError ? <Text style={styles.optionError}>{optionError}</Text> : null}
             </Card>
 
             {preferences.length > 0 ? (
@@ -321,6 +404,58 @@ export default function ProfileScreen() {
                     ))}
                 </Card>
             ) : null}
+
+            {/* ARCHON: account management the app never had. Security is
+                sessions and the password; the profile editor is the bio,
+                location and the cosmetics Archon+ sells. */}
+            <Card style={{ marginBottom: spacing.md }}>
+                <Pressable onPress={() => router.push('/profile-edit')} style={styles.communityRow}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.sectionTitle}>Edit profile</Text>
+                        <Text style={styles.hint}>
+                            Your bio, where you play, and how your name looks.
+                        </Text>
+                    </View>
+                    <Text style={styles.chevron}>›</Text>
+                </Pressable>
+                <Pressable onPress={() => router.push('/security')} style={styles.communityRow}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.sectionTitle}>Security</Text>
+                        <Text style={styles.hint}>
+                            Password, email, and every device signed in to this account.
+                        </Text>
+                    </View>
+                    <Text style={styles.chevron}>›</Text>
+                </Pressable>
+            </Card>
+
+            {/* ARCHON: the people section — players, clubs and teams. It sits
+                above Friends because those are the people you already know
+                and this is where you find the rest. */}
+            <Card style={{ marginBottom: spacing.md }}>
+                <Pressable
+                    onPress={() => router.push('/community')}
+                    style={styles.communityRow}
+                >
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.sectionTitle}>Community</Text>
+                        <Text style={styles.hint}>
+                            Players, clubs and teams — and your own public profile.
+                        </Text>
+                    </View>
+                    <Text style={styles.chevron}>›</Text>
+                </Pressable>
+                {user?.username ? (
+                    <Pressable
+                        onPress={() =>
+                            router.push(`/players/${encodeURIComponent(String(user.username))}`)
+                        }
+                        style={styles.communityRow}
+                    >
+                        <Text style={styles.linkText}>View my public profile</Text>
+                    </Pressable>
+                ) : null}
+            </Card>
 
             {/* ARCHON: friends live here now rather than in a tab of their own.
                 Below the account settings and above sign-out, because it is the
@@ -403,6 +538,17 @@ const styles = StyleSheet.create({
     },
     linkItem: {
         paddingVertical: 4
+    },
+    communityRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.md,
+        paddingVertical: 4
+    },
+    chevron: {
+        color: colors.textFaint,
+        fontSize: 22,
+        fontWeight: '300'
     },
     linkText: {
         color: colors.accent,
@@ -493,6 +639,11 @@ const styles = StyleSheet.create({
         fontSize: 12,
         marginTop: 2,
         lineHeight: 17
+    },
+    optionError: {
+        color: '#ff8f93',
+        fontSize: 12,
+        marginTop: spacing.sm
     },
     notice: {
         color: '#7ed494',
