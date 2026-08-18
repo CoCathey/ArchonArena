@@ -170,7 +170,10 @@ async function main() {
     const rows = await db.query(
         'SELECT gr."Data" FROM "GameReplays" gr ' +
             'JOIN "Games" g ON g."Id" = gr."GameDbId" ' +
-            'WHERE g."FinishedAt" IS NOT NULL ' +
+            // Practice games against the bot are recorded but are not
+            // results, and they are not calibration data either: thresholds
+            // tuned on bot play would be tuned for the wrong opponent.
+            'WHERE g."FinishedAt" IS NOT NULL AND g."BotGame" IS NOT TRUE ' +
             'ORDER BY g."FinishedAt" DESC LIMIT $1',
         [limit]
     );
