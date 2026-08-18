@@ -322,6 +322,34 @@ export default function ProfileScreen() {
                 </Card>
             ) : null}
 
+            {/* ARCHON: the people section — players, clubs and teams. It sits
+                above Friends because those are the people you already know
+                and this is where you find the rest. */}
+            <Card style={{ marginBottom: spacing.md }}>
+                <Pressable
+                    onPress={() => router.push('/community')}
+                    style={styles.communityRow}
+                >
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.sectionTitle}>Community</Text>
+                        <Text style={styles.hint}>
+                            Players, clubs and teams — and your own public profile.
+                        </Text>
+                    </View>
+                    <Text style={styles.chevron}>›</Text>
+                </Pressable>
+                {user?.username ? (
+                    <Pressable
+                        onPress={() =>
+                            router.push(`/players/${encodeURIComponent(String(user.username))}`)
+                        }
+                        style={styles.communityRow}
+                    >
+                        <Text style={styles.linkText}>View my public profile</Text>
+                    </Pressable>
+                ) : null}
+            </Card>
+
             {/* ARCHON: friends live here now rather than in a tab of their own.
                 Below the account settings and above sign-out, because it is the
                 part of this screen you come back to - the settings above it are
@@ -403,6 +431,17 @@ const styles = StyleSheet.create({
     },
     linkItem: {
         paddingVertical: 4
+    },
+    communityRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.md,
+        paddingVertical: 4
+    },
+    chevron: {
+        color: colors.textFaint,
+        fontSize: 22,
+        fontWeight: '300'
     },
     linkText: {
         color: colors.accent,

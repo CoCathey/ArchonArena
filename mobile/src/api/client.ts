@@ -131,6 +131,19 @@ export async function refreshAuthToken(): Promise<string | undefined> {
 }
 
 /**
+ * An unauthenticated request. For endpoints the server serves to anyone — the
+ * card dictionary, leaderboards, public player profiles, club and team lists.
+ * Sending a token to those would only mean a signed-out app behaves worse than
+ * a browser on the same page.
+ */
+export async function rawApiFetch<T>(
+    path: string,
+    options: { method?: string; body?: unknown } = {}
+): Promise<T> {
+    return rawFetch<T>(path, options);
+}
+
+/**
  * Authenticated request wrapper: attaches the current JWT and transparently
  * refreshes it once on a 401 before failing.
  */

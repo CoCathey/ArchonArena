@@ -17,6 +17,7 @@ import { connectLobby, lobby } from '../../src/net/lobbySocket';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useGameStore } from '../../src/stores/gameStore';
 import { useLobbyStore } from '../../src/stores/lobbyStore';
+import PlayerName from '../../src/community/PlayerBadge';
 import LobbyChatSheet from '../../src/lobby/LobbyChatSheet';
 import QuickMatchPanel from '../../src/lobby/QuickMatchPanel';
 import {
@@ -29,15 +30,31 @@ import {
 import { colors, radius, spacing } from '../../src/theme';
 import { Badge, Button, Card, EmptyState, ErrorBanner, TextField } from '../../src/ui/primitives';
 
-function playerLine(game: GameSummary): string {
-    const players = Object.values(game.players ?? {});
+/**
+ * Who is at this table, with their badges. Names carry them everywhere on the
+ * website; the app rendered bare text, so a Vault Master and a practice bot
+ * looked the same in the list.
+ */
+function PlayerLine(props: { game: GameSummary }) {
+    const players = Object.values(props.game.players ?? {});
+
     if (players.length === 0) {
-        return 'Empty';
+        return <Text style={styles.gamePlayers}>Empty</Text>;
     }
-    if (players.length === 1) {
-        return `${players[0].name} waits for an opponent`;
-    }
-    return players.map((player) => player.name).join('  vs  ');
+
+    return (
+        <View style={styles.playerLine}>
+            {players.map((player, index) => (
+                <React.Fragment key={player.name}>
+                    {index > 0 ? <Text style={styles.versus}>vs</Text> : null}
+                    <PlayerName username={player.name} compact={false} />
+                </React.Fragment>
+            ))}
+            {players.length === 1 ? (
+                <Text style={styles.gamePlayers}>waits for an opponent</Text>
+            ) : null}
+        </View>
+    );
 }
 
 function GameRow(props: {
@@ -59,9 +76,7 @@ function GameRow(props: {
                 <Text style={styles.gameName} numberOfLines={1}>
                     {game.name}
                 </Text>
-                <Text style={styles.gamePlayers} numberOfLines={1}>
-                    {playerLine(game)}
-                </Text>
+                <PlayerLine game={game} />
                 <View style={styles.badgeRow}>
                     {game.started ? <Badge text='In progress' color='#274a33' textColor='#7ed494' /> : null}
                     {game.gameFormat && game.gameFormat !== 'normal' ? (
@@ -446,6 +461,18 @@ const styles = StyleSheet.create({
     statusText: {
         color: colors.textDim,
         fontSize: 12
+    },
+    playerLine: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 6,
+        marginTop: 2
+    },
+    versus: {
+        color: colors.textFaint,
+        fontSize: 12,
+        fontWeight: '700'
     },
     iconAction: {
         color: colors.textDim,

@@ -163,6 +163,25 @@ export default function RootLayout() {
                     name='notifications'
                     options={{ title: 'Notifications', headerBackTitle: 'Back' }}
                 />
+                {/* ARCHON: the people section. Stack screens rather than a
+                    sixth tab — the tab bar is full, and these are places you
+                    go from a name you tapped rather than places you live. */}
+                <Stack.Screen
+                    name='community'
+                    options={{ title: 'Community', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='players/[username]'
+                    options={{ title: 'Player', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='club/[id]'
+                    options={{ title: 'Club', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='team/[id]'
+                    options={{ title: 'Team', headerBackTitle: 'Back' }}
+                />
                 {/* ARCHON (N12): Archon+ and the tools it unlocks. Stack
                     screens rather than tabs — six tabs is already the most a
                     phone reads comfortably, and these are places you go to
