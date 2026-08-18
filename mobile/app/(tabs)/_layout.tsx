@@ -142,6 +142,14 @@ export default function TabsLayout() {
         return <Redirect href='/login' />;
     }
 
+    // ARCHON: a new account finishes (or skips) the welcome flow before it
+    // lands on an empty game list. `onboarded === false` rather than falsy:
+    // an older server that does not send the field must not push every
+    // existing player back through the wizard.
+    if ((user as { onboarded?: boolean }).onboarded === false) {
+        return <Redirect href='/welcome' />;
+    }
+
     return (
         <Tabs
             screenOptions={{

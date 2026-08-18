@@ -6,6 +6,7 @@
     "@expo/metro-runtime": "~57.0.6",
     "diff-match-patch": "^1.0.5",
     "expo": "~57.0.7",
+    "expo-camera": "~57.0.3",
     "expo-constants": "~57.0.6",
     "expo-device": "~57.0.1",
     "expo-haptics": "~57.0.1",

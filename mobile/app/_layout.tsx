@@ -175,6 +175,22 @@ export default function RootLayout() {
                     name='profile-edit'
                     options={{ title: 'Edit profile', headerBackTitle: 'Back' }}
                 />
+                {/* ARCHON (N13/N9): playing across a table. The phone is the
+                    device you have AT the table, so these belong here more
+                    than they belong in a browser. */}
+                <Stack.Screen
+                    name='in-person'
+                    options={{ title: 'Paper games', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='stores'
+                    options={{ title: 'Into the Fray', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='check-in'
+                    options={{ title: 'Event check-in', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen name='welcome' options={{ headerShown: false }} />
                 <Stack.Screen
                     name='deck-import'
                     options={{ title: 'Import decks', headerBackTitle: 'Back' }}

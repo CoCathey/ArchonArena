@@ -260,6 +260,21 @@ export default function PlayScreen() {
                 </View>
             </View>
 
+            {/* ARCHON (N13/N9): playing off the screen. Under the game list
+                rather than in it — these are not tables you can join from
+                here, they are the paper half of the same hobby. */}
+            <View style={styles.toolRow}>
+                <Pressable onPress={() => router.push('/check-in')} hitSlop={6}>
+                    <Text style={styles.toolLink}>Scan check-in</Text>
+                </Pressable>
+                <Pressable onPress={() => router.push('/in-person')} hitSlop={6}>
+                    <Text style={styles.toolLink}>Paper games</Text>
+                </Pressable>
+                <Pressable onPress={() => router.push('/stores')} hitSlop={6}>
+                    <Text style={styles.toolLink}>Into the Fray</Text>
+                </Pressable>
+            </View>
+
             {/* ARCHON: the lobby filters, which the app never had. Collapsed
                 by default — at four tables they are noise, and the point of
                 them is the day there are forty. */}
@@ -473,6 +488,18 @@ const styles = StyleSheet.create({
         color: colors.textFaint,
         fontSize: 12,
         fontWeight: '700'
+    },
+    toolRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.lg,
+        paddingHorizontal: spacing.md,
+        paddingBottom: spacing.sm
+    },
+    toolLink: {
+        color: colors.accent,
+        fontSize: 12,
+        fontWeight: '600'
     },
     iconAction: {
         color: colors.textDim,

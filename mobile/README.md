@@ -12,33 +12,51 @@ engine the website uses, with a UI built for one-handed portrait play.
   six modes the lobby runs (Archon, Sealed, Adaptive, Alliance, Reversal,
   Unchained) with every option the web form has — password, spectators, open
   hands, mute spectators, hidden deck lists, unlisted games, time limit, Lucky
-  Dice and SAS bounds — quick join, join/watch with password
+  Dice and SAS bounds — quick join, join/watch with password, **Find Match**
+  (the rating-aware matchmaking queue), **lobby chat**, and per-format filters
+- **Practice tables** — join the house bot's table and choose both its sparring
+  style and the ARI band its deck comes from
 - **Decks tab** — your deck library with house icons + SAS, Master Vault import by
   link or id, standalone decks for instant play, deck detail view (full card list
-  by house with card zoom)
+  by house with card zoom, AERC breakdown, accolades), delete and bulk delete,
+  **bulk import** (a Decks of KeyForge key, a Master Vault name search, or a
+  pasted CSV — with live job progress), and the **alliance deck builder**
 - **Stats tab** — world leaderboard per rating pool, your ratings/rank, win-rate
   breakdowns by house and format, and match history
 - **Profile tab** — account, appearance and notification settings, Archon+
   status, and friends (presence, requests, and dropping into a friend's game)
+- **Community** — public player profiles, the player directory, clubs and teams
+  (join, apply, leave, redeem a code), with membership badges beside names
+- **Account** — security (every signed-in device, password, email), the profile
+  editor (bio, location, cosmetics), the preview programme, and forgot-password
+- **Notifications** — the in-app centre behind the bell, with an unread badge
+- **In person** — record paper games and confirm them from both sides, the store
+  finder, and camera QR scanning for event check-in
+- **Welcome flow** — a new account is walked through location, a first deck, a
+  picture and where to play, all of it skippable
 - **Archon+** — membership status, what each tier includes, and connecting an
   existing Patreon account (OAuth sign-in through the system browser). What the
   screen may say about *buying* a membership is decided per platform — see
   `APP-REVIEW.md`
 - **Archon Intelligence** — rating history, performance against what your rating
-  predicted, per-deck breakdowns, your decks ranked, record by house, and the
-  meta. Each panel gated on its own capability, so a Supporter sees what a
-  Supporter paid for
+  predicted, per-deck breakdowns, your decks ranked, side-by-side deck
+  comparison, AERC analytics, record by house, and the meta. Each panel gated on
+  its own capability, so a Supporter sees what a Supporter paid for
+- **Champion's Challenge** — the Vault Master lab: enrol decks, read what the
+  background games concluded, withdraw a deck
 - **Tournament Lab** — compare up to four of your decks on record, rating swing,
   recent form and matchups before picking one for an event
 - **Pending game** — pick a deck (yours or standalone), chat, start when both ready
 - **Game board** — full live gameplay:
-  - opponent + player HUDs (æmber, keys, key cost, chains, houses, pile counts)
+  - opponent + player HUDs (æmber, keys, key cost, chains, houses, pile counts,
+    the deck's token creature) and the game time-limit clock
   - battlelines and artifact rows, card tokens (damage/power/æmber/ward), stun,
     exhaust, selection highlights
   - server-driven prompt panel (mulligans, house choice, ability targeting, Fight/Reap
     menus, end-of-game rematch) including house-icon prompts, with card names
     interpolated into buttons/titles and a "because of <card>" source-card context
-    for effect resolution
+    for effect resolution, plus the "name a card" and "name a trait" prompts
+    (a search over the cached card dictionary)
   - live play-by-play: while the opponent acts, the latest log lines appear in the
     waiting panel with a tap-through to the full log
   - tap to play/use a card, long-press to zoom, card menus for in-play cards
@@ -75,7 +93,10 @@ app/                    expo-router screens
   login.tsx register.tsx new-game.tsx pending.tsx game.tsx
   membership.tsx intelligence.tsx tournament-lab.tsx
 src/
-  api/                  REST client + wire types
+  api/                  REST client + wire types (account, community, play,
+                        premium, tournaments)
+  community/            player badges and the name component
+  lobby/                Quick Match, lobby chat, game filters, bot tables
   friends/              the friends section of the Profile tab
   membership/           capabilities, entitlements, Patreon linking, store policy
   net/                  lobby socket, game socket, jsonpatch
@@ -130,6 +151,11 @@ AA_SERVER=... AA_GAME_NODE=...  # to override
 
 ## Not yet implemented
 
-Sealed/alliance formats, tournaments, lobby chat, spectator lists,
-card-name/trait typeahead prompts (regular prompt buttons cover the common
-cases), push notifications.
+- **Replays.** No viewer, so no per-game replay analysis and no share links.
+  Replay Intelligence (the aggregate half) is on the Intelligence screen.
+- **SSO sign-in.** The OIDC flow keeps its state in a cookie the app has no jar
+  for; it needs a mobile callback path server-side of the kind Patreon linking
+  already has.
+- **The Learn hub and the interactive tutorial**, and How To Play.
+- **Spectator lists**, and moderation/admin dashboards.
+- **Localisation.** The website ships ten locales; the app is English-only.

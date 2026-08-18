@@ -48,6 +48,14 @@
           "color": "#e8a33d",
           "defaultChannel": "default"
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Archon Arena uses the camera to scan the QR code on an event check-in sheet.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
       ]
     ]
   }
