@@ -178,7 +178,18 @@ function chunkRequests(cards, chunkSize, model) {
 function readPriorsFile() {
     try {
         if (fs.existsSync(PRIORS_FILE)) {
-            const parsed = JSON.parse(fs.readFileSync(PRIORS_FILE, 'utf8'));
+            const raw = fs.readFileSync(PRIORS_FILE, 'utf8');
+
+            // An EMPTY file is what an interrupted copy leaves behind (a
+            // `cat >` redirect creates its target before failing). Nothing is
+            // lost by starting fresh. A NON-empty file that will not parse
+            // still stops the run: overwriting one of those could destroy
+            // scores somebody already paid for.
+            if (!raw.trim()) {
+                return { version: 1, scores: {} };
+            }
+
+            const parsed = JSON.parse(raw);
 
             if (parsed && parsed.scores && typeof parsed.scores === 'object') {
                 return parsed;
