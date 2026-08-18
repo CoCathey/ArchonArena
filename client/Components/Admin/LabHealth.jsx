@@ -35,6 +35,10 @@ const Row = ({ label, value, tone, hint }) => (
                     'text-sm font-semibold',
                     tone === 'good' ? 'text-emerald-300' : '',
                     tone === 'bad' ? 'text-red-300' : '',
+                    // ARCHON (N45): not broken, but not working either - the
+                    // state of a thing that is switched on and has produced
+                    // nothing yet.
+                    tone === 'warn' ? 'text-amber-300' : '',
                     !tone ? 'text-foreground' : ''
                 ].join(' ')}
             >
@@ -123,6 +127,42 @@ const LabHealth = () => {
                         value={t('{{games}} games', {
                             games: (health.learning.diaryGames || 0).toLocaleString()
                         })}
+                    />
+                    {/* ARCHON (N45): how much of the diary came from people.
+                        Everything else on this panel can look healthy while
+                        capture has silently stopped - a bot that is only ever
+                        taught by itself is the failure this row exists to make
+                        visible, and zero human games with the setting on is
+                        what it looks like. */}
+                    <Row
+                        label={t('Human play')}
+                        tone={
+                            health.learning.humanLearning === 'off'
+                                ? undefined
+                                : health.learning.humanGames
+                                ? 'good'
+                                : 'warn'
+                        }
+                        value={
+                            health.learning.humanLearning === 'off'
+                                ? t('off')
+                                : t('{{games}} games', {
+                                      games: (health.learning.humanGames || 0).toLocaleString()
+                                  })
+                        }
+                        hint={
+                            health.learning.humanLearning === 'off'
+                                ? t('self-play only')
+                                : health.learning.humanGames
+                                ? t('{{mode}}, pull ×{{weight}}', {
+                                      mode:
+                                          health.learning.humanLearning === 'all'
+                                              ? t('every game')
+                                              : t('practice games'),
+                                      weight: health.learning.humanGameWeight
+                                  })
+                                : t('capturing, none finished yet')
+                        }
                     />
                     <Row
                         label={t('Champion')}

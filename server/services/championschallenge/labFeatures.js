@@ -28,6 +28,10 @@ const { ROLES, rolesFor } = require('../membership/cardKnowledge');
 // committed traits file, absent-tolerant like every other card data source -
 // and what it wants from its friends (the synergy tags).
 const { traitsFor, synergiesFor } = require('./cardTraits');
+// ARCHON (N46): and what the move DOES to the position, predicted one step
+// ahead - merged into the action features so scoring and training need no
+// change at all. See labAfterstate.
+const { deltaFeatures } = require('./labAfterstate');
 
 /**
  * ARCHON (N26): the features, computed from a plain VIEW of a position.
@@ -244,6 +248,43 @@ const ACTION_CONTEXTS = {
         (player.opponent.creaturesInPlay || []).length > (player.creaturesInPlay || []).length,
     /** Enough amber to forge now - one more is worth much less than a key. */
     keyReady: (player) => player.amber >= keyCostOf(player),
+    /**
+     * ARCHON (N45): the RACE, before anybody is at the line.
+     *
+     * `keyReady` and `oppAtCheck` are both "already there". By the time
+     * either holds, the decision that produced it was made three turns
+     * earlier - so the model could express "what to do at check" and never
+     * "how to play the approach", which is where most of a game happens.
+     *
+     * This is the hole the calibration ladder found. A persona with a flat
+     * `reap +0.6` beat the trained champion, and the reason is that a fixed
+     * bias approximates "reap harder when the race is on" better than a
+     * model which cannot see a race until somebody has already won it. The
+     * fix is not more crossing - the machinery has always crossed kind with
+     * context - it is a context vocabulary that includes the approach.
+     *
+     * Within a turn or two of forging: close enough that amber is the
+     * currency and the board is a means to it.
+     */
+    closingIn: (player) => player.amber >= keyCostOf(player) - 3,
+    oppClosingIn: (player) =>
+        !!player.opponent && player.opponent.amber >= keyCostOf(player.opponent) - 3,
+    /**
+     * And who is AHEAD in it, which no context could say before: every one
+     * of them describes a single seat, so "they are nearer their key than I
+     * am to mine" - the fact that decides whether to race or to disrupt -
+     * was not expressible at all.
+     *
+     * Measured in amber still needed rather than amber held, because the key
+     * cost rises and two seats at eight amber are not in the same position
+     * when one of them owes eleven.
+     */
+    losingRace: (player) =>
+        !!player.opponent &&
+        keyCostOf(player.opponent) - player.opponent.amber < keyCostOf(player) - player.amber,
+    winningRace: (player) =>
+        !!player.opponent &&
+        keyCostOf(player) - player.amber < keyCostOf(player.opponent) - player.opponent.amber,
     /**
      * They forge at the start of their next turn. The context that decides
      * whether a move is worth making at all: crossed with the kind, it is
@@ -595,10 +636,19 @@ function decisionRecord(game, player, action) {
     // The deciding seat is always the context for the crosses; house calls
     // and selections pass it themselves, and defaulting it here means every
     // other kind gets it too.
-    const { features, cardId } = actionFeatures({ ...action, player: action.player || player });
+    const seat = action.player || player;
+    const { features, cardId } = actionFeatures({ ...action, player: seat });
     const record = {
         state: stateFeatures(game, player),
-        action: features,
+        // ARCHON (N46): what the move DOES, beside what the move is.
+        //
+        // Merged into the action features rather than living anywhere new, and
+        // that is the whole trick: `scoreDecision` already sums every action
+        // feature and `trainModel` already learns a weight for every one, so a
+        // model that judges a move by the position it produces needs no change
+        // to either. See labAfterstate for what is modelled and what is
+        // deliberately left alone.
+        action: { ...features, ...deltaFeatures({ ...action, player: seat }) },
         cardId,
         side: player.name,
         turn: game.round || 0

@@ -22,6 +22,9 @@ const HealthServer = require('./healthserver.js');
 // event that can change game state. Attached to the game instance itself so
 // it lives and dies with the game.
 const BotDriver = require('./botdriver.js');
+// ARCHON (N45): the learning loop reads the human seat too, live, from the
+// same clicks the engine gets.
+const HumanCapture = require('./humancapture.js');
 const { rolesIndex: warmCardKnowledge } = require('../services/membership/cardKnowledge');
 
 class GameServer {
@@ -617,7 +620,11 @@ class GameServer {
             winner: winner.name,
             reason: reason,
             // ARCHON: recorded play-by-play for the replay viewer.
-            replay: game.getReplay()
+            replay: game.getReplay(),
+            // ARCHON (N45): and what the human seats decided, for the learning
+            // loop. Null on every table that was not capturing, which the
+            // lobby's handler treats as "nothing to file".
+            humanGame: game.humanCapture ? game.humanCapture.harvest(winner.name, reason) : null
         });
     }
 
@@ -719,6 +726,28 @@ class GameServer {
         game.initialise();
         if (pendingGame.rematch) {
             game.addAlert('info', 'The rematch is ready');
+        }
+
+        // ARCHON (N45): and watch the human seats, if the lobby said to.
+        //
+        // The decision is the lobby's because the setting lives there and this
+        // node has no database to ask - the same reason the bot's policy rides
+        // along on the table rather than being looked up per move.
+        if (pendingGame.learnFromHumans) {
+            const humanNames = Object.values(pendingGame.players)
+                .filter((player) => !player.isBot)
+                .map((player) => player.name);
+
+            if (humanNames.length) {
+                game.humanCapture = new HumanCapture(humanNames);
+                // Said out loud, at the table, every time. A bot that learns
+                // from the people it plays is a good thing and there is no
+                // version of it worth doing quietly.
+                game.addAlert(
+                    'info',
+                    'The plays made here help train the practice bots. Only the moves are recorded - never who made them.'
+                );
+            }
         }
 
         // ARCHON (F9): seat the bot. The lobby marks the bot's seat on the
@@ -1060,6 +1089,14 @@ class GameServer {
 
         this.runAndCatchErrors(game, () => {
             game.notePlayerEvent(socket.user.username);
+
+            // ARCHON (N45): read the decision BEFORE the engine acts on it.
+            // The row has to describe the position the move was chosen from;
+            // afterwards it would describe the consequence and label it the
+            // cause. Never throws - see humancapture.js.
+            if (game.humanCapture) {
+                game.humanCapture.note(game, socket.user.username, command, args);
+            }
 
             game[command](socket.user.username, ...args);
 

@@ -116,7 +116,15 @@ async function buildPacket({
     ]);
 
     const [diary, recent, championRows, calibration] = await Promise.all([
-        db.query('SELECT COUNT(*)::int AS "Count" FROM "BotTrainingGames"'),
+        db.query(
+            'SELECT COUNT(*)::int AS "Count", ' +
+                // ARCHON (N45): and how much of it came from people rather than
+                // from the loop playing itself. An advisor asked why the bot has
+                // stopped improving should be able to see whether anything from
+                // outside the lab is reaching it.
+                'COUNT(*) FILTER (WHERE "Source" = \'human\')::int AS "Human" ' +
+                'FROM "BotTrainingGames"'
+        ),
         db.query(
             'SELECT COUNT(*)::int AS "Games", COUNT(*) FILTER (WHERE "Deep")::int AS "Deep" ' +
                 'FROM "ProvingGroundsGames" ' +
@@ -161,6 +169,7 @@ async function buildPacket({
         loop: {
             ...vitals,
             diaryGames: (diary && diary[0] && diary[0].Count) || 0,
+            diaryHumanGames: (diary && diary[0] && diary[0].Human) || 0,
             gamesLast7Days: (recent && recent[0] && recent[0].Games) || 0,
             deepGamesLast7Days: (recent && recent[0] && recent[0].Deep) || 0
         },

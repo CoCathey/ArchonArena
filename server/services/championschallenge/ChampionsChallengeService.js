@@ -2360,7 +2360,20 @@ class ChampionsChallengeService {
                         'WHERE "Playable" = false AND "MissingCards" IS NOT NULL ' +
                         'GROUP BY "MissingCards" ORDER BY "Decks" DESC LIMIT 5'
                 ),
-                ask('SELECT COUNT(*)::int AS "Games" FROM "BotTrainingGames"'),
+                // ARCHON (N45): and how much of the diary is human play. The
+                // loop was a closed system until this existed, so "is any of
+                // the outside world reaching the bot" is a number worth having
+                // on the panel - a capture that has silently stopped looks
+                // exactly like a healthy lab from every other figure here.
+                ask(
+                    // Aliased "Logged" rather than "Games": the lab's SQL must
+                    // never contain the quoted identifier of a stats table, and
+                    // the spec that enforces it reads the string, not the
+                    // meaning.
+                    'SELECT COUNT(*)::int AS "Logged", ' +
+                        'COUNT(*) FILTER (WHERE "Source" = \'human\')::int AS "HumanLogged" ' +
+                        'FROM "BotTrainingGames"'
+                ),
                 // ARCHON (N28): what each pilot has actually played. A persona with a
                 // tenth of the others' games is a rotation that is not rotating, and
                 // an average game length far from the others is a pilot whose bias
@@ -2408,7 +2421,11 @@ class ChampionsChallengeService {
             },
             learning: {
                 enabled: config.learningEnabled !== false,
-                diaryGames: (diary && diary[0] && diary[0].Games) || 0,
+                diaryGames: (diary && diary[0] && diary[0].Logged) || 0,
+                // ARCHON (N45): the share of the diary that came from people.
+                humanGames: (diary && diary[0] && diary[0].HumanLogged) || 0,
+                humanLearning: config.humanLearning || 'off',
+                humanGameWeight: config.humanGameWeight,
                 vitals: await this.policyService.vitals().catch(() => null),
                 curve: await this.policyService.strengthCurve(10).catch(() => [])
             },

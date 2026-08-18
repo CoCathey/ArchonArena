@@ -515,3 +515,62 @@ the bot learning (diary depth, champion version, any title fight in progress),
 and is the field growing (pool against target, last Master Vault fetch, and what
 the pool could **not** play, grouped — one card id at the top of that list is an
 actionable fact about this server's card data).
+
+## Learning from the people who play here (N45)
+
+Every row in the training diary came from the lab playing itself, which makes
+the whole loop a closed system: it can get steadily better at beating its own
+habits and never discover that the habits are the problem. The site already
+runs thousands of games with a person sitting on one side of the table, and
+their moves are the one source of play nothing in the lab generates.
+
+**Capture is live, at the game node, before the engine acts.** A human's click
+arrives at `onGameMessage`, and `HumanCapture.note` reads the decision out of it
+on the way past — from the position the move was chosen FROM, since a row built
+after the engine resolved the move would describe the consequence and label it
+the cause.
+
+**The rows are the bot's own rows, or they are worse than nothing.** A model is
+a weight per feature; feed it rows whose features were computed even slightly
+differently and it does not learn less, it learns something wrong, confidently,
+with no signal in the output that says so. So the capture calls
+`decisionRecord(game, player, action)` — the same function the bot's own driver
+calls, with the same triple — and a spec compares a captured row against that
+function called directly.
+
+**Why not rebuild the rows from replays.** It was the obvious cheaper route and
+it is a trap worth writing down. A recording knows a deck's SIZE but not its
+contents, so the deck-composition features the model reads would simply be
+absent — and absent reads as _false_, not as unknown. Every human row would have
+carried a quiet, systematic lie. Replays also record board snapshots rather than
+the action taken, so the move itself would have to be inferred.
+
+**Only the choices the bot would also have scored.** The policy answers a great
+many prompts from a rule rather than from the model — the mulligan, the
+end-of-turn confirmation, its own prophecy question — and it never scores a
+choice it did not have. Capturing those would teach the model that whatever the
+engine compels is good, weighted by how often it compels it. The capture mirrors
+that skip list exactly, and a decision with fewer than two options is not a
+decision. A cancelled card menu is not a move either.
+
+**Conceded and abandoned games are thrown away.** A concession labels every move
+the conceder made a losing move, including the good ones, and people concede for
+reasons that have nothing to do with the position. Nothing else in the diary
+carries that distortion.
+
+**Which tables, and what a human move is worth.** `championsChallenge.humanLearning`
+takes `bot` (practice tables, the default), `all` (people against people too) or
+`off`. The pull is `humanGameWeight`, default 3 — above the 1 an ordinary
+sparring row pulls, because the move came from somebody trying to win; well
+below the 8 a searched decision pulls, because the label is still "somebody won
+this game twenty turns later". The diary stores the **source**, not the weight,
+and the weight is applied when a batch is folded — so changing the knob
+re-weights the whole diary rather than only its future. Zero parks the rows
+without losing them.
+
+**Said out loud.** A table that is capturing says so in its own chat log when it
+opens. Nothing captured identifies anybody: a row is the feature vector of a
+position and the move taken from it, with no player, deck or game attached. The
+lab health panel reports the human share of the diary, because a capture that
+has silently stopped looks exactly like a healthy lab from every other figure
+on that page.

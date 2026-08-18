@@ -5,6 +5,13 @@ const GameService = require('./services/GameService');
 // ARCHON: ratings react to finished games (docs/design/rating-engine.md)
 const RatingService = require('./services/rating/RatingService');
 const RedisClientFactory = require('./services/RedisClientFactory');
+// ARCHON (N45): the learning loop's diary, which finished human games are
+// written into (see gamenode/humancapture.js).
+const BotPolicyService = require('./services/championschallenge/BotPolicyService');
+const {
+    humanLearningConfig,
+    learnsFromTable
+} = require('./services/championschallenge/humanLearning');
 const { detectBinary } = require('./util');
 
 class GameRouter extends EventEmitter {
@@ -18,6 +25,10 @@ class GameRouter extends EventEmitter {
         this.gameService = new GameService();
         // ARCHON: ratings react to finished games (docs/design/rating-engine.md)
         this.ratingService = new RatingService(configService);
+        // ARCHON (N45): a finished human game is training data. This is the
+        // only place both halves are known at once - the node ships the
+        // decisions with GAMEWIN, and the diary lives in the lobby's database.
+        this.policyService = new BotPolicyService(configService);
 
         const factory = new RedisClientFactory(configService);
         this.subscriber = factory.createClient();
@@ -58,6 +69,15 @@ class GameRouter extends EventEmitter {
         // where "it happened" is written; rating is where "it counted" is,
         // and a bot game is never rated (see GAMEWIN below).
         this.gameService.create(game.getSaveState());
+
+        // ARCHON (N45): whether this table's human seats are captured for the
+        // learning loop. Stamped here rather than at each of the three places
+        // a game can start, because this is the one funnel all of them go
+        // through - and because a table that started before an admin turned
+        // the setting on should finish the way it started.
+        game.learnFromHumans = learnsFromTable(humanLearningConfig().mode, {
+            botGame: !!game.botGame
+        });
 
         node.numGames++;
 
@@ -223,6 +243,28 @@ class GameRouter extends EventEmitter {
         );
     }
 
+    /**
+     * ARCHON (N45): file a finished human game in the training diary.
+     *
+     * The node captured the rows live (gamenode/humancapture.js); the diary
+     * lives in the lobby's database, so this is the one point where both
+     * halves exist at once. Best effort throughout - a game that has finished
+     * already did everything it owed anybody.
+     *
+     * @param {object} arg the GAMEWIN payload
+     */
+    recordHumanGame(arg) {
+        const human = arg && arg.humanGame;
+
+        if (!human || !Array.isArray(human.decisions) || !human.decisions.length) {
+            return;
+        }
+
+        Promise.resolve(this.policyService.recordHumanGame(human)).catch((err) =>
+            logger.error('Failed to record a human game for training', err)
+        );
+    }
+
     // Events
     /**
      * @param {Error} err
@@ -304,6 +346,12 @@ class GameRouter extends EventEmitter {
                 //
                 // Rating still runs after `update`, because it reads the rows
                 // that writes. Only the replay dependency is removed.
+                // ARCHON (N45): the people who just played it taught the bot
+                // something. A third independent consequence, deliberately
+                // outside the chain below: a diary write must never be able
+                // to cost a game its record, its replay or its rating.
+                this.recordHumanGame(message.arg);
+
                 Promise.resolve(this.gameService.update(message.arg.game))
                     .then(() =>
                         Promise.allSettled([

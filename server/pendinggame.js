@@ -532,6 +532,11 @@ class PendingGame {
             // rides along rather than being looked up per move.
             botStyle: this.botStyle || undefined,
             botStyleLabel: this.botStyleLabel || undefined,
+            // ARCHON (N45): whether this table's human seats are captured for
+            // the learning loop. Decided by the lobby, where the setting lives
+            // - the game node has no database and no settings to read, which
+            // is the same reason the bot's own policy rides along.
+            learnFromHumans: this.learnFromHumans || undefined,
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,

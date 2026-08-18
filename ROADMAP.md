@@ -2642,6 +2642,149 @@ code under deterministic seeds. So: measure.
         points, so the deliverable is the measurement. Fidelity rises with the champion, and
         re-measuring is expected — the assay is a flywheel, not a census.
 
+#### N45 — The race, before anybody is at the line _(done)_
+
+**Why:** the calibration ladder found a defect the moment it existed. A persona flying a flat
+`reap +0.6` beat the trained champion 57–43, and the three pilots ranked in exact order of how
+much their bias pushed toward reaping. That is a gradient, not noise.
+
+**What it was NOT.** The first diagnosis — that the model adds state and action scores and never
+crosses them — was wrong. `labFeatures` has always emitted `x:kind:context`, so "reap when X"
+was expressible. The hole was narrower and more interesting.
+
+**Tasks**
+
+-   [x] **The approach, not just the line.** Every race-related context was an endpoint:
+        `keyReady` (I can forge now) and `oppAtCheck` (they forge next turn). By the time either
+        holds, the decision that produced it was three turns ago — so the model could say what to
+        do AT check and never how to play toward one. `closingIn` / `oppClosingIn` name the
+        approach.
+-   [x] **Who is ahead.** Every context described a single seat, so "they are nearer their key
+        than I am to mine" — the fact that decides race-or-disrupt — could not be represented at
+        all. `losingRace` / `winningRace` compare the two.
+-   [x] **Measured in what is owed, not what is held.** The key cost rises; two seats on eight
+        amber are not in the same position when one of them owes eleven. Asserted, because
+        comparing raw amber gets it exactly backwards in precisely the positions that matter.
+-   [x] **A dead heat is neither.** Claiming one would be a lie the loop learns from.
+-   Later: re-read the ladder after the loop has trained on the new contexts. If the Racer stops
+    beating the champion, this was the defect; if it does not, the next suspect is the
+    self-play distribution rather than the feature set.
+
+**Acceptance criteria**
+
+-   [x] A seat within three amber of a key is closing in, at any key cost.
+-   [x] The race contexts cross with the ACTION — a state fact cancels out of a ranking and could
+        never change a move.
+
+#### N46 — Judge a move by the position it produces _(done)_
+
+**Why:** "the bots are not actually thinking through plays — they seem fairly random and cannot
+grasp strategy." The randomness theory was checked and is false: the live driver plays greedily
+(`BotPolicy` passes temperature 0) and explores nothing. The real cause is that `scoreDecision`
+scores each candidate on its own, as a description of a MOVE, with no representation of what the
+move does. Reaping scored the same whether it took the seat to a key or spent the last ready
+creature before a swing.
+
+**What is not possible here, and why.** True lookahead needs the deep bot's fork, which searches
+by replaying a seeded input log from the start of a simulated game. A live game against a person
+has no such log, and cloning an arbitrary live position is a far larger piece of work than this.
+But most of the value of one ply needs no search at all, because the mechanical effect of a
+KeyForge action is known exactly.
+
+**Tasks**
+
+-   [x] **`labAfterstate`**: the predicted CHANGE each action makes to the state, on the same
+        scales as the state features it mirrors — so a weight learned for `d:amber` is
+        commensurate with one learned for `s:myAmber`. Getting that wrong would not error; it
+        would quietly let one axis dominate, so the spec compares them directly.
+-   [x] **Reaping costs something.** An amber AND a creature that can no longer act. Without the
+        second half the model could only ever learn that amber is good, which is exactly the bias
+        that was beating it on the ladder.
+-   [x] **Forging is a threshold, not a quantity** — an amber is worth far more when it is the
+        sixth than when it is the first, and `d:forges` says which.
+-   [x] **It refuses to guess.** A kind whose effect is card text emits nothing beyond the card
+        leaving hand, and a house call emits nothing at all: its consequence is the whole rest of
+        the turn, and a one-step effect model must not pretend to it. A guess would be a fiction
+        the loop trains on.
+-   [x] **No change to scoring or training.** The deltas ride with the action features, and both
+        `scoreDecision` and `trainModel` already walk every action feature — the same trick the
+        crosses use.
+-   Later: an afterstate for card TEXT, from the LLM teacher's readings (N38) rather than
+    hand-written rules; and a real one-ply search once a live position can be cloned.
+
+**Acceptance criteria**
+
+-   [x] A delta is on the same scale as the state feature it mirrors.
+-   [x] A kind whose effect is unknowable emits nothing rather than a guess.
+
+#### N47 — A longer diary _(done)_
+
+**Why:** four thousand games was set when every row was the same kind of evidence. The diary is
+now a mixture — self-play, the deep bot's measured search, the LLM teacher's readings — and the
+rarer kinds are the ones a short diary discards first, because pruning is by age and the
+expensive rows are produced most slowly.
+
+-   [x] Default 4,000 → 20,000; ceiling 50,000 → 250,000. The cost is disk: each row is a game's
+        decisions as jsonb, so twenty thousand games is on the order of a gigabyte, and an
+        operator who cannot spare it should turn it back down rather than discover it.
+-   [x] The teacher's spec now reads the cap from the registry instead of hard-coding it, so
+        changing how much history the loop keeps no longer looks like a broken teacher.
+
+#### N48 — Learning from the people who play here _(done)_
+
+**Why:** every row in the training diary came from the lab playing itself, which makes the
+learning loop a closed system — it can get steadily better at beating its own habits and never
+discover that the habits are the problem. Meanwhile the site runs thousands of games with a
+person sitting on one side of the table, and their moves are the one source of play nothing in
+the lab generates. Asked for directly: "learn from human games with the bots."
+
+**The route not taken, and why it matters.** Rebuilding the rows from replays afterwards is
+cheaper and would have been wrong. A recording knows a deck's SIZE but not its contents, so the
+deck-composition features the model reads would be absent — and absent reads as _false_, not as
+unknown. Every human row would then have carried a quiet, systematic lie, with nothing in the
+output to show it. Replays also record board snapshots rather than the action taken, so the move
+itself would have to be inferred. Capture therefore had to be live.
+
+**Tasks**
+
+-   [x] **`HumanCapture` at the game node**, reading each decision out of the click on its way
+        past `onGameMessage` — before the engine acts, so the row describes the position the move
+        was chosen FROM rather than the consequence it produced.
+-   [x] **The rows are the bot's own rows.** The capture calls `decisionRecord(game, player,
+action)` — the same function the bot's driver calls, with the same triple — and a spec
+        compares a captured row against that function called directly. Anything less and the
+        model is fed two languages without being told which it is reading.
+-   [x] **A main-window click names the card; the menu that follows names the move.** Reap and
+        fight are the same click, so the row waits for the button. A cancelled menu writes
+        nothing, and an abandoned click cannot be revived by a later, unrelated press.
+-   [x] **Only the choices the bot would also have scored.** The mulligan, the end-of-turn
+        confirmation, its own prophecy question and Done/Autoresolve are skipped, mirroring the
+        policy's own rule-answered list — and a decision with fewer than two options is not a
+        decision. Otherwise the model learns that whatever the engine compels is good, weighted
+        by how often it compels it.
+-   [x] **Conceded and abandoned games are thrown away.** A concession labels every move the
+        conceder made a losing move, including the good ones, and people concede for reasons that
+        have nothing to do with the position.
+-   [x] **`"Source"` on `BotTrainingGames`, not a baked-in weight.** The pull is applied when a
+        batch is folded, so changing `humanGameWeight` re-weights the whole diary rather than only
+        its future — and most of a diary is always already written. `trainModel` needed no change:
+        it already honours a per-row weight, the same door the AI teacher's rows use.
+-   [x] **Settings:** `humanLearning` — `bot` (practice tables, the default), `all` (people
+        against people too), `off`; and `humanGameWeight`, default 3. Above the 1 a sparring row
+        pulls, because the move came from somebody trying to win; well below the 8 a searched
+        decision pulls, because the label is still "somebody won this game twenty turns later".
+        Zero parks the rows without losing them.
+-   [x] **Said out loud, and visible.** A capturing table says so in its chat log when it opens;
+        nothing captured identifies anybody. The lab health panel reports the human share of the
+        diary, because a capture that has silently stopped looks exactly like a healthy lab from
+        every other figure on that page.
+
+**Acceptance criteria**
+
+-   [x] A captured row is byte-identical to `decisionRecord` for the same position and move.
+-   [x] A forced move, a cancelled menu and a rule-answered prompt each write nothing.
+-   [x] Changing the weight changes what the existing diary trains to.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.
