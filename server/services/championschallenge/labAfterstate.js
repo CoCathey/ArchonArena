@@ -1,5 +1,5 @@
 /**
- * ARCHON (N43): judge a move by the position it produces.
+ * ARCHON (N46): judge a move by the position it produces.
  *
  * The fast bot scores each candidate action on its own - a weighted sum of
  * features describing the move and the board it was made on. What it never

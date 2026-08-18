@@ -4,7 +4,7 @@ const {
 } = require('../../../../server/services/championschallenge/labFeatures');
 
 /**
- * ARCHON (N42): the race, before anybody is at the line.
+ * ARCHON (N45): the race, before anybody is at the line.
  *
  * The calibration ladder found this. A persona flying a flat `reap +0.6` beat
  * the trained champion, and the reason was not that the model cannot cross

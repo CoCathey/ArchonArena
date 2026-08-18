@@ -2360,7 +2360,7 @@ class ChampionsChallengeService {
                         'WHERE "Playable" = false AND "MissingCards" IS NOT NULL ' +
                         'GROUP BY "MissingCards" ORDER BY "Decks" DESC LIMIT 5'
                 ),
-                // ARCHON (N45): and how much of the diary is human play. The
+                // ARCHON (N48): and how much of the diary is human play. The
                 // loop was a closed system until this existed, so "is any of
                 // the outside world reaching the bot" is a number worth having
                 // on the panel - a capture that has silently stopped looks
@@ -2422,7 +2422,7 @@ class ChampionsChallengeService {
             learning: {
                 enabled: config.learningEnabled !== false,
                 diaryGames: (diary && diary[0] && diary[0].Logged) || 0,
-                // ARCHON (N45): the share of the diary that came from people.
+                // ARCHON (N48): the share of the diary that came from people.
                 humanGames: (diary && diary[0] && diary[0].HumanLogged) || 0,
                 humanLearning: config.humanLearning || 'off',
                 humanGameWeight: config.humanGameWeight,

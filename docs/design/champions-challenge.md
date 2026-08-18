@@ -516,7 +516,7 @@ and is the field growing (pool against target, last Master Vault fetch, and what
 the pool could **not** play, grouped — one card id at the top of that list is an
 actionable fact about this server's card data).
 
-## Learning from the people who play here (N45)
+## Learning from the people who play here (N48)
 
 Every row in the training diary came from the lab playing itself, which makes
 the whole loop a closed system: it can get steadily better at beating its own

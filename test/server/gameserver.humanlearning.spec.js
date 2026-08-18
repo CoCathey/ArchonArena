@@ -6,7 +6,7 @@ const { getCardIndex, cloneCard } = require('../../server/services/championschal
 const { ACTION_KINDS } = require('../../server/services/championschallenge/labFeatures');
 
 /**
- * ARCHON (N45): the bot learning from a person, through the real wiring.
+ * ARCHON (N48): the bot learning from a person, through the real wiring.
  *
  * Every other spec for this feature drives stand-ins. This one plays a whole
  * practice game on the real engine, with the human seat's every input going

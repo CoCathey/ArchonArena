@@ -118,7 +118,7 @@ async function buildPacket({
     const [diary, recent, championRows, calibration] = await Promise.all([
         db.query(
             'SELECT COUNT(*)::int AS "Count", ' +
-                // ARCHON (N45): and how much of it came from people rather than
+                // ARCHON (N48): and how much of it came from people rather than
                 // from the loop playing itself. An advisor asked why the bot has
                 // stopped improving should be able to see whether anything from
                 // outside the lab is reaching it.

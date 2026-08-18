@@ -8,7 +8,7 @@ const {
 } = require('../../../../server/services/championschallenge/labFeatures');
 
 /**
- * ARCHON (N43): judge a move by the position it produces.
+ * ARCHON (N46): judge a move by the position it produces.
  *
  * The complaint that produced this was "the bots do not seem to think" - and
  * the cause was not randomness. The live driver plays greedily; it explores

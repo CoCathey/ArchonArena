@@ -5,7 +5,7 @@ const GameService = require('./services/GameService');
 // ARCHON: ratings react to finished games (docs/design/rating-engine.md)
 const RatingService = require('./services/rating/RatingService');
 const RedisClientFactory = require('./services/RedisClientFactory');
-// ARCHON (N45): the learning loop's diary, which finished human games are
+// ARCHON (N48): the learning loop's diary, which finished human games are
 // written into (see gamenode/humancapture.js).
 const BotPolicyService = require('./services/championschallenge/BotPolicyService');
 const {
@@ -25,7 +25,7 @@ class GameRouter extends EventEmitter {
         this.gameService = new GameService();
         // ARCHON: ratings react to finished games (docs/design/rating-engine.md)
         this.ratingService = new RatingService(configService);
-        // ARCHON (N45): a finished human game is training data. This is the
+        // ARCHON (N48): a finished human game is training data. This is the
         // only place both halves are known at once - the node ships the
         // decisions with GAMEWIN, and the diary lives in the lobby's database.
         this.policyService = new BotPolicyService(configService);
@@ -70,7 +70,7 @@ class GameRouter extends EventEmitter {
         // and a bot game is never rated (see GAMEWIN below).
         this.gameService.create(game.getSaveState());
 
-        // ARCHON (N45): whether this table's human seats are captured for the
+        // ARCHON (N48): whether this table's human seats are captured for the
         // learning loop. Stamped here rather than at each of the three places
         // a game can start, because this is the one funnel all of them go
         // through - and because a table that started before an admin turned
@@ -244,7 +244,7 @@ class GameRouter extends EventEmitter {
     }
 
     /**
-     * ARCHON (N45): file a finished human game in the training diary.
+     * ARCHON (N48): file a finished human game in the training diary.
      *
      * The node captured the rows live (gamenode/humancapture.js); the diary
      * lives in the lobby's database, so this is the one point where both
@@ -346,7 +346,7 @@ class GameRouter extends EventEmitter {
                 //
                 // Rating still runs after `update`, because it reads the rows
                 // that writes. Only the replay dependency is removed.
-                // ARCHON (N45): the people who just played it taught the bot
+                // ARCHON (N48): the people who just played it taught the bot
                 // something. A third independent consequence, deliberately
                 // outside the chain below: a diary write must never be able
                 // to cost a game its record, its replay or its rating.

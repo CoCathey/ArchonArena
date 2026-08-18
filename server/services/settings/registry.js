@@ -503,10 +503,10 @@ const REGISTRY = {
                 max: 1000,
                 default: 25
             },
-            // ARCHON (N43): a longer memory. Four thousand games was set when
+            // ARCHON (N47): a longer memory. Four thousand games was set when
             // the loop was new and every row was the same kind of evidence.
             // It is now a mixture - self-play, the deep bot's measured search,
-            // the LLM teacher's readings, and (N44) human play - and the
+            // the LLM teacher's readings, and (N48) human play - and the
             // rarer kinds are exactly the ones a short diary throws away
             // first, since pruning is by age and the expensive rows are
             // produced most slowly. The cost is disk: each row is a game's
@@ -567,7 +567,7 @@ const REGISTRY = {
                 max: 50,
                 default: 8
             },
-            // ARCHON (N45): learning from the people who play here.
+            // ARCHON (N48): learning from the people who play here.
             //
             // Every other row in the diary comes from the bot playing itself,
             // so the whole loop is a closed system: it can get better at
@@ -590,7 +590,7 @@ const REGISTRY = {
                     { value: 'off', label: 'Off - self-play only' }
                 ]
             },
-            // ARCHON (N45): how hard a human's move pulls, against the 1 an
+            // ARCHON (N48): how hard a human's move pulls, against the 1 an
             // ordinary sparring row pulls and the 8 a searched one does.
             //
             // A human row is outcome-labelled, exactly like a sparring row -

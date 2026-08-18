@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS public."BotTrainingGames"
     -- from the behaviour that produced them - but "how much of my diary is one
     -- style" should have an answer. See labPersonas.js.
     "Persona" text COLLATE pg_catalog."default",
-    -- ARCHON (N45): where this game came from. 'self' is the lab sparring
+    -- ARCHON (N48): where this game came from. 'self' is the lab sparring
     -- against itself, which is every row the loop wrote before this existed
     -- and so is the default; 'human' is a game a person played on this site,
     -- captured live at the game node. The distinction has to survive into the

@@ -35,7 +35,7 @@ const Row = ({ label, value, tone, hint }) => (
                     'text-sm font-semibold',
                     tone === 'good' ? 'text-emerald-300' : '',
                     tone === 'bad' ? 'text-red-300' : '',
-                    // ARCHON (N45): not broken, but not working either - the
+                    // ARCHON (N48): not broken, but not working either - the
                     // state of a thing that is switched on and has produced
                     // nothing yet.
                     tone === 'warn' ? 'text-amber-300' : '',
@@ -128,7 +128,7 @@ const LabHealth = () => {
                             games: (health.learning.diaryGames || 0).toLocaleString()
                         })}
                     />
-                    {/* ARCHON (N45): how much of the diary came from people.
+                    {/* ARCHON (N48): how much of the diary came from people.
                         Everything else on this panel can look healthy while
                         capture has silently stopped - a bot that is only ever
                         taught by itself is the failure this row exists to make

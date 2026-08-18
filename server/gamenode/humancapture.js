@@ -7,7 +7,7 @@ const { INTENT_BUTTONS, mainWindowCandidates, textOf } = require('../services/bo
 const { NEVER_PRESS } = require('../services/botplayer/BotPolicy');
 
 /**
- * ARCHON (N45): what the person across the table just decided, written down
+ * ARCHON (N48): what the person across the table just decided, written down
  * in the bot's own handwriting.
  *
  * The Champion's Challenge learns from the bot playing itself, which is a

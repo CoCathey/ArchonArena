@@ -2,7 +2,7 @@ const HumanCapture = require('../../../server/gamenode/humancapture');
 const { decisionRecord } = require('../../../server/services/championschallenge/labFeatures');
 
 /**
- * ARCHON (N45): the bot learns from the people who play here.
+ * ARCHON (N48): the bot learns from the people who play here.
  *
  * The whole feature stands on one property, and it is the property that is
  * easiest to break silently: a human row must be INDISTINGUISHABLE from a row

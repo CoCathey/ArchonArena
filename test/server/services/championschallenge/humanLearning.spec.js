@@ -11,7 +11,7 @@ const {
 const { REGISTRY } = require('../../../../server/services/settings/registry');
 
 /**
- * ARCHON (N45): the diary end of learning from human games.
+ * ARCHON (N48): the diary end of learning from human games.
  *
  * The capture itself is pinned next door (test/server/gamenode). What is
  * pinned here is everything after the game ends: which tables are captured at

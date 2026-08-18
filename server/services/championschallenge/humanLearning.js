@@ -2,7 +2,7 @@ const logger = require('../../log');
 const { sectionDefaults } = require('../settings/registry');
 
 /**
- * ARCHON (N45): whether the bot may learn from the people it plays, and how
+ * ARCHON (N48): whether the bot may learn from the people it plays, and how
  * hard those lessons pull.
  *
  * Read in two places that must agree - the lobby, deciding whether a table

@@ -22,7 +22,7 @@ const HealthServer = require('./healthserver.js');
 // event that can change game state. Attached to the game instance itself so
 // it lives and dies with the game.
 const BotDriver = require('./botdriver.js');
-// ARCHON (N45): the learning loop reads the human seat too, live, from the
+// ARCHON (N48): the learning loop reads the human seat too, live, from the
 // same clicks the engine gets.
 const HumanCapture = require('./humancapture.js');
 const { rolesIndex: warmCardKnowledge } = require('../services/membership/cardKnowledge');
@@ -621,7 +621,7 @@ class GameServer {
             reason: reason,
             // ARCHON: recorded play-by-play for the replay viewer.
             replay: game.getReplay(),
-            // ARCHON (N45): and what the human seats decided, for the learning
+            // ARCHON (N48): and what the human seats decided, for the learning
             // loop. Null on every table that was not capturing, which the
             // lobby's handler treats as "nothing to file".
             humanGame: game.humanCapture ? game.humanCapture.harvest(winner.name, reason) : null
@@ -728,7 +728,7 @@ class GameServer {
             game.addAlert('info', 'The rematch is ready');
         }
 
-        // ARCHON (N45): and watch the human seats, if the lobby said to.
+        // ARCHON (N48): and watch the human seats, if the lobby said to.
         //
         // The decision is the lobby's because the setting lives there and this
         // node has no database to ask - the same reason the bot's policy rides
@@ -1090,7 +1090,7 @@ class GameServer {
         this.runAndCatchErrors(game, () => {
             game.notePlayerEvent(socket.user.username);
 
-            // ARCHON (N45): read the decision BEFORE the engine acts on it.
+            // ARCHON (N48): read the decision BEFORE the engine acts on it.
             // The row has to describe the position the move was chosen from;
             // afterwards it would describe the consequence and label it the
             // cause. Never throws - see humancapture.js.

@@ -166,7 +166,7 @@ class BotPolicyService {
     }
 
     /**
-     * ARCHON (N45): one finished HUMAN game into the same diary.
+     * ARCHON (N48): one finished HUMAN game into the same diary.
      *
      * The rows were captured live at the game node
      * (server/gamenode/humancapture.js) through the same `decisionRecord` the
@@ -231,7 +231,7 @@ class BotPolicyService {
             return null; // not enough evidence to be worth a title fight
         }
 
-        // ARCHON (N45): a human's move pulls harder than a sparring one.
+        // ARCHON (N48): a human's move pulls harder than a sparring one.
         //
         // Applied HERE rather than at capture time, and that is the point of
         // storing the source instead of the weight: the knob then governs the
@@ -608,7 +608,7 @@ class BotPolicyService {
 }
 
 /**
- * ARCHON (N45): stamp the pull a stored row's SOURCE earns it.
+ * ARCHON (N48): stamp the pull a stored row's SOURCE earns it.
  *
  * A row that already carries its own weight keeps it - that is the LLM
  * teacher's rows, whose pull is set from how well that teacher has been
