@@ -3,9 +3,9 @@
 // ARCHON (N38): the advisor packet - the learning loop's telemetry, in one
 // paste.
 //
-//   npm run advisor-packet            (in production:
+//   npm run -s advisor-packet         (in production:
 //   docker compose -f docker-compose.prod.yml --env-file .env.production \
-//       exec -T lobby npm run advisor-packet > packet.json)
+//       exec -T lobby npm run -s advisor-packet > packet.json)
 //
 // The third way the Challenge uses AI costs nothing to keep and nothing to
 // run: every month or so, hand this JSON to a Claude session alongside the

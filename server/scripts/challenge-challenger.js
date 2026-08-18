@@ -3,7 +3,7 @@
 // ARCHON (N38): the challenger's door - hand-made brains enter the arena,
 // never the throne.
 //
-//   npm run challenger:export > champion.json
+//   npm run -s challenger:export > champion.json
 //       the current champion's full model, editable JSON
 //
 //   npm run challenger:enter < challenger.json
@@ -12,7 +12,7 @@
 //
 // (In production, through the lobby container:
 //   docker compose -f docker-compose.prod.yml --env-file .env.production \
-//       exec -T lobby npm run challenger:export > champion.json
+//       exec -T lobby npm run -s challenger:export > champion.json
 //   docker compose -f docker-compose.prod.yml --env-file .env.production \
 //       exec -T lobby npm run challenger:enter < challenger.json)
 //
@@ -131,6 +131,22 @@ function sanitizeModel(raw) {
     return { model: problems.length ? null : model, problems, warnings };
 }
 
+/**
+ * JSON from `text`, tolerating the banner an un-silenced `npm run` leaves in
+ * front of it. An export captured without `-s` starts with two `> ...` lines;
+ * refusing such a file teaches nothing, and nothing before the first brace
+ * can be part of the model.
+ */
+function parseModelInput(text) {
+    const start = text.indexOf('{');
+
+    if (start === -1) {
+        throw new Error('no JSON object in the input');
+    }
+
+    return JSON.parse(text.slice(start));
+}
+
 /** The reigning champion's raw stored model, or a blank slate to edit. */
 async function exportChampion(db) {
     const rows = await db.query(
@@ -216,7 +232,7 @@ async function main() {
     // A file argument, or stdin - which is what reaches through
     // `docker compose exec -T lobby ... < challenger.json`.
     const fs = require('fs');
-    const raw = JSON.parse(fs.readFileSync(file || 0, 'utf8'));
+    const raw = parseModelInput(fs.readFileSync(file || 0, 'utf8'));
     const { model, problems, warnings } = sanitizeModel(raw);
 
     for (const warning of warnings) {
@@ -264,4 +280,4 @@ if (require.main === module) {
         });
 }
 
-module.exports = { sanitizeModel, exportChampion, enterChallenger };
+module.exports = { sanitizeModel, parseModelInput, exportChampion, enterChallenger };

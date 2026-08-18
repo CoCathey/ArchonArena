@@ -1,5 +1,6 @@
 const {
     sanitizeModel,
+    parseModelInput,
     exportChampion,
     enterChallenger
 } = require('../../../../server/scripts/challenge-challenger');
@@ -77,6 +78,21 @@ describe('the challenger door', function () {
             expect(sanitizeModel('brain').model).toBeNull();
             expect(sanitizeModel([1, 2]).model).toBeNull();
             expect(sanitizeModel(null).model).toBeNull();
+        });
+    });
+
+    describe('parseModelInput', function () {
+        it('tolerates the npm banner an un-silenced export captures', function () {
+            const polluted =
+                '\n> archon-arena@2.0.0 challenger:export\n' +
+                '> node server/scripts/challenge-challenger.js export\n\n' +
+                '{ "weights": { "s:myAmber": 0.4 } }\n';
+
+            expect(parseModelInput(polluted).weights['s:myAmber']).toBe(0.4);
+        });
+
+        it('input with no JSON object at all is a clear refusal', function () {
+            expect(() => parseModelInput('nothing here')).toThrow('no JSON object');
         });
     });
 
