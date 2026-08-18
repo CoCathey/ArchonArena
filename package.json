@@ -23,6 +23,7 @@
         "lint:fix": "prettier --write --ignore-unknown '!**/*.{js,jsx,ts,tsx}' . && eslint --fix --ext=js,jsx,ts,tsx .",
         "build": "vite build --config vite.config.mjs",
         "typecheck:client": "tsc -p client/tsconfig.json --noEmit",
+        "advisor-packet": "node server/scripts/challenge-advisor-packet.js",
         "card-priors": "node server/scripts/generate-card-priors.js",
         "migrate": "node server/scripts/migrate.js",
         "sync:upstream": "node server/scripts/upstream-sync.js",
