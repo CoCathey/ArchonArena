@@ -24,6 +24,7 @@
 // ARCHON (F3): what a card does, from the canonical card data - the misplay
 // review's classifier, so "this card steals" has one answer platform-wide.
 const { ROLES, rolesFor } = require('../membership/cardKnowledge');
+const { deltaFeatures } = require('./labAfterstate');
 
 /**
  * ARCHON (N26): the features, computed from a plain VIEW of a position.
@@ -506,10 +507,19 @@ function decisionRecord(game, player, action) {
     // The deciding seat is always the context for the crosses; house calls
     // and selections pass it themselves, and defaulting it here means every
     // other kind gets it too.
-    const { features, cardId } = actionFeatures({ ...action, player: action.player || player });
+    const seat = action.player || player;
+    const { features, cardId } = actionFeatures({ ...action, player: seat });
     const record = {
         state: stateFeatures(game, player),
-        action: features,
+        // ARCHON (N43): what the move DOES, beside what the move is.
+        //
+        // Merged into the action features rather than living anywhere new, and
+        // that is the whole trick: `scoreDecision` already sums every action
+        // feature and `trainModel` already learns a weight for every one, so a
+        // model that judges a move by the position it produces needs no change
+        // to either. See labAfterstate for what is modelled and what is
+        // deliberately left alone.
+        action: { ...features, ...deltaFeatures({ ...action, player: seat }) },
         cardId,
         side: player.name,
         turn: game.round || 0

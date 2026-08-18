@@ -1,4 +1,5 @@
 const LlmTeacherService = require('../../../../server/services/championschallenge/LlmTeacherService');
+const { REGISTRY } = require('../../../../server/services/settings/registry');
 
 /**
  * ARCHON (N38): the AI teacher, pinned end to end against fakes.
@@ -455,7 +456,11 @@ describe('LlmTeacherService', function () {
 
             const [logged, keep] = policyService.recordTrainingGame.mock.calls[0];
 
-            expect(keep).toBe(4000);
+            // The diary cap the teacher passes through, read from the registry
+            // rather than written out: what this pins is that the cap TRAVELS,
+            // and hard-coding the number makes every future change to how much
+            // history the loop keeps look like a broken teacher.
+            expect(keep).toBe(REGISTRY.championsChallenge.fields.trainingGamesKept.default);
             expect(logged.winnerSide).toBe('challenger-alpha');
             expect(logged.decisions).toHaveLength(2);
             expect(logged.decisions[0]).toMatchObject({

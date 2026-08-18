@@ -2577,6 +2577,60 @@ was expressible. The hole was narrower and more interesting.
 -   [x] The race contexts cross with the ACTION — a state fact cancels out of a ranking and could
         never change a move.
 
+#### N43 — Judge a move by the position it produces _(done)_
+
+**Why:** "the bots are not actually thinking through plays — they seem fairly random and cannot
+grasp strategy." The randomness theory was checked and is false: the live driver plays greedily
+(`BotPolicy` passes temperature 0) and explores nothing. The real cause is that `scoreDecision`
+scores each candidate on its own, as a description of a MOVE, with no representation of what the
+move does. Reaping scored the same whether it took the seat to a key or spent the last ready
+creature before a swing.
+
+**What is not possible here, and why.** True lookahead needs the deep bot's fork, which searches
+by replaying a seeded input log from the start of a simulated game. A live game against a person
+has no such log, and cloning an arbitrary live position is a far larger piece of work than this.
+But most of the value of one ply needs no search at all, because the mechanical effect of a
+KeyForge action is known exactly.
+
+**Tasks**
+
+-   [x] **`labAfterstate`**: the predicted CHANGE each action makes to the state, on the same
+        scales as the state features it mirrors — so a weight learned for `d:amber` is
+        commensurate with one learned for `s:myAmber`. Getting that wrong would not error; it
+        would quietly let one axis dominate, so the spec compares them directly.
+-   [x] **Reaping costs something.** An amber AND a creature that can no longer act. Without the
+        second half the model could only ever learn that amber is good, which is exactly the bias
+        that was beating it on the ladder.
+-   [x] **Forging is a threshold, not a quantity** — an amber is worth far more when it is the
+        sixth than when it is the first, and `d:forges` says which.
+-   [x] **It refuses to guess.** A kind whose effect is card text emits nothing beyond the card
+        leaving hand, and a house call emits nothing at all: its consequence is the whole rest of
+        the turn, and a one-step effect model must not pretend to it. A guess would be a fiction
+        the loop trains on.
+-   [x] **No change to scoring or training.** The deltas ride with the action features, and both
+        `scoreDecision` and `trainModel` already walk every action feature — the same trick the
+        crosses use.
+-   Later: an afterstate for card TEXT, from the LLM teacher's readings (N38) rather than
+    hand-written rules; and a real one-ply search once a live position can be cloned.
+
+**Acceptance criteria**
+
+-   [x] A delta is on the same scale as the state feature it mirrors.
+-   [x] A kind whose effect is unknowable emits nothing rather than a guess.
+
+#### N44 — A longer diary _(done)_
+
+**Why:** four thousand games was set when every row was the same kind of evidence. The diary is
+now a mixture — self-play, the deep bot's measured search, the LLM teacher's readings — and the
+rarer kinds are the ones a short diary discards first, because pruning is by age and the
+expensive rows are produced most slowly.
+
+-   [x] Default 4,000 → 20,000; ceiling 50,000 → 250,000. The cost is disk: each row is a game's
+        decisions as jsonb, so twenty thousand games is on the order of a gigabyte, and an
+        operator who cannot spare it should turn it back down rather than discover it.
+-   [x] The teacher's spec now reads the cap from the registry instead of hard-coding it, so
+        changing how much history the loop keeps no longer looks like a broken teacher.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

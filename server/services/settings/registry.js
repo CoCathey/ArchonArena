@@ -503,12 +503,22 @@ const REGISTRY = {
                 max: 1000,
                 default: 25
             },
+            // ARCHON (N43): a longer memory. Four thousand games was set when
+            // the loop was new and every row was the same kind of evidence.
+            // It is now a mixture - self-play, the deep bot's measured search,
+            // the LLM teacher's readings, and (N44) human play - and the
+            // rarer kinds are exactly the ones a short diary throws away
+            // first, since pruning is by age and the expensive rows are
+            // produced most slowly. The cost is disk: each row is a game's
+            // decisions as jsonb, so twenty thousand games is on the order of
+            // a gigabyte, and an operator who cannot spare it should turn this
+            // back down rather than discover it.
             trainingGamesKept: {
                 type: 'number',
                 label: 'Training games kept (older pruned)',
                 min: 100,
-                max: 50000,
-                default: 4000
+                max: 250000,
+                default: 20000
             },
             // ARCHON (N25): how adventurously the fast bot plays, and how fast
             // that settles. A young model must try second-best moves to learn
