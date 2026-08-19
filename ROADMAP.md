@@ -1033,8 +1033,8 @@ keyteki card fixes need a routine path in.
     -   The node's health port is three read-only routes again; a node cannot be stood down.
     -   The admin Restart button shells out to `pm2 restart`, and pm2 is not installed anywhere
         in this stack — the one control an operator reaches for during an incident is inert.
-    -   The per-node game cap is read from a key the config file does not document, so it is
-        never enforced.
+    -   [x] The per-node game cap was read from a key the config file did not document, so it
+            was never enforced — fixed; see "Known defects & housekeeping" below.
     -   A game result published while the lobby is restarting is dropped with no retry, so a
         game that finishes in that window is never recorded, rated or replayed. That bug
         predates the reverted branch and is back.
@@ -3829,6 +3829,13 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         entry as unrecognised and the filter was cleared. The menu is `strategyOptions` now and
         the choice stays `strategies`. Found by screenshotting the page.
 
+-   [x] **The per-node game cap was never enforced** — `GameSocket.onGameSync` read the
+        undocumented top-level `config.maxGames`, while the config file only ever documented
+        `gameNode.maxGames`, so `numGames >= undefined` was false for every number and no node
+        ever hit a ceiling. Now reads `gameNode.maxGames` through `ConfigService`, matching every
+        other game-node setting (`name`, `host`, `keyPath`, `certPath`); a deployment that sets it
+        gets a real cap, one that doesn't gets today's unchanged no-cap behaviour. → **N10**.
+
 ### Open, and currently true
 
 -   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The
@@ -3838,10 +3845,6 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
 -   [ ] **The admin Restart button is inert.** `NodesAdmin` shells out to `pm2 restart`, and pm2
         is not installed anywhere in this stack — the one control an operator reaches for during
         an incident does nothing and reports nothing. → **N10**.
--   [ ] **The per-node game cap is never enforced.** The node reads `config.maxGames` while the
-        config file documents `gameNode.maxGames`, and `numGames >= undefined` is false for every
-        number. It is unset today either way, so the effect is that a node has no ceiling rather
-        than the wrong one. → **N10**.
 -   [ ] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Game three of an
         Adaptive Bo3 waits for the bid, so a pair who neither bid nor pass leave the round
         waiting on them. The organizer can still award or take a paper result, which is why this
