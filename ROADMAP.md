@@ -2785,6 +2785,59 @@ action)` — the same function the bot's driver calls, with the same triple — 
 -   [x] A forced move, a cancelled menu and a rule-answered prompt each write nothing.
 -   [x] Changing the weight changes what the existing diary trains to.
 
+#### N49 — The ladder stops moving _(done)_
+
+**Why:** reported as "rating the games is broken — it just says rating… after games and doesn't
+change the amber or change ratings", and it was exactly that. Every rated game had been failing
+to rate since N19 pointed the Elo deck term at ARI.
+
+**What actually happened.** `"RatingHistory"."OwnSas"/"OpponentSas"` record the deck-strength
+value a rating USED, and they were `integer` — correct for as long as that value was a raw SAS.
+An ARI is not: it is stored to a tenth, and its seed is the SAS/AERC midpoint, so a 72/63 deck
+seeds at 67.5. A bound parameter is sent as text and parsed by the target column's input
+function, so 67.5 was not rounded down to fit — it was rejected outright:
+
+    invalid input syntax for type integer: "67.5"
+
+That threw inside the rating transaction, which rolled back, so neither history row nor the
+`"Ratings"` update was ever written. `processGame` swallows its own errors by design — rating
+must never break the game flow — so the only trace was one log line per game. What a player saw
+was the post-game panel polling for a rating that was never coming: "Rating this game…", then
+"Still rating this game", then an Amber total that had not moved.
+
+Nothing was wrong with the rating arithmetic, and nothing was wrong with ARI. The two features
+were correct and the column between them was not.
+
+**Tasks**
+
+-   [x] **The ladder is back on raw SAS,** which is what was asked for and what the numbers on
+        the leaderboard have always meant.
+-   [x] **`ari.useForElo`, separately from `ari.enabled`.** They were one flag, which meant "put
+        the ladder back on SAS" and "stop the index learning anything" could not be said apart:
+        switching the ladder back would have frozen every ARI at its card-math seed and quietly
+        emptied the column the deck lists, Deep Probe and the Challenge all read. So ARI stays
+        on, still moved by every result, and only the ladder's deck term changed hands.
+-   [x] **The columns are `real` anyway** (migration 90). Putting the ladder on SAS makes these
+        writes integral again and would have been enough to stop the bleeding — but the column
+        type is what made a fractional deck rating unstorable, and leaving it would put the same
+        landmine back under whoever next turns `useForElo` on. Widened rather than rounded on the
+        way in: `recalculateRatings` replays these exact numbers back through the calculator, so
+        a rounded column would make a replay disagree with the ratings it exists to reproduce.
+-   [x] **The games it dropped are recoverable.** `npm run backfill:ratings -- --commit` puts
+        every finished-but-unrated game back through the same `processGame`, oldest first, which
+        is the order the arithmetic requires.
+-   [x] **A test that would have caught it.** The existing fixtures carry a whole-number SAS and
+        no AERC, which seeds an ARI of exactly 70 — so every one of them passed against a bug
+        that fired on every real game. The new spec uses a deck whose card scores disagree, and
+        reads the column type out of the schema, because a fake database will store anything.
+
+**Acceptance criteria**
+
+-   [x] A finished game rates, and the post-game panel shows the Amber change rather than
+        "Rating this game…".
+-   [x] A deck whose ARI is fractional rates without rolling the transaction back.
+-   [x] Turning `useForElo` on stores the ARI it rated with, to the precision it rated with.
+
 ### Future — differentiation
 
 _Goal: the things that make Archon Arena the KeyForge platform rather than a KeyForge site.

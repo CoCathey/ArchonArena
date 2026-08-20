@@ -14,8 +14,15 @@ CREATE TABLE IF NOT EXISTS public."RatingHistory"
     "RatingBefore" integer NOT NULL,
     "RatingAfter" integer NOT NULL,
     "Expected" real,
-    "OwnSas" integer,
-    "OpponentSas" integer,
+    -- The deck-strength values the rating actually USED, which is raw SAS or
+    -- (where an operator points the ladder at it) the deck's ARI. `real`, not
+    -- `integer`: ARI is a tenth-precision number and its seed is a midpoint,
+    -- so it is fractional far more often than not. As `integer` these columns
+    -- rejected every such write outright - `invalid input syntax for type
+    -- integer: "67.5"` - which rolled back the rating transaction and left the
+    -- game silently unrated. See migration 90.
+    "OwnSas" real,
+    "OpponentSas" real,
     "KeyDiff" integer,
     "ResultType" text COLLATE pg_catalog."default",
     "ConfigSnapshot" jsonb,

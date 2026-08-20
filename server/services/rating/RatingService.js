@@ -23,13 +23,19 @@ const DEFAULT_RATING_CONFIG = {
     decay: { enabled: false, graceDays: 30, pointsPerWeek: 20, floor: 1200, autoApplyHours: 24 },
     // Season soft-reset policy, applied when an admin starts a new season.
     season: { carryFactor: 0.5, baseline: 1200 },
-    // ARCHON (N19): ARI, the Archon Rating Index (see AriService). When
-    // enabled, the Elo deck-strength term reads each deck's ARI - seeded
-    // from SAS/AERC, moved by results - instead of raw SAS, and every rated
-    // game nudges both decks' ARIs by gameK (Elo points per unit surprise;
-    // Champion's Challenge sparring games use the gentler simGameK).
-    // Disabling falls straight back to raw SAS everywhere.
-    ari: { enabled: true, gameK: 8, simGameK: 4 }
+    // ARCHON (N19): ARI, the Archon Rating Index (see AriService). `enabled`
+    // keeps the index alive - every rated game nudges both decks' ARIs by
+    // gameK (Elo points per unit surprise; Champion's Challenge sparring
+    // games use the gentler simGameK), and the deck lists, Deep Probe and the
+    // Challenge all read it.
+    //
+    // ARCHON (N49): `useForElo` is the separate question of whether the AMBER
+    // LADDER's deck-strength term reads ARI or raw SAS, and it is off: the
+    // ladder is back on SAS. The two were one flag, which meant "put the
+    // ladder back on SAS" and "stop the index learning anything" could not be
+    // said apart - so switching the ladder back would have frozen every ARI at
+    // its card-math seed and quietly emptied the deck lists' own column.
+    ari: { enabled: true, useForElo: false, gameK: 8, simGameK: 4 }
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -327,17 +333,19 @@ class RatingService {
         // a later recalculation replay reproduce these numbers.
         const keyDiff = keyDifferential(loserRow.Keys);
 
-        // ARCHON (N19): the deck-strength term reads ARI - the platform's own
-        // index, seeded from SAS/AERC and moved by results - rather than raw
-        // SAS, unless an admin has switched ARI off. It rides through the
-        // calculator's `deckSas` input unchanged because ARI lives on the SAS
-        // scale by construction: same numbers, same sasWeight, same formula -
-        // only what the number knows has changed. A deck with neither score
+        // ARCHON (N49): the deck-strength term reads raw SAS again.
+        //
+        // ARI (N19) can still stand in for it - it lives on the SAS scale by
+        // construction, so it rides through the calculator's `deckSas` input
+        // unchanged: same numbers, same sasWeight, same formula, only what the
+        // number knows has changed - but that is now its own switch rather
+        // than a consequence of the index existing. A deck with neither score
         // stays null, and the calculator's both-or-nothing rule applies as
         // ever.
         const ariEnabled = !!(config.ari && config.ari.enabled);
-        const winnerDeckStrength = ariEnabled ? effectiveAri(winnerRow) : winnerRow.SasRating;
-        const loserDeckStrength = ariEnabled ? effectiveAri(loserRow) : loserRow.SasRating;
+        const eloReadsAri = ariEnabled && !!config.ari.useForElo;
+        const winnerDeckStrength = eloReadsAri ? effectiveAri(winnerRow) : winnerRow.SasRating;
+        const loserDeckStrength = eloReadsAri ? effectiveAri(loserRow) : loserRow.SasRating;
 
         const result = calculateGameResult(
             {
@@ -371,9 +379,12 @@ class RatingService {
             // pub/sub fans a GAMEWIN out to every lobby instance); the earlier
             // pre-check alone was check-then-act and could double-apply.
             // The Sas columns on the history row record the deck-strength
-            // values the rating actually used - ARI once N19 is on, raw SAS
-            // before it - so a recalculation replay reproduces these numbers
-            // either way. The config snapshot beside them says which.
+            // values the rating actually used - raw SAS, or ARI where an
+            // operator has pointed the ladder at it - so a recalculation
+            // replay reproduces these numbers either way. The config snapshot
+            // beside them says which. They are `real` rather than `integer`
+            // for exactly that reason: ARI is a tenth-precision number, and
+            // storing it here was what unrated every game (see migration 90).
             const gate = await this.insertHistory(client, {
                 gameDbId: game.GameDbId,
                 userId: winnerRow.PlayerId,
@@ -438,8 +449,11 @@ class RatingService {
             // and outside, the rating transaction, because the index learning
             // from a game must never be able to unrate it. The surprise is
             // measured against the expectation the Elo engine just used
-            // (players AND decks), so ARI absorbs only what player ratings
-            // could not explain. applyGameResult is best-effort by contract.
+            // (players AND decks), so ARI absorbs only what the ratings and
+            // the card math together could not explain - which with the
+            // ladder back on SAS (N49) is precisely what ARI is for: the
+            // running correction to what SAS predicted. applyGameResult is
+            // best-effort by contract.
             if (ariEnabled && winnerRow.DeckUuid && loserRow.DeckUuid) {
                 await this.ariService.applyGameResult({
                     winnerUuid: winnerRow.DeckUuid,

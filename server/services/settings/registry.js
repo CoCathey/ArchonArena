@@ -191,16 +191,26 @@ const REGISTRY = {
                     }
                 }
             },
-            // ARCHON (N19): ARI, the Archon Rating Index - the deck rating the
-            // Elo deck term reads instead of raw SAS while enabled.
+            // ARCHON (N19): ARI, the Archon Rating Index - the platform's own
+            // deck rating, seeded from SAS/AERC and moved by results.
             ari: {
                 type: 'section',
                 label: 'ARI (Archon Rating Index)',
                 fields: {
                     enabled: {
                         type: 'boolean',
-                        label: 'Use ARI (seeded from SAS/AERC, moved by results) as the deck term',
+                        label: 'Keep ARI: let results move each deck’s rating, and show it on the deck lists',
                         default: true
+                    },
+                    // ARCHON (N49): whether the LADDER reads it, which is a
+                    // separate question from whether the index exists. Off:
+                    // Amber is calculated from raw SAS. Turning it on points
+                    // the Elo deck term at ARI instead - same scale, same
+                    // exchange rate, a better-informed number.
+                    useForElo: {
+                        type: 'boolean',
+                        label: 'Calculate Amber from ARI instead of raw SAS',
+                        default: false
                     },
                     gameK: {
                         type: 'number',
