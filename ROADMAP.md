@@ -1033,8 +1033,9 @@ keyteki card fixes need a routine path in.
     -   The node's health port is three read-only routes again; a node cannot be stood down.
     -   The admin Restart button shells out to `pm2 restart`, and pm2 is not installed anywhere
         in this stack — the one control an operator reaches for during an incident is inert.
-    -   The per-node game cap is read from a key the config file does not document, so it is
-        never enforced.
+    -   [x] The per-node game cap was read from a key the config file does not document, so it
+            was never enforced. Fixed: the node now reports `gameNode.maxGames` in its HELLO
+            registration.
     -   A game result published while the lobby is restarting is dropped with no retry, so a
         game that finishes in that window is never recorded, rated or replayed. That bug
         predates the reverted branch and is back.
@@ -3891,10 +3892,11 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
 -   [ ] **The admin Restart button is inert.** `NodesAdmin` shells out to `pm2 restart`, and pm2
         is not installed anywhere in this stack — the one control an operator reaches for during
         an incident does nothing and reports nothing. → **N10**.
--   [ ] **The per-node game cap is never enforced.** The node reads `config.maxGames` while the
+-   [x] **The per-node game cap is never enforced.** The node read `config.maxGames` while the
         config file documents `gameNode.maxGames`, and `numGames >= undefined` is false for every
-        number. It is unset today either way, so the effect is that a node has no ceiling rather
-        than the wrong one. → **N10**.
+        number. It was unset in every environment either way, so the fix is a no-op until an
+        operator sets `gameNode.maxGames` — the node now reports the configured cap in its HELLO
+        registration instead of always reporting `undefined`. → **N10**.
 -   [ ] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Game three of an
         Adaptive Bo3 waits for the bid, so a pair who neither bid nor pass leave the round
         waiting on them. The organizer can still award or take a paper result, which is why this
