@@ -20,6 +20,17 @@ CREATE TABLE IF NOT EXISTS public."ChallengeCalibration"
     -- 'heuristic' | 'deep' | a persona key. Not a foreign key: these are code
     -- identities, and a reference opponent that is retired should leave its
     -- history behind rather than take it with it.
+    --
+    -- ARCHON (N50): also 'human' and 'human:<band>' - every practice game that
+    -- reached a finish against a person, filed against the total and against
+    -- the band its opponent falls in. Those are NOT rungs on the ladder above
+    -- (people learn, which is the opposite of a ruler) and the service reads
+    -- them separately: across versions rather than within one, because the lab
+    -- plays the ladder every sweep while this grows only when somebody sits
+    -- down. They are deliberately excluded from the ladder's own query, which
+    -- reads MAX("PolicyVersion") - one practice game finishing after a
+    -- promotion would otherwise name a version holding nothing else, and empty
+    -- the ladder until the next sweep.
     "Opponent" text COLLATE pg_catalog."default" NOT NULL,
     -- The champion version these games were played by. Kept so a ladder can be
     -- read as "what THIS champion can do" rather than a running total across
