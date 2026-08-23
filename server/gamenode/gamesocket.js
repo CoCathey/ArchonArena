@@ -99,7 +99,7 @@ class GameSocket extends EventEmitter {
 
     onGameSync(games) {
         const helloData = {
-            maxGames: this.isDraining ? 0 : config.maxGames,
+            maxGames: this.isDraining ? 0 : config.gameNode.maxGames,
             version: this.version,
             port:
                 process.env.NODE_ENV === 'production'
