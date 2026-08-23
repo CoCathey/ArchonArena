@@ -3999,6 +3999,69 @@ The ladder prices the gap: the champion, playing exactly these weights, beats th
 **Not done here:** nothing uses it yet. Turn-level search is the next piece, and it is what this
 existed to make possible.
 
+#### N52 — Planning the house call _(done, and off by default)_
+
+**Why:** N51 made a position copyable; this is the first thing to use it. The house call is the
+worst-informed decision the bot makes and the most consequential — N46 named exactly why it could
+not be modelled: "its consequence is the whole rest of the turn". Every other move the bot scores
+is one it can describe. This one can only be answered by finding out.
+
+**Tasks**
+
+-   [x] **`turnPlanner`**: fork the game, call each house, play that turn out with the same policy
+        that will actually play it, and compare where each one left the board. Not "what could
+        this house do" but "what will this bot do with it".
+-   [x] **`determinize`**: forget what the seat cannot see, before every rollout. A fork is exact,
+        and exactness is the problem — it holds the real deck in its real order, so a planner
+        handed one unmodified calls the house whose cards it is about to draw. The end of every
+        turn draws the hand back up, so a one-turn search reaches its own next three or four cards
+        on every line. KeyForge makes the fix cheap: the opponent's hidden three zones already
+        hold exactly the right multiset, so a plausible world is one shuffle.
+-   [x] **Every house judged on the SAME worlds.** With a world each, a house can win for having
+        been dealt a better shuffle and the planner measures the deal. Same common-random-numbers
+        correction DeepGame applies to its own rollouts.
+-   [x] **A wall-clock budget, spent breadth first.** Measured: a fork is ~10ms, determinizing
+        ~0.5ms, a turn ~25ms, so three houses at two worlds is ~200ms and the node is
+        single-threaded and shared. The first pass over the houses is never cut short — a
+        comparison missing a candidate is not a comparison — so the budget bounds the extra
+        worlds, and a planner that cannot afford one world per house declines.
+-   [x] **A rollout's pilot never plans**, or the first house call inside the first rollout would
+        start a second planner and a third inside that.
+-   [x] **Settings, plumbed lobby → node → driver** like the policy already is, because the game
+        node has no database to ask.
+
+**The measured result, and why it ships off**
+
+Against a hand-made stand-in value model (no trained champion exists in a test environment) the
+planner **changed the house call on 41% of turns**, with a clear spread between the houses it
+compared — so the search runs and is not merely reproducing the heuristic — and **won 51% of
+paired games** against the identical pilot with planning off (95% CI 40.5–61.9%, n=80). Scoring
+after the opponent's reply gave 55% (CI 42.5–66.9%, n=60); three rounds deep with three worlds
+gave 52% (CI 38.5–65.2%, n=50). All neutral.
+
+That is the ordinary diagnosis for game search: **a search is only as good as the thing it
+optimises.** The planner faithfully finds the house leading to the position the value model likes
+best, and the stand-in is not a champion. What would settle it is a real champion and the
+instrument N50 built. The machinery is proven correct and its value is unproven, so it ships
+where an operator can turn it on and the ladder can decide — a bot must never quietly get worse.
+
+**A measurement trap worth recording.** The first duel reported the planner winning **91%**, and
+it was a strawman. The stand-in model carried only state weights, and state features cancel across
+candidates at one decision (labFeatures says so) — so every house scored identically and the
+baseline was "always call the first house". The two features a house call actually gets
+(`house:inHand`, `house:ready`) had to be weighted before the comparison meant anything.
+
+**Acceptance criteria**
+
+-   [x] A rollout never reads the seat's own deck order or the opponent's hand.
+-   [x] Everything the seat CAN see is identical before and after determinization.
+-   [x] The same seed gives the same plan twice.
+-   [x] The planner declines on an unforkable position, with no champion, and rather than
+        comparing a house that was tried against one that was not.
+
+**Next:** the value model is the binding constraint, not the search. A lab-side calibration rung
+that plays the planner against the champion would let the ladder settle this automatically.
+
 ### Open, and currently true
 
 -   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The

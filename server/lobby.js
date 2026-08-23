@@ -941,6 +941,24 @@ class Lobby {
         game.botDifficulty = difficulty;
         game.botMaxTurns = config.maxTurns;
         game.botThinkMs = config.thinkMs;
+        /**
+         * ARCHON (N52): whether this table's bot PLANS its house call, and what
+         * it may spend doing it.
+         *
+         * Resolved when the table opens, like the policy below and for the same
+         * reason: the game node has no database to ask. Off by default (see the
+         * registry for the measurement behind that), and inert without a
+         * champion in any case - a planner scores a rolled-out turn with the
+         * learned value model, and there is nothing to score with until the lab
+         * has crowned one.
+         */
+        game.botPlanner = config.planHouseCall
+            ? {
+                  budgetMs: config.planBudgetMs,
+                  samples: config.planSamples,
+                  rounds: config.planRounds
+              }
+            : null;
         // ARCHON (N21): the brain the bot plays with, resolved when the table
         // opens rather than per move - it travels to the game node with the
         // rest of the table, and the node has no database to ask. Null is

@@ -760,3 +760,101 @@ the difference between a facility a live table can use and one only the lab can.
 It makes turn-level search possible at a real table for the first time, and it
 removes the replay-from-turn-one cost that made the lab's own deep games
 expensive. Nothing uses it yet; that is the next piece.
+
+## Planning the house call (N52)
+
+The house call is the worst-informed decision the bot makes and the most
+consequential one it makes. N46 named exactly why it could not be modelled: a
+house call "emits nothing at all: its consequence is the whole rest of the
+turn". Every other move the bot scores is one it can describe. This one can
+only be answered by finding out — and since a position can be copied (N51),
+finding out is possible: fork the game, call each house, play that turn out,
+and compare where each one left the board.
+
+Rolling the turn out with **the same policy that will actually play it** makes
+the estimate the honest one: not "what could this house do" but "what will this
+bot do with it".
+
+### Fairness is not optional
+
+A fork is exact, and exactness is the problem — it holds the real deck in its
+real order, so a planner handed one unmodified calls the house whose cards it is
+about to draw, and looks brilliant doing it. That is not a small effect: the end
+of every turn draws the hand back up, so a one-turn search reaches the next
+three or four cards of its own deck on every line it considers.
+
+So every rollout is **determinized** first (`services/botplayer/determinize.js`).
+KeyForge is unusually kind here: a deck is a published 36-card list and the
+opponent's play area, discard and purged pile are face up, so whatever is not in
+them is distributed among their hand, deck and archives in an order nobody can
+see. A fork already holds exactly that multiset in exactly those three zones, so
+a plausible world is one shuffle — pool the three, shuffle, deal back to the
+same counts. Nothing has to be derived, and the result cannot contradict
+anything visible because the visible zones are never touched. The deciding seat
+gets its own deck shuffled and nothing else: it built the deck and has watched
+its own cards leave it, so composition is fair information and order is not.
+
+That makes each world a sample rather than an answer, so several are averaged —
+and every house is judged on **the same worlds**. Sharing them is not a nicety:
+with one world each, a house can win for having been dealt a better shuffle and
+the planner would be measuring the deal. Same common-random-numbers correction
+DeepGame already applies to its own rollouts.
+
+### The budget is the design
+
+Measured on real positions: a fork costs about 10ms, determinizing half a
+millisecond, playing a turn out about 25ms — so one rollout is roughly 35ms, and
+three houses at two worlds each is about 200ms. The node is single-threaded and
+shared, and a bot that holds it is every other game on that node waiting.
+
+So the planner spends a wall-clock budget rather than a fixed count, and spends
+it **breadth first**: one world for every house before a second for any of them.
+A house nobody rolled has no score, and preferring a house that was tried over
+one that was not is worse than not planning — so if the budget cannot cover one
+world per house, the planner declines and the caller chooses as it always did.
+It also declines on a position N51 refuses to fork, and on a table with no
+champion, because scoring a rolled-out turn needs a value model.
+
+### What it measures, and the honest result
+
+**It is off by default, and that is a measurement rather than caution.**
+
+Against a hand-made stand-in value model — no trained champion exists in a test
+environment — the planner:
+
+-   **changed the house call on 41% of turns**, with a clear value spread
+    between the houses it compared (mean 0.21, and only 6 of 105 positions where
+    the houses were indistinguishable). So the search runs, and it is not merely
+    reproducing the heuristic.
+-   **won 51% of paired games** against the identical pilot with planning off
+    (95% CI 40.5–61.9%, n=80). Scoring after the opponent's reply instead of at
+    the end of its own turn gave 55% (CI 42.5–66.9%, n=60); three rounds deep
+    with three worlds gave 52% (CI 38.5–65.2%, n=50). All three are neutral.
+
+The diagnosis those numbers support is the ordinary one for game search: **a
+search is only as good as the thing it optimises.** The planner faithfully finds
+the house that leads to the position the value model likes best, and the stand-in
+value model is not a champion. A crude evaluator searched harder produces a bot
+that is very good at reaching positions a crude evaluator likes.
+
+What would settle it is a real champion and the instrument N50 built. The honest
+state is that **the machinery is proven correct and its value is unproven**, so
+it ships where an operator can turn it on and the ladder can decide. A bot must
+never quietly get worse.
+
+### Shape
+
+```
+server/services/botplayer/determinize.js   forget what the seat cannot see
+server/services/botplayer/turnPlanner.js   fork, call each house, play it out, compare
+server/services/botplayer/BotPolicy.js     chooseHouse consults the planner, or does not
+server/services/settings/registry.js       bots.planHouseCall and its budget (all off/default)
+server/lobby.js                            resolves the planner when a table opens
+server/gamenode/gameserver.js              carries it to the driver
+server/gamenode/botdriver.js               hands it to the policy
+```
+
+One property worth keeping if this is extended: **the pilot flying a rollout
+never plans.** `BotPolicy`'s planner defaults to null, and the planner builds its
+rollout pilots without one — otherwise the first house call inside the first
+rollout would start a second planner, and a third inside that.

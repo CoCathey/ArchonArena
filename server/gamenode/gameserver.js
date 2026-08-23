@@ -778,6 +778,10 @@ class GameServer {
                 // ARCHON (N21): the Champion's Challenge's reigning model,
                 // so the practice opponent plays what the lab learned.
                 policy: pendingGame.botPolicy,
+                // ARCHON (N52): and whether it plans the house call by playing
+                // the turn out, with what it may spend. Null - the default -
+                // is the policy exactly as it was.
+                planner: pendingGame.botPlanner || null,
                 // A pump that runs out of its event-loop budget finishes here,
                 // on a later tick, with the board pushed out as it goes. The
                 // node stays responsive to every other game on it - and to the

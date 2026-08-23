@@ -102,6 +102,17 @@ class BotPolicy {
     constructor(options = {}) {
         this.rng = options.rng || Math.random;
         this.policy = options.policy || null;
+        /**
+         * ARCHON (N52): whether the house call is PLANNED rather than scored.
+         *
+         * An object of planner options ({samples, budgetMs, seed}) turns it on;
+         * null - the default, and what every rollout inside the planner itself
+         * gets - leaves the policy exactly as it was. That default is what
+         * stops a plan from planning: the pilot flying a rollout must be the
+         * plain greedy one, or the first house call inside the first rollout
+         * would start a second planner.
+         */
+        this.planner = options.planner || null;
         // Set when a card is clicked for a specific reason, so the menu that
         // opens next is answered with the move that was intended rather than
         // by a fixed preference order.
@@ -376,7 +387,42 @@ class BotPolicy {
     chooseHouse(game, player, buttons) {
         let best = null;
 
-        if (this.policy && buttons.length > 1) {
+        /**
+         * ARCHON (N52): find out, rather than guess.
+         *
+         * Every other branch here scores a DESCRIPTION of the choice - the
+         * model's weights over a house-call record, or `houseScore` counting
+         * what the hand holds. Neither can express what N46 named as the
+         * reason this decision was unmodellable: a house call's consequence is
+         * the whole rest of the turn.
+         *
+         * So when a planner is configured, the turn is played out under each
+         * house in a fork and the choice is made on where they ended. It
+         * declines - returning null - on a position that cannot be forked, on
+         * a table with no champion to score with, and whenever it could not
+         * afford one world for every house; all three fall through to the
+         * scoring below, which is what the bot has always done.
+         */
+        if (this.planner && this.policy && buttons.length > 1) {
+            const { planHouse } = require('./turnPlanner');
+            // `player.game`, NOT this method's `game`. Everything else in this
+            // class dispatches through the CLIENT it was handed - the object
+            // with cardClicked/menuButton/clickProphecy that a driver passes as
+            // `game` - which is exactly the point: a bot presses buttons like a
+            // browser does and cannot reach into state. A planner is the one
+            // thing here that needs the real engine object to copy it, and the
+            // seat is the honest way to ask for it.
+            const plan = planHouse(player.game, player, buttons, {
+                ...this.planner,
+                policy: this.policy
+            });
+
+            if (plan) {
+                best = buttons.find((button) => textOf(button.text) === plan.house) || null;
+            }
+        }
+
+        if (!best && this.policy && buttons.length > 1) {
             const records = buttons.map((button) =>
                 decisionRecord(game, player, {
                     kind: 'houseCall',

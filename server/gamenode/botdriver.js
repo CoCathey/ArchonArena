@@ -36,6 +36,7 @@ class BotDriver {
      * @param {number} [options.maxTurns] concede past this many rounds
      * @param {number} [options.maxInteractions] concede past this many inputs
      * @param {object} [options.policy] the learned model to play with
+     * @param {object} [options.planner] house-call planner options, or null
      * @param {number} [options.thinkMs] pause between plays; 0 plays instantly
      * @param {number} [options.maxPumpMs] event-loop budget for one pump
      * @param {function} [options.resume] continue a pump that ran out of budget
@@ -85,7 +86,17 @@ class BotDriver {
         this.resume = options.resume || null;
         this.schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay || 0));
         this.now = options.now || (() => Date.now());
-        this.policy = new BotPolicy({ rng: options.rng, policy: options.policy });
+        this.policy = new BotPolicy({
+            rng: options.rng,
+            policy: options.policy,
+            // ARCHON (N52): the house-call planner's budget, or null for the
+            // policy as it always was. It costs real time and the node is
+            // single-threaded and shared, which is why the planner spends a
+            // wall-clock budget rather than a fixed number of rollouts - and
+            // why `maxPumpMs` above still governs: a pump that overruns hands
+            // the loop back and finishes on a later tick.
+            planner: options.planner || null
+        });
 
         this.interactions = 0;
         this.conceded = false;

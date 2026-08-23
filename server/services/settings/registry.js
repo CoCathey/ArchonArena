@@ -1068,6 +1068,66 @@ const REGISTRY = {
                 max: 3,
                 default: 1
             },
+            /**
+             * ARCHON (N52): plan the house call instead of scoring it.
+             *
+             * The house call is the worst-informed decision the bot makes and
+             * the most consequential: N46 could not model it at all, because
+             * "its consequence is the whole rest of the turn". Since a position
+             * can be copied (N51) it can be answered by finding out - fork the
+             * game, call each house, play the turn out, compare where they
+             * ended.
+             *
+             * OFF by default, and that is a measurement rather than caution.
+             * Against a hand-made stand-in value model the planner changed the
+             * house call on 41% of turns, with a clear spread between the
+             * houses it was comparing - so the search works - and won 51% of
+             * paired games, which is no improvement at all. A search is only as
+             * good as the thing it optimises, and no trained champion existed
+             * to measure it against; the honest state is "the machinery is
+             * proven correct and its value is unproven", so it ships where an
+             * operator can turn it on and the calibration ladder can settle it.
+             *
+             * It costs real time - about 35ms per rollout, so roughly 200ms for
+             * three houses at two worlds - and the node is single-threaded and
+             * shared, which is what the budget below is for.
+             */
+            planHouseCall: {
+                type: 'boolean',
+                label: 'Bots plan the house call by playing the turn out (experimental)',
+                default: false
+            },
+            planBudgetMs: {
+                type: 'number',
+                // Spent breadth first, and the first pass over the houses is
+                // never cut short: a comparison missing a candidate is not a
+                // comparison. So this bounds the EXTRA worlds, not the first.
+                label: 'Time the house-call planner may spend (milliseconds)',
+                min: 0,
+                max: 2000,
+                default: 150
+            },
+            planSamples: {
+                type: 'number',
+                // Worlds per house. One world is a deal, not an answer: the
+                // planner shuffles everything the seat cannot see before each
+                // rollout, so a house can win a single world for having been
+                // dealt a better shuffle.
+                label: 'Determinized worlds the planner tries per house',
+                min: 1,
+                max: 8,
+                default: 2
+            },
+            planRounds: {
+                type: 'number',
+                // 1 scores the board the moment the turn ends; 2 scores it
+                // after the opponent has answered, which is a different and
+                // usually fairer question - and twice the work.
+                label: 'Turns the planner plays forward before scoring (1 = its own turn only)',
+                min: 1,
+                max: 3,
+                default: 1
+            },
             // A safety valve, not a pacing knob: past this many rounds the
             // bot concedes so the table can never be held forever.
             maxTurns: {
