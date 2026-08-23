@@ -647,3 +647,116 @@ whole ladder would vanish from the page until the sweep caught up.
 opponents never learn, which is what makes them a ruler. People are the exact
 opposite. Putting one in that list would make the page contradict itself; the
 honest arrangement is a ruler, and beside it the thing being measured.
+
+## A position that can be copied (N51)
+
+N46 diagnosed why the bot reads as not thinking, and it was not randomness: the
+live driver plays greedily and explores nothing. It is that `scoreDecision`
+scores each candidate as a _description of a move_, with no representation of
+what the move does. The ladder puts a number on what that costs — the champion,
+playing exactly these weights, beats the **searching** bot 33% of the time. Same
+model, same features; the only difference is that one of them looks ahead.
+
+The reason that search never reached a table is one sentence long: the deep bot
+forks by **replaying a seeded input log from the start of a simulated game**,
+and a live game has no such log. It is also why a deep game costs about a minute
+where a fast one costs half a second — every fork re-runs the whole game so far,
+so thinking about turn twenty costs twenty turns of engine.
+
+Both are the same problem. There was no way to copy a position. This is that
+way.
+
+### Exact, or nothing
+
+A fork that is subtly wrong is worse than no fork. A planner searching a
+position that differs from the real one does not plan badly — it plans
+confidently about a game nobody is playing, and nothing in the output says so.
+Same trap N48 avoided by refusing to rebuild training rows from replays, same
+principle N46 applied when it made an unknowable afterstate emit nothing rather
+than a guess.
+
+So `capture` returns a snapshot **or a reason**, never a best effort. It refuses:
+
+-   a lasting effect that is not a `persistentEffect`. Persistent effects
+    re-register themselves when a card lands in a location, so a rebuilt board
+    gets them free; everything else was put there by an ability that has already
+    resolved, and its closures cannot be rebuilt from data.
+-   a delayed or during-opponent's-next-turn effect, for the same reason.
+-   a card in play the decklist cannot account for — a token creature — because
+    a rebuild deals from the decklist and has nowhere to take an extra body
+    from.
+
+Measured over real games across all thirteen houses: **80% of house calls
+capture, and every one that captures reproduces its position exactly** — 968 of
+968 accepted forks in the widest sweep, over 1,205 house calls. The refusals are a short list of specific cards, not
+anything structural, which is a much better place to be — it can be shortened
+incrementally.
+
+### The turn boundary, and why that one
+
+A snapshot is taken at the **house call**. Three reasons, and they agree: it is
+the cleanest point in the pipeline (the key phase has resolved, no ability is
+mid-resolution, only a prompt is outstanding); it is the decision a planner most
+needs, because the house call decides the whole rest of the turn, which is
+exactly why N46 could not model it; and forking there means a search explores
+whole **turns** — the unit a person plans in, and the thing the bot has never
+been able to compare.
+
+Restore therefore queues the turn from the **house phase**, not the top of the
+round. A snapshot is taken inside the house phase, after the key phase has
+already forged and spent; queuing a whole round would forge a second time off
+the same amber, which is the kind of error that makes a fork look like a
+brilliant line.
+
+### Two bugs the fingerprint caught, and why the test is shaped that way
+
+Structural equality is not the test — two positions can carry identical numbers
+and diverge on the next input. So `fingerprint` is exhaustive where
+`SimulatedGame.boardHash` is deliberately coarse: that one exists to notice a
+game going in circles, this one exists to prove two games _are_ the same game,
+and a field left out of it is a field a fork is free to get wrong.
+
+Comparing fingerprints over real games caught both of the bugs that were there:
+
+-   **Cards under a card** (what a prophecy buries) were captured and never put
+    back, so a board quietly forgot what it was carrying.
+-   **`controller` was restored where `defaultController` is the field that
+    matters.** Control is _derived_ — `getModifiedController` reads a
+    `takeControl` effect or falls back to `defaultController` — and
+    `Game.checkGameState` re-derives it on every state change, physically moving
+    a card whose controller disagrees with the board it sits on. Restoring only
+    the derived value lasted exactly until the first state check, which handed
+    the card back: a Treachery card ("enters play under your opponent's
+    control") silently migrated to its owner's side. The copy was a legal,
+    plausible position, and it was not the one being played.
+
+A third thing worth writing down, because it looks like a bug and is not:
+`player.allCards` **is the same array as** `player.deck` (see
+`Player.prepareDecks`), so it shrinks with every card drawn and is not a record
+of what was built. The first version of the decklist check tested membership
+against it and concluded that every card in play was a token.
+
+### Driving a fork
+
+The copy is exact at the moment it is taken. What it cannot reproduce is the
+randomness the engine reaches for **afterwards** — a deck running out and the
+discard being shuffled back, an ability that discards at random. Left alone the
+fork draws those from crypto, so two rollouts of the same line face different
+futures and the comparison measures the deal rather than the move.
+
+That is not a defect to fix, it is hidden information to **sample** — the same
+call DeepGame makes when it rolls a fork forward on a fresh `rolloutSeed` so it
+plans against likelihoods rather than replaying fate. So the caller wraps a
+rollout in `withRandomSource(seededSource(n), …)` and varies `n` per sample,
+never per candidate, so every line being compared faces the same futures.
+Measured: forks rolled forty plies forward under one seeded source land on the
+same position every time, and under different seeds they do not.
+
+### What this unlocks
+
+`fork(game)` is the one call a planner needs — both decklists already sit on the
+seats as `deckData`, so a caller does not have to carry them alongside, which is
+the difference between a facility a live table can use and one only the lab can.
+It makes turn-level search possible at a real table for the first time, and it
+removes the replay-from-turn-one cost that made the lab's own deep games
+expensive. Nothing uses it yet; that is the next piece.

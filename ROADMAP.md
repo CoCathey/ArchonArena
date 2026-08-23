@@ -3944,6 +3944,61 @@ them.
         people each write nothing.
 -   [x] A human row can never empty the fixed ladder.
 
+#### N51 — A position that can be copied _(done)_
+
+**Why:** "a bot has never beat me at the game." N50 put a number on that; this is the first
+piece of making it false. N46 already found the cause and said what was blocking the cure:
+`scoreDecision` scores each candidate as a DESCRIPTION of a move with no representation of what
+the move does, and the fix — real lookahead — needs a fork the live game cannot provide, because
+the deep bot forks by replaying a seeded input log from the start of a SIMULATED game.
+
+The ladder prices the gap: the champion, playing exactly these weights, beats the searching bot
+33% of the time. Same model, same features. The only difference is that one of them looks ahead.
+
+**Tasks**
+
+-   [x] **`positionSnapshot`**: capture, restore, fingerprint and `fork`, at the house call.
+-   [x] **Exact, or nothing.** `capture` returns a snapshot or a REASON, never a best effort. A
+        fork that is subtly wrong does not plan badly — it plans confidently about a game nobody
+        is playing, and nothing in the output says which. Refused: any lasting effect that is not
+        a `persistentEffect` (persistent ones re-register themselves when a card lands, the rest
+        are closures from an ability that has already resolved), delayed and
+        during-opponent's-next-turn effects, and any body the decklist cannot supply.
+-   [x] **Measured rather than assumed.** Before writing any of it: 1,596 real decision points
+        instrumented to ask what is actually live at one. 86% of house calls and 80% of in-turn
+        decisions hold nothing unrebuildable, and the refusals are a short list of specific cards
+        rather than anything structural — a much better place to be, because it shortens.
+-   [x] **The house call is the boundary**, and restore queues from the HOUSE phase rather than
+        the top of the round. A snapshot is taken inside the house phase, after the key phase has
+        forged and spent; queuing a whole round would forge a second time off the same amber —
+        the kind of error that makes a fork look like a brilliant line.
+-   [x] **Proven by fingerprint over real games, not by structural equality.** Two positions can
+        carry identical numbers and diverge on the next input. 968 of 968 accepted forks
+        reproduce their position exactly, across all thirteen houses.
+-   [x] **Two bugs that found**, both of exactly that shape: cards UNDER a card (what a prophecy
+        buries) were captured and never put back; and `controller` was restored where
+        `defaultController` is the load-bearing field — control is derived, and
+        `Game.checkGameState` re-derives it on every state change and physically MOVES a card
+        whose controller disagrees with the board it is on, so a Treachery card silently migrated
+        back to its owner's side on the first check.
+-   [x] **A trap worth recording:** `player.allCards` is the SAME ARRAY as `player.deck`, so it
+        shrinks with every draw and is not a record of what was built. The first decklist check
+        tested membership against it and concluded every card in play was a token.
+-   [x] **Sampling, not reproducing.** A fork cannot reproduce randomness the engine reaches for
+        after the fork — a reshuffle, a random discard — and a planner does not want it to. The
+        caller wraps a rollout in `withRandomSource` and varies the seed per SAMPLE, never per
+        candidate, so every line compared faces the same futures. Verified both ways: same seed
+        lands identically over forty plies, different seeds do not.
+
+**Acceptance criteria**
+
+-   [x] Every position `capture` accepts restores to an identical fingerprint.
+-   [x] A position it cannot rebuild is refused with a reason naming what stopped it.
+-   [x] A fork rolled forward under one seeded source is reproducible; under another it is not.
+
+**Not done here:** nothing uses it yet. Turn-level search is the next piece, and it is what this
+existed to make possible.
+
 ### Open, and currently true
 
 -   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The
