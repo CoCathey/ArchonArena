@@ -624,7 +624,15 @@ class GameServer {
             // ARCHON (N48): and what the human seats decided, for the learning
             // loop. Null on every table that was not capturing, which the
             // lobby's handler treats as "nothing to file".
-            humanGame: game.humanCapture ? game.humanCapture.harvest(winner.name, reason) : null
+            humanGame: game.humanCapture ? game.humanCapture.harvest(winner.name, reason) : null,
+            // ARCHON (N50): who at this table was the bot, and which model it
+            // was playing - the two facts the human ladder needs and the save
+            // state has never carried. The lobby knows a table was a bot game
+            // (`botGame`) but not which SEAT, and the champion can be promoted
+            // between a game starting and finishing, so reading the current
+            // version at file time would credit the wrong model.
+            botSeats: game.botDriver ? game.botDriver.botNames : [],
+            botPolicyVersion: game.botPolicyVersion || 0
         });
     }
 
@@ -759,6 +767,10 @@ class GameServer {
             .map((player) => player.name);
 
         if (botNames.length > 0) {
+            // ARCHON (N50): stamped at the table rather than looked up when the
+            // game ends. A game outlives a promotion, and the ladder row has to
+            // name the model that actually played.
+            game.botPolicyVersion = (pendingGame.botPolicy && pendingGame.botPolicy.version) || 0;
             game.botDriver = new BotDriver(botNames, {
                 maxTurns: pendingGame.botMaxTurns,
                 // ARCHON (F9): play at a pace a person can watch.

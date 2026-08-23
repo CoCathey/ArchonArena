@@ -2276,6 +2276,13 @@ class ChampionsChallengeService {
             // would leave "your deck wins 62%" hanging in the air exactly as it
             // was before this existed.
             calibration: await this.policyService.calibration().catch(() => []),
+            // ARCHON (N50): and the rung that is a person. Every opponent on
+            // the ladder above is something the lab built, so its ceiling is
+            // the lab's own - this is the only figure on the page that says
+            // whether the bot can beat anybody who is not a bot.
+            humanLadder: await this.policyService
+                .humanLadder()
+                .catch(() => ({ overall: null, bands: [] })),
             cards: cards ? { ...cards, deckId: topDeck.deckId, deckName: topDeck.name } : null,
             vaultTour,
             gauntlet: {

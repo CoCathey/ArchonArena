@@ -12,6 +12,8 @@ const {
     humanLearningConfig,
     learnsFromTable
 } = require('./services/championschallenge/humanLearning');
+// ARCHON (N50): which finished games are evidence about play - see humanLadder.
+const { countsTowardLadder } = require('./services/championschallenge/humanLadder');
 const { detectBinary } = require('./util');
 
 class GameRouter extends EventEmitter {
@@ -265,6 +267,55 @@ class GameRouter extends EventEmitter {
         );
     }
 
+    /**
+     * ARCHON (N50): file a finished practice game on the human record.
+     *
+     * The calibration ladder (N39) measures the champion against opponents the
+     * lab built, so its ceiling is the lab's own. This is the rung that is a
+     * person - and it is the only number on the page that answers the question
+     * anybody actually asks about a game bot.
+     *
+     * Here rather than in the node because a ladder row needs the database
+     * (the opponent's standing decides which band the game lands in), and
+     * beside `recordHumanGame` because both are consequences of the same
+     * event. Kept OUT of the persist/replay/rate chain for the same reason
+     * that one is: bookkeeping must never be able to cost a game its record.
+     *
+     * @param {object} arg the GAMEWIN payload
+     */
+    recordHumanLadderGame(arg) {
+        const game = arg && arg.game;
+
+        if (!game || !game.botGame || !countsTowardLadder(arg.reason)) {
+            return;
+        }
+
+        // Both shapes are checked rather than assumed: this runs BEFORE the
+        // persist/replay/rate chain below it, so a throw here would cost the
+        // game the three things it is actually owed.
+        const botSeats = Array.isArray(arg.botSeats) ? arg.botSeats : [];
+        const seats = Array.isArray(game.players) ? game.players : [];
+        const humans = seats
+            .map((player) => player && player.name)
+            .filter((name) => name && !botSeats.includes(name));
+
+        // A bot-versus-bot showcase has no human seat, and a table whose bot
+        // seat was never identified would file the game against whoever the
+        // first player happened to be. Both are "nothing to record", not a
+        // guess.
+        if (botSeats.length !== 1 || humans.length !== 1) {
+            return;
+        }
+
+        Promise.resolve(
+            this.policyService.recordHumanLadderGame({
+                username: humans[0],
+                botWon: arg.winner === botSeats[0],
+                policyVersion: arg.botPolicyVersion
+            })
+        ).catch((err) => logger.error('Failed to record a practice game on the human ladder', err));
+    }
+
     // Events
     /**
      * @param {Error} err
@@ -351,6 +402,10 @@ class GameRouter extends EventEmitter {
                 // outside the chain below: a diary write must never be able
                 // to cost a game its record, its replay or its rating.
                 this.recordHumanGame(message.arg);
+                // ARCHON (N50): and how the bot did against them. A fourth
+                // independent consequence, outside the chain for the same
+                // reason the third is.
+                this.recordHumanLadderGame(message.arg);
 
                 Promise.resolve(this.gameService.update(message.arg.game))
                     .then(() =>

@@ -3882,6 +3882,68 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         entry as unrecognised and the filter was cleared. The menu is `strategyOptions` now and
         the choice stays `strategies`. Found by screenshotting the page.
 
+#### N50 — The rung that is a person _(done)_
+
+**Why:** "a bot has never beat me at the game and I need a way for them to get really good."
+The first thing that needs is a number, and there was not one. The calibration ladder (N39)
+measures the champion against the plain bot, the three personas and the searching bot — every
+one of them something the lab built, so the ladder tops out at the lab's own ceiling and the
+highest praise available is "as good as the best bot we can make".
+
+Nothing else on the site could answer it either. Practice games are deliberately never results
+(F9) — no Amber, no deck records, no rating, no statistic — which is the right call and has a
+cost: **a bot that had never once beaten a human being looked identical, from every number this
+site publishes, to one that always did.** The games were already being played. Nothing counted
+them.
+
+**Tasks**
+
+-   [x] **`humanLadder`**: the band vocabulary and the rules about which games count, as one
+        pure module both halves read — the lobby deciding what to file, the page deciding what
+        to draw.
+-   [x] **The split is the measurement.** "Beats people 55%" is a number about the site's
+        population, not about the bot: a site joined mostly by first-week players reports a
+        strong bot for as long as it keeps beating first-week players, and the report goes on
+        being true and goes on meaning nothing. Each game is filed twice, against the total and
+        against its opponent's band. The total is kept rather than summed back out of the bands,
+        because the day a band is added every historic row would be missing from the new split.
+-   [x] **The bands are the rating engine's own** (`provisionalGames`, `highRatingThreshold`),
+        not numbers invented here — a second opinion about where "strong" starts is a second
+        thing to keep in step. A player with no rating row bands as provisional rather than
+        being dropped: excluding them would make this a record of rated players only, which on a
+        young site is almost nobody and specifically not the people who join a practice table.
+-   [x] **Concessions and abandonments are thrown away**, matching N48's call for the diary —
+        and it matters more here, because the practice bot **concedes itself** past its own
+        safety caps. Counting those would file the bot's wedges as somebody's wins, so a bot
+        that got worse at finishing games would read as people getting better at beating it.
+-   [x] **Two facts stamped at the table, not inferred later.** The save state has always known
+        a table _was_ a practice game and never which SEAT the bot held, so a result filed from
+        it alone would be credited to whichever name came first; and a champion can be promoted
+        mid-game, so reading the current version at file time would credit a model that never
+        sat down. `botSeats` and `botPolicyVersion` ride with GAMEWIN. A table where either is
+        ambiguous files nothing rather than guessing.
+-   [x] **Human rows kept out of the ladder's own query, both halves.** The ladder reads "the
+        newest version anybody calibrated", so one practice game finishing after a promotion and
+        before the lab's next sweep would make `MAX(PolicyVersion)` name a version holding
+        nothing but that game — and the whole ladder would vanish from the page. Found by
+        reasoning about the shared table, not by a failure; it would have presented as the
+        calibration panel intermittently disappearing.
+-   [x] **Read across versions, written per version.** The ladder plays hundreds of games a
+        sweep; this grows only when somebody sits down, so per-champion it would say "0 games so
+        far" for most of every reign. The rows keep the version so the split is available later.
+-   [x] **Its own panel.** The ladder's panel says out loud that its opponents never learn,
+        which is what makes them a ruler; people are the exact opposite, and putting one in that
+        list would make the page contradict itself.
+-   [x] **No migration.** `ChallengeCalibration` already keys on (opponent, version) and already
+        carries Wilson intervals; the human record is rows in it.
+
+**Acceptance criteria**
+
+-   [x] A finished practice game writes both a total and a band, against the model that played.
+-   [x] A concession, an abandonment, a bot-versus-bot table and an ordinary game between two
+        people each write nothing.
+-   [x] A human row can never empty the fixed ladder.
+
 ### Open, and currently true
 
 -   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The

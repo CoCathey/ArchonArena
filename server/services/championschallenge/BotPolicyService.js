@@ -4,7 +4,17 @@ const { sprt, wilsonInterval } = require('./labMath');
 const { personaByKey, duelPairKey } = require('./labPersonas');
 const { withCardPriors, stripCardPriors } = require('./cardPriors');
 const { MODES, humanLearningConfig } = require('./humanLearning');
+const {
+    HUMAN_OVERALL,
+    HUMAN_PREFIX,
+    bandFor,
+    calibrationKeys,
+    isHumanKey
+} = require('./humanLadder');
 const { sectionDefaults } = require('../settings/registry');
+// ARCHON (N50): the band thresholds are the rating engine's, not a second
+// opinion about where "strong" starts - see humanLadder.
+const { DEFAULT_ELO_CONFIG } = require('../rating/eloDefaults');
 
 /**
  * ARCHON (N21): the learning loop's bookkeeping - training diary, candidate
@@ -33,6 +43,20 @@ const { sectionDefaults } = require('../settings/registry');
  */
 
 const CHAMPION_CACHE_MS = 60 * 1000;
+
+/**
+ * ARCHON (N50): the human record shares `ChallengeCalibration` and must stay
+ * out of the fixed ladder's query.
+ *
+ * The ladder reads "the newest version anybody has calibrated", and human rows
+ * are written at the champion version too - so the moment a champion is
+ * promoted, one practice game finishing before the lab's next calibration
+ * sweep would make MAX(PolicyVersion) point at a version holding nothing BUT
+ * that game, and the whole ladder would vanish from the page until the sweep
+ * caught up. Excluding them from both halves of the query is what stops a rung
+ * that is a person from being able to empty the ladder it sits beside.
+ */
+const NOT_HUMAN_SQL = `("Opponent" <> '${HUMAN_OVERALL}' AND "Opponent" NOT LIKE '${HUMAN_PREFIX}%')`;
 
 class BotPolicyService {
     constructor(configService, db = require('../../db'), settingsService = require('../settings')) {
@@ -553,10 +577,12 @@ class BotPolicyService {
             rows = await this.db.query(
                 policyVersion === null
                     ? 'SELECT "Opponent", "PolicyVersion", "Wins", "Losses" ' +
-                          'FROM "ChallengeCalibration" WHERE "PolicyVersion" = ' +
-                          '(SELECT MAX("PolicyVersion") FROM "ChallengeCalibration")'
+                          `FROM "ChallengeCalibration" WHERE ${NOT_HUMAN_SQL} ` +
+                          'AND "PolicyVersion" = (SELECT MAX("PolicyVersion") ' +
+                          `FROM "ChallengeCalibration" WHERE ${NOT_HUMAN_SQL})`
                     : 'SELECT "Opponent", "PolicyVersion", "Wins", "Losses" ' +
-                          'FROM "ChallengeCalibration" WHERE "PolicyVersion" = $1',
+                          `FROM "ChallengeCalibration" WHERE ${NOT_HUMAN_SQL} ` +
+                          'AND "PolicyVersion" = $1',
                 policyVersion === null ? [] : [policyVersion]
             );
         } catch (err) {
@@ -581,6 +607,156 @@ class BotPolicyService {
                 };
             })
             .sort((left, right) => right.rate - left.rate || right.games - left.games);
+    }
+
+    /**
+     * ARCHON (N50): one finished practice game, filed against the champion.
+     *
+     * Called from the lobby's GAMEWIN handler, which is the one place where
+     * "this was a bot table", "this is who won" and "this is the model the bot
+     * was playing" are all known at once.
+     *
+     * Best effort from end to end. A practice game that has finished already
+     * gave the player what it owed them; a ladder row is bookkeeping, and
+     * bookkeeping never gets to throw into the path that saves somebody's
+     * replay.
+     *
+     * @param {object} params
+     * @param {string} params.username the human seat
+     * @param {boolean} params.botWon
+     * @param {number} params.policyVersion the model the bot actually played
+     * @returns {Promise<boolean>} whether anything was written
+     */
+    async recordHumanLadderGame({ username, botWon, policyVersion } = {}) {
+        if (!username) {
+            return false;
+        }
+
+        const band = bandFor(await this.humanStanding(username), this.eloThresholds());
+        const results = await Promise.all(
+            calibrationKeys(band).map((key) =>
+                this.recordCalibration(key, policyVersion || 0, !!botWon)
+            )
+        );
+
+        return results.some(Boolean);
+    }
+
+    /**
+     * A player's standing, for banding only.
+     *
+     * Deliberately NOT `RatingService.getRatingsForUsername`: that one computes
+     * worldwide rank and win/loss history through four correlated subqueries,
+     * and - the part that would actually be wrong here - it drops players below
+     * `leaderboardMinGames`, who are exactly the people this record most needs
+     * to count. A band needs two numbers.
+     *
+     * The archon pool, because that is the format practice tables are played
+     * in. A player rated only in sealed reads as provisional, which is the
+     * honest answer to "how strong are they at this".
+     *
+     * @param {string} username
+     * @returns {Promise<{rating: number, gamesPlayed: number}|null>}
+     */
+    async humanStanding(username) {
+        try {
+            const rows = await this.db.query(
+                'SELECT r."Rating", r."GamesPlayed" FROM "Ratings" r ' +
+                    'JOIN "Users" u ON u."Id" = r."UserId" ' +
+                    'WHERE lower(u."Username") = lower($1) AND r."Pool" = $2',
+                [username, 'archon']
+            );
+
+            if (!rows || !rows.length) {
+                return null;
+            }
+
+            return { rating: Number(rows[0].Rating), gamesPlayed: Number(rows[0].GamesPlayed) };
+        } catch (err) {
+            logger.error('Challenge bot: could not read a standing for the human ladder', err);
+
+            return null;
+        }
+    }
+
+    /**
+     * The rating engine's own band thresholds.
+     *
+     * Read from the same settings section the engine reads, so "established"
+     * here and "established" there can never drift apart - and defaulted from
+     * the shipped Elo config rather than from numbers written twice.
+     */
+    eloThresholds() {
+        let elo = {};
+
+        try {
+            elo = (this.settingsService.getSection('rating') || {}).elo || {};
+        } catch (err) {
+            // A settings read that fails must never stop a game being counted;
+            // the shipped defaults below are the same ones the engine runs on.
+        }
+
+        return {
+            provisionalGames: Number(elo.provisionalGames ?? DEFAULT_ELO_CONFIG.provisionalGames),
+            highRatingThreshold: Number(
+                elo.highRatingThreshold ?? DEFAULT_ELO_CONFIG.highRatingThreshold
+            )
+        };
+    }
+
+    /**
+     * ARCHON (N50): what the bot has done against people, over its lifetime.
+     *
+     * Read ACROSS champion versions, where the fixed ladder is read within
+     * one. The ladder can afford per-version because the lab plays it every
+     * sweep and a version accumulates hundreds of games; this record grows
+     * only when somebody sits down to play, so per-version it would read "0
+     * games so far" for most of every champion's reign, and a panel that says
+     * nothing is one nobody looks at twice.
+     *
+     * The rows are still WRITTEN per version, so the day this is worth
+     * splitting by champion, the history is already there to split.
+     *
+     * Never throws; an empty record means nobody has finished a practice game
+     * yet, which is a normal state and says so on the page.
+     *
+     * @returns {Promise<{overall: object|null, bands: object[]}>}
+     */
+    async humanLadder() {
+        let rows;
+
+        try {
+            rows = await this.db.query(
+                'SELECT "Opponent", SUM("Wins")::int AS "Wins", SUM("Losses")::int AS "Losses" ' +
+                    'FROM "ChallengeCalibration" ' +
+                    'WHERE "Opponent" = $1 OR "Opponent" LIKE $2 ' +
+                    'GROUP BY "Opponent"',
+                [HUMAN_OVERALL, `${HUMAN_PREFIX}%`]
+            );
+        } catch (err) {
+            logger.error('Challenge bot: could not read the human record', err);
+
+            return { overall: null, bands: [] };
+        }
+
+        const measured = (row) => {
+            const wins = row.Wins || 0;
+            const losses = row.Losses || 0;
+            const games = wins + losses;
+
+            return { wins, losses, games, ...wilsonInterval(wins, games) };
+        };
+        const overallRow = (rows || []).find((row) => row.Opponent === HUMAN_OVERALL);
+
+        return {
+            overall: overallRow ? measured(overallRow) : null,
+            bands: (rows || [])
+                .filter((row) => isHumanKey(row.Opponent) && row.Opponent !== HUMAN_OVERALL)
+                .map((row) => ({
+                    band: row.Opponent.slice(HUMAN_PREFIX.length),
+                    ...measured(row)
+                }))
+        };
     }
 
     /** The learning loop's public vitals, for the Challenge page. */

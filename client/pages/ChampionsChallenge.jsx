@@ -895,6 +895,146 @@ const CalibrationPanel = ({ calibration, t }) => {
     );
 };
 
+/** The bands, in the order they read: weakest opposition first. */
+const HUMAN_BANDS = [
+    {
+        key: 'provisional',
+        label: 'Still finding their level',
+        note: 'fewer rated games than the engine calls established'
+    },
+    {
+        key: 'established',
+        label: 'Established players',
+        note: 'rated, below the engine’s high-rating mark'
+    },
+    { key: 'strong', label: 'Strong players', note: 'at or above that mark' }
+];
+
+/**
+ * ARCHON (N50): the rung that is a person.
+ *
+ * Every opponent on the ladder above is something the lab built, so the highest
+ * praise that page can offer is "as good as the best bot we can make". This is
+ * the only figure on the page that answers the question anybody actually asks
+ * about a game bot, and it could not be answered from anywhere else: practice
+ * games are deliberately never results, so a bot that had never once beaten a
+ * human being looked identical, from every published number, to one that
+ * always did.
+ *
+ * Its own panel rather than a sixth rung, because the ladder's rungs are fixed
+ * opponents that never learn and people are the exact opposite - putting one in
+ * a list whose own subtitle says "these opponents never learn" would make the
+ * page contradict itself.
+ *
+ * Read across every champion, where the ladder is read within one. The ladder
+ * plays hundreds of games a sweep; this grows only when somebody sits down, so
+ * per-champion it would say "0 games so far" for most of every reign.
+ */
+const HumanLadderPanel = ({ humanLadder, t }) => {
+    const overall = humanLadder && humanLadder.overall;
+    const bands = (humanLadder && humanLadder.bands) || [];
+
+    if (!overall || !overall.games) {
+        return null;
+    }
+
+    const byBand = new Map(bands.map((row) => [row.band, row]));
+    const known = HUMAN_BANDS.filter((band) => {
+        const row = byBand.get(band.key);
+
+        return row && row.games;
+    });
+    const thin = overall.games < 20;
+
+    return (
+        <Panel type='default' compactHeader title={t('And against people?')}>
+            <p className='m-0 pb-2 text-sm text-muted'>
+                {t(
+                    'The ladder above is every opponent the lab built, so it can only say how ' +
+                        'the bot does against itself. This is every practice game that reached ' +
+                        'a finish against somebody real.'
+                )}
+            </p>
+
+            <div className='flex flex-wrap items-baseline gap-x-2 border-b border-border/40 pb-2'>
+                <span className='text-foreground'>{t('Every practice game')}</span>
+                <span
+                    className={`ms-auto font-semibold tabular-nums ${
+                        overall.rate >= 0.5 ? 'text-emerald-300' : 'text-amber-300'
+                    }`}
+                    title={t('{{wins}}–{{losses}}', {
+                        wins: overall.wins,
+                        losses: overall.losses
+                    })}
+                >
+                    {Math.round(overall.rate * 100)}%
+                </span>
+                <span className='text-[11px] text-muted tabular-nums'>
+                    {thin
+                        ? t('{{games}} games so far', { games: overall.games })
+                        : t('±{{margin}}', {
+                              margin: Math.round(((overall.high - overall.low) / 2) * 100)
+                          })}
+                </span>
+            </div>
+
+            {/* The split is the point. One average over everybody who happens
+                to play here is a number about the site's population, not about
+                the bot: a site joined mostly by first-week players reports a
+                strong bot for as long as it keeps beating first-week players. */}
+            {known.length > 0 && (
+                <ul className='m-0 list-none space-y-1 p-0 pt-2 text-sm'>
+                    {known.map((band) => {
+                        const row = byBand.get(band.key);
+                        const few = row.games < 20;
+
+                        return (
+                            <li
+                                className='flex flex-wrap items-baseline gap-x-2 border-b border-border/40 py-1 last:border-0'
+                                key={band.key}
+                            >
+                                <span className='text-foreground'>{t(band.label)}</span>
+                                <span className='text-[11px] text-muted'>{t(band.note)}</span>
+                                <span
+                                    className={`ms-auto font-semibold tabular-nums ${
+                                        row.rate >= 0.5 ? 'text-emerald-300' : 'text-amber-300'
+                                    }`}
+                                    title={t('{{wins}}–{{losses}}', {
+                                        wins: row.wins,
+                                        losses: row.losses
+                                    })}
+                                >
+                                    {Math.round(row.rate * 100)}%
+                                </span>
+                                <span className='text-[11px] text-muted tabular-nums'>
+                                    {few
+                                        ? t('{{games}} games so far', { games: row.games })
+                                        : t('±{{margin}}', {
+                                              margin: Math.round(((row.high - row.low) / 2) * 100)
+                                          })}
+                                </span>
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
+
+            <p className='m-0 pt-2 text-[11px] text-muted'>
+                {t(
+                    'Conceded and abandoned games are left out: the bot concedes itself past ' +
+                        'its own safety caps, and counting that would file its wedges as ' +
+                        'somebody’s wins.'
+                )}
+            </p>
+        </Panel>
+    );
+};
+
+HumanLadderPanel.propTypes = {
+    humanLadder: PropTypes.object,
+    t: PropTypes.func
+};
+
 CalibrationPanel.propTypes = {
     calibration: PropTypes.array,
     t: PropTypes.func
@@ -1654,6 +1794,7 @@ const ChampionsChallenge = () => {
                     <StylePanel personas={data?.personas} decks={data?.decks} t={t} />
                     <BurstPanel decks={data?.decks} t={t} />
                     <CalibrationPanel calibration={data?.calibration} t={t} />
+                    <HumanLadderPanel humanLadder={data?.humanLadder} t={t} />
                     <MatchupMatrix matchups={data?.matchups} t={t} />
                     <CardContribution cards={data?.cards} t={t} />
                     <StrengthCurve curve={data?.strengthCurve} t={t} />

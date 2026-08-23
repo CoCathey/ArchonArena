@@ -574,3 +574,76 @@ position and the move taken from it, with no player, deck or game attached. The
 lab health panel reports the human share of the diary, because a capture that
 has silently stopped looks exactly like a healthy lab from every other figure
 on that page.
+
+## The rung that is a person (N50)
+
+The calibration ladder (N39) measures the champion against opponents that never
+learn — the plain bot, the three personas, the searching bot — and that fixity
+is the whole point: a ladder whose rungs move measures nothing.
+
+It also means the ladder tops out at the lab's own ceiling. Every rung is
+something the lab built, so the highest praise available is "as good as the best
+bot we can make", and the question anybody actually asks about a game bot — can
+it beat a person — was not on the page at all.
+
+**It could not be answered from anywhere else, either.** Practice games are
+deliberately never results (F9): no Amber, no deck records, no rating, no
+statistic. That is the right call and it has a cost — a bot that had never once
+beaten a human being looked identical, from every number this site publishes, to
+one that always did. The games were already being played; nothing was counting
+them.
+
+**The split is the measurement.** "The bot beats people 55% of the time" is a
+number about the site's population, not about the bot: a site whose practice
+tables are mostly joined by first-week players reports a strong bot for as long
+as it keeps beating first-week players, and the report goes on being true and
+goes on meaning nothing. So each game is filed twice — against the total, and
+against the band its opponent falls in — and the shape is what reads: beats the
+newcomers, holds the middle, loses to the good ones is the sentence that says
+what to work on.
+
+The bands are the **rating engine's own** thresholds (`provisionalGames`,
+`highRatingThreshold`), not numbers invented for this. Those are the points the
+platform already treats as meaningful about a player, and a second opinion about
+where "strong" starts is a second thing to keep in step. A player with no rating
+row at all bands as provisional rather than being dropped: they played the game,
+the bot won or lost it, and excluding them would quietly make this a record of
+rated players only — which on a young site is almost nobody, and specifically not
+the people who join a practice table.
+
+**Which games count.** Concessions and abandonments are thrown away, matching
+what N48 already decided for the training diary — and it matters more here,
+because the practice bot **concedes itself** past its interaction and turn caps
+(`gamenode/botdriver.js`). Counting those would file the bot's own wedges as
+wins for whoever was sitting across from it, so a bot that got _worse_ at
+finishing games would show up on this page as people getting better at beating
+it. Games the engine decided — a third key, or any of the timeout rules — are
+the ones that measure play.
+
+**Two facts are stamped at the table, not inferred later.** The save state has
+always known a table _was_ a practice game and never which SEAT the bot held, so
+a result filed from it alone would be credited to whichever name came first. And
+a champion can be promoted while a game is being played, so reading the current
+version at file time would credit a model that never sat down. Both ride with
+GAMEWIN: `botSeats` from the driver, `botPolicyVersion` from the policy the
+lobby actually sent. A table where either is ambiguous — a bot-versus-bot
+showcase, a seat that was never identified — files nothing rather than guessing.
+
+**Where it is stored, and why it is read differently.** The same
+`ChallengeCalibration` table, under `human` and `human:<band>`, written per
+champion version like every other rung. It is _read_ across versions, where the
+ladder is read within one: the ladder plays hundreds of games a sweep, and this
+grows only when somebody sits down, so per-champion it would say "0 games so
+far" for most of every reign. The rows are still written per version, so the day
+this is worth splitting by champion the history is already there.
+
+Human rows are excluded from the ladder's own query, both halves of it. The
+ladder reads "the newest version anybody calibrated", so one practice game
+finishing after a promotion and before the lab's next sweep would otherwise make
+`MAX(PolicyVersion)` name a version holding nothing but that game — and the
+whole ladder would vanish from the page until the sweep caught up.
+
+**Its own panel, not a sixth rung.** The ladder's panel says out loud that its
+opponents never learn, which is what makes them a ruler. People are the exact
+opposite. Putting one in that list would make the page contradict itself; the
+honest arrangement is a ruler, and beside it the thing being measured.
