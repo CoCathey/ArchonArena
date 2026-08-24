@@ -1,5 +1,4 @@
 const EventEmitter = require('events');
-const { spawnSync } = require('child_process');
 
 const config = require('config');
 const logger = require('../log.js');
@@ -164,8 +163,15 @@ class GameSocket extends EventEmitter {
                 this.emit('onCloseGame', message.arg.gameId);
                 break;
             case 'RESTART':
-                logger.error('Got told to restart, executing pm2 restart..');
-                spawnSync('pm2', ['restart', this.nodeName]);
+                // Production runs each node as its own `restart: unless-stopped`
+                // container (docker-compose.prod.yml) - there is no pm2 anywhere in
+                // this stack. Exiting is the restart: the container's own restart
+                // policy relaunches the process. Any games on this node end with it,
+                // same as an operator running `docker restart node-N` by hand.
+                logger.error(
+                    `Got told to restart node ${this.nodeName} - exiting so the container's restart policy can relaunch it`
+                );
+                process.exit(1);
                 break;
             case 'LOBBYHELLO':
                 this.emit('onGameSync', this.onGameSync.bind(this));

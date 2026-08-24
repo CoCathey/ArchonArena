@@ -3888,15 +3888,21 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         node now advertises `config.gameNode.maxGames`, matching the key `getNextAvailableGameNode`
         was always comparing against. Covered by `test/server/gameSocketMaxGames.spec.js`.
 
+-   [x] **The admin Restart button now restarts the node.** It sent a `RESTART` command that the
+        node handled by shelling out to `pm2 restart` — and pm2 is not installed anywhere in this
+        stack; production runs each node as its own `restart: unless-stopped` Docker container
+        (`docker-compose.prod.yml`). `spawnSync` failing does not throw, so the handler silently
+        did nothing: the one control an operator reaches for during an incident had no effect. It
+        now exits the process instead, so the container's own restart policy relaunches it — the
+        same outcome as an operator running `docker restart node-N` by hand. Covered by
+        `test/server/gameSocketRestart.spec.js`.
+
 ### Open, and currently true
 
 -   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The
         game is never recorded, rated or replayed, and nothing tells either player. A fix landed
         with the zero-downtime work and went back out with the revert, so this is live again.
         → **N10**.
--   [ ] **The admin Restart button is inert.** `NodesAdmin` shells out to `pm2 restart`, and pm2
-        is not installed anywhere in this stack — the one control an operator reaches for during
-        an incident does nothing and reports nothing. → **N10**.
 -   [ ] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Game three of an
         Adaptive Bo3 waits for the bid, so a pair who neither bid nor pass leave the round
         waiting on them. The organizer can still award or take a paper result, which is why this
