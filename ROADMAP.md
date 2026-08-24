@@ -4132,6 +4132,64 @@ the wrong way. N51 made forking cheap, which is what makes more of those rows af
 **Next:** more measured rows, not more capacity. The deep bot is the teacher, forking is now
 cheap, and `deepGamesPerDay` is the dial.
 
+#### N54 — The samples that were one sample _(done)_
+
+**Why:** N53 ended on a diagnosis — the value model is starved, and the rows that could feed it
+are the ones whose value was MEASURED rather than inferred. The obvious next move was to make
+deep games cheaper, since N51 had made positions copyable and a fork is far cheaper than a
+replay.
+
+**That was the wrong lever, and profiling said so.** A deep game takes ~73s and it goes: 79% the
+rules engine, 13% Node internals and GC, 7% the bot's own code — and **10% `replayTo`**, the
+thing forking would have replaced. Most replays are short anyway (mean 24 inputs, because
+`worthAnalyzing` fires early and at house calls). The engine cost is it re-evaluating persistent
+effects after every state change, which is the engine doing its job. Memoising the per-candidate
+features, the other obvious idea, is worth at most the 7%.
+
+**What the profiling found instead: `samplesPerCandidate` did nothing at all.**
+
+`DeepGame` derives a fresh `rolloutSeed` per sample precisely so samples differ. But
+`SimulatedGame` builds `this.source` from its seed in the CONSTRUCTOR and `run()` enters that
+source's scope — while `replayTo` constructed the fork with the ORIGINAL seed. So the replay ran
+under one scope on the recorded seed and then `run()` re-entered a fresh stream seeded from the
+original game, discarding `rolloutSeed` entirely. Measured at 5, 10 and 16 rollout turns, four
+samples of a road agreed **to the last bit 100% of the time**. The averaging was averaging a
+number with itself and the only effect of the knob was the bill.
+
+Nothing about it looked broken. That is the shape of failure this lab keeps writing down: a
+measurement that looks like it is working.
+
+**Tasks**
+
+-   [x] **The fork is seeded for its CONTINUATION**, not for the game it was forked from. The
+        replay still runs under its own scope on the original seed, so the determinism tripwire
+        still catches a fork that will not reproduce; only the life the fork lives afterwards is
+        re-rolled.
+-   [x] **Pinned from both ends.** Two different rollout seeds must land somewhere different, and
+        the same rollout seed must still be reproducible — because candidates are compared across
+        SHARED futures and a road that got a better one would win for the wrong reason.
+-   [x] **`deepGamesPerDay` 8 → 16.** At the measured 73s a game that is ~20 minutes of CPU a day
+        per roster, inside the "about half an hour" this budget was written for, and it buys twice
+        as many of the only rows whose value was measured rather than inferred.
+-   [x] **`deepSamples` stays at 2.** The cost was already being paid there; this makes that spend
+        start working rather than making it bigger.
+
+**What the fix is worth**
+
+-   samples diverge (0% identical, from 100%), and a road's value spreads by about **0.57** on a
+    [0,1] scale across futures — so a single sample is very noisy, and these rows pull
+    `trainingTargetWeight` times as hard as a played decision.
+-   the averaged search picks a **different road on 31%** of analysed decisions. Nearly a third of
+    every annotation the showcase panel has ever drawn, and every lesson target the deep bot has
+    ever written, was decided by one unaveraged rollout.
+-   the swing the panel reports as "how much the choice mattered" falls from 0.333 to 0.207,
+    because a swing read off a single rollout is mostly the deal.
+
+**Acceptance criteria**
+
+-   [x] Different rollout seeds lead to different positions; the same one is reproducible.
+-   [x] The recorded past still replays exactly, whatever the rollout seed.
+
 ### Open, and currently true
 
 -   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The

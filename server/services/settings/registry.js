@@ -854,7 +854,31 @@ const REGISTRY = {
                 label: 'Deep searched games per roster per day (0 = none)',
                 min: 0,
                 max: 20,
-                default: 8
+                /**
+                 * ARCHON (N54): doubled, on two measurements.
+                 *
+                 * The first is that these rows are the ones worth buying. N53
+                 * gave the model a hidden layer, proved it learns interactions
+                 * the linear model cannot represent at all (50% to 99.7% on a
+                 * planted one), and could not show it winning a game - because
+                 * outcome-labelled self-play is too noisy a signal to fill the
+                 * capacity. The rows that are NOT noisy are the searched ones,
+                 * which is why they already train at `trainingTargetWeight`.
+                 *
+                 * The second is what a deep game actually costs: profiled at
+                 * about 73 seconds at these defaults, of which 79% is the rules
+                 * engine re-evaluating persistent effects, 10% is the replay
+                 * and 7% is the bot's own code. Sixteen games is therefore
+                 * about twenty minutes of CPU a day per roster, still inside
+                 * the "about half an hour" this budget was written for.
+                 *
+                 * That profile is also why the obvious speed-up was not taken.
+                 * N51 made positions copyable and forking a position is far
+                 * cheaper than replaying one - but the replay is a tenth of the
+                 * bill, so the whole idea is worth 10% at absolute best. The
+                 * engine is the cost, and the engine is the game.
+                 */
+                default: 16
             },
             deepMaxAnalyzedDecisions: {
                 type: 'number',
@@ -872,6 +896,26 @@ const REGISTRY = {
             },
             deepSamples: {
                 type: 'number',
+                /**
+                 * ARCHON (N54): this setting did nothing until N54.
+                 *
+                 * `SimulatedGame` builds its random source from its seed in the
+                 * constructor and `run()` enters that source's scope, and the
+                 * fork was constructed with the ORIGINAL seed - so every sample
+                 * of a road re-entered an identical fresh stream and played an
+                 * identical future, whatever `rolloutSeed` said. Measured at 5,
+                 * 10 and 16 rollout turns, four samples agreed to the last bit
+                 * 100% of the time. The averaging was averaging a number with
+                 * itself, and the only effect of this knob was the bill.
+                 *
+                 * Now that it works, more than one is worth paying for: a
+                 * road's value across futures spreads by about 0.57 on a [0,1]
+                 * scale, and a single sample of that pulls `trainingTargetWeight`
+                 * times as hard as a played decision. Left at 2 rather than
+                 * raised, because the cost was already being paid at 2 and this
+                 * change makes that spend start working rather than making it
+                 * bigger.
+                 */
                 label: 'Sampled futures per candidate move',
                 min: 1,
                 max: 8,

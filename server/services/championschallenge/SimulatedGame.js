@@ -916,9 +916,27 @@ async function replayTo(deckAlpha, deckOmega, { seed, inputLog, upTo, rolloutSee
     const botDice = seededSource((continuationSeed ^ 0x9e3779b9) >>> 0);
 
     return withRandomSource(delegate, async () => {
+        /**
+         * ARCHON (N54): the fork is seeded for its CONTINUATION, not for the
+         * game it was forked from.
+         *
+         * `SimulatedGame` builds `this.source` from its seed in the
+         * constructor, and `run()` enters that source's scope. The replay
+         * below happens under the `delegate` scope instead, so the
+         * constructor's seed governs one thing only: the stream the fork plays
+         * its own life on after the replay point.
+         *
+         * Passing the ORIGINAL seed here - as this did - meant every sample of
+         * a road re-entered an identical fresh stream and played an identical
+         * future, whatever `rolloutSeed` said. `samplesPerCandidate` was
+         * therefore paying N times over for one number: measured at 5, 10 and
+         * 16 rollout turns, four samples of a road agreed to the last bit
+         * 100% of the time. The averaging N25 describes was averaging a value
+         * with itself.
+         */
         const sim = new SimulatedGame(deckAlpha, deckOmega, {
             ...options,
-            seed,
+            seed: continuationSeed,
             rng: () => botDice.next()
         });
 

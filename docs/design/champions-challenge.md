@@ -965,3 +965,78 @@ whether it takes the title, exactly as for every other candidate. Lowering the
 knob does not tear a net off a champion that already has one — a model keeps
 what it was trained with, and the arena is what decides whether it keeps the
 title.
+
+## The samples that were one sample (N54)
+
+N53 ended on a diagnosis: the value model is starved of signal, and the rows
+that could feed it are the ones whose value was **measured** rather than
+inferred — the deep bot's lessons, which already train at `trainingTargetWeight`
+for exactly that reason. The obvious next move was to make deep games cheaper,
+since N51 had made positions copyable and a fork is far cheaper than a replay.
+
+**That was the wrong lever, and profiling said so.** A deep game at the shipped
+defaults takes about 73 seconds, and it goes:
+
+|                                                                 | share   |
+| --------------------------------------------------------------- | ------- |
+| the rules engine (`Card.js`, `Effect.js`, `effectengine.js`, …) | **79%** |
+| Node internals and GC                                           | 13%     |
+| the bot's own code (features, policy)                           | 7%      |
+| `replayTo` — the thing forking would replace                    | **10%** |
+
+Replacing replay with a fork is worth 10% at absolute best. Most of the replays
+are short anyway (a mean of 24 inputs, because `worthAnalyzing` fires early and
+at house calls), and the cost is the engine re-evaluating every persistent
+effect after every state change — which is the engine doing its job, not waste.
+Memoising the per-candidate features, the other obvious idea, is worth at most
+the 7%.
+
+### What the profiling found instead
+
+`samplesPerCandidate` did nothing at all.
+
+`DeepGame` measures a road by rolling it forward several times and averaging,
+and derives a fresh `rolloutSeed` per sample precisely so the samples differ.
+But `SimulatedGame` builds `this.source` from its seed **in the constructor**,
+and `run()` enters that source's scope — while `replayTo` constructed the fork
+with the **original** seed. So the replay ran under one scope on the recorded
+seed, and then `run()` re-entered a _fresh_ stream seeded from the original
+game, discarding `rolloutSeed` entirely.
+
+Every sample of a road therefore played an identical future. Measured at 5, 10
+and 16 rollout turns: **four samples of a road agreed to the last bit 100% of
+the time.** The averaging N25 describes was averaging a number with itself, and
+the only effect of the setting was the bill — a deep game at `deepSamples: 2`
+cost exactly twice what it needed to and produced the same numbers.
+
+Nothing about it looked broken. That is the shape of failure this lab keeps
+writing down: a measurement that looks like it is working.
+
+### What the fix changes
+
+The fork is now seeded for its **continuation** rather than for the game it was
+forked from. The replay still runs under its own scope on the original seed —
+so the determinism tripwire still catches a fork that will not reproduce — and
+only the life the fork lives afterwards is re-rolled.
+
+With that in place:
+
+-   samples diverge (0% identical, from 100%), and a road's value spreads by
+    about **0.57** on a [0,1] scale across futures — so a single sample of it
+    is very noisy indeed, and these rows pull `trainingTargetWeight` times as
+    hard as a played decision;
+-   the averaged search picks a **different road on 31%** of analysed decisions
+    than the unaveraged one did. Nearly a third of every annotation the showcase
+    panel has ever drawn, and every lesson target the deep bot has ever written,
+    was decided by one unaveraged rollout;
+-   the swing the panel reports as "how much the choice mattered" falls from
+    0.333 to 0.207, because a swing read off a single rollout is mostly the
+    deal.
+
+`deepSamples` stays at 2: the cost was already being paid there, and this makes
+that spend start working rather than making it bigger.
+
+`deepGamesPerDay` doubles to 16, which at the measured 73 seconds a game is
+about twenty minutes of CPU a day per roster — still inside the "about half an
+hour" the budget was written for, and buying twice as many of the only rows
+whose value was measured rather than inferred.
