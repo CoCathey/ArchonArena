@@ -39,6 +39,41 @@ const sigmoid = (z) => 1 / (1 + Math.exp(-z));
  */
 const DENSE_LAYOUT = denseLayout(STATE_KEYS);
 
+/**
+ * ARCHON (N55): an in-place Fisher-Yates on a seeded stream.
+ *
+ * Deliberately not `secureRandom.shuffle`: that draws from a source scoped by
+ * async context, and a trainer needs its own reproducible one. Fisher-Yates
+ * because every permutation has to be equally likely - a biased shuffle would
+ * leave exactly the correlation this exists to break.
+ *
+ * Returns a function rather than shuffling once, so successive epochs walk
+ * different orders from one continuing stream.
+ */
+function seededShuffle(seed) {
+    let state = seed >>> 0;
+    const next = () => {
+        state = (state + 0x6d2b79f5) >>> 0;
+
+        let t = state;
+
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    return (items) => {
+        for (let i = items.length - 1; i > 0; i--) {
+            const j = Math.floor(next() * (i + 1));
+
+            [items[i], items[j]] = [items[j], items[i]];
+        }
+
+        return items;
+    };
+}
+
 /** A fresh, know-nothing model. */
 function emptyModel() {
     return {
@@ -224,13 +259,28 @@ function trainModel(
     model,
     games,
     {
-        learningRate = 0.05,
-        epochs = 2,
+        /**
+         * ARCHON (N55): a fifth of what it was.
+         *
+         * Measured on real self-play, over identical games in six different
+         * orders: at 0.05 the held-out loss averaged 0.563 and spanned 0.056;
+         * at 0.005 it averaged 0.535 and spanned 0.015. The shipped step was
+         * both NOISIER and WORSE - it was taking a stride big enough that
+         * whichever evidence arrived last left the deepest mark, and landing
+         * further from the answer for it.
+         *
+         * Paired with more epochs, so the same evidence is still walked as
+         * many times over: the batch is small (a few hundred games) and the
+         * cost is milliseconds either way.
+         */
+        learningRate = 0.01,
+        epochs = 6,
         l2 = 1e-4,
         lambda = 0.5,
         targetWeight = 8,
         hiddenUnits = 0,
-        netSeed = 20260824
+        netSeed = 20260824,
+        shuffleSeed = 20260825
     } = {}
 ) {
     const next = {
@@ -290,101 +340,148 @@ function trainModel(
         }
     }
 
+    /**
+     * ARCHON (N55): the labels first, in one order-independent pass.
+     *
+     * Every target here is computed against the FROZEN model, so none of them
+     * depends on the order the batch is walked in - which means they can be
+     * settled once, up front, and the gradient pass is then free to walk the
+     * evidence in any order at all. That is what makes the shuffle below safe:
+     * it moves the updates around without moving a single label.
+     *
+     * It also retires an O(n^2): the same seat's NEXT decision used to be
+     * found by scanning forward from every row, which for a game of three
+     * hundred decisions is forty-five thousand comparisons. One backward pass
+     * carries it instead.
+     */
+    const examples = [];
+
+    for (const game of games) {
+        const decisions = game.decisions || [];
+        // The last decision each seat made, walking backwards - so each row
+        // meets the one that came after it for the same side, which is the
+        // position N25's bootstrapped target leans on.
+        const laterForSide = new Map();
+
+        for (let i = decisions.length - 1; i >= 0; i--) {
+            const decision = decisions[i];
+            const outcome = decision.side === game.winnerSide ? 1 : 0;
+            const nextForSide = laterForSide.get(decision.side);
+
+            examples.push({
+                decision,
+                label: decisionTarget(decision, nextForSide, outcome, lambda, valueOf)
+            });
+            laterForSide.set(decision.side, decision);
+        }
+    }
+
+    /**
+     * ARCHON (N55): and then the order is shuffled, per epoch.
+     *
+     * Walking the batch as it arrived is what made this trainer's answer
+     * depend on the order it happened to receive its evidence in. Measured:
+     * the same games, the same settings, only the order different, moved
+     * held-out log loss across a spread of 0.056 - three to twenty-eight times
+     * larger than every effect the lab has recently tried to measure, and
+     * sitting underneath the arena that decides which candidate takes the
+     * title.
+     *
+     * The cause is correlation rather than arrival order as such. Consecutive
+     * rows come from one game and one seat, so a block of them pushes the
+     * weights coherently in one direction, and a fixed step means whichever
+     * block lands last leaves the deepest mark. Shuffling breaks the blocks up.
+     *
+     * Seeded, because a training run that cannot be reproduced cannot be
+     * debugged, and because the specs plant a signal and prove training finds
+     * it - which is not a proof if the answer moves between runs.
+     */
+    const shuffle = seededShuffle(shuffleSeed);
+
     for (let epoch = 0; epoch < epochs; epoch++) {
-        for (const game of games) {
-            const decisions = game.decisions || [];
+        shuffle(examples);
 
-            for (let i = 0; i < decisions.length; i++) {
-                const decision = decisions[i];
-                const outcome = decision.side === game.winnerSide ? 1 : 0;
-                // The same seat's NEXT decision - not simply the next record,
-                // which usually belongs to the opponent and whose value is
-                // therefore the wrong way up.
-                const nextForSide = decisions
-                    .slice(i + 1)
-                    .find((entry) => entry.side === decision.side);
-                const label = decisionTarget(decision, nextForSide, outcome, lambda, valueOf);
-                // ARCHON (N53): the net's forward pass is computed ONCE and
-                // reused for the prediction and the gradient. Recomputing it in
-                // a backward pass is the classic way for the two to quietly
-                // disagree about which units were active.
-                const vector = next.net ? denseInput(decision, DENSE_LAYOUT) : null;
-                const pass = next.net ? forward(next.net, vector) : null;
-                const predicted = scoreLinear(next, decision, pass ? pass.z : 0);
-                /**
-                 * ARCHON: a measured decision counts for more than a guessed
-                 * one.
-                 *
-                 * Two kinds of row arrive here. One carries a number the deep
-                 * bot established by forking the position, playing the move
-                 * and rolling the future forward. The other carries "this
-                 * appeared in a game somebody won" - which for a play on turn
-                 * 3 of a game thrown away on turn 20 is noise pointing the
-                 * wrong way. They used to push the weights equally hard, and
-                 * since the fast bot outproduces the deep bot by orders of
-                 * magnitude, the signal was drowned by the noise no matter
-                 * how much search was bought.
-                 *
-                 * The weight goes on the GRADIENT, not on the decay: L2 is a
-                 * property of the weights, not of the evidence. Counts stay
-                 * unweighted too - one observation is one observation, and
-                 * inflating them would under-shrink a card seen once.
-                 */
-                const measured = typeof decision.target === 'number';
-                // ARCHON (N38): a lesson may carry its own pull. The deep
-                // bot's rows all deserve `targetWeight` because they were all
-                // measured the same way; the LLM teacher's rows carry an
-                // explicit `weight` set from how well that teacher has been
-                // agreeing with the deep bot's measurements - a provisional
-                // teacher pulls gently, a proven one harder, and the dial
-                // lives with the evidence for it rather than in this file.
-                const pull =
-                    typeof decision.weight === 'number' && decision.weight >= 0
-                        ? decision.weight
-                        : measured
-                        ? targetWeight
-                        : 1;
-                // Logistic loss gradient: (p - y) times each feature.
-                const gradient = (predicted - label) * pull;
+        for (const { decision, label } of examples) {
+            // ARCHON (N53): the net's forward pass is computed ONCE and
+            // reused for the prediction and the gradient. Recomputing it in
+            // a backward pass is the classic way for the two to quietly
+            // disagree about which units were active.
+            const vector = next.net ? denseInput(decision, DENSE_LAYOUT) : null;
+            const pass = next.net ? forward(next.net, vector) : null;
+            const predicted = scoreLinear(next, decision, pass ? pass.z : 0);
+            /**
+             * ARCHON: a measured decision counts for more than a guessed
+             * one.
+             *
+             * Two kinds of row arrive here. One carries a number the deep
+             * bot established by forking the position, playing the move
+             * and rolling the future forward. The other carries "this
+             * appeared in a game somebody won" - which for a play on turn
+             * 3 of a game thrown away on turn 20 is noise pointing the
+             * wrong way. They used to push the weights equally hard, and
+             * since the fast bot outproduces the deep bot by orders of
+             * magnitude, the signal was drowned by the noise no matter
+             * how much search was bought.
+             *
+             * The weight goes on the GRADIENT, not on the decay: L2 is a
+             * property of the weights, not of the evidence. Counts stay
+             * unweighted too - one observation is one observation, and
+             * inflating them would under-shrink a card seen once.
+             */
+            const measured = typeof decision.target === 'number';
+            // ARCHON (N38): a lesson may carry its own pull. The deep
+            // bot's rows all deserve `targetWeight` because they were all
+            // measured the same way; the LLM teacher's rows carry an
+            // explicit `weight` set from how well that teacher has been
+            // agreeing with the deep bot's measurements - a provisional
+            // teacher pulls gently, a proven one harder, and the dial
+            // lives with the evidence for it rather than in this file.
+            const pull =
+                typeof decision.weight === 'number' && decision.weight >= 0
+                    ? decision.weight
+                    : measured
+                    ? targetWeight
+                    : 1;
+            // Logistic loss gradient: (p - y) times each feature.
+            const gradient = (predicted - label) * pull;
 
-                for (const [key, value] of Object.entries(decision.state || {})) {
-                    const weightKey = `s:${key}`;
+            for (const [key, value] of Object.entries(decision.state || {})) {
+                const weightKey = `s:${key}`;
 
-                    next.weights[weightKey] =
-                        (next.weights[weightKey] || 0) * (1 - learningRate * l2) -
-                        learningRate * gradient * value;
+                next.weights[weightKey] =
+                    (next.weights[weightKey] || 0) * (1 - learningRate * l2) -
+                    learningRate * gradient * value;
+            }
+
+            for (const [key, value] of Object.entries(decision.action || {})) {
+                if (!value) {
+                    continue;
                 }
 
-                for (const [key, value] of Object.entries(decision.action || {})) {
-                    if (!value) {
-                        continue;
-                    }
+                const weightKey = `a:${key}`;
 
-                    const weightKey = `a:${key}`;
+                next.weights[weightKey] =
+                    (next.weights[weightKey] || 0) * (1 - learningRate * l2) -
+                    learningRate * gradient * value;
+            }
 
-                    next.weights[weightKey] =
-                        (next.weights[weightKey] || 0) * (1 - learningRate * l2) -
-                        learningRate * gradient * value;
-                }
+            if (decision.cardId) {
+                next.cardWeights[decision.cardId] =
+                    (next.cardWeights[decision.cardId] || 0) * (1 - learningRate * l2) -
+                    learningRate * gradient;
+            }
 
-                if (decision.cardId) {
-                    next.cardWeights[decision.cardId] =
-                        (next.cardWeights[decision.cardId] || 0) * (1 - learningRate * l2) -
-                        learningRate * gradient;
-                }
+            if (decision.promptKey) {
+                next.promptWeights[decision.promptKey] =
+                    (next.promptWeights[decision.promptKey] || 0) * (1 - learningRate * l2) -
+                    learningRate * gradient;
+            }
 
-                if (decision.promptKey) {
-                    next.promptWeights[decision.promptKey] =
-                        (next.promptWeights[decision.promptKey] || 0) * (1 - learningRate * l2) -
-                        learningRate * gradient;
-                }
-
-                // The net shares the logit, so it shares the derivative
-                // exactly - which is the whole reason it composes with this
-                // trainer instead of needing one of its own.
-                if (pass) {
-                    netBackprop(next.net, vector, pass.hidden, gradient, learningRate, l2);
-                }
+            // The net shares the logit, so it shares the derivative
+            // exactly - which is the whole reason it composes with this
+            // trainer instead of needing one of its own.
+            if (pass) {
+                netBackprop(next.net, vector, pass.hidden, gradient, learningRate, l2);
             }
         }
     }

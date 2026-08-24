@@ -4196,6 +4196,81 @@ measurement that looks like it is working.
 -   [x] Different rollout seeds lead to different positions; the same one is reproducible.
 -   [x] The recorded past still replays exactly, whatever the rollout seed.
 
+#### N55 — The trainer's answer depended on the order it read its evidence in _(done)_
+
+**Why:** three notes in a row (N52, N53) built machinery that was provably correct and could not
+be shown to win a game. Chasing the third one turned up the reason the _measurements_ kept coming
+back empty.
+
+Same games, same settings, only the arrival order different: held-out log loss spanned **0.056**.
+Every effect the lab had recently tried to measure was 0.002–0.020. The noise floor was three to
+twenty-eight times larger than the signal — which sits underneath the SPRT arena that decides
+which candidate takes the title, so promotions were partly a coin flip and any real improvement
+smaller than the noise was invisible. N53's null result was very likely _unmeasurable_ rather
+than negative.
+
+The cause is correlation, not arrival order as such: consecutive rows come from one game and one
+seat, so a block of them pushes the weights coherently, and a fixed step means whichever block
+lands last leaves the deepest mark.
+
+**Tasks**
+
+-   [x] **Labels first, in one order-independent pass.** Every target is already computed against
+        the FROZEN model, so they can be settled up front and the gradient pass is then free to
+        walk the evidence in any order — the shuffle moves the updates without moving a label.
+-   [x] **Shuffle the gradient pass, per epoch**, seeded — because a training run that cannot be
+        reproduced cannot be debugged, and a planted-signal spec is not a proof if the answer
+        moves between runs.
+-   [x] **A fifth of the step, three times the epochs.** Measured over six orderings: at lr=0.05
+        the loss averaged 0.563 and spanned 0.056; at lr=0.005 it averaged 0.535 and spanned
+        0.015. The shipped step was both noisier AND worse.
+-   [x] **An O(n²) retired on the way.** The same seat's next decision was found by scanning
+        forward from every row — forty-five thousand comparisons for a three-hundred-decision
+        game. One backward pass carries it now.
+
+**Measured result:** order-spread **0.056 → 0.0053**, a 10.5× reduction, and the mean improved
+from 0.563 to 0.530. The noise floor is now below the effects the lab is trying to measure with
+it, which it was not before.
+
+**Acceptance criteria**
+
+-   [x] The same evidence in five different orders lands in nearly the same place.
+-   [x] The same evidence in the same order gives the same model twice.
+-   [x] The shuffle reorders the gradient pass without dropping a row from it.
+
+#### N56 — Hard mode sometimes dealt a weak deck _(done)_
+
+**Why:** reported by a player — "hard mode for the bots sometimes gives them low decks" — and it
+did exactly that.
+
+Difficulty is the ARI band the bot's deck comes from; the brain is deliberately identical at
+every setting. When a house had nothing rated inside the band, the picker dropped the band
+**entirely** and drew uniformly from the whole imported library. Hard is ARI 90–125; that
+fallback could hand it a 40. Not a slightly-wrong deck: a Hard table could come out **weaker than
+an Easy one**, which is the single thing a difficulty setting must never do.
+
+The instinct behind the fallback was right and is kept — a table that opens beats a table that
+does not. What was wrong was which way to relax.
+
+**Tasks**
+
+-   [x] **Each setting relaxes toward its own end.** Hard tries the band, then anything at least
+        as strong as its floor, then the strongest decks of that house the site has at all. Easy
+        mirrors it downward. Medium keeps drawing from the whole field, because the middle of the
+        field is what Medium means.
+-   [x] **A shortlist, not the single best deck**, so the hardest setting does not also become the
+        most repetitive — a new deck is rolled for every table.
+-   [x] **The ARI rides along with the pool row**, so a caller sorting for the strongest deck
+        sorts on the same number the band filtered on rather than forming a second opinion.
+-   [x] **Every widening says so in the log.** A table quietly playing outside its band is how
+        this went unnoticed.
+
+**Acceptance criteria**
+
+-   [x] No pool Hard will accept can return a deck below its band's floor while the house has one.
+-   [x] Easy never reaches upward, Hard never reaches downward, at any step of the ladder.
+-   [x] Medium still draws from the whole field.
+
 ### Open, and currently true
 
 -   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The

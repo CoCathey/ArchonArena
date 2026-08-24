@@ -88,10 +88,25 @@ rather than once per copy: a deck is 36 cards with a Master Vault uuid, not
 somebody's property, and the bot plays the cards. Nothing about whose
 collection a copy sits in reaches the table. That is what makes the settings
 mean anything - three bands per house need hundreds of decks to feel
-different, and no hand-stocked bot account was ever going to hold them. When a
-band genuinely has nothing in it (a young site, an unrated house) the table
-opens with an unbanded deck and says so in the log, because a table that opens
-beats a table that does not.
+different, and no hand-stocked bot account was ever going to hold them.
+
+**When a band is empty, it widens toward its own end of the field (N56).** A
+young site or an unrated house can have nothing at all rated between 90 and
+125, and a table that opens beats a table that does not - but the first version
+of that fallback dropped the band ENTIRELY and drew uniformly from the whole
+library, so Hard could deal a 40. Reported by a player as "hard mode for the
+bots sometimes gives them low decks", and it is worse than a slightly-wrong
+deck: a Hard table could come out weaker than an Easy one, which is the one
+thing a difficulty setting must never do.
+
+So each setting relaxes in the direction that keeps its promise. Hard tries the
+band, then anything at least as strong as its floor, then the strongest decks
+of that house the site has at all; Easy mirrors it downward; Medium keeps
+drawing from the whole field, because the middle of the field is what Medium
+means. The last step draws from a shortlist rather than taking the single best
+deck, so the hardest setting does not also become the most repetitive. Every
+widening says so in the log, because a table quietly playing outside its band
+is how this went unnoticed.
 
 Whoever joins the table owns the setting until the game starts; changing it
 re-deals the bot's deck. An unattended table opens at whatever an admin chose

@@ -415,6 +415,7 @@ class DeckService {
      * @returns {Promise<number|null>} a "Decks" row id, or null for an empty pool
      */
     async getRandomPracticeDeckId(options = {}) {
+        const { prefer, shortlist = 25 } = options;
         const { sql, params } = this.practiceDeckPool(options);
 
         try {
@@ -422,6 +423,36 @@ class DeckService {
 
             if (total === 0) {
                 return null;
+            }
+
+            /**
+             * ARCHON (N56): when a caller asks for the strongest or weakest it
+             * can find, the pool is SORTED and drawn from the near end.
+             *
+             * Reported as "hard mode for the bots sometimes gives them low
+             * decks", and that is exactly what it did. The bot's difficulty is
+             * the ARI band its deck comes from, and when a house had nothing
+             * rated in the band the caller dropped the band ENTIRELY and drew
+             * uniformly from the whole library - so Hard, which is meant to be
+             * ARI 90-125, could hand out a 40. Not slightly wrong: a Hard table
+             * could be weaker than an Easy one, which is the one thing a
+             * difficulty setting must never be.
+             *
+             * A shortlist rather than the single best deck, because a new deck
+             * is rolled for every table and always seating the same strongest
+             * one would make the hardest setting the most repetitive.
+             */
+            if (prefer === 'strongest' || prefer === 'weakest') {
+                const direction = prefer === 'strongest' ? 'DESC' : 'ASC';
+                const take = Math.max(1, Math.min(shortlist, total));
+                const rows = await db.query(
+                    `SELECT "Id" FROM (SELECT pool."Id", pool."Ari" FROM (${sql}) pool ` +
+                        `ORDER BY pool."Ari" ${direction}, pool."Id" LIMIT ${take}) ranked ` +
+                        `OFFSET $${params.length + 1} LIMIT 1`,
+                    [...params, secureRandom.randomInt(take)]
+                );
+
+                return rows && rows.length > 0 ? rows[0].Id : null;
             }
 
             // Chosen here rather than by `ORDER BY random()`, for the reason
@@ -495,7 +526,12 @@ class DeckService {
 
         return {
             sql:
-                `SELECT DISTINCT ON (${identity}) d."Id" FROM "Decks" d ` +
+                // ARCHON (N56): the ARI rides along with the row. A caller that
+                // wants the strongest deck a house has must be able to ORDER BY
+                // the same number this filtered on, and recomputing it outside
+                // would be a second opinion about deck strength.
+                `SELECT DISTINCT ON (${identity}) d."Id", ${EFFECTIVE_ARI_SQL} AS "Ari" ` +
+                'FROM "Decks" d ' +
                 'JOIN "Expansions" e ON e."Id" = d."ExpansionId" ' +
                 'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" ' +
                 'LEFT JOIN "DeckAri" da ON da."Uuid" = d."Uuid" ' +

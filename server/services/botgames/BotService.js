@@ -476,6 +476,63 @@ class BotService {
     }
 
     /**
+     * ARCHON (N56): where to look for a deck, in order - and every step keeps
+     * the setting's MEANING.
+     *
+     * Reported as "hard mode for the bots sometimes gives them low decks", and
+     * that is precisely what it did. The band was tried, and when a house had
+     * nothing rated inside it the band was dropped ENTIRELY and a deck drawn
+     * uniformly from the whole library. Hard is ARI 90-125; the fallback could
+     * hand it a 40. That is not a slightly-wrong deck, it is a Hard table
+     * weaker than an Easy one - the one thing a difficulty setting must never
+     * be, and the reason a player reports it rather than shrugging.
+     *
+     * The original instinct was right: a table that opens beats a table that
+     * does not. What was wrong was WHICH way to relax. So each setting now
+     * relaxes toward its own end of the field:
+     *
+     *  1. the band itself,
+     *  2. the band's half-open form - at least this strong for Hard, at most
+     *     this weak for Easy - so the ordering survives even when the exact
+     *     window is empty,
+     *  3. the strongest (or weakest) decks the house has at all, drawn from a
+     *     shortlist so the hardest setting does not become the most
+     *     repetitive.
+     *
+     * Medium keeps the old behaviour at step 3 on purpose: it is the middle of
+     * the field, so the whole library IS its relaxation.
+     */
+    deckAttempts(band) {
+        const strongest = band.key === 'hard';
+        const weakest = band.key === 'easy';
+        const attempts = [{ pool: { minAri: band.minAri, maxAri: band.maxAri } }];
+
+        if (strongest || weakest) {
+            attempts.push({
+                // Half-open, on the side that preserves the ordering.
+                pool: strongest ? { minAri: band.minAri } : { maxAri: band.maxAri },
+                note: (bot, wanted) =>
+                    `No imported ${bot.label} deck is rated between ARI ${wanted.minAri} and ` +
+                    `${wanted.maxAri}, so the ${wanted.label} practice table is playing the ` +
+                    `${strongest ? 'strongest' : 'weakest'} deck of that house it can find. ` +
+                    'Import more decks, or let the rating engine see more games.'
+            });
+        }
+
+        attempts.push({
+            pool: strongest || weakest ? { prefer: strongest ? 'strongest' : 'weakest' } : {},
+            note: (bot, wanted) =>
+                `No imported ${bot.label} deck is rated for the ${wanted.label} band at all, so ` +
+                `the table is playing the ${
+                    strongest ? 'strongest' : weakest ? 'weakest' : 'closest'
+                } deck of that house the site has. Import more decks, or let the rating engine ` +
+                'see more games.'
+        });
+
+        return attempts;
+    }
+
+    /**
      * A random deck for this bot to play, at the strength the table asked for.
      *
      * Where the deck comes from, in order:
@@ -497,28 +554,21 @@ class BotService {
     async pickDeckSelection(bot, difficulty = DEFAULT_DIFFICULTY) {
         const band = difficultyBand(difficulty);
 
-        for (const banded of [true, false]) {
+        for (const attempt of this.deckAttempts(band)) {
             let deckId = null;
 
             try {
                 deckId = await this.deckService.getRandomPracticeDeckId({
                     house: bot.house,
-                    minAri: banded ? band.minAri : undefined,
-                    maxAri: banded ? band.maxAri : undefined
+                    ...attempt.pool
                 });
             } catch (err) {
                 logger.error(`The ${bot.label} bot could not pick a deck`, err);
             }
 
             if (deckId) {
-                if (!banded) {
-                    this.logOnce(
-                        `band:${band.key}`,
-                        `No imported ${bot.label} deck is rated between ARI ${band.minAri} and ` +
-                            `${band.maxAri}, so the ${band.label} practice table is playing an ` +
-                            'unbanded deck. Import more decks, or let the rating engine see ' +
-                            'more games.'
-                    );
+                if (attempt.note) {
+                    this.logOnce(`band:${band.key}`, attempt.note(bot, band));
                 }
 
                 return { deckId, isStandalone: false };

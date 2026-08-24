@@ -90,7 +90,14 @@ describe('the deck pool a difficulty draws from', function () {
         const { sql, params } = poolFor({ house: 'sanctum' });
 
         expect(params).toEqual(['sanctum']);
-        expect(sql).not.toContain('da."Ari"');
+        // The ARI is SELECTED unconditionally since N56 - a caller asking for
+        // the strongest deck of a house has to be able to sort on the same
+        // number the band filters on - so the absence of a band shows in the
+        // WHERE clause, not in whether the column is mentioned at all.
+        const where = sql.slice(sql.indexOf('WHERE'));
+
+        expect(where).not.toContain('>=');
+        expect(where).not.toContain('<=');
     });
 
     it('can be narrowed to one account, for a bot stocked by hand', function () {

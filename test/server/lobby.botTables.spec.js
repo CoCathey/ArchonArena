@@ -137,8 +137,15 @@ describe('the practice bot table', function () {
                 // library, filtered to a house and a difficulty's ARI band.
                 // Every request is recorded so a test can assert which band
                 // was asked for, not just which deck came back.
-                getRandomPracticeDeckId: async ({ house, minAri, maxAri } = {}) => {
-                    deckRequests.push({ house, minAri, maxAri });
+                //
+                // ARCHON (N56): `prefer` is recorded too. It is what carries
+                // the setting's meaning at the last step of the ladder, where
+                // there is no band left to carry it - a request that has
+                // dropped its bounds is safe only because it asks for the
+                // strong end, and a stub that dropped the field could not tell
+                // that apart from the bug it replaced.
+                getRandomPracticeDeckId: async ({ house, minAri, maxAri, prefer } = {}) => {
+                    deckRequests.push({ house, minAri, maxAri, prefer });
 
                     if (!houseDecks.has(house)) {
                         return null;
@@ -665,8 +672,8 @@ describe('the practice bot table', function () {
         });
 
         it('opens the table anyway when a band has nothing rated in it', async function () {
-            // A young site can easily have no deck of a house rated 90-125.
-            // A table that opens with a slightly-wrong deck beats no table.
+            // A young site can easily have no deck of a house rated 90-125,
+            // and a table that opens beats a table that does not.
             emptyBands.add(90);
             config.defaultDifficulty = 'hard';
 
@@ -676,8 +683,27 @@ describe('the practice bot table', function () {
 
             expect(game.botDifficulty).toBe('hard');
             expect(hostOf(game).deck.id).toBe(houseDecks.get(game.botHouse));
-            // Asked for the band, then asked again without it.
-            expect(deckRequests.map((request) => request.minAri)).toEqual([90, undefined]);
+
+            /**
+             * ARCHON (N56): it widens UPWARD, and this spec used to assert the
+             * bug. It read "asked for the band, then asked again without it",
+             * and asking again without it is what let Hard deal a 40 - the
+             * player-reported "hard mode sometimes gives them low decks".
+             *
+             * Three asks now: the band, then anything at least as strong as
+             * its floor, then the strongest decks of that house the site has.
+             * The last one carries no floor because there may be nothing above
+             * it at all - so what makes it safe is `prefer`, not a bound.
+             */
+            expect(deckRequests.map((request) => request.minAri)).toEqual([90, 90, undefined]);
+            expect(deckRequests.map((request) => request.maxAri)).toEqual([
+                125,
+                undefined,
+                undefined
+            ]);
+            expect(deckRequests[deckRequests.length - 1].prefer).toBe('strongest');
+            // And never once reaches for the weak end.
+            expect(deckRequests.some((request) => request.prefer === 'weakest')).toBe(false);
         });
     });
 });

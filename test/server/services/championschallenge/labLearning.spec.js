@@ -230,16 +230,27 @@ describe('the learning loop (N25)', function () {
                 epochs: 1
             });
 
+            const moved = (trained) =>
+                Math.abs(trained.weights['a:act:reap'] - noSuccessor.weights['a:act:reap']);
+
             // My own strong follow-up lifts the label of the first move...
             expect(mySuccessor.weights['a:act:reap']).toBeGreaterThan(
                 noSuccessor.weights['a:act:reap']
             );
-            // ...while a position that is strong for the OPPONENT is not my
-            // position's value, so it changes nothing.
-            expect(theirSuccessor.weights['a:act:reap']).toBeCloseTo(
-                noSuccessor.weights['a:act:reap'],
-                12
-            );
+            /**
+             * ...while a position that is strong for the OPPONENT is not my
+             * position's value, so it moves the weight by essentially nothing:
+             * four orders of magnitude less than my own successor does.
+             *
+             * Compared as a RATIO rather than asserted equal, because N55's
+             * shuffle means the successor may now be trained before the row
+             * under test - and training it nudges the state weights they
+             * share, which moves the first row's prediction by a hair. That
+             * residue is the shuffle working, not the bootstrap leaking: the
+             * claim being made here is about which seat's value is borrowed,
+             * and it holds by a factor of ten thousand.
+             */
+            expect(moved(theirSuccessor)).toBeLessThan(moved(mySuccessor) / 1000);
         });
 
         // Distillation: a measured value outranks any label derived from the
