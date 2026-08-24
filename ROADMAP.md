@@ -4062,6 +4062,76 @@ baseline was "always call the first house". The two features a house call actual
 **Next:** the value model is the binding constraint, not the search. A lab-side calibration rung
 that plays the planner against the champion would let the ladder settle this automatically.
 
+#### N53 — A model that can learn its own crosses _(done, and off by default)_
+
+**Why:** N52 found the binding constraint. The search machinery works — it changed the house call
+on 41% of turns with a clear spread between the choices — and it did not win more games, because
+a search is only as good as the thing it optimises. So the value model is the thing to improve.
+
+`labPolicy` is logistic regression, which is linear, and that has one consequence which has
+shaped every piece of learning work since N21: every candidate at one decision shares a state, so
+the state cancels out of the ranking entirely. A linear model can learn "creatures tend to win
+games" and can never learn "not this, not here" unless somebody writes the interaction down as
+its own feature — which is what N42, N43, N45 and N46 each did by hand, and what does not
+terminate in a game with 2,700 cards.
+
+**Tasks**
+
+-   [x] **`labNet`**: a hidden layer over a fixed dense vector — 27 state features, 13 action
+        kinds, 16 board contexts, 6 AERC axes, 6 afterstate deltas, roles and synergy flags.
+        Seventy-seven in, one hidden layer, one out: ~1,900 parameters, smaller than the per-card
+        weight table the model already carries, because a model is a JSON row that rides to the
+        game node with every table.
+-   [x] **A CORRECTION, never a replacement.** `z = linear + net`. A model with no net scores
+        exactly as it always did, so every champion ever trained keeps playing the way it played;
+        a fresh net starts near zero, so a candidate is its champion plus a whisper and the arena
+        measures a change rather than a stranger.
+-   [x] **The output layer is deliberately not zeroed.** It would make a candidate identical to
+        its champion — and make the first layer's gradient identically zero, so the hidden units
+        would never learn at all.
+-   [x] **The dense layout is a contract**, and the vocabularies are exported frozen from
+        `labFeatures` for it. A net reads its input by position: appending is safe, reordering
+        silently points every later weight at another input and nothing in the output says so.
+-   [x] **One logit function, two callers.** Training already runs the forward pass (it needs the
+        hidden activations for the backward one); running it twice is how a forward and a backward
+        pass come to disagree about which units were active.
+-   [x] **A styled pilot carries the net.** A style is a bias on the champion's own weights, and a
+        persona that quietly lost the hidden layer would not be the champion wearing a plan.
+
+**What was measured**
+
+**Proven, cleanly.** A planted interaction of exactly the shape a linear model cannot represent —
+two candidates from one position where which is right depends on a _state_ feature, no existing
+cross covering it. Linear: **50.0%**, chance, and not "does badly" but _cannot_: its score
+difference between the pair is a constant no evidence can make depend on the position. With a
+24-unit hidden layer: **99.7%**. The capability is new.
+
+**Not demonstrated: any improvement on real games.** Trained on self-play diaries of 100–750
+games and scored on held-out games (split by GAME, never by decision — two decisions from one
+game share its outcome), the hidden layer is indistinguishable from the linear model. Held-out
+log loss moved between −0.009 and +0.020 with no trend, and **run-to-run variance across training
+slices (0.53–0.58) dwarfs every difference measured.** Regularisation did not recover it, which
+rules out simple over-capacity.
+
+That instability is worth recording on its own account: it shows in the **linear** model too, so
+it is a property of the trainer rather than of the net.
+
+**Where the signal would come from.** The rows that could fill a hidden layer are the ones whose
+value was MEASURED rather than inferred — the deep bot's lessons, which already train at 8×
+weight (N25) because an outcome label on a turn-3 play in a game thrown away on turn 20 points
+the wrong way. N51 made forking cheap, which is what makes more of those rows affordable. So
+`hiddenUnits` ships at 0: proven to learn what the linear model cannot, unproven to win a game.
+
+**Acceptance criteria**
+
+-   [x] The linear model is at chance on the planted interaction; the hidden layer is not.
+-   [x] A model with no net scores bit-identically to before.
+-   [x] Training a candidate never reaches back into the champion's own net.
+-   [x] The model still round-trips through JSON and stays under 4,000 parameters.
+
+**Next:** more measured rows, not more capacity. The deep bot is the teacher, forking is now
+cheap, and `deepGamesPerDay` is the dial.
+
 ### Open, and currently true
 
 -   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The

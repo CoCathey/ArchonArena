@@ -671,6 +671,31 @@ function decisionRecord(game, player, action) {
     return record;
 }
 
+/**
+ * ARCHON (N53): the vocabularies, as ordered lists.
+ *
+ * `ACTION_CONTEXTS` is an object of predicates and `ROLE_KEYS` is a map, and
+ * neither promises an order. A net reads its input vector BY POSITION, so it
+ * needs one - and it has to be the same order tomorrow, because a model
+ * trained today reads the vector a model tomorrow builds.
+ *
+ * Frozen for that reason: an accidental push here would shift every weight
+ * after it onto the wrong input, and nothing about the output would say so.
+ */
+const ACTION_CONTEXTS_KEYS = Object.freeze(Object.keys(ACTION_CONTEXTS));
+const ROLE_KEY_LIST = Object.freeze(Object.values(ROLE_KEYS));
+
+/** The state feature names, in the order `stateFeaturesFrom` emits them. */
+const STATE_KEYS = Object.freeze(
+    Object.keys(
+        stateFeaturesFrom({
+            round: 0,
+            me: { amber: 0, keys: 0, keyCost: 6, creatures: [] },
+            them: { amber: 0, keys: 0, keyCost: 6, creatures: [] }
+        })
+    )
+);
+
 module.exports = {
     stateFeatures,
     stateFeaturesFrom,
@@ -679,5 +704,8 @@ module.exports = {
     decisionRecord,
     promptKey,
     ACTION_KINDS,
-    ACTION_CONTEXTS
+    ACTION_CONTEXTS,
+    ACTION_CONTEXTS_KEYS,
+    ROLE_KEY_LIST,
+    STATE_KEYS
 };

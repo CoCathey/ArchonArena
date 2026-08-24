@@ -285,6 +285,21 @@ class BotPolicyService {
             options.targetWeight = targetWeight;
         }
 
+        /**
+         * ARCHON (N53): how many hidden units the next candidate learns with.
+         *
+         * Read per training run rather than baked into a model, so raising it
+         * grows a net on the next candidate and lowering it does NOT tear one
+         * off a champion that already has it - a model keeps whatever it was
+         * trained with, and the arena is what decides whether it keeps the
+         * title. Zero on a model that has no net leaves it exactly as it was.
+         */
+        const hiddenUnits = Math.max(0, parseInt(this.section().hiddenUnits, 10) || 0);
+
+        if (hiddenUnits > 0) {
+            options.hiddenUnits = hiddenUnits;
+        }
+
         const trained = trainModel(base, games, options);
 
         const versions = await this.db.query(

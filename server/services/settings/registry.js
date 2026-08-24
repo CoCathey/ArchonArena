@@ -577,6 +577,39 @@ const REGISTRY = {
                 max: 50,
                 default: 8
             },
+            /**
+             * ARCHON (N53): let the model learn its own crosses.
+             *
+             * The model is logistic regression, which is linear, and that has
+             * one consequence which has shaped every piece of learning work
+             * since N21: every candidate at one decision shares a state, so the
+             * state cancels out of the ranking entirely. A linear model can
+             * learn "creatures tend to win games" and can never learn "not
+             * this, not here" unless somebody writes the interaction down as
+             * its own feature - which is what N42, N43, N45 and N46 each did by
+             * hand, and what does not terminate in a game with 2,700 cards.
+             *
+             * A hidden layer learns them instead, for about two thousand
+             * numbers. It is a CORRECTION added to the linear score, never a
+             * replacement: a model without one scores exactly as it always did,
+             * and a candidate that grows one starts as the champion plus a
+             * whisper. Whether the whisper was worth listening to is the
+             * arena's decision, like every other candidate's.
+             *
+             * Zero - the default - leaves the model exactly as it is. It is off
+             * because it has been proven to learn what the linear model cannot
+             * (a planted state-by-move interaction: 50% for the linear model,
+             * 99.7% with a hidden layer) and NOT yet proven to win games, and
+             * this loop's whole doctrine is that the bot can never quietly get
+             * worse.
+             */
+            hiddenUnits: {
+                type: 'number',
+                label: 'Hidden units the next candidate learns with (0 = linear model only)',
+                min: 0,
+                max: 64,
+                default: 0
+            },
             // ARCHON (N48): learning from the people who play here.
             //
             // Every other row in the diary comes from the bot playing itself,

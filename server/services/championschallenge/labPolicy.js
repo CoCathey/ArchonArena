@@ -24,7 +24,20 @@
  * proves training finds it.
  */
 
+const { STATE_KEYS } = require('./labFeatures');
+const { cloneNet, denseInput, denseLayout, emptyNet, forward, netBackprop } = require('./labNet');
+
 const sigmoid = (z) => 1 / (1 + Math.exp(-z));
+
+/**
+ * ARCHON (N53): the dense input layout, built once.
+ *
+ * It is derived from the feature vocabularies rather than written out, so a
+ * context added to `labFeatures` appears here automatically - and appears at
+ * the END, which is the only place it can safely appear. See labNet: a trained
+ * net reads this vector positionally.
+ */
+const DENSE_LAYOUT = denseLayout(STATE_KEYS);
 
 /** A fresh, know-nothing model. */
 function emptyModel() {
@@ -86,6 +99,39 @@ function shrink(weight, count, prior = 0) {
  * @returns {number} in (0, 1)
  */
 function scoreDecision(model, decision) {
+    let z = linearLogit(model, decision);
+
+    /**
+     * ARCHON (N53): the hidden layer's correction, ADDED to the linear score.
+     *
+     * A model with no net scores exactly as it did before this existed, which
+     * is what lets every champion ever trained go on playing the way it
+     * played. And because it is a correction rather than a replacement, the
+     * linear part keeps doing what it is good at - per-card evidence, per-
+     * prompt evidence, shrinkage toward the card-text priors - while the net
+     * only has to learn the interactions nobody wrote down.
+     */
+    if (model.net) {
+        z += forward(model.net, denseInput(decision, DENSE_LAYOUT)).z;
+    }
+
+    return sigmoid(z);
+}
+
+/**
+ * The same score, with the net's contribution supplied by the caller.
+ *
+ * Training has already run the forward pass (it needs the hidden activations
+ * for the backward one), and running it twice is how a forward and a backward
+ * pass come to disagree about which units were active. One logit function,
+ * two callers.
+ */
+function scoreLinear(model, decision, netZ) {
+    return sigmoid(linearLogit(model, decision) + netZ);
+}
+
+/** Everything the sparse tables contribute: the model as it was before N53. */
+function linearLogit(model, decision) {
     let z = 0;
 
     for (const [key, value] of Object.entries(decision.state || {})) {
@@ -111,7 +157,7 @@ function scoreDecision(model, decision) {
         );
     }
 
-    return sigmoid(z);
+    return z;
 }
 
 /**
@@ -177,7 +223,15 @@ function decisionTarget(decision, nextDecision, outcome, lambda, valueOf) {
 function trainModel(
     model,
     games,
-    { learningRate = 0.05, epochs = 2, l2 = 1e-4, lambda = 0.5, targetWeight = 8 } = {}
+    {
+        learningRate = 0.05,
+        epochs = 2,
+        l2 = 1e-4,
+        lambda = 0.5,
+        targetWeight = 8,
+        hiddenUnits = 0,
+        netSeed = 20260824
+    } = {}
 ) {
     const next = {
         version: (model.version || 0) + 1,
@@ -187,6 +241,20 @@ function trainModel(
         cardCounts: { ...(model.cardCounts || {}) },
         promptCounts: { ...(model.promptCounts || {}) },
         trainedGames: (model.trainedGames || 0) + games.length,
+        /**
+         * ARCHON (N53): the hidden layer, deep-copied so training a candidate
+         * can never reach back into the reigning champion's own weights - the
+         * same reason every sparse table above is spread rather than shared.
+         *
+         * A model grows one the first time it is trained with `hiddenUnits`
+         * set, and keeps it thereafter. Zero leaves a model exactly as it was,
+         * which is what an operator who wants nothing to do with this gets.
+         */
+        ...(model.net || hiddenUnits > 0
+            ? {
+                  net: cloneNet(model.net) || emptyNet(DENSE_LAYOUT.length, hiddenUnits, netSeed)
+              }
+            : {}),
         // ARCHON (N38): priors ride along so training predictions score the
         // way play will - a card weight learned against its prior is a
         // CORRECTION to the prior, and correcting against nothing would leave
@@ -236,7 +304,13 @@ function trainModel(
                     .slice(i + 1)
                     .find((entry) => entry.side === decision.side);
                 const label = decisionTarget(decision, nextForSide, outcome, lambda, valueOf);
-                const predicted = scoreDecision(next, decision);
+                // ARCHON (N53): the net's forward pass is computed ONCE and
+                // reused for the prediction and the gradient. Recomputing it in
+                // a backward pass is the classic way for the two to quietly
+                // disagree about which units were active.
+                const vector = next.net ? denseInput(decision, DENSE_LAYOUT) : null;
+                const pass = next.net ? forward(next.net, vector) : null;
+                const predicted = scoreLinear(next, decision, pass ? pass.z : 0);
                 /**
                  * ARCHON: a measured decision counts for more than a guessed
                  * one.
@@ -304,6 +378,13 @@ function trainModel(
                         (next.promptWeights[decision.promptKey] || 0) * (1 - learningRate * l2) -
                         learningRate * gradient;
                 }
+
+                // The net shares the logit, so it shares the derivative
+                // exactly - which is the whole reason it composes with this
+                // trainer instead of needing one of its own.
+                if (pass) {
+                    netBackprop(next.net, vector, pass.hidden, gradient, learningRate, l2);
+                }
             }
         }
     }
@@ -361,8 +442,11 @@ function chooseDecision(model, decisions, temperature, rng) {
 }
 
 module.exports = {
+    DENSE_LAYOUT,
     emptyModel,
+    linearLogit,
     scoreDecision,
+    scoreLinear,
     scoreState,
     trainModel,
     chooseDecision,

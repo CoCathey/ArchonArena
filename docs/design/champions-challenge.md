@@ -858,3 +858,110 @@ One property worth keeping if this is extended: **the pilot flying a rollout
 never plans.** `BotPolicy`'s planner defaults to null, and the planner builds its
 rollout pilots without one — otherwise the first house call inside the first
 rollout would start a second planner, and a third inside that.
+
+## A model that can learn its own crosses (N53)
+
+N52 established what the binding constraint is. The search machinery works — it
+changed the house call on 41% of turns with a clear spread between the choices —
+and it did not win more games, because a search is only as good as the thing it
+optimises. So the value model is the thing to improve.
+
+### The treadmill
+
+`labPolicy` is logistic regression: `Q = sigmoid(w · features)`. Linear, which
+has one consequence that has shaped every piece of learning work since N21:
+**every candidate at one decision shares a state, so the state's contribution is
+identical across them and cancels out of the ranking entirely.** A linear model
+can learn "playing creatures tends to win games" and can never learn "playing
+_this_, _here_, is a waste" — unless somebody writes that interaction down as
+its own feature.
+
+Somebody has, repeatedly. N42 added board-sense crosses, N43 the graded card
+axes, N45 a vocabulary for the race, N46 the afterstate. Every one is a real
+improvement, every one is another column the Challenge has to fill with games
+before it means anything — and the list of interactions in a game with 2,700
+cards does not terminate.
+
+A hidden layer learns them instead. It costs about two thousand numbers.
+
+### A correction, not a replacement
+
+```
+z = w · features + cardWeight + promptWeight + net(dense)
+```
+
+Three things follow, and all three matter more than the extra accuracy:
+
+-   a model with **no net scores exactly as it did before**, so every champion
+    ever trained keeps playing the way it played;
+-   a fresh net starts near zero, so a candidate begins life as **the champion
+    plus a whisper** — the arena is measuring a change, not a replacement;
+-   the linear part goes on doing what it is good at (per-card evidence,
+    per-prompt evidence, shrinkage toward the card-text priors) and the net only
+    has to learn the leftovers.
+
+The output layer is deliberately **not** initialised to zero, tempting as that
+is: it would make a candidate identical to its champion, and it would also make
+the first layer's gradient identically zero, so the hidden units would never
+learn anything at all.
+
+### Why it stays small
+
+A model is a JSON row and it rides to the game node with every table — the
+stated reason `labFeatures` limits the per-card crosses to two. So the input is
+not the sparse feature space (unbounded, a key per card) but a fixed **dense**
+vector of the things whose interactions are worth learning: the 27 state
+features, the 13 action kinds, the 16 board contexts, the 6 AERC axes, the 6
+afterstate deltas, the roles and the synergy flags. Seventy-seven in, one hidden
+layer, one out — about 1,900 parameters, smaller than the per-card weight table
+the model already carries.
+
+**The layout is a contract**, exactly as the feature keys are. A net reads its
+input by position, so appending is safe and reordering silently points every
+weight after the change at some other input. The vocabularies are exported
+frozen from `labFeatures` for that reason.
+
+### What was measured
+
+**Proven, and cleanly.** A planted interaction of exactly the shape a linear
+model cannot represent — two candidates from one position where which is right
+depends on a _state_ feature, and no existing cross covers it:
+
+|                                    | ranking accuracy   |
+| ---------------------------------- | ------------------ |
+| linear model, 4,000 training games | **50.0%** (chance) |
+| with a 24-unit hidden layer        | **99.7%**          |
+
+That is not "does badly" versus "does well". The linear model's score
+difference between the two candidates is `w[a:act:reap] − w[a:act:fight]`, a
+constant no amount of evidence can make depend on the amber. The capability is
+new.
+
+**Not demonstrated: any improvement on real games.** Trained on self-play
+diaries of 100–750 games and scored on held-out games (split by _game_, never by
+decision — two decisions from one game share its outcome), the hidden layer is
+indistinguishable from the linear model. Held-out log loss moved between −0.009
+and +0.020 with no trend, and **run-to-run variance across training slices
+(0.53–0.58) dwarfs every difference measured.** Regularisation did not recover
+it, which rules out simple over-capacity; the honest reading is that
+outcome-labelled self-play is too noisy a signal to fill the extra capacity.
+
+That instability is worth recording on its own account: it appears in the
+**linear** model too, so it is a property of the trainer rather than of the net.
+
+### Where the signal would come from
+
+The rows that could fill a hidden layer are the ones whose value was
+**measured** rather than inferred — the deep bot's lessons, which already train
+at 8× weight (N25) because an outcome label on a turn-3 play in a game thrown
+away on turn 20 points the wrong way. N51 made forking cheap, which is what
+makes more of those rows affordable. That is the order the phases actually go
+in, and this is why `hiddenUnits` ships at **0**: proven to learn what the
+linear model cannot, unproven to win a game, and the loop's whole doctrine is
+that the bot can never quietly get worse.
+
+Turning it on grows a net on the next candidate; the SPRT arena then decides
+whether it takes the title, exactly as for every other candidate. Lowering the
+knob does not tear a net off a champion that already has one — a model keeps
+what it was trained with, and the arena is what decides whether it keeps the
+title.
