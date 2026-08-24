@@ -3882,6 +3882,12 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         entry as unrecognised and the filter was cleared. The menu is `strategyOptions` now and
         the choice stays `strategies`. Found by screenshotting the page.
 
+-   [x] **The per-node game cap is now enforced.** The node's HELLO message read `config.maxGames`
+        while the config file documents `gameNode.maxGames`, and `numGames >= undefined` is false
+        for every number — so an operator who set `gameNode.maxGames` saw no effect at all. The
+        node now advertises `config.gameNode.maxGames`, matching the key `getNextAvailableGameNode`
+        was always comparing against. Covered by `test/server/gameSocketMaxGames.spec.js`.
+
 #### N50 — The rung that is a person _(done)_
 
 **Why:** "a bot has never beat me at the game and I need a way for them to get really good."
@@ -4199,10 +4205,6 @@ measurement that looks like it is working.
 -   [ ] **The admin Restart button is inert.** `NodesAdmin` shells out to `pm2 restart`, and pm2
         is not installed anywhere in this stack — the one control an operator reaches for during
         an incident does nothing and reports nothing. → **N10**.
--   [ ] **The per-node game cap is never enforced.** The node reads `config.maxGames` while the
-        config file documents `gameNode.maxGames`, and `numGames >= undefined` is false for every
-        number. It is unset today either way, so the effect is that a node has no ceiling rather
-        than the wrong one. → **N10**.
 -   [ ] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Game three of an
         Adaptive Bo3 waits for the bid, so a pair who neither bid nor pass leave the round
         waiting on them. The organizer can still award or take a paper result, which is why this
