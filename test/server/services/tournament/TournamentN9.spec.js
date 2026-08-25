@@ -349,7 +349,18 @@ describe('Tournament Adaptive Bo3', function () {
         };
 
         db = {
-            query: vi.fn().mockImplementation(async (sql) => {
+            query: vi.fn().mockImplementation(async (sql, params) => {
+                // Mirrors the real claim UPDATE's jsonb merge, so a deadline
+                // stamped by ensureAdaptiveBidDeadline is visible to whatever
+                // reads the match next, just as it would be against Postgres.
+                if (sql.includes('RETURNING "AdaptiveState"')) {
+                    const patch = JSON.parse(params[1]);
+
+                    match.AdaptiveState = { ...(match.AdaptiveState || {}), ...patch };
+
+                    return [{ AdaptiveState: match.AdaptiveState }];
+                }
+
                 if (sql.includes('FROM "Tournaments"')) {
                     return [tournament];
                 }
@@ -528,5 +539,189 @@ describe('Tournament Adaptive Bo3', function () {
         );
 
         expect(parsed.errors.some((error) => /cannot be sealed/i.test(error))).toBe(true);
+    });
+
+    it('stamps a bid deadline the first time anyone looks at game three', async function () {
+        const state = await service.getAdaptiveState(1, 3, { id: 1 });
+
+        expect(state.bidding.turnDeadlineAt).toBeTruthy();
+        expect(new Date(state.bidding.turnDeadlineAt).getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it('does not restamp a deadline that is already set', async function () {
+        const existing = new Date(Date.now() + 1000).toISOString();
+        match.AdaptiveState = { currentBid: 0, highBidderId: null, turnDeadlineAt: existing };
+
+        const state = await service.getAdaptiveState(1, 3, { id: 1 });
+
+        expect(state.bidding.turnDeadlineAt).toBe(existing);
+    });
+
+    it('refreshes the deadline when the turn passes after a bid', async function () {
+        const state = await service.getAdaptiveState(1, 3, { id: 1 });
+        const bidder = state.bidding.turnUserId;
+
+        await service.adaptiveBid(1, 3, { id: bidder }, 3);
+
+        expect(savedState().turnDeadlineAt).toBeTruthy();
+    });
+});
+
+describe('Tournament Adaptive Bo3 bid timeout', function () {
+    let service;
+    let db;
+    let tournament;
+    let match;
+
+    beforeEach(function () {
+        tournament = { Id: 1, Status: 'active', OrganizerId: 9, AdaptiveBo3: true, Name: 'Cup' };
+        match = {
+            Id: 3,
+            TournamentId: 1,
+            Player1Id: 1,
+            Player2Id: 2,
+            Player1: 'alice',
+            Player2: 'bob',
+            AdaptiveState: null
+        };
+
+        db = { query: vi.fn() };
+        service = new TournamentService(db, { settingsService: { getSection: () => ({}) } });
+    });
+
+    const expiredIso = () => new Date(Date.now() - 1000).toISOString();
+
+    const claimedUpdate = () =>
+        db.query.mock.calls.find(([sql]) =>
+            sql.includes('AND (("AdaptiveState"->>\'turnDeadlineAt\') = $3)')
+        );
+
+    it('does nothing when no bid has timed out', async function () {
+        db.query.mockResolvedValue([]);
+
+        const result = await service.sweepAdaptiveBidTimeouts();
+
+        expect(result.resolved).toBe(0);
+    });
+
+    it('gives the opponent the deck at zero chains when nobody ever bid', async function () {
+        const deadline = expiredIso();
+
+        match.AdaptiveState = {
+            bidDeckOwnerId: 1,
+            currentBid: 0,
+            highBidderId: null,
+            turnUserId: 1,
+            turnDeadlineAt: deadline
+        };
+
+        db.query.mockImplementation(async (sql) => {
+            if (sql.startsWith('SELECT') && sql.includes('FROM "TournamentMatches"')) {
+                return [
+                    {
+                        ...match,
+                        TournamentName: tournament.Name,
+                        OrganizerId: tournament.OrganizerId
+                    }
+                ];
+            }
+
+            if (sql.startsWith('UPDATE') && sql.includes('RETURNING "Id"')) {
+                return [{ Id: match.Id }];
+            }
+
+            return [];
+        });
+
+        const result = await service.sweepAdaptiveBidTimeouts();
+
+        expect(result.resolved).toBe(1);
+
+        const update = claimedUpdate();
+        const resolved = JSON.parse(update[1][1]);
+
+        expect(resolved.resolved).toBe(true);
+        expect(resolved.timedOut).toBe(true);
+        // Player 1 (turnUserId) let the clock run out, so player 2 wins the
+        // nominated deck at no chains - exactly what a live pass would give.
+        expect(resolved.highBidderId).toBe(2);
+        expect(resolved.chains['2']).toBe(0);
+        expect(resolved.decks['2']).toBe(1);
+    });
+
+    it('awards the deck to the standing high bidder when the other side lets the clock run out', async function () {
+        const deadline = expiredIso();
+
+        match.AdaptiveState = {
+            bidDeckOwnerId: 1,
+            currentBid: 6,
+            highBidderId: 1,
+            turnUserId: 2,
+            turnDeadlineAt: deadline
+        };
+
+        db.query.mockImplementation(async (sql) => {
+            if (sql.startsWith('SELECT') && sql.includes('FROM "TournamentMatches"')) {
+                return [
+                    {
+                        ...match,
+                        TournamentName: tournament.Name,
+                        OrganizerId: tournament.OrganizerId
+                    }
+                ];
+            }
+
+            if (sql.startsWith('UPDATE') && sql.includes('RETURNING "Id"')) {
+                return [{ Id: match.Id }];
+            }
+
+            return [];
+        });
+
+        const result = await service.sweepAdaptiveBidTimeouts();
+
+        expect(result.resolved).toBe(1);
+
+        const resolved = JSON.parse(claimedUpdate()[1][1]);
+
+        expect(resolved.highBidderId).toBe(1);
+        expect(resolved.chains['1']).toBe(6);
+        expect(resolved.decks['1']).toBe(1);
+    });
+
+    it('leaves it alone when a real bid or pass wins the race', async function () {
+        const deadline = expiredIso();
+
+        match.AdaptiveState = {
+            bidDeckOwnerId: 1,
+            currentBid: 0,
+            highBidderId: null,
+            turnUserId: 1,
+            turnDeadlineAt: deadline
+        };
+
+        db.query.mockImplementation(async (sql) => {
+            if (sql.startsWith('SELECT') && sql.includes('FROM "TournamentMatches"')) {
+                return [
+                    {
+                        ...match,
+                        TournamentName: tournament.Name,
+                        OrganizerId: tournament.OrganizerId
+                    }
+                ];
+            }
+
+            if (sql.startsWith('UPDATE') && sql.includes('RETURNING "Id"')) {
+                // The real action already flipped the deadline, so the
+                // sweep's conditional claim matches nothing.
+                return [];
+            }
+
+            return [];
+        });
+
+        const result = await service.sweepAdaptiveBidTimeouts();
+
+        expect(result.resolved).toBe(0);
     });
 });

@@ -3887,6 +3887,17 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         for every number — so an operator who set `gameNode.maxGames` saw no effect at all. The
         node now advertises `config.gameNode.maxGames`, matching the key `getNextAvailableGameNode`
         was always comparing against. Covered by `test/server/gameSocketMaxGames.spec.js`.
+-   [x] **`adaptiveBid` / `adaptivePass` now have a timeout and force-resolve.** A game-3 Adaptive
+        Bo3 bid used to wait forever on a pair who neither bid nor passed — the organizer's only
+        recourse was a manual paper result. The panel now stamps a 24-hour deadline the moment
+        either player looks at it (`ensureAdaptiveBidDeadline`, a jsonb merge guarded against
+        clobbering a concurrent bid), refreshes it every time the turn passes, and a per-minute
+        lobby sweep (`sweepAdaptiveBidTimeouts`, riding the existing round-deadline tick) resolves
+        an expired bid exactly as a live pass would — extracted into `resolveAdaptivePass` so the
+        two paths cannot disagree about what "pass" means. The sweep's write is a conditional claim
+        keyed on the deadline it read, so a bid or pass landing in the same instant beats it rather
+        than being overwritten. Both players are notified (`tournament.adaptiveBid`), and the panel
+        now shows the deadline. Covered by `test/server/services/tournament/TournamentN9.spec.js`.
 
 #### N50 — The rung that is a person _(done)_
 
@@ -4280,10 +4291,6 @@ does not. What was wrong was which way to relax.
 -   [ ] **The admin Restart button is inert.** `NodesAdmin` shells out to `pm2 restart`, and pm2
         is not installed anywhere in this stack — the one control an operator reaches for during
         an incident does nothing and reports nothing. → **N10**.
--   [ ] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Game three of an
-        Adaptive Bo3 waits for the bid, so a pair who neither bid nor pass leave the round
-        waiting on them. The organizer can still award or take a paper result, which is why this
-        is a defect and not a blocker. → **N9**.
 -   [ ] **`docs/README.md` and `AGENTS.md` still say "Keyteki".** Both describe the project by
         its pre-fork name and neither lists the platform documentation (`DEVELOPMENT.md`,
         `DEPLOYMENT.md`, `SECURITY.md`, `UPSTREAM.md`, `docs/design/`) that has been written

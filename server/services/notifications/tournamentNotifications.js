@@ -268,6 +268,43 @@ function install({ tournamentService, notificationService }) {
         }
     };
 
+    // ARCHON: the adaptive bid sweep found a game-3 negotiation nobody
+    // answered in time. The silent player is told what happened to them;
+    // the other player is told they won the deck by default - both facts
+    // are useful, and neither is obvious from the panel going quiet.
+    const onAdaptiveBidTimedOut = async (payload) => {
+        try {
+            const timedOutId = payload.timedOutUserId;
+            const winnerId = payload.winnerOfBid;
+            const url = scheduleUrl(payload);
+
+            await notificationService.notifyMany([
+                {
+                    userId: timedOutId,
+                    category: 'tournament.adaptiveBid',
+                    title: `Bid timed out - ${payload.tournamentName}`,
+                    body: 'You did not respond to the game 3 chain bid in time. Your opponent takes the nominated deck by default.',
+                    url,
+                    data: { tournamentId: payload.tournamentId, matchId: payload.matchId },
+                    dedupeKey: `tournament.adaptiveBid:${payload.matchId}:${timedOutId}`
+                },
+                {
+                    userId: winnerId,
+                    category: 'tournament.adaptiveBid',
+                    title: `Bid resolved - ${payload.tournamentName}`,
+                    body: `Your opponent did not respond to the game 3 chain bid in time. You pilot the nominated deck${
+                        payload.chains ? ` carrying ${payload.chains} chain(s)` : ' at no chains'
+                    }.`,
+                    url,
+                    data: { tournamentId: payload.tournamentId, matchId: payload.matchId },
+                    dedupeKey: `tournament.adaptiveBid:${payload.matchId}:${winnerId}`
+                }
+            ]);
+        } catch (err) {
+            logger.error(`Failed to notify adaptive bid timeout for match ${payload.matchId}`, err);
+        }
+    };
+
     // Listeners are async; the emitter does not await them, which is exactly
     // the decoupling we want - but it also means a rejection would be unhandled,
     // so each handler resolves rather than throws.
@@ -295,6 +332,9 @@ function install({ tournamentService, notificationService }) {
     tournamentEvents.on('matchTimeApproaching', (payload) => {
         onMatchTimeApproaching(payload);
     });
+    tournamentEvents.on('adaptiveBidTimedOut', (payload) => {
+        onAdaptiveBidTimedOut(payload);
+    });
 
     return {
         onRoundPaired,
@@ -304,7 +344,8 @@ function install({ tournamentService, notificationService }) {
         onMatchScheduleCleared,
         onRoundDeadlinePassed,
         onRoundDeadlineApproaching,
-        onMatchTimeApproaching
+        onMatchTimeApproaching,
+        onAdaptiveBidTimedOut
     };
 }
 

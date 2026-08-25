@@ -449,6 +449,84 @@ describe('a tournament end to end, on real PostgreSQL', function () {
     );
 
     /**
+     * The Adaptive Bo3 bid timeout, over real rows and real jsonb - the fake
+     * db cannot fail on a `->>` operator, a `::timestamptz` cast, or a jsonb
+     * `||` merge that does not do what it reads like it does.
+     */
+    maybe(
+        'force-resolves an Adaptive game-3 bid nobody answered in time',
+        async function () {
+            const alice = users.player7;
+            const bob = users.player8;
+
+            const created = await service.create(alice, {
+                name: 'Adaptive Timeout Cup',
+                format: 'swiss',
+                roundCount: 1,
+                adaptiveBo3: true
+            });
+
+            expect(created.success, created.message).toBe(true);
+            const id = created.id;
+
+            await service.register(id, alice, { deckId: alice.deckId });
+            await service.register(id, bob, { deckId: bob.deckId });
+            await service.start(id, alice);
+
+            const detail = await service.getDetail(id, alice);
+            const match = detail.matches.find((entry) => entry.player1Id && entry.player2Id);
+
+            // Skip straight to 1-1: the bid only exists at game three, and
+            // getting there through real games is not what this test is for.
+            await db.query(
+                'UPDATE "TournamentMatches" SET "Player1Wins" = 1, "Player2Wins" = 1 WHERE "Id" = $1',
+                [match.id]
+            );
+
+            // Looking at the panel is what starts the clock.
+            const opened = await service.getAdaptiveState(id, match.id, alice);
+            expect(opened.gameNumber).toBe(3);
+            expect(opened.bidding.resolved).toBe(false);
+            expect(opened.bidding.turnDeadlineAt).toBeTruthy();
+
+            // Nothing bid or passed. A sweep before the deadline touches
+            // nothing.
+            expect((await service.sweepAdaptiveBidTimeouts()).resolved).toBe(0);
+            expect((await service.getAdaptiveState(id, match.id, alice)).bidding.resolved).toBe(
+                false
+            );
+
+            // Age the deadline into the past, exactly the merge
+            // ensureAdaptiveBidDeadline itself performs.
+            await db.query(
+                'UPDATE "TournamentMatches" SET "AdaptiveState" = "AdaptiveState" || $2::jsonb ' +
+                    'WHERE "Id" = $1',
+                [
+                    match.id,
+                    JSON.stringify({ turnDeadlineAt: new Date(Date.now() - 1000).toISOString() })
+                ]
+            );
+
+            const swept = await service.sweepAdaptiveBidTimeouts();
+            expect(swept.resolved).toBe(1);
+
+            const resolved = await service.getAdaptiveState(id, match.id, alice);
+            expect(resolved.bidding.resolved).toBe(true);
+            // Nobody bid, so whoever's turn it was forfeits the choice and
+            // the other player takes the nominated deck at zero chains -
+            // exactly what a live pass would have produced.
+            const silentPlayer = opened.bidding.turnUserId;
+            const otherPlayer = silentPlayer === alice.id ? bob.id : alice.id;
+            expect(resolved.bidding.highBidderId).toBe(otherPlayer);
+            expect(resolved.bidding.chains[String(silentPlayer)]).toBe(0);
+
+            // A second sweep finds nothing left to do.
+            expect((await service.sweepAdaptiveBidTimeouts()).resolved).toBe(0);
+        },
+        60000
+    );
+
+    /**
      * Asynchronous events are the pacing where the platform, not a room full
      * of people, is doing the organizing - so the SQL that moves the deadline
      * with each round is the part that has to be right.

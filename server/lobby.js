@@ -1199,6 +1199,15 @@ class Lobby {
                         `${reminders.reminded} match(es) starting soon`
                 );
             }
+
+            // ARCHON: the same tick force-resolves an Adaptive Bo3 game-3 bid
+            // nobody answered in time, so a silent pair no longer stalls the
+            // round forever - see TournamentService.sweepAdaptiveBidTimeouts.
+            const bids = await this.tournamentService.sweepAdaptiveBidTimeouts();
+
+            if (bids && bids.resolved > 0) {
+                logger.info(`Force-resolved ${bids.resolved} expired adaptive bid(s)`);
+            }
         } catch (err) {
             logger.error('Tournament round deadline sweep failed', err);
         } finally {

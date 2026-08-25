@@ -25,7 +25,7 @@ const AdaptiveBidding = ({ tournamentId, matchId, players }) => {
     }
 
     const nameOf = (userId) =>
-        players?.find((player) => player.id === userId)?.username || t('Player');
+        players?.find((player) => player.userId === userId)?.username || t('Player');
 
     if (data.gameNumber < 3) {
         return (
@@ -97,6 +97,11 @@ const AdaptiveBidding = ({ tournamentId, matchId, players }) => {
                 </div>
                 <div className='text-xs text-muted'>
                     {t('Waiting on {{name}}.', { name: nameOf(myTurn) })}
+                    {bidding.turnDeadlineAt &&
+                        ' ' +
+                            t('Resolves automatically at {{time}} if nobody acts.', {
+                                time: new Date(bidding.turnDeadlineAt).toLocaleString()
+                            })}
                 </div>
                 <div className='flex flex-wrap items-center gap-2'>
                     <input

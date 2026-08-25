@@ -54,6 +54,13 @@ const CATEGORIES = {
             'A round deadline in an asynchronous event has passed with your match unplayed, or (for organizers) with matches outstanding.',
         defaults: { inApp: true, email: true, push: true }
     },
+    'tournament.adaptiveBid': {
+        group: 'Tournaments',
+        label: 'Adaptive bid timeouts',
+        description:
+            'A game-3 chain bid in an Adaptive Bo3 timed out and was resolved automatically.',
+        defaults: { inApp: true, email: true, push: true }
+    },
     'friend.request': {
         group: 'Community',
         label: 'Friend requests',
