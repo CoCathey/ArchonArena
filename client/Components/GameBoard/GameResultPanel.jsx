@@ -1,8 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useDispatch } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 
 import AmberValue from '../Site/AmberValue';
+import Link from '../Navigation/Link';
 import { useGetGameRatingQuery } from '../../redux/api';
+import {
+    gameCloseRequested,
+    gameSendMessage,
+    lobbyLeaveGameRequested
+} from '../../redux/socketActions';
 
 const POOL_LABELS = {
     archon: 'Archon',
@@ -58,6 +66,8 @@ const RATING_POLL_ATTEMPTS = 30;
 
 const GameResultPanel = ({ gameId, username, winner }) => {
     const { t } = useTranslation();
+    const dispatch = useDispatch();
+    const navigate = useNavigate();
     // Fixed at mount rather than counted per request, so a slow network cannot
     // stretch the wait indefinitely.
     const [deadline] = useState(() => Date.now() + RATING_POLL_MS * RATING_POLL_ATTEMPTS);
@@ -67,6 +77,48 @@ const GameResultPanel = ({ gameId, username, winner }) => {
         skip: !gameId,
         pollingInterval
     });
+
+    // ARCHON: leave the finished game the same way the top-bar "Leave Game"
+    // control does (both sockets, so a dead game socket can never strand the
+    // player here) - this is only ever rendered once `currentGame.winner` is
+    // set, so there is no active game left to concede.
+    const onBackToLobby = () => {
+        dispatch(gameSendMessage('leavegame'));
+        if (gameId) {
+            dispatch(lobbyLeaveGameRequested(gameId));
+        }
+        dispatch(gameCloseRequested());
+        navigate('/');
+    };
+
+    // The replay is written as an independent, best-effort consequence of the
+    // same persist that the rating read above is waiting on (see GAMEWIN in
+    // gamerouter.js) - so "the Games row exists" (rating no longer `pending`)
+    // is the same signal that tells us the replay page will not 403 the
+    // player out of their own just-finished game or claim it doesn't exist.
+    const replayReady = !!data && !data.pending;
+
+    const renderActions = () => (
+        <div className='mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs'>
+            {replayReady ? (
+                <Link
+                    href={`/replay/${gameId}`}
+                    className='font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200'
+                >
+                    {t('View Replay')}
+                </Link>
+            ) : (
+                <span className='text-muted'>{t('Preparing replay...')}</span>
+            )}
+            <button
+                type='button'
+                onClick={onBackToLobby}
+                className='font-medium text-muted underline underline-offset-2 hover:text-foreground'
+            >
+                {t('Back to Lobby')}
+            </button>
+        </div>
+    );
 
     // Stop as soon as the answer is final: the rating arrived, the server says
     // none is coming, or we have waited long enough. Asking once and caching
@@ -91,6 +143,7 @@ const GameResultPanel = ({ gameId, username, winner }) => {
         return (
             <div className='rounded-md border border-border/60 bg-surface-secondary/60 px-3 py-2 text-center text-xs text-muted'>
                 {t('Rating this game...')}
+                {renderActions()}
             </div>
         );
     }
@@ -111,6 +164,7 @@ const GameResultPanel = ({ gameId, username, winner }) => {
         return (
             <div className='rounded-md border border-border/60 bg-surface-secondary/60 px-3 py-2 text-center text-xs text-muted'>
                 {t('Still rating this game — it will appear in your Amber history shortly.')}
+                {renderActions()}
             </div>
         );
     }
@@ -128,6 +182,7 @@ const GameResultPanel = ({ gameId, username, winner }) => {
                     ? t('{{winner}} won. This game was not rated.', { winner })
                     : t('This game was not rated.')}
                 {reason ? <span className='ml-1'>{t(reason)}</span> : null}
+                {renderActions()}
             </div>
         );
     }
@@ -187,6 +242,7 @@ const GameResultPanel = ({ gameId, username, winner }) => {
                     </span>
                 )}
             </div>
+            {renderActions()}
         </div>
     );
 };

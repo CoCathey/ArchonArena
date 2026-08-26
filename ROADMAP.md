@@ -287,8 +287,11 @@ matters most. Players finished a rated game with no feedback that anything had h
         placement countdown while a rating is still provisional.
 -   [x] Unrated games render an explicit "not rated" line rather than a blank panel — an
         unrated game is a 200 with `rated: false`, not a 404 the client has to interpret.
--   [ ] Rematch / view-replay / back-to-lobby actions alongside the result (the engine's own
-        rematch prompt already sits directly below it).
+-   [x] Rematch / view-replay / back-to-lobby actions alongside the result (the engine's own
+        rematch prompt already sits directly below it; the panel adds View Replay, disabled
+        until the replay's own read confirms the game row is persisted so it can never 403 or
+        404 the winner out of the game they just finished, and Back to Lobby, which leaves
+        over both sockets the same way the top-bar control does).
 
 **Blocks:** N4.
 **Acceptance criteria**
@@ -3669,7 +3672,7 @@ turns a feature-complete site into a habit.
         it (the other is SSO-only mode, Phase 3).
 -   [x] **Queue health telemetry** (depth, wait time) — recorded as it happens, since the
         queue is in-memory and leaves no trace afterwards (migration 45).
--   [ ] Rematch, view-replay and back-to-lobby actions alongside the result panel itself → **I4**.
+-   [x] Rematch, view-replay and back-to-lobby actions alongside the result panel itself → **I4**.
         The engine's own rematch prompt sits below it and works; these are the deliberate
         follow-ons.
 
