@@ -67,4 +67,27 @@ describe('navigation that actually navigates', function () {
         // A Link, so the route actually changes.
         expect(source).toMatch(/<Link\b[\s\S]{0,400}?champions-challenge/);
     });
+
+    /**
+     * ARCHON: the mute-spectators control put `onClick` on the decorative
+     * `<Icon>` instead of the `<a>` wrapping it. A mouse click on the svg
+     * glyph itself happened to still work, which is exactly what let this
+     * ship - Tab-and-Enter on the focused link never called the handler, and
+     * neither did a click anywhere else on the link. Every sibling control in
+     * the same file puts `onClick` on the `<a>`, so this pattern is always a
+     * mistake here: an `<Icon>` is decoration, never the click target.
+     */
+    it('never puts onClick on the decorative Icon instead of its link', function () {
+        const offenders = [];
+
+        for (const file of files) {
+            const source = fs.readFileSync(file, 'utf8');
+
+            if (/<Icon\b[^>]*\bonClick=/.test(source)) {
+                offenders.push(path.relative(CLIENT, file));
+            }
+        }
+
+        expect(offenders).toEqual([]);
+    });
 });

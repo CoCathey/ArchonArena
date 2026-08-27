@@ -331,11 +331,16 @@ const PlayerStats = ({
             {showMessages && (
                 <div className='state'>
                     <div className='state'>
-                        <a href='#' className='pr-1 pl-1'>
+                        <a
+                            href='#'
+                            className='pr-1 pl-1'
+                            onClick={onMuteClick}
+                            aria-label={t('Mute spectators')}
+                        >
                             <Icon
                                 icon={muteSpectators ? faEyeSlash : faEye}
-                                onClick={onMuteClick}
-                            ></Icon>
+                                title={t('Mute spectators')}
+                            />
                         </a>
                     </div>
                     <div className='state'>
