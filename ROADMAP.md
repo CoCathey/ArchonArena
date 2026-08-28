@@ -110,8 +110,7 @@ ends games in progress.
 -   **The zero-downtime deploy was built and reverted** (895b773 reverting aedefdd and
     86f5cfa): games could not be started on the deployed stack, which is worse than the problem
     it solved. `deploy/update.sh` runs `up -d --build` again, so a deploy still ends every game
-    in progress, the node's health port is read-only, and the admin Restart button is inert
-    (it shells out to `pm2`, which is not installed). Reverted with it, and worth restating:
+    in progress, and the node's health port is read-only. Reverted with it, and worth restating:
     a game result published while the lobby is restarting is dropped with no retry, so that
     game is never recorded, rated or replayed. → **N10**.
 -   **SAS on the lobby game list.** Deliberately skipped, not missed: decks are not chosen for
@@ -1034,8 +1033,17 @@ keyteki card fixes need a routine path in.
     -   `deploy/update.sh` runs `up -d --build` directly, so a deploy replaces every container
         at once and ends every game in progress.
     -   The node's health port is three read-only routes again; a node cannot be stood down.
-    -   The admin Restart button shells out to `pm2 restart`, and pm2 is not installed anywhere
-        in this stack — the one control an operator reaches for during an incident is inert.
+    -   [x] **Fixed 2026-08-28.** The admin Restart button shelled out to `pm2 restart`, and pm2
+            is not installed anywhere in this stack — the one control an operator reaches for during
+            an incident did nothing and said nothing. It now emits `onRestart` instead, which
+            `GameServer` wires to the same `HealthServer.startDraining()` SIGTERM already used: stop
+            accepting new games, exit once the ones in flight finish (or the 90-minute drain times
+            out), and let the container's `restart: unless-stopped` policy bring it back. Verified
+            locally end to end — clicking Restart flips the node to `draining` in the admin table and
+            `/health/ready`, a game already in progress is left alone (`numGames` stays put, the
+            process does not exit under it), and a node with nothing running exits cleanly within one
+            drain-check tick. This is only the button; the rest of the row below (quiesce as a
+            deploy step, a second node to roll onto) is still open.
     -   The per-node game cap is read from a key the config file does not document, so it is
         never enforced.
     -   A game result published while the lobby is restarting is dropped with no retry, so a
@@ -4280,9 +4288,6 @@ does not. What was wrong was which way to relax.
         game is never recorded, rated or replayed, and nothing tells either player. A fix landed
         with the zero-downtime work and went back out with the revert, so this is live again.
         → **N10**.
--   [ ] **The admin Restart button is inert.** `NodesAdmin` shells out to `pm2 restart`, and pm2
-        is not installed anywhere in this stack — the one control an operator reaches for during
-        an incident does nothing and reports nothing. → **N10**.
 -   [ ] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Game three of an
         Adaptive Bo3 waits for the bid, so a pair who neither bid nor pass leave the round
         waiting on them. The organizer can still award or take a paper result, which is why this

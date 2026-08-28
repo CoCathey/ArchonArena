@@ -79,6 +79,7 @@ class GameServer {
         this.gameSocket.on('onFailedConnect', this.onFailedConnect.bind(this));
         this.gameSocket.on('onCloseGame', this.onCloseGame.bind(this));
         this.gameSocket.on('onCardData', this.onCardData.bind(this));
+        this.gameSocket.on('onRestart', this.onRestart.bind(this));
 
         var server = undefined;
 
@@ -884,6 +885,18 @@ class GameServer {
 
     onCardData(cardData) {
         this.cardData = cardData;
+    }
+
+    // ARCHON: the admin "Restart" button used to shell out to `pm2 restart`,
+    // which does nothing on this stack - the game nodes run under Docker
+    // (`restart: unless-stopped`), not pm2. Reuse the same graceful drain
+    // HealthServer already runs for SIGTERM: stop accepting new games, exit
+    // once the ones in flight finish (or after the drain timeout), and let
+    // the container's restart policy bring the node back up.
+    onRestart() {
+        if (this.healthServer) {
+            this.healthServer.startDraining();
+        }
     }
 
     onConnection(ioSocket) {

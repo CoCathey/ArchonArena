@@ -1,5 +1,4 @@
 const EventEmitter = require('events');
-const { spawnSync } = require('child_process');
 
 const config = require('config');
 const logger = require('../log.js');
@@ -164,8 +163,13 @@ class GameSocket extends EventEmitter {
                 this.emit('onCloseGame', message.arg.gameId);
                 break;
             case 'RESTART':
-                logger.error('Got told to restart, executing pm2 restart..');
-                spawnSync('pm2', ['restart', this.nodeName]);
+                // This stack runs game nodes under Docker (`restart: unless-stopped`),
+                // not pm2 - there is no pm2 binary to shell out to. Draining and exiting
+                // reuses the same graceful shutdown HealthServer already does for SIGTERM
+                // (docs/DEPLOYMENT.md), so the container's own restart policy brings the
+                // node back once its games have finished.
+                logger.info('Got told to restart - starting graceful drain');
+                this.emit('onRestart');
                 break;
             case 'LOBBYHELLO':
                 this.emit('onGameSync', this.onGameSync.bind(this));
