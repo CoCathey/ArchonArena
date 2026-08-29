@@ -16,6 +16,10 @@ const {
 const { countsTowardLadder } = require('./services/championschallenge/humanLadder');
 const { detectBinary } = require('./util');
 
+// ARCHON (N10): matches the key a game node queues a result onto - see the
+// comment on `send()` in gamenode/gamesocket.js.
+const PENDING_GAME_RESULTS_KEY = 'pendingGameResults';
+
 class GameRouter extends EventEmitter {
     /**
      * @param {import("./services/ConfigService.js")} configService
@@ -46,11 +50,20 @@ class GameRouter extends EventEmitter {
             })
             .then(() => {
                 this.sendCommand('allnodes', 'LOBBYHELLO');
+                // ARCHON (N10): catch up on any result a node queued while
+                // this process was down or still starting - the wake-up
+                // publish for it may already have come and gone with nobody
+                // subscribed yet to hear it.
+                this.drainPendingGameResults();
             });
 
         this.publisher.connect();
 
         setInterval(this.checkTimeouts.bind(this), 1000 * 60);
+        // ARCHON (N10): a periodic safety net alongside the startup drain
+        // above and the ack on every live GAMEWIN below, in case a result
+        // ever lands in the queue with nothing around to notice it arrive.
+        setInterval(this.drainPendingGameResults.bind(this), 1000 * 30);
     }
 
     // External methods
@@ -316,6 +329,116 @@ class GameRouter extends EventEmitter {
         ).catch((err) => logger.error('Failed to record a practice game on the human ladder', err));
     }
 
+    /**
+     * ARCHON: persist the result, then save the replay and rate the game.
+     * Best effort and idempotent; never blocks the game flow. The lobby also
+     * listens so tournament matches auto-report.
+     *
+     * Saving the replay and rating the game are INDEPENDENT consequences of
+     * a game finishing, and are run that way. They used to be chained -
+     * `update -> saveReplay -> processGame` - which quietly made rating
+     * conditional on the replay working. A deployment whose database was
+     * missing "GameReplays" hit exactly that: saveReplay rejected, the chain
+     * skipped straight to the catch, and a month of games finished normally
+     * without ever reaching the ladder. Nothing was broken about rating.
+     *
+     * Rating still runs after `update`, because it reads the rows that
+     * writes. Only the replay dependency is removed.
+     *
+     * Called from the live GAMEWIN message and (N10) from the durable queue
+     * a node also wrote the same payload to, so this must stay safe to run
+     * twice for the same game - which it is: `update` and `saveReplay` are
+     * plain overwrites/upserts, and `processGame` already checks
+     * `RatingHistory` before moving anyone's rating.
+     *
+     * @param {object} arg the GAMEWIN payload
+     */
+    handleGameWin(arg) {
+        // ARCHON (N48): the people who just played it taught the bot
+        // something. A third independent consequence, deliberately outside
+        // the chain below: a diary write must never be able to cost a game
+        // its record, its replay or its rating.
+        this.recordHumanGame(arg);
+        // ARCHON (N50): and how the bot did against them. A fourth
+        // independent consequence, outside the chain for the same reason the
+        // third is.
+        this.recordHumanLadderGame(arg);
+
+        Promise.resolve(this.gameService.update(arg.game))
+            .then(() =>
+                Promise.allSettled([
+                    this.gameService.saveReplay(arg.game.gameId, arg.replay),
+                    // ARCHON (F9): a practice game is recorded and replayable,
+                    // and is never a result: no Amber moves, no record
+                    // changes. The guard is here rather than inside the
+                    // rating engine because this is where "should this
+                    // count" is known.
+                    arg.game && arg.game.botGame
+                        ? Promise.resolve({ skipped: true })
+                        : this.ratingService.processGame(arg.game.gameId)
+                ])
+            )
+            .then(([replay, rating]) => {
+                // Reported separately so the log names which one failed.
+                // "Failed to save/rate" told you neither.
+                if (replay.status === 'rejected') {
+                    logger.error(
+                        `Failed to save the replay for game ${arg.game.gameId}`,
+                        replay.reason
+                    );
+                }
+                if (rating.status === 'rejected') {
+                    logger.error(`Failed to rate game ${arg.game.gameId}`, rating.reason);
+                }
+            })
+            .catch((err) =>
+                // Only `update` reaches here now. If that failed there is no
+                // persisted game to replay or rate in the first place.
+                logger.error('Failed to persist finished game', err)
+            );
+
+        this.emit('onGameWin', arg.game);
+    }
+
+    /**
+     * ARCHON (N10): a game result a node queued durably in Redis (see
+     * gamesocket.js) rather than only publishing - pub/sub delivers to
+     * whoever is subscribed at the instant of the publish and drops the
+     * message for good otherwise, which is exactly what happens to a result
+     * published while this process is mid-restart. `handleGameWin` is safe
+     * to run twice, so replaying an entry the live path already handled
+     * costs nothing but a wasted call.
+     */
+    async drainPendingGameResults() {
+        for (;;) {
+            let raw;
+
+            try {
+                raw = await this.publisher.lPop(PENDING_GAME_RESULTS_KEY);
+            } catch (err) {
+                logger.error('Failed to drain pending game results', err);
+                return;
+            }
+
+            if (!raw) {
+                return;
+            }
+
+            let message;
+
+            try {
+                message = JSON.parse(raw);
+            } catch (err) {
+                logger.error(`Error decoding queued game result '${raw}'`, err);
+                continue;
+            }
+
+            if (message.command === 'GAMEWIN') {
+                this.handleGameWin(message.arg);
+            }
+        }
+    }
+
     // Events
     /**
      * @param {Error} err
@@ -382,71 +505,19 @@ class GameRouter extends EventEmitter {
 
                 break;
             case 'GAMEWIN':
-                // ARCHON: persist the result, then save the replay and rate the
-                // game. Best effort and idempotent; never blocks the game flow.
-                // The lobby also listens so tournament matches auto-report.
-                //
-                // Saving the replay and rating the game are INDEPENDENT
-                // consequences of a game finishing, and are run that way. They
-                // used to be chained - `update -> saveReplay -> processGame` -
-                // which quietly made rating conditional on the replay working.
-                // A deployment whose database was missing "GameReplays" hit
-                // exactly that: saveReplay rejected, the chain skipped straight
-                // to the catch, and a month of games finished normally without
-                // ever reaching the ladder. Nothing was broken about rating.
-                //
-                // Rating still runs after `update`, because it reads the rows
-                // that writes. Only the replay dependency is removed.
-                // ARCHON (N48): the people who just played it taught the bot
-                // something. A third independent consequence, deliberately
-                // outside the chain below: a diary write must never be able
-                // to cost a game its record, its replay or its rating.
-                this.recordHumanGame(message.arg);
-                // ARCHON (N50): and how the bot did against them. A fourth
-                // independent consequence, outside the chain for the same
-                // reason the third is.
-                this.recordHumanLadderGame(message.arg);
+                this.handleGameWin(message.arg);
 
-                Promise.resolve(this.gameService.update(message.arg.game))
-                    .then(() =>
-                        Promise.allSettled([
-                            this.gameService.saveReplay(
-                                message.arg.game.gameId,
-                                message.arg.replay
-                            ),
-                            // ARCHON (F9): a practice game is recorded and
-                            // replayable, and is never a result: no Amber
-                            // moves, no record changes. The guard is here
-                            // rather than inside the rating engine because
-                            // this is where "should this count" is known.
-                            message.arg.game && message.arg.game.botGame
-                                ? Promise.resolve({ skipped: true })
-                                : this.ratingService.processGame(message.arg.game.gameId)
-                        ])
-                    )
-                    .then(([replay, rating]) => {
-                        // Reported separately so the log names which one failed.
-                        // "Failed to save/rate" told you neither.
-                        if (replay.status === 'rejected') {
-                            logger.error(
-                                `Failed to save the replay for game ${message.arg.game.gameId}`,
-                                replay.reason
-                            );
-                        }
-                        if (rating.status === 'rejected') {
-                            logger.error(
-                                `Failed to rate game ${message.arg.game.gameId}`,
-                                rating.reason
-                            );
-                        }
-                    })
-                    .catch((err) =>
-                        // Only `update` reaches here now. If that failed there is
-                        // no persisted game to replay or rate in the first place.
-                        logger.error('Failed to persist finished game', err)
-                    );
+                // ARCHON (N10): the node also queued this result durably
+                // (gamesocket.js) in case nobody was listening when it
+                // published. This message proves somebody was, so drop the
+                // matching entry rather than leave it to be replayed later.
+                // Best effort - `handleGameWin` is idempotent in everything
+                // that matters, so a queued duplicate the removal missed
+                // costs at most a wasted reprocess, never the result itself.
+                this.publisher
+                    .lRem(PENDING_GAME_RESULTS_KEY, 1, msg)
+                    .catch((err) => logger.error('Failed to clear queued game result', err));
 
-                this.emit('onGameWin', message.arg.game);
                 break;
             case 'REMATCH':
                 // ARCHON: the rejection handler GAMEWIN has and these three did

@@ -38,6 +38,9 @@ const drive = async ({ saveReplay, update = async () => {} }) => {
     };
     router.emit = () => {};
     router.workers = { 'worker-1': { numGames: 1 } };
+    // ARCHON (N10): the live GAMEWIN path acks the durable queue a node also
+    // writes the same result to.
+    router.publisher = { lRem: async () => {} };
 
     router.onMessage(
         JSON.stringify({
@@ -95,6 +98,7 @@ describe('GAMEWIN handling', function () {
         };
         router.emit = () => {};
         router.workers = {};
+        router.publisher = { lRem: async () => {} };
 
         router.onMessage(
             JSON.stringify({
@@ -124,5 +128,102 @@ describe('GAMEWIN handling', function () {
         expect(calls.update).toBe(1);
         expect(calls.saveReplay).toBe(0);
         expect(calls.processGame).toBe(0);
+    });
+});
+
+/**
+ * ARCHON (N10): a node queues every GAMEWIN durably (gamesocket.js) in
+ * addition to publishing it, because pub/sub drops the message for good if
+ * nobody is subscribed at the instant of the publish - which is exactly what
+ * a lobby restart did to a result published in that window. These pin the
+ * two halves of the fix: a live GAMEWIN acks (removes) its queued entry, and
+ * a leftover entry - one the lobby was down to hear published - gets caught
+ * up by the drain.
+ */
+describe('GAMEWIN durability queue', function () {
+    it('acks the queued entry once the live message is handled', async function () {
+        const router = Object.create(GameRouter.prototype);
+        const removed = [];
+
+        router.gameService = { update: async () => {}, saveReplay: async () => 'stored' };
+        router.ratingService = { processGame: async () => {} };
+        router.emit = () => {};
+        router.workers = { 'worker-1': { numGames: 1 } };
+        router.publisher = {
+            lRem: async (key, count, entry) => {
+                removed.push({ key, count, entry });
+            }
+        };
+
+        const raw = JSON.stringify({
+            identity: 'worker-1',
+            command: 'GAMEWIN',
+            arg: { game: { gameId: 'uuid-1' }, replay: {} }
+        });
+
+        router.onMessage(raw, 'nodemessage');
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        expect(removed).toEqual([{ key: 'pendingGameResults', count: 1, entry: raw }]);
+    });
+
+    it('drains a queued result nobody was listening for', async function () {
+        const calls = { update: 0, saveReplay: 0, processGame: 0 };
+        const router = Object.create(GameRouter.prototype);
+
+        router.gameService = {
+            update: async () => {
+                calls.update++;
+            },
+            saveReplay: async () => {
+                calls.saveReplay++;
+
+                return 'stored';
+            }
+        };
+        router.ratingService = {
+            processGame: async () => {
+                calls.processGame++;
+            }
+        };
+        router.emit = () => {};
+
+        const queued = [
+            JSON.stringify({
+                identity: 'worker-1',
+                command: 'GAMEWIN',
+                arg: { game: { gameId: 'uuid-1' }, replay: {} }
+            })
+        ];
+
+        router.publisher = {
+            lPop: async () => queued.shift() || null
+        };
+
+        await router.drainPendingGameResults();
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        expect(calls.update).toBe(1);
+        expect(calls.saveReplay).toBe(1);
+        expect(calls.processGame).toBe(1);
+    });
+
+    it('leaves the queue alone when it is empty', async function () {
+        const router = Object.create(GameRouter.prototype);
+        let popCalls = 0;
+
+        router.publisher = {
+            lPop: async () => {
+                popCalls++;
+
+                return null;
+            }
+        };
+
+        await router.drainPendingGameResults();
+
+        expect(popCalls).toBe(1);
     });
 });

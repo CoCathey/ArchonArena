@@ -21,6 +21,9 @@ class RedisClientFactory {
         const originalSet = client.set.bind(client);
         const originalPublish = client.publish.bind(client);
         const originalSubscribe = client.subscribe.bind(client);
+        const originalRPush = client.rPush.bind(client);
+        const originalLPop = client.lPop.bind(client);
+        const originalLRem = client.lRem.bind(client);
 
         client.get = async function (key) {
             return originalGet(prefix + key);
@@ -28,6 +31,18 @@ class RedisClientFactory {
 
         client.set = async function (key, value, options) {
             return originalSet(prefix + key, value, options);
+        };
+
+        client.rPush = async function (key, element) {
+            return originalRPush(prefix + key, element);
+        };
+
+        client.lPop = async function (key) {
+            return originalLPop(prefix + key);
+        };
+
+        client.lRem = async function (key, count, element) {
+            return originalLRem(prefix + key, count, element);
         };
 
         client.publish = async function (channel, message) {

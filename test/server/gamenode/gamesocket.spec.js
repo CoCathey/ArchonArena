@@ -28,7 +28,8 @@ describe('GameSocket', function () {
                 connect: vi.fn().mockResolvedValue(undefined),
                 get: vi.fn().mockResolvedValue(null),
                 subscribe: vi.fn().mockResolvedValue(undefined),
-                publish: vi.fn().mockResolvedValue(undefined)
+                publish: vi.fn().mockResolvedValue(undefined),
+                rPush: vi.fn().mockResolvedValue(undefined)
             }));
 
         gameSocket = new GameSocket(new ConfigService(), undefined, 'http', 'test');
@@ -54,6 +55,40 @@ describe('GameSocket', function () {
             gameSocket.onMessage(JSON.stringify({ command: 'RESTART' }), gameSocket.nodeName);
 
             expect(gameSocket.isDraining).toBe(false);
+        });
+    });
+
+    /**
+     * ARCHON (N10): pub/sub only delivers a GAMEWIN to a subscriber that is
+     * connected right now, and drops it for good otherwise - exactly what a
+     * lobby restart did to a result published in that window. The node now
+     * also queues the result durably so it survives that window; the publish
+     * stays the fast path for a lobby that is already listening.
+     */
+    describe('when it sends a GAMEWIN', function () {
+        it('queues the result durably, in addition to publishing it', function () {
+            gameSocket.send('GAMEWIN', { game: { gameId: 'uuid-1' }, winner: 'p1' });
+
+            expect(gameSocket.publisher.rPush).toHaveBeenCalledTimes(1);
+            expect(gameSocket.publisher.publish).toHaveBeenCalledTimes(1);
+
+            const [key, queued] = gameSocket.publisher.rPush.mock.calls[0];
+            expect(key).toBe('pendingGameResults');
+
+            const parsed = JSON.parse(queued);
+            expect(parsed.command).toBe('GAMEWIN');
+            expect(parsed.arg.game.gameId).toBe('uuid-1');
+
+            // The queued payload is exactly what gets published, so the
+            // lobby can ack the same entry it just processed live.
+            expect(queued).toBe(gameSocket.publisher.publish.mock.calls[0][1]);
+        });
+
+        it('does not queue other commands', function () {
+            gameSocket.send('SPECTATOR', { game: { gameId: 'uuid-1' } });
+
+            expect(gameSocket.publisher.rPush).not.toHaveBeenCalled();
+            expect(gameSocket.publisher.publish).toHaveBeenCalledTimes(1);
         });
     });
 });

@@ -5,6 +5,10 @@ const logger = require('../log.js');
 const RedisClientFactory = require('../services/RedisClientFactory');
 const { detectBinary } = require('../util');
 
+// ARCHON (N10): a finished game's result is queued here, not just published -
+// see the comment on `send()` below.
+const PENDING_GAME_RESULTS_KEY = 'pendingGameResults';
+
 class GameSocket extends EventEmitter {
     /**
      * @param {import("../services/ConfigService.js")} configService
@@ -78,6 +82,21 @@ class GameSocket extends EventEmitter {
             }
 
             return;
+        }
+
+        if (command === 'GAMEWIN') {
+            // A game result must survive the lobby being unreachable at the
+            // exact instant it is sent: pub/sub only delivers to a subscriber
+            // connected right now and drops the message for good otherwise -
+            // which is exactly what a lobby restart does to a result
+            // published in that window (N10: never recorded, rated or
+            // replayed). Queuing it durably first means the payload is never
+            // lost; the lobby drains this list on startup and periodically
+            // (`gamerouter.js`). The publish below stays the fast path for a
+            // lobby that is already listening.
+            this.publisher
+                .rPush(PENDING_GAME_RESULTS_KEY, data)
+                .catch((err) => logger.error('Failed to queue game result for durability', err));
         }
 
         this.publisher.publish('nodemessage', data);

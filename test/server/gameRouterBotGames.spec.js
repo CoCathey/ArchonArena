@@ -46,6 +46,9 @@ const buildRouter = () => {
         calls.commands.push({ channel, command, arg });
     };
     router.getNextAvailableGameNode = () => router.workers['worker-1'];
+    // ARCHON (N10): the live GAMEWIN path acks the durable queue a node also
+    // writes the same result to.
+    router.publisher = { lRem: async () => {} };
 
     return { router, calls };
 };

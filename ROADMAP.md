@@ -110,9 +110,10 @@ ends games in progress.
 -   **The zero-downtime deploy was built and reverted** (895b773 reverting aedefdd and
     86f5cfa): games could not be started on the deployed stack, which is worse than the problem
     it solved. `deploy/update.sh` runs `up -d --build` again, so a deploy still ends every game
-    in progress, and the node's health port is read-only. Reverted with it, and worth restating:
-    a game result published while the lobby is restarting is dropped with no retry, so that
-    game is never recorded, rated or replayed. → **N10**.
+    in progress, and the node's health port is read-only. → **N10**. A game result published
+    while the lobby is restarting no longer needs the drain to survive it: the node now queues
+    every result durably in Redis as well as publishing it, and the lobby drains anything left
+    unclaimed on startup — fixed 2026-08-29, independently of the rest of N10.
 -   **SAS on the lobby game list.** Deliberately skipped, not missed: decks are not chosen for
     open games, so there is nothing to show there yet. Everywhere else — deck lists, the deck
     view with its AERC breakdown, the pre-game screen, per-deck stats — is done (**N3**).
@@ -1046,9 +1047,25 @@ keyteki card fixes need a routine path in.
             deploy step, a second node to roll onto) is still open.
     -   The per-node game cap is read from a key the config file does not document, so it is
         never enforced.
-    -   A game result published while the lobby is restarting is dropped with no retry, so a
-        game that finishes in that window is never recorded, rated or replayed. That bug
-        predates the reverted branch and is back.
+    -   [x] **Fixed 2026-08-29.** A game result published while the lobby is restarting was
+            dropped with no retry: `GAMEWIN` only ever went out over Redis pub/sub, which
+            delivers to whoever is subscribed at the instant of the publish and drops the
+            message for good otherwise — exactly what a lobby mid-restart does to a result
+            published in that window. The node now also `RPUSH`es the same payload onto a
+            durable Redis list (`gamesocket.js`) before publishing; the publish stays the fast
+            path for a lobby that is already listening, and it acks (removes) its own queue
+            entry once handled (`gamerouter.js`). The lobby drains anything left in the list on
+            startup and every 30s after, so a result queued while nobody was listening gets
+            recorded, replayed and rated once the lobby comes back. Safe to run twice for the
+            same game either way: `update` and `saveReplay` are plain overwrites/upserts, and
+            `processGame` already checks `RatingHistory` before moving anyone's rating. Verified
+            against a real Redis instance (not mocked): a `GAMEWIN` sent with no `GameRouter`
+            running lands in the queue and stays there, and instantiating a fresh `GameRouter` —
+            standing in for the lobby restarting — drains it and persists/replays/rates the
+            game; a `GAMEWIN` sent to an already-listening lobby processes immediately and
+            leaves the queue empty. Covered by
+            `test/server/gamenode/gamesocket.spec.js` and
+            `test/server/gameRouterGameWin.spec.js`.
 -   `staging.archonarena.com` deploying from main. **Do this before re-attempting the drain** —
     the reverted attempt failed on the deployed stack in a way no local run reproduced, which is
     exactly the class of failure a staging environment exists to catch.
@@ -4284,10 +4301,6 @@ does not. What was wrong was which way to relax.
 
 ### Open, and currently true
 
--   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The
-        game is never recorded, rated or replayed, and nothing tells either player. A fix landed
-        with the zero-downtime work and went back out with the revert, so this is live again.
-        → **N10**.
 -   [ ] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Game three of an
         Adaptive Bo3 waits for the bid, so a pair who neither bid nor pass leave the round
         waiting on them. The organizer can still award or take a paper result, which is why this
