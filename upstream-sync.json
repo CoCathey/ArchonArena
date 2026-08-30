@@ -2,9 +2,18 @@
     "$comment": "Tracks how far Archon Arena has pulled in from keyteki (The Crucible Online). Updated by `npm run sync:upstream`; see docs/UPSTREAM.md.",
     "remote": "https://github.com/keyteki/keyteki.git",
     "branch": "master",
-    "syncedCommit": "296c2742212db7e6652a0913ce21ae17b49d6e2e",
-    "syncedDate": "2026-06-28",
-    "note": "Initial import. This repository was created from a verbatim snapshot of the upstream tree, not a git fork, so there is no shared history to merge - the sync applies a path-restricted diff instead.",
+    "syncedCommit": "87d8041580eee4105f8cd9544ecd8191670c15dd",
+    "syncedDate": "2026-08-08",
+    "note": "Initial import was a verbatim snapshot of the upstream tree (no shared history), so the sync applies a path-restricted diff instead of a merge. 2026-08-30: cherry-picked 87d8041580 ('refactor: remove and minimize underscore in favor of native JS array methods', #5163) in isolation - see deferredUpstreamCommits for why it was isolated from the commit immediately before it.",
+    "deferredUpstreamCommits": [
+        {
+            "commit": "095c40b47ecc0e27353ae9cb8d3f520804d7fe75",
+            "title": "feat: change adaptive to auto pick first deck (#5202)",
+            "date": "2026-07-21",
+            "reason": "Genuine gameplay-rules change to the Adaptive (adaptive-bo1) format's first-player determination - exactly the category docs/UPSTREAM.md names as needing a human read before merging ('especially around Adaptive, chains, and first-player selection'). Deliberately left out of the 2026-08-30 sync alongside it (87d8041580) rather than skipped silently. Touches server/game/game.js, server/game/gamesteps/setup/AdaptiveDeckSelectionPrompt.js, server/game/gamesteps/setup/FirstPlayerSelection.js, server/game/gamesteps/setup/setupphase.js.",
+            "note": "Chronologically before syncedCommit, so it will not appear in a future syncedCommit..upstream/master diff. Needs a deliberate cherry-pick (see docs/UPSTREAM.md) and a product decision on whether Archon Arena's Adaptive tournaments should adopt it, then remove this entry."
+        }
+    ],
     "$paths": "Upstream-owned and kept byte-identical, so a new set's cards, tests, card data and set flags arrive on their own. server/constants.js and client/constants.js are single files, not directories - the rest of client/ is ours and is never synced.",
     "paths": [
         "server/game",
