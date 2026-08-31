@@ -3899,6 +3899,26 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         node now advertises `config.gameNode.maxGames`, matching the key `getNextAvailableGameNode`
         was always comparing against. Covered by `test/server/gameSocketMaxGames.spec.js`.
 
+-   [x] **Every local dev server rendered unstyled, and no local game node was reachable at
+        all — fixed 2026-08-31.** The I5 CSP hardening pass reasoned about the app's own runtime
+        style injection (Font Awesome, React Aria) and dropped `style-src 'unsafe-inline'` for
+        development along with production, missing that Vite's dev server injects every module's
+        CSS as its own inline `<style>` tag for HMR — a mechanism the React Aria hash cannot cover
+        since it pins one specific rule's content. With CSP enforced (the default in every
+        documented setup, Docker included), that left `npm run dev:lobby` serving the entire
+        bundled stylesheet only to have the browser discard it, so every page rendered as
+        unstyled HTML. The same pass also left `connect-src` without plain `http:`/`https:` in
+        development: Socket.IO's client polls over plain HTTP before it upgrades to a WebSocket,
+        and the documented local topology runs the game node on its own port (9500) with no
+        reverse proxy in front — unlike production, where one Caddy host makes `'self'` sufficient
+        — so that handshake's first request was blocked and no local game node could ever be
+        reached, with the lobby logging "failed to handoff to game server" for every attempt.
+        Both are `isDeveloping`-gated exactly like the existing script-src/ws: allowances, so
+        production keeps the identical hash-only, `'self'`-only policy it had before. Verified end
+        to end against the real dev server in a browser: a fully styled site, and a complete
+        practice game against a bot played from login through several turns with zero console
+        errors. `csp.spec.js` pins both allowances to development only.
+
 #### N50 — The rung that is a person _(done)_
 
 **Why:** "a bot has never beat me at the game and I need a way for them to get really good."

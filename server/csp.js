@@ -11,13 +11,22 @@
  *
  * Deliberate exceptions, and why:
  *
- *  - Development adds 'unsafe-inline'/'unsafe-eval' to script-src, and ws:,
- *    because Vite's dev server and HMR require them. Production never gets them.
+ *  - Development adds 'unsafe-inline'/'unsafe-eval' to script-src, 'unsafe-inline'
+ *    to style-src, and ws:, because Vite's dev server and HMR require them.
+ *    Production never gets them.
  *
- * ARCHON (I5): style-src no longer carries 'unsafe-inline', and connect-src no
- * longer carries a blanket `wss:`. Both were removed against the real built
- * bundle in Chromium rather than by reasoning about what the app might do —
- * see the notes on REACT_ARIA_PRESSABLE_STYLE and gameNodeOrigins below.
+ * ARCHON (I5): style-src no longer carries 'unsafe-inline' in production, and
+ * connect-src no longer carries a blanket `wss:`. Both were removed against the
+ * real built bundle in Chromium rather than by reasoning about what the app
+ * might do — see the notes on REACT_ARIA_PRESSABLE_STYLE and gameNodeOrigins
+ * below.
+ *
+ * ARCHON: that I5 pass reasoned about the app's own runtime style injection
+ * (Font Awesome, React Aria) and missed a second, unrelated one — Vite's dev
+ * server injects every module's CSS as an inline <style> tag for HMR, which a
+ * hash pinned to one specific rule's content cannot cover. Without
+ * 'unsafe-inline' in development, style-src silently discarded the entire
+ * bundled stylesheet and every local dev server rendered unstyled.
  */
 
 const crypto = require('crypto');
@@ -112,7 +121,7 @@ function sentryOrigin(dsn) {
 
 /**
  * @param {object} options
- * @param {boolean} [options.isDeveloping] loosen script-src for the Vite dev server
+ * @param {boolean} [options.isDeveloping] loosen script-src and style-src for the Vite dev server
  * @param {string}  [options.sentryDsn]    allow the Sentry ingest origin
  * @param {string[]|string} [options.gameNodeOrigins] ws(s) origins for game
  *        nodes on their own hosts; unset means same-origin, covered by 'self'
@@ -120,9 +129,31 @@ function sentryOrigin(dsn) {
  */
 function buildDirectives({ isDeveloping = false, sentryDsn, gameNodeOrigins: nodes } = {}) {
     const devScript = isDeveloping ? ["'unsafe-inline'", "'unsafe-eval'"] : [];
+    // Vite's dev server injects every module's CSS as an inline <style> tag for
+    // HMR - a mechanism entirely separate from anything the app itself injects,
+    // and one the hash below cannot cover since it pins one specific rule's
+    // content. 'unsafe-inline' is also a CSP no-op wherever a hash or nonce is
+    // present in the same directive (browsers ignore it there on purpose - see
+    // csp.spec.js), so dev drops the hash rather than adding to it; production
+    // never sees this and keeps the hash-only policy below.
+    const devStyle = isDeveloping
+        ? ["'unsafe-inline'"]
+        : [inlineStyleHash(REACT_ARIA_PRESSABLE_STYLE)];
     // Development talks to the Vite dev server and HMR over plain ws on a
     // possibly-different port; production is same-origin or explicitly listed.
-    const socketSchemes = isDeveloping ? ['ws:', 'wss:'] : gameNodeOrigins(nodes);
+    //
+    // http:/https: are needed too, not just ws:/wss: - Socket.IO's client
+    // defaults to the polling transport for its initial handshake (a plain
+    // XHR) and only upgrades to a WebSocket afterwards, and both the
+    // documented Docker dev stack and the hybrid local-node setup run the
+    // game node on its own port (9500) with no reverse proxy in front, unlike
+    // the production topology (one Caddy host) that 'self' covers. Without
+    // this, that handshake's first request is blocked and no local game node
+    // is reachable at all - verified against the real dev server in a
+    // browser, the same way the style-src gap above was.
+    const socketSchemes = isDeveloping
+        ? ['ws:', 'wss:', 'http:', 'https:']
+        : gameNodeOrigins(nodes);
 
     return {
         defaultSrc: ["'self'"],
@@ -135,10 +166,11 @@ function buildDirectives({ isDeveloping = false, sentryDsn, gameNodeOrigins: nod
         // Stops an injected form from posting credentials off-site.
         formAction: ["'self'"],
         scriptSrc: ["'self'", ...devScript, ...HCAPTCHA],
-        // The hash covers React Aria's one runtime-injected rule; everything
-        // else is the bundled same-origin stylesheet. A hash here also disables
-        // 'unsafe-inline' semantics for this directive in every modern browser.
-        styleSrc: ["'self'", inlineStyleHash(REACT_ARIA_PRESSABLE_STYLE), ...HCAPTCHA],
+        // In production the hash covers React Aria's one runtime-injected rule;
+        // everything else is the bundled same-origin stylesheet. A hash here
+        // also disables 'unsafe-inline' semantics for this directive in every
+        // modern browser, which is why dev uses 'unsafe-inline' alone above.
+        styleSrc: ["'self'", ...devStyle, ...HCAPTCHA],
         // Fonts are self-hosted (client/assets/fonts), so no third-party font
         // origin is needed; data: covers any inlined face.
         fontSrc: ["'self'", 'data:'],

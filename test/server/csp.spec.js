@@ -27,6 +27,27 @@ describe('Content-Security-Policy', function () {
             expect(dev.scriptSrc).toContain("'unsafe-eval'");
         });
 
+        // Vite's dev server injects every module's CSS as an inline <style> tag
+        // for HMR - unrelated to anything the app itself injects, and not
+        // covered by the React Aria hash below. Without this, style-src
+        // silently discards the entire bundled stylesheet in development and
+        // the site renders unstyled - verified against the real dev server in
+        // a browser, the same way the I5 pass verified removing it from prod.
+        it('allows inline style only in development, for Vite/HMR', function () {
+            const dev = buildDirectives({ isDeveloping: true });
+
+            expect(dev.styleSrc).toContain("'unsafe-inline'");
+        });
+
+        // A hash-source in the same directive makes browsers ignore
+        // 'unsafe-inline' outright, so the two must never be combined - the dev
+        // policy has to drop the hash rather than add to it.
+        it('does not combine the dev unsafe-inline with the production hash', function () {
+            const dev = buildDirectives({ isDeveloping: true });
+
+            expect(dev.styleSrc).not.toContain(inlineStyleHash(REACT_ARIA_PRESSABLE_STYLE));
+        });
+
         it('locks down the injection-adjacent directives', function () {
             expect(prod.objectSrc).toEqual(["'none'"]);
             expect(prod.baseUri).toEqual(["'self'"]);
@@ -90,6 +111,24 @@ describe('Content-Security-Policy', function () {
 
             expect(dev.connectSrc).toContain('ws:');
             expect(dev.connectSrc).toContain('wss:');
+        });
+
+        // Socket.IO's client polls over plain http(s) before it upgrades to a
+        // WebSocket, and the local game node runs on its own port with no
+        // reverse proxy in front - unlike production, where 'self' covers it.
+        // Without this a local game node is unreachable even though ws:/wss:
+        // are allowed, because the handshake that precedes the upgrade never
+        // gets there.
+        it('allows plain http(s) in development, for the Socket.IO handshake to a local game node', function () {
+            const dev = buildDirectives({ isDeveloping: true });
+
+            expect(dev.connectSrc).toContain('http:');
+            expect(dev.connectSrc).toContain('https:');
+        });
+
+        it('does not allow plain http(s) connections in production', function () {
+            expect(prod.connectSrc).not.toContain('http:');
+            expect(prod.connectSrc).not.toContain('https:');
         });
 
         it('allows explicitly configured game-node origins for a split-host deployment', function () {
