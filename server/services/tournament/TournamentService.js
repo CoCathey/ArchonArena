@@ -4649,6 +4649,110 @@ class TournamentService {
         return null;
     }
 
+    /**
+     * How long a player has to act on their turn in the chain bid before
+     * their silence force-resolves as a pass, in milliseconds - or null if
+     * the round runs unclocked. Reuses the event's own round clock rather
+     * than a separate knob: a live event's minutes timer or an async
+     * event's day deadline is already the organizer's answer to how long a
+     * table may sit before somebody has to act, and an event with neither
+     * runs every other stall unclocked too.
+     */
+    adaptiveBidTimeoutMs(tournament) {
+        if (tournament.Pacing === 'async') {
+            const days = tournament.RoundDeadlineDays || 0;
+
+            return days > 0 ? days * 24 * 60 * 60 * 1000 : null;
+        }
+
+        const minutes = tournament.RoundTimerMinutes || 0;
+
+        return minutes > 0 ? minutes * 60 * 1000 : null;
+    }
+
+    /**
+     * Force-resolve a stalled bid: treat the acting player's turn as a pass,
+     * exactly as if they had clicked Pass themselves. Shared by the manual
+     * endpoint and the timeout check so both leave the state in the same
+     * shape.
+     */
+    resolveAdaptivePassState(match, state, actingUserId) {
+        if (!state.highBidderId) {
+            // Nobody has bid. Passing first concedes the choice: the
+            // opponent takes the nominated deck at zero chains rather than
+            // the series deadlocking on two players who both refuse to open.
+            const opponentId = actingUserId === match.Player1Id ? match.Player2Id : match.Player1Id;
+            const bidDeckOwnerId = state.bidDeckOwnerId ?? match.Player1Id;
+
+            return {
+                ...state,
+                bidDeckOwnerId,
+                currentBid: 0,
+                highBidderId: opponentId,
+                turnUserId: null,
+                resolved: true,
+                chains: { [opponentId]: 0, [actingUserId]: 0 },
+                decks: {
+                    [opponentId]: bidDeckOwnerId,
+                    [actingUserId]:
+                        bidDeckOwnerId === match.Player1Id ? match.Player2Id : match.Player1Id
+                }
+            };
+        }
+
+        const bidDeckOwnerId = state.bidDeckOwnerId ?? match.Player1Id;
+        const otherDeckOwnerId =
+            bidDeckOwnerId === match.Player1Id ? match.Player2Id : match.Player1Id;
+
+        return {
+            ...state,
+            turnUserId: null,
+            resolved: true,
+            // The high bidder pilots the nominated deck carrying the chains
+            // they bid; the other player takes the remaining deck unchained.
+            chains: { [state.highBidderId]: state.currentBid ?? 0, [actingUserId]: 0 },
+            decks: { [state.highBidderId]: bidDeckOwnerId, [actingUserId]: otherDeckOwnerId }
+        };
+    }
+
+    /**
+     * Bidding otherwise waits on whichever player's turn it is - forever, if
+     * they never come back (N9's open, documented gap). Called on every read
+     * or write of the bid so it self-heals the next time anybody looks,
+     * rather than needing a background job: stamps the turn's start the
+     * first time it's seen, and once that turn has sat longer than the
+     * event's own round clock allows, force-resolves it as a pass.
+     */
+    async settleExpiredAdaptiveBid(tournament, match) {
+        const state = this.parseJsonColumn(match.AdaptiveState) || {};
+
+        if (state.resolved) {
+            return match.AdaptiveState;
+        }
+
+        const turnUserId = state.turnUserId ?? this.adaptiveFirstBidder(match);
+
+        if (!state.turnStartedAt) {
+            const started = { ...state, turnUserId, turnStartedAt: Date.now() };
+
+            await this.saveAdaptiveState(match.Id, started);
+
+            return started;
+        }
+
+        const timeoutMs = this.adaptiveBidTimeoutMs(tournament);
+
+        if (timeoutMs === null || Date.now() - state.turnStartedAt < timeoutMs) {
+            return state;
+        }
+
+        const resolved = this.resolveAdaptivePassState(match, state, turnUserId);
+
+        await this.saveAdaptiveState(match.Id, resolved);
+
+        return resolved;
+    }
+
     async adaptiveContext(tournamentId, matchId, actor) {
         const tournament = await this.getTournamentRow(tournamentId);
 
@@ -4678,6 +4782,10 @@ class TournamentService {
             }
         }
 
+        if (this.adaptiveGameNumber(match) === 3) {
+            match.AdaptiveState = await this.settleExpiredAdaptiveBid(tournament, match);
+        }
+
         return { tournament, match };
     }
 
@@ -4688,9 +4796,10 @@ class TournamentService {
             return { success: false, message: context.error };
         }
 
-        const { match } = context;
+        const { tournament, match } = context;
         const gameNumber = this.adaptiveGameNumber(match);
         const state = this.parseJsonColumn(match.AdaptiveState) || {};
+        const timeoutMs = this.adaptiveBidTimeoutMs(tournament);
 
         return {
             success: true,
@@ -4706,7 +4815,13 @@ class TournamentService {
                           turnUserId: state.turnUserId ?? this.adaptiveFirstBidder(match),
                           resolved: !!state.resolved,
                           chains: state.chains || null,
-                          decks: state.decks || null
+                          decks: state.decks || null,
+                          // When the current turn force-resolves as a pass if
+                          // nobody acts - null on an unclocked round.
+                          turnDeadlineAt:
+                              !state.resolved && timeoutMs !== null && state.turnStartedAt
+                                  ? state.turnStartedAt + timeoutMs
+                                  : null
                       }
                     : null
         };
@@ -4778,6 +4893,8 @@ class TournamentService {
             currentBid: bid,
             highBidderId: actor.id,
             turnUserId: opponentId,
+            // The clock is on whoever's turn it is now, not whoever's it was.
+            turnStartedAt: Date.now(),
             resolved: false
         };
 
@@ -4811,54 +4928,15 @@ class TournamentService {
             return { success: false, message: 'It is not your turn' };
         }
 
-        if (!state.highBidderId) {
-            // Nobody has bid. Passing first concedes the choice: the opponent
-            // takes the nominated deck at zero chains rather than the series
-            // deadlocking on two players who both refuse to open.
-            const opponentId = actor.id === match.Player1Id ? match.Player2Id : match.Player1Id;
-            const bidDeckOwnerId = state.bidDeckOwnerId ?? match.Player1Id;
-
-            const resolved = {
-                ...state,
-                bidDeckOwnerId,
-                currentBid: 0,
-                highBidderId: opponentId,
-                turnUserId: null,
-                resolved: true,
-                chains: { [opponentId]: 0, [actor.id]: 0 },
-                decks: {
-                    [opponentId]: bidDeckOwnerId,
-                    [actor.id]:
-                        bidDeckOwnerId === match.Player1Id ? match.Player2Id : match.Player1Id
-                }
-            };
-
-            await this.saveAdaptiveState(match.Id, resolved);
-
-            return { success: true, resolved: true, winnerOfBid: opponentId, chains: 0 };
-        }
-
-        const bidDeckOwnerId = state.bidDeckOwnerId ?? match.Player1Id;
-        const otherDeckOwnerId =
-            bidDeckOwnerId === match.Player1Id ? match.Player2Id : match.Player1Id;
-
-        const resolved = {
-            ...state,
-            turnUserId: null,
-            resolved: true,
-            // The high bidder pilots the nominated deck carrying the chains
-            // they bid; the other player takes the remaining deck unchained.
-            chains: { [state.highBidderId]: state.currentBid ?? 0, [actor.id]: 0 },
-            decks: { [state.highBidderId]: bidDeckOwnerId, [actor.id]: otherDeckOwnerId }
-        };
+        const resolved = this.resolveAdaptivePassState(match, state, actor.id);
 
         await this.saveAdaptiveState(match.Id, resolved);
 
         return {
             success: true,
             resolved: true,
-            winnerOfBid: state.highBidderId,
-            chains: state.currentBid ?? 0
+            winnerOfBid: resolved.highBidderId,
+            chains: resolved.chains[resolved.highBidderId] ?? 0
         };
     }
 

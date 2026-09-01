@@ -97,6 +97,12 @@ const AdaptiveBidding = ({ tournamentId, matchId, players }) => {
                 </div>
                 <div className='text-xs text-muted'>
                     {t('Waiting on {{name}}.', { name: nameOf(myTurn) })}
+                    {bidding.turnDeadlineAt
+                        ? ' ' +
+                          t('Passes automatically at {{time}} if they have not acted.', {
+                              time: new Date(bidding.turnDeadlineAt).toLocaleString()
+                          })
+                        : ''}
                 </div>
                 <div className='flex flex-wrap items-center gap-2'>
                     <input

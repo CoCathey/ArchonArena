@@ -4288,10 +4288,11 @@ does not. What was wrong was which way to relax.
         game is never recorded, rated or replayed, and nothing tells either player. A fix landed
         with the zero-downtime work and went back out with the revert, so this is live again.
         → **N10**.
--   [ ] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Game three of an
-        Adaptive Bo3 waits for the bid, so a pair who neither bid nor pass leave the round
-        waiting on them. The organizer can still award or take a paper result, which is why this
-        is a defect and not a blocker. → **N9**.
+-   [x] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Fixed: the bid now
+        stamps when each turn opens and force-resolves it as a pass once that turn has sat longer
+        than the event's own round clock (live minutes timer or async day deadline) - an unclocked
+        round still waits indefinitely, same as everywhere else. The UI shows the auto-pass time
+        while a turn is open. → **N9**.
 -   [ ] **`docs/README.md` and `AGENTS.md` still say "Keyteki".** Both describe the project by
         its pre-fork name and neither lists the platform documentation (`DEVELOPMENT.md`,
         `DEPLOYMENT.md`, `SECURITY.md`, `UPSTREAM.md`, `docs/design/`) that has been written

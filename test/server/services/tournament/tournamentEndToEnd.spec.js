@@ -1336,4 +1336,85 @@ describe('a tournament end to end, on real PostgreSQL', function () {
         },
         120000
     );
+
+    /**
+     * ARCHON (N9): the Adaptive Bo3 chain bid's timeout, over a real jsonb
+     * column. The unit suite proves the state machine against a fake that
+     * hands state straight back; this proves `turnStartedAt` survives an
+     * actual round trip through Postgres as a number the timeout arithmetic
+     * can still do math on, not a string it silently NaNs on.
+     */
+    maybe(
+        'force-resolves a stalled Adaptive Bo3 chain bid as a pass once the round timer expires',
+        async function () {
+            const alice = users.player7;
+            const bob = users.player8;
+
+            const created = await service.create(alice, {
+                name: 'Adaptive Chain Cup',
+                format: 'swiss',
+                roundCount: 1,
+                adaptiveBo3: true,
+                pacing: 'live',
+                roundTimerMinutes: 5
+            });
+
+            expect(created.success, created.message).toBe(true);
+            const id = created.id;
+
+            await service.register(id, alice, { deckId: alice.deckId });
+            await service.register(id, bob, { deckId: bob.deckId });
+            await service.start(id, alice);
+
+            const match = (await service.getDetail(id, alice)).matches.find(
+                (entry) => entry.player1Id && entry.player2Id
+            );
+
+            // Games 1 and 2 split - the only way a series reaches the bid.
+            await service.attachGame(id, match.id, 1, `adaptive-${match.id}-g1`);
+            await service.recordGameWin({
+                gameId: `adaptive-${match.id}-g1`,
+                winner: alice.username,
+                tournament: { tournamentId: id, matchId: match.id }
+            });
+            await service.attachGame(id, match.id, 2, `adaptive-${match.id}-g2`);
+            await service.recordGameWin({
+                gameId: `adaptive-${match.id}-g2`,
+                winner: bob.username,
+                tournament: { tournamentId: id, matchId: match.id }
+            });
+
+            const now = Date.now();
+            vi.spyOn(Date, 'now').mockReturnValue(now);
+
+            const opened = await service.getAdaptiveState(id, match.id, alice);
+
+            expect(opened.gameNumber).toBe(3);
+            expect(opened.bidding.resolved).toBe(false);
+            expect(opened.bidding.turnDeadlineAt).toBe(now + 5 * 60 * 1000);
+
+            const turnUserId = opened.bidding.turnUserId;
+
+            Date.now.mockReturnValue(now + 5 * 60 * 1000 + 1);
+
+            const settled = await service.getAdaptiveState(id, match.id, alice);
+
+            expect(settled.bidding.resolved).toBe(true);
+            expect(settled.bidding.highBidderId).not.toBe(turnUserId);
+            expect(settled.bidding.currentBid).toBe(0);
+
+            Date.now.mockRestore();
+
+            // And it really persisted - a real Postgres row, not the service's
+            // own idea of one.
+            const [row] = await db.query(
+                'SELECT "AdaptiveState" FROM "TournamentMatches" WHERE "Id" = $1',
+                [match.id]
+            );
+
+            expect(row.AdaptiveState.resolved).toBe(true);
+            expect(row.AdaptiveState.turnStartedAt).toBe(now);
+        },
+        60000
+    );
 });

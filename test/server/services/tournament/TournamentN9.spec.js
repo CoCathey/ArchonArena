@@ -349,9 +349,17 @@ describe('Tournament Adaptive Bo3', function () {
         };
 
         db = {
-            query: vi.fn().mockImplementation(async (sql) => {
+            query: vi.fn().mockImplementation(async (sql, params) => {
                 if (sql.includes('FROM "Tournaments"')) {
                     return [tournament];
+                }
+
+                // Mimics the real UPDATE: later reads in the same test see
+                // what a prior call saved, the way a real round-trip would.
+                if (sql.includes('SET "AdaptiveState"')) {
+                    match.AdaptiveState = JSON.parse(params[1]);
+
+                    return [];
                 }
 
                 if (sql.includes('FROM "TournamentMatches"')) {
@@ -501,6 +509,101 @@ describe('Tournament Adaptive Bo3', function () {
         const result = await service.adaptiveBid(1, 3, { id: 77, permissions: {} }, 3);
 
         expect(result.success).toBe(false);
+    });
+
+    describe('bid timeout', function () {
+        let now;
+
+        beforeEach(function () {
+            now = 1700000000000;
+            vi.spyOn(Date, 'now').mockImplementation(() => now);
+        });
+
+        afterEach(function () {
+            Date.now.mockRestore();
+        });
+
+        it('waits indefinitely on an unclocked round', async function () {
+            await service.getAdaptiveState(1, 3, { id: 1 });
+
+            now += 365 * 24 * 60 * 60 * 1000;
+
+            const state = await service.getAdaptiveState(1, 3, { id: 1 });
+
+            expect(state.bidding.resolved).toBe(false);
+            expect(state.bidding.turnDeadlineAt).toBeNull();
+        });
+
+        it('force-resolves a live event bid once the round timer expires', async function () {
+            tournament.Pacing = 'live';
+            tournament.RoundTimerMinutes = 5;
+
+            const opened = await service.getAdaptiveState(1, 3, { id: 1 });
+            const turnUserId = opened.bidding.turnUserId;
+
+            expect(opened.bidding.turnDeadlineAt).toBe(now + 5 * 60 * 1000);
+
+            now += 5 * 60 * 1000 + 1;
+
+            const settled = await service.getAdaptiveState(1, 3, { id: 1 });
+
+            expect(settled.bidding.resolved).toBe(true);
+            // Nobody had bid, so the silent player's opponent gets the deck free.
+            expect(settled.bidding.highBidderId).not.toBe(turnUserId);
+            expect(settled.bidding.currentBid).toBe(0);
+        });
+
+        it('force-resolves an async event bid once the round deadline expires', async function () {
+            tournament.Pacing = 'async';
+            tournament.RoundDeadlineDays = 2;
+
+            await service.getAdaptiveState(1, 3, { id: 1 });
+
+            now += 2 * 24 * 60 * 60 * 1000 - 1;
+            expect((await service.getAdaptiveState(1, 3, { id: 1 })).bidding.resolved).toBe(false);
+
+            now += 2;
+            expect((await service.getAdaptiveState(1, 3, { id: 1 })).bidding.resolved).toBe(true);
+        });
+
+        it('restarts the clock for the opponent after a bid', async function () {
+            tournament.Pacing = 'live';
+            tournament.RoundTimerMinutes = 5;
+
+            const opened = await service.getAdaptiveState(1, 3, { id: 1 });
+            const bidder = opened.bidding.turnUserId;
+
+            now += 4 * 60 * 1000;
+
+            await service.adaptiveBid(1, 3, { id: bidder }, 3);
+
+            now += 4 * 60 * 1000;
+
+            const state = await service.getAdaptiveState(1, 3, { id: 1 });
+
+            expect(state.bidding.resolved).toBe(false);
+            expect(state.bidding.highBidderId).toBe(bidder);
+        });
+
+        it('will not act on a stale turn after the bid it applied to already resolved', async function () {
+            tournament.Pacing = 'live';
+            tournament.RoundTimerMinutes = 5;
+
+            const opened = await service.getAdaptiveState(1, 3, { id: 1 });
+            const bidder = opened.bidding.turnUserId;
+            const other = bidder === 1 ? 2 : 1;
+
+            await service.adaptiveBid(1, 3, { id: bidder }, 3);
+            await service.adaptivePass(1, 3, { id: other });
+
+            now += 10 * 60 * 1000;
+
+            const state = await service.getAdaptiveState(1, 3, { id: 1 });
+
+            expect(state.bidding.resolved).toBe(true);
+            expect(state.bidding.highBidderId).toBe(bidder);
+            expect(state.bidding.currentBid).toBe(3);
+        });
     });
 
     it('forces a three-game series when Adaptive is on', function () {
