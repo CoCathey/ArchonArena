@@ -132,8 +132,9 @@ ends games in progress.
 -   **A funding path that has actually been used.** Tiers, capabilities, per-tier checkout
     links, Patreon sync and a diagnostics endpoint are all built and tested — but there is no
     campaign, no credentials set, and no page saying where the money goes (**N12**).
--   **Self-serve app distribution.** `/mobile/ios` and `/mobile/android` are still `Placeholder`
-    pages, so the only way into the beta is knowing the owner (**N14**).
+-   **Self-serve Android distribution.** `/mobile/android` is still a `Placeholder` page pending
+    a real Play Store beta URL or signed APK; `/mobile/ios` now runs the TestFlight request queue
+    (**N14**).
 -   **Staging and load testing** (**N10**).
 -   **Something to _watch_ on an empty site.** The empty-lobby problem is half solved: thirteen
     practice bots keep an open table you can join at any hour (**F9**). What is still missing is
@@ -1276,7 +1277,7 @@ events, which feed one tournament standing rather than the open ladder.
         about someone behaving badly. The report carries both accounts of the game side by
         side and accuses neither player.
 
-#### N14 — App distribution: Android beta and iOS TestFlight requests
+#### N14 — App distribution: Android beta and iOS TestFlight requests _(iOS queue done; Android open)_
 
 **Why:** builds are already in testers' hands — the owner has had friends running the app on both
 iOS and Android for a while, invited by hand. So the app is not the gap; **self-serve** is.
@@ -1286,19 +1287,30 @@ the whole of what is left here.
 **Tasks**
 
 -   `/mobile/android`: link straight to the Google Play beta track (or a signed APK) with install
-    instructions.
--   `/mobile/ios`: a form that requests a TestFlight invite — the requester's account and the
-    Apple ID email — plus an admin view of pending requests to work through. Apple caps external
-    TestFlight testers, so the queue is the point: it lets the owner work through requests in
-    order rather than field them over chat.
--   Show the current beta build number and what changed in it, so a tester knows if they are behind.
+    instructions. **Still open** — there is no real Play Store beta URL or signed APK to link to
+    yet; `/mobile/android` stays a `Placeholder` until one exists.
+-   [x] `/mobile/ios`: a form that requests a TestFlight invite — the requester's account and the
+        Apple ID email — plus an admin view of pending requests to work through. Apple caps
+        external TestFlight testers, so the queue is the point: it lets the owner work through
+        requests in order rather than field them over chat. `IosBetaRequests` (migration 91) is
+        one row per request; a partial unique index caps a player at one _pending_ request so
+        asking twice does not build two rows for the admin to work through, and the service
+        layer checks the same thing first for a friendlier message. `/admin/ios-beta-requests`
+        works the queue - pending/cleared/all, newest-request-last so the front of the line is
+        worked first - matching `BugReportsAdmin`'s inbox-not-ticketing-system shape.
+-   Show the current beta build number and what changed in it, so a tester knows if they are
+    behind. **Still open** — there is no changelog content to source this from yet.
 
-**Depends on:** I6 (email template) for the invite request; folds into N2 once notifications exist.
+**Depends on:** I6 (email template) for the invite request - **deliberately not built yet**: the
+confirmation is a toast plus the persisted pending state on `/mobile/ios` itself (matching
+`BugReportModal`, which also skips email for the same shape of feature). An email nudge when a
+request is cleared is a reasonable follow-up once someone is watching outbound mail budgets for
+it. Folds into N2 once notifications exist.
 **Acceptance criteria**
 
--   A signed-in player can request an iOS beta invite in one action and gets a confirmation.
--   An admin can see and clear pending invite requests.
--   The Android page links to an install that works on a clean device.
+-   [x] A signed-in player can request an iOS beta invite in one action and gets a confirmation.
+-   [x] An admin can see and clear pending invite requests.
+-   [ ] The Android page links to an install that works on a clean device.
 
 #### N15 — Move-by-move clarity in the apps _(done)_
 

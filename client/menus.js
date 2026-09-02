@@ -168,6 +168,11 @@ export const SidebarMenu = [
             // exist, whatever the router says.
             { path: '/admin/analytics', title: 'Analytics & Lab', permission: 'isAdmin' },
             { path: '/admin/bug-reports', title: 'Bug Reports', permission: 'isAdmin' },
+            {
+                path: '/admin/ios-beta-requests',
+                title: 'TestFlight Requests',
+                permission: 'isAdmin'
+            },
             // ARCHON: News Admin, Motd Admin and Ban List used to sit here.
             // The first two are features this site does not run and does not
             // intend to; the third moved into User Admin, because banning an
