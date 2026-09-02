@@ -1,7 +1,31 @@
 const logger = require('../log');
 
 const STATUSES = ['pending', 'cleared'];
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Deliberately not a regex: `[^\s@]+@[^\s@]+\.[^\s@]+` lets the middle
+ * `[^\s@]+` and the literal `.` both match the same dot, and a CodeQL scan
+ * on this PR flagged the resulting ambiguity as polynomial-time backtracking
+ * on adversarial input to a public, user-controlled field. This does the
+ * same shape check (one `@`, a non-empty local part, a domain with an
+ * internal dot, no whitespace anywhere) in linear time.
+ */
+function looksLikeEmail(value) {
+    if (!value || /\s/.test(value)) {
+        return false;
+    }
+
+    const at = value.indexOf('@');
+
+    if (at <= 0 || at !== value.lastIndexOf('@')) {
+        return false;
+    }
+
+    const domain = value.slice(at + 1);
+    const dot = domain.lastIndexOf('.');
+
+    return dot > 0 && dot < domain.length - 1;
+}
 
 /**
  * ARCHON (N14): self-serve TestFlight requests. `/mobile/ios` lets a
@@ -18,7 +42,7 @@ class IosBetaRequestService {
     async create(userId, { appleId }) {
         const email = (appleId || '').trim();
 
-        if (!EMAIL_PATTERN.test(email)) {
+        if (!looksLikeEmail(email)) {
             return { success: false, message: 'Enter the email address your Apple ID uses' };
         }
 

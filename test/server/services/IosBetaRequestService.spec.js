@@ -77,7 +77,20 @@ describe('IosBetaRequestService', function () {
     it('rejects an Apple ID that is not an email address', async function () {
         expect((await service.create(1, { appleId: 'not-an-email' })).success).toBe(false);
         expect((await service.create(1, { appleId: '' })).success).toBe(false);
+        expect((await service.create(1, { appleId: 'two@at@example.com' })).success).toBe(false);
+        expect((await service.create(1, { appleId: 'trailing.dot@example.' })).success).toBe(false);
         expect(db.state.requests.length).toBe(0);
+    });
+
+    it('rejects a pathological Apple ID in linear time, not backtracking time', async function () {
+        // CodeQL flagged the old regex-based check as polynomial on input
+        // shaped like this - many "!." repetitions with no valid ending.
+        const evil = `!@${'!.'.repeat(50000)}`;
+        const start = Date.now();
+
+        expect((await service.create(1, { appleId: evil })).success).toBe(false);
+
+        expect(Date.now() - start).toBeLessThan(500);
     });
 
     it('files a request and refuses a second one while it is pending', async function () {
