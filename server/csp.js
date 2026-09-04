@@ -11,13 +11,16 @@
  *
  * Deliberate exceptions, and why:
  *
- *  - Development adds 'unsafe-inline'/'unsafe-eval' to script-src, and ws:,
- *    because Vite's dev server and HMR require them. Production never gets them.
+ *  - Development adds 'unsafe-inline'/'unsafe-eval' to script-src, 'unsafe-inline'
+ *    to style-src, and ws:, because Vite's dev server and HMR require them (HMR
+ *    ships every module's CSS as an inline <style> tag). Production never gets
+ *    any of that.
  *
- * ARCHON (I5): style-src no longer carries 'unsafe-inline', and connect-src no
- * longer carries a blanket `wss:`. Both were removed against the real built
- * bundle in Chromium rather than by reasoning about what the app might do —
- * see the notes on REACT_ARIA_PRESSABLE_STYLE and gameNodeOrigins below.
+ * ARCHON (I5): style-src no longer carries 'unsafe-inline' in production, and
+ * connect-src no longer carries a blanket `wss:`. Both were removed against the
+ * real built bundle in Chromium rather than by reasoning about what the app
+ * might do — see the notes on REACT_ARIA_PRESSABLE_STYLE and gameNodeOrigins
+ * below.
  */
 
 const crypto = require('crypto');
@@ -112,7 +115,7 @@ function sentryOrigin(dsn) {
 
 /**
  * @param {object} options
- * @param {boolean} [options.isDeveloping] loosen script-src for the Vite dev server
+ * @param {boolean} [options.isDeveloping] loosen script-src and style-src for the Vite dev server
  * @param {string}  [options.sentryDsn]    allow the Sentry ingest origin
  * @param {string[]|string} [options.gameNodeOrigins] ws(s) origins for game
  *        nodes on their own hosts; unset means same-origin, covered by 'self'
@@ -122,7 +125,26 @@ function buildDirectives({ isDeveloping = false, sentryDsn, gameNodeOrigins: nod
     const devScript = isDeveloping ? ["'unsafe-inline'", "'unsafe-eval'"] : [];
     // Development talks to the Vite dev server and HMR over plain ws on a
     // possibly-different port; production is same-origin or explicitly listed.
-    const socketSchemes = isDeveloping ? ['ws:', 'wss:'] : gameNodeOrigins(nodes);
+    // http:/https: are also needed in development: the game node normally
+    // runs on its own port there (config/default-node.json5's
+    // gameNode.socketioPort), so it is a different origin from the lobby, and
+    // socket.io's transport always opens with an http polling handshake
+    // before it can upgrade to a websocket - ws:/wss: alone cover the
+    // upgraded connection but not that first request, which left every local
+    // two-process dev setup unable to reach a game node at all.
+    const socketSchemes = isDeveloping
+        ? ['ws:', 'wss:', 'http:', 'https:']
+        : gameNodeOrigins(nodes);
+    // Vite's dev server injects every module's CSS as an inline <style> tag
+    // (that's how HMR swaps styles without a reload); production has none of
+    // that; the built bundle links a real same-origin stylesheet. A hash-source
+    // makes browsers ignore 'unsafe-inline' outright (see the production
+    // comment below), so the dev directive has to drop the hash rather than
+    // add 'unsafe-inline' alongside it, or Vite's styles stay blocked and the
+    // dev server serves an unstyled page.
+    const styleSrc = isDeveloping
+        ? ["'self'", "'unsafe-inline'", ...HCAPTCHA]
+        : ["'self'", inlineStyleHash(REACT_ARIA_PRESSABLE_STYLE), ...HCAPTCHA];
 
     return {
         defaultSrc: ["'self'"],
@@ -138,7 +160,7 @@ function buildDirectives({ isDeveloping = false, sentryDsn, gameNodeOrigins: nod
         // The hash covers React Aria's one runtime-injected rule; everything
         // else is the bundled same-origin stylesheet. A hash here also disables
         // 'unsafe-inline' semantics for this directive in every modern browser.
-        styleSrc: ["'self'", inlineStyleHash(REACT_ARIA_PRESSABLE_STYLE), ...HCAPTCHA],
+        styleSrc,
         // Fonts are self-hosted (client/assets/fonts), so no third-party font
         // origin is needed; data: covers any inlined face.
         fontSrc: ["'self'", 'data:'],

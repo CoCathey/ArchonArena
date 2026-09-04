@@ -27,6 +27,24 @@ describe('Content-Security-Policy', function () {
             expect(dev.scriptSrc).toContain("'unsafe-eval'");
         });
 
+        // Vite's dev server ships every module's CSS as an inline <style> tag
+        // for HMR; without 'unsafe-inline' here the whole dev site renders
+        // unstyled, since the hash below only covers one production-only rule.
+        it('allows inline style only in development, for Vite/HMR', function () {
+            const dev = buildDirectives({ isDeveloping: true });
+
+            expect(dev.styleSrc).toContain("'unsafe-inline'");
+            expect(prod.styleSrc).not.toContain("'unsafe-inline'");
+        });
+
+        // A hash-source makes browsers ignore 'unsafe-inline' outright, so the
+        // dev directive must not carry both - it would silently stay blocked.
+        it('does not pair the React Aria hash with unsafe-inline in development', function () {
+            const dev = buildDirectives({ isDeveloping: true });
+
+            expect(dev.styleSrc).not.toContain(inlineStyleHash(REACT_ARIA_PRESSABLE_STYLE));
+        });
+
         it('locks down the injection-adjacent directives', function () {
             expect(prod.objectSrc).toEqual(["'none'"]);
             expect(prod.baseUri).toEqual(["'self'"]);
@@ -90,6 +108,22 @@ describe('Content-Security-Policy', function () {
 
             expect(dev.connectSrc).toContain('ws:');
             expect(dev.connectSrc).toContain('wss:');
+        });
+
+        // The dev game node runs on its own port (a different origin from the
+        // lobby), and socket.io's polling transport opens with a plain http(s)
+        // request before it can upgrade to a websocket - ws:/wss: alone don't
+        // cover that first request.
+        it('allows the socket.io polling handshake to a dev game node on another port', function () {
+            const dev = buildDirectives({ isDeveloping: true });
+
+            expect(dev.connectSrc).toContain('http:');
+            expect(dev.connectSrc).toContain('https:');
+        });
+
+        it('does not allow arbitrary http(s) connections in production', function () {
+            expect(prod.connectSrc).not.toContain('http:');
+            expect(prod.connectSrc).not.toContain('https:');
         });
 
         it('allows explicitly configured game-node origins for a split-host deployment', function () {
