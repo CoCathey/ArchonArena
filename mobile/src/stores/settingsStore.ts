@@ -10,8 +10,13 @@ const HIDE_HAND_KEY = 'aa.hideHandOnOpponentTurn';
  * self-hoster wanted that and it was an easy way to lock yourself out of the
  * app, so the app is pinned here and the old stored value is cleared on
  * startup.
+ *
+ * A developer running the backend locally sets `EXPO_PUBLIC_SERVER_URL` in
+ * the environment of `expo start` instead (Expo inlines `EXPO_PUBLIC_*` at
+ * bundle time, so a shipped build without it keeps the pinned host). The
+ * game node must be reachable from the device on its own port as well.
  */
-export const SERVER_URL = 'https://archonarena.com';
+export const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL || 'https://archonarena.com';
 
 interface SettingsState {
     serverUrl: string;

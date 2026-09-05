@@ -115,10 +115,12 @@ npm install
 npm run ios        # or: npm start, then scan the QR with Expo Go
 ```
 
-Sign in against the default server (`https://archonarena.com`) or tap
-**Server settings** on the login screen and point it at your own instance
-(e.g. `http://<your-lan-ip>:4000` when running the backend locally — the game
-node must also be reachable on its port, 9500 by default).
+The app is pinned to `https://archonarena.com`. To run it against your own
+instance, set `EXPO_PUBLIC_SERVER_URL` when starting Metro — for example
+`EXPO_PUBLIC_SERVER_URL=http://<your-lan-ip>:4000 npm run ios` with the backend
+running locally (the game node must also be reachable on its port, 9500 by
+default). Expo inlines the value at bundle time, so a build made without it
+keeps the pinned host.
 
 ## App Store / Play Store
 

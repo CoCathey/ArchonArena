@@ -72,7 +72,13 @@ export const useLobbyStore = create<LobbyState>((set, get) => ({
             set({ games });
         }
     },
-    addGames: (games) => set({ games: [...games, ...get().games] }),
+    // The lobby announces a game to everyone, its creator included, and the
+    // creator's list may already hold it from the last full refresh - so an
+    // arriving game replaces its own earlier entry rather than joining it.
+    addGames: (games) => {
+        const arriving = new Set(games.map((game) => game.id));
+        set({ games: [...games, ...get().games.filter((game) => !arriving.has(game.id))] });
+    },
     updateGames: (games) =>
         set({
             games: get().games.map((existing) => {

@@ -153,7 +153,19 @@ export default function RootLayout() {
                 />
                 <Stack.Screen
                     name='tournament/new'
-                    options={{ title: 'New event', presentation: 'modal' }}
+                    options={{
+                        title: 'New event',
+                        presentation: 'modal',
+                        // A modal has no back button; without this the only
+                        // way out was a swipe nothing on screen suggests.
+                        headerLeft: () => (
+                            <Pressable onPress={() => router.back()} hitSlop={8}>
+                                <Text style={{ color: colors.accent, fontSize: 16, fontWeight: '600' }}>
+                                    Cancel
+                                </Text>
+                            </Pressable>
+                        )
+                    }}
                 />
                 <Stack.Screen
                     name='deck/[id]'

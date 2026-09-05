@@ -11,6 +11,7 @@ import {
     Text,
     View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { avatarUrl, importDeck, parseDeckUuid, updateAvatar } from '../src/api/client';
 import { saveLocation } from '../src/api/account';
 import { markOnboarded } from '../src/api/play';
@@ -59,6 +60,14 @@ export default function WelcomeScreen() {
         } catch {
             // Not worth blocking on: the worst case is seeing this again.
         } finally {
+            // The tab layout sends `onboarded === false` back here, and the
+            // stored user is only refreshed by checkauth on the next launch.
+            // Without stamping the local copy too, "Start playing" landed
+            // straight back on step one until the app was restarted.
+            const current = useAuthStore.getState().user;
+            if (current) {
+                await useAuthStore.getState().setAuth({ user: { ...current, onboarded: true } });
+            }
             setBusy(false);
             router.replace('/(tabs)');
         }
@@ -151,137 +160,148 @@ export default function WelcomeScreen() {
     };
 
     return (
-        <KeyboardAvoidingView
-            style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-            <ScrollView
-                contentContainerStyle={{ padding: spacing.lg, paddingBottom: 48 }}
-                keyboardShouldPersistTaps='handled'
+        <SafeAreaView style={styles.container}>
+            <KeyboardAvoidingView
+                style={{ flex: 1 }}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
-                <Text style={styles.title}>Welcome, {user?.username}</Text>
-                <Text style={styles.subtitle}>
-                    Four quick things. All of them optional — skip any you like.
-                </Text>
-
-                <View style={styles.dots}>
-                    {STEPS.map((title, index) => (
-                        <Pressable
-                            key={title}
-                            onPress={() => setStep(index)}
-                            hitSlop={8}
-                            accessibilityLabel={title}
-                        >
-                            <View
-                                style={[
-                                    styles.dot,
-                                    index === step && styles.dotActive,
-                                    index < step && styles.dotDone
-                                ]}
-                            />
-                        </Pressable>
-                    ))}
-                </View>
-
-                <ErrorBanner message={error} />
-
-                <Card>
-                    <Text style={styles.stepTitle}>
-                        {step + 1}/{STEPS.length} · {STEPS[step]}
+                <ScrollView
+                    contentContainerStyle={{ padding: spacing.lg, paddingBottom: 48 }}
+                    keyboardShouldPersistTaps='handled'
+                >
+                    <Text style={styles.title}>Welcome, {user?.username}</Text>
+                    <Text style={styles.subtitle}>
+                        Four quick things. All of them optional — skip any you like.
                     </Text>
 
-                    {step === 0 ? (
-                        <>
-                            <Text style={styles.body}>
-                                Optional and public. It puts you on the regional leaderboards and
-                                helps people near you find a game.
-                            </Text>
-                            <TextField
-                                label='Country'
-                                value={country}
-                                onChangeText={setCountry}
-                                placeholder='e.g. GB'
-                                autoCapitalize='characters'
-                                maxLength={2}
-                                containerStyle={{ marginTop: spacing.md }}
-                            />
-                            <TextField
-                                label='State or region'
-                                value={state}
-                                onChangeText={setState}
-                                autoCapitalize='words'
-                            />
-                            <Button title='Continue' loading={busy} onPress={saveWhere} />
-                        </>
-                    ) : null}
+                    <View style={styles.dots}>
+                        {STEPS.map((title, index) => (
+                            <Pressable
+                                key={title}
+                                onPress={() => setStep(index)}
+                                hitSlop={8}
+                                accessibilityLabel={title}
+                            >
+                                <View
+                                    style={[
+                                        styles.dot,
+                                        index === step && styles.dotActive,
+                                        index < step && styles.dotDone
+                                    ]}
+                                />
+                            </Pressable>
+                        ))}
+                    </View>
 
-                    {step === 1 ? (
-                        <>
-                            <Text style={styles.body}>
-                                Paste a Master Vault deck link to bring one deck in now. You can
-                                import a whole collection later from the Decks tab.
-                            </Text>
-                            <TextField
-                                value={deckLink}
-                                onChangeText={setDeckLink}
-                                placeholder='Master Vault link or deck id'
-                                containerStyle={{ marginTop: spacing.md }}
-                            />
-                            {deckNotice ? (
-                                <Text style={styles.notice}>{deckNotice}</Text>
-                            ) : null}
-                            <Button
-                                title='Import deck'
-                                loading={busy}
-                                disabled={!deckLink.trim()}
-                                onPress={importFirstDeck}
-                            />
-                        </>
-                    ) : null}
+                    <ErrorBanner message={error} />
 
-                    {step === 2 ? (
-                        <>
-                            <Text style={styles.body}>
-                                It shows next to your name in the lobby and on your profile.
-                            </Text>
-                            <View style={styles.avatarRow}>
-                                {avatar ? (
-                                    <Image source={{ uri: avatar }} style={styles.avatar} />
-                                ) : (
-                                    <View style={[styles.avatar, styles.avatarEmpty]}>
-                                        <Text style={styles.avatarInitial}>
-                                            {(user?.username ?? '?').slice(0, 1).toUpperCase()}
-                                        </Text>
-                                    </View>
-                                )}
+                    <Card>
+                        <Text style={styles.stepTitle}>
+                            {step + 1}/{STEPS.length} · {STEPS[step]}
+                        </Text>
+
+                        {step === 0 ? (
+                            <>
+                                <Text style={styles.body}>
+                                    Optional and public. It puts you on the regional leaderboards and
+                                    helps people near you find a game.
+                                </Text>
+                                <TextField
+                                    label='Country'
+                                    value={country}
+                                    onChangeText={setCountry}
+                                    placeholder='e.g. GB'
+                                    autoCapitalize='characters'
+                                    maxLength={2}
+                                    containerStyle={{ marginTop: spacing.md }}
+                                />
+                                <TextField
+                                    label='State or region'
+                                    value={state}
+                                    onChangeText={setState}
+                                    autoCapitalize='words'
+                                />
+                                <Button title='Continue' loading={busy} onPress={saveWhere} />
+                            </>
+                        ) : null}
+
+                        {step === 1 ? (
+                            <>
+                                <Text style={styles.body}>
+                                    Paste a Master Vault deck link to bring one deck in now. You can
+                                    import a whole collection later from the Decks tab.
+                                </Text>
+                                <TextField
+                                    value={deckLink}
+                                    onChangeText={setDeckLink}
+                                    placeholder='Master Vault link or deck id'
+                                    containerStyle={{ marginTop: spacing.md }}
+                                />
+                                {deckNotice ? (
+                                    <Text style={styles.notice}>{deckNotice}</Text>
+                                ) : null}
+                                <Button
+                                    title='Import deck'
+                                    loading={busy}
+                                    disabled={!deckLink.trim()}
+                                    onPress={importFirstDeck}
+                                />
+                                {/* Every step is skippable, this one included: without
+                                    this the only ways past it were the 10pt dots or
+                                    abandoning the whole wizard. */}
                                 <Button
                                     variant='secondary'
-                                    title={avatar ? 'Change picture' : 'Choose a picture'}
-                                    loading={busy}
-                                    onPress={pickAvatar}
+                                    title='Not now'
+                                    disabled={busy}
+                                    onPress={next}
                                 />
-                            </View>
-                            <Button title='Continue' onPress={next} />
-                        </>
-                    ) : null}
+                            </>
+                        ) : null}
 
-                    {step === 3 ? (
-                        <>
-                            <Text style={styles.body}>
-                                That is everything. Find Match pairs you with somebody of similar
-                                Amber; the practice tables let you play the house bot first if you
-                                would rather warm up.
-                            </Text>
-                            <Button title='Start playing' loading={busy} onPress={finish} />
-                        </>
-                    ) : null}
-                </Card>
+                        {step === 2 ? (
+                            <>
+                                <Text style={styles.body}>
+                                    It shows next to your name in the lobby and on your profile.
+                                </Text>
+                                <View style={styles.avatarRow}>
+                                    {avatar ? (
+                                        <Image source={{ uri: avatar }} style={styles.avatar} />
+                                    ) : (
+                                        <View style={[styles.avatar, styles.avatarEmpty]}>
+                                            <Text style={styles.avatarInitial}>
+                                                {(user?.username ?? '?').slice(0, 1).toUpperCase()}
+                                            </Text>
+                                        </View>
+                                    )}
+                                    <Button
+                                        variant='secondary'
+                                        title={avatar ? 'Change picture' : 'Choose a picture'}
+                                        loading={busy}
+                                        onPress={pickAvatar}
+                                    />
+                                </View>
+                                <Button title='Continue' onPress={next} />
+                            </>
+                        ) : null}
 
-                <Pressable onPress={finish} hitSlop={8} style={styles.skip}>
-                    <Text style={styles.skipText}>Skip all of this</Text>
-                </Pressable>
-            </ScrollView>
-        </KeyboardAvoidingView>
+                        {step === 3 ? (
+                            <>
+                                <Text style={styles.body}>
+                                    That is everything. Find Match pairs you with somebody of similar
+                                    Amber; the practice tables let you play the house bot first if you
+                                    would rather warm up.
+                                </Text>
+                                <Button title='Start playing' loading={busy} onPress={finish} />
+                            </>
+                        ) : null}
+                    </Card>
+
+                    <Pressable onPress={finish} hitSlop={8} style={styles.skip}>
+                        <Text style={styles.skipText}>Skip all of this</Text>
+                    </Pressable>
+                </ScrollView>
+            </KeyboardAvoidingView>
+        </SafeAreaView>
     );
 }
 

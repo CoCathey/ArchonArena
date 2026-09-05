@@ -85,6 +85,8 @@ function CardThumb(props: {
             onPress={props.onPress ? () => props.onPress?.(props.card) : undefined}
             disabled={!props.onPress}
             hitSlop={4}
+            accessibilityRole='image'
+            accessibilityLabel={props.card.name ?? 'Card'}
         >
             <Image
                 source={{ uri: url }}
@@ -260,6 +262,8 @@ export default function PromptPanel(props: {
                             key={`${String(button.arg)}-${index}`}
                             onPress={() => props.onButton(button)}
                             disabled={!!button.disabled}
+                            accessibilityRole='button'
+                            accessibilityState={{ disabled: !!button.disabled }}
                             style={({ pressed }) => [
                                 styles.houseButton,
                                 pressed && { opacity: 0.7 },
@@ -293,6 +297,9 @@ export default function PromptPanel(props: {
                                 }
                                 delayLongPress={400}
                                 disabled={!!button.disabled}
+                                accessibilityRole='button'
+                                accessibilityLabel={label}
+                                accessibilityState={{ disabled: !!button.disabled }}
                                 style={({ pressed }) => [
                                     styles.promptButton,
                                     pressed && { opacity: 0.7 },
