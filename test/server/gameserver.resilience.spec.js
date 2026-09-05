@@ -107,3 +107,61 @@ describe('the game node survives one bad game', function () {
         expect(process.listenerCount('unhandledRejection')).toBeLessThanOrEqual(before + 1);
     });
 });
+
+/**
+ * ARCHON (N10): a finished game is the one thing this node cannot afford to
+ * shout into an empty room.
+ *
+ * `nodemessage` is Redis pub/sub, which is at-most-once - a publish with no
+ * subscriber is discarded, and the lobby is the only subscriber. A deploy
+ * restarts it, so a game that finished in that window was never recorded,
+ * rated or replayed, and nothing told either player.
+ *
+ * So GAMEWIN goes out durably: written to an outbox the lobby drains when it
+ * comes back. This pins the node's end of that contract - that the result
+ * takes the durable route at all, and that it is filed under the game, so a
+ * redelivery overwrites the entry rather than queueing a second copy of a game
+ * that only finished once.
+ */
+describe('a finished game is sent durably', function () {
+    const finish = () => {
+        const server = Object.create(GameServer.prototype);
+        const durable = [];
+
+        server.gameSocket = {
+            send: () => {
+                throw new Error('a game result must not take the lossy route');
+            },
+            sendDurable: (command, arg, key) => durable.push({ command, arg, key })
+        };
+
+        const game = {
+            id: 'table-1',
+            getSaveState: () => ({ gameId: 'uuid-9' }),
+            getReplay: () => ({}),
+            getPlayerByName: (name) => ({ name })
+        };
+
+        server.gameWon(game, 'keys', { name: 'Winner' });
+
+        return durable;
+    };
+
+    it('does not publish the result without filing it first', function () {
+        // The stubbed `send` throws, so reaching for it fails this outright.
+        expect(finish()).toHaveLength(1);
+    });
+
+    it('files the result under the game that produced it', function () {
+        expect(finish()[0].key).toBe('GAMEWIN:uuid-9');
+    });
+
+    it('still carries everything the lobby needs from the payload', function () {
+        const { command, arg } = finish()[0];
+
+        expect(command).toBe('GAMEWIN');
+        expect(arg.game.gameId).toBe('uuid-9');
+        expect(arg.winner).toBe('Winner');
+        expect(arg.reason).toBe('keys');
+    });
+});

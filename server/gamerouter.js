@@ -14,7 +14,15 @@ const {
 } = require('./services/championschallenge/humanLearning');
 // ARCHON (N50): which finished games are evidence about play - see humanLadder.
 const { countsTowardLadder } = require('./services/championschallenge/humanLadder');
+// ARCHON (N10): the durable outbox a game result is filed in before it is
+// published - see nodeoutbox.js and gamenode/gamesocket.js.
+const { OUTBOX_KEY } = require('./nodeoutbox');
 const { detectBinary } = require('./util');
+
+// How often to sweep the outbox for results that never landed. A minute
+// matches the existing worker-timeout sweep, and the only thing waiting on it
+// is a game that has already finished.
+const OUTBOX_DRAIN_INTERVAL = 1000 * 60;
 
 class GameRouter extends EventEmitter {
     /**
@@ -48,9 +56,27 @@ class GameRouter extends EventEmitter {
                 this.sendCommand('allnodes', 'LOBBYHELLO');
             });
 
-        this.publisher.connect();
+        this.publisher
+            .connect()
+            .then(() => {
+                // ARCHON (N10): the first thing a lobby does on the way up is
+                // ask what finished while it was down. This is the restart
+                // case the outbox exists for - a deploy replaces this process,
+                // and every result published in that window went to nobody.
+                return this.drainOutbox();
+            })
+            // An unhandled rejection terminates the process under Node's
+            // default policy, taking every game on this lobby with it. The
+            // startup drain is bookkeeping about games that have already
+            // finished; it must never be able to cost anybody a game in
+            // progress. The interval below picks up whatever this missed.
+            .catch((err) => logger.error('Failed to drain the node outbox on startup', err));
 
         setInterval(this.checkTimeouts.bind(this), 1000 * 60);
+        // And again on a timer, for the narrower case of a lobby that was up
+        // but momentarily unsubscribed (a Redis reconnect drops the
+        // subscription; the publish that lands in the gap is gone the same way).
+        setInterval(this.drainOutbox.bind(this), OUTBOX_DRAIN_INTERVAL);
     }
 
     // External methods
@@ -246,6 +272,71 @@ class GameRouter extends EventEmitter {
     }
 
     /**
+     * ARCHON (N10): replay whatever finished while this lobby was not here.
+     *
+     * A game node files its result in the outbox before publishing it, because
+     * `nodemessage` is Redis pub/sub and a publish with no subscriber is
+     * simply discarded. Draining is deliberately just a replay through the
+     * ordinary handler: the outbox holds the same wire message that was
+     * published, so there is no second code path to keep in step with the
+     * first, and a message that arrives both ways is handled twice by three
+     * consequences that are all idempotent (`update` is an UPDATE by GameId,
+     * `saveReplay` is ON CONFLICT DO NOTHING, `processGame` returns early on a
+     * game that has already rated).
+     */
+    async drainOutbox() {
+        let entries;
+
+        try {
+            entries = await this.publisher.hGetAll(OUTBOX_KEY);
+        } catch (err) {
+            logger.error('Failed to read the durable node outbox', err);
+
+            return;
+        }
+
+        const keys = Object.keys(entries || {});
+
+        if (!keys.length) {
+            return;
+        }
+
+        logger.info(`Replaying ${keys.length} game result(s) from the durable outbox`);
+
+        for (const key of keys) {
+            // Per entry, so one unreplayable message cannot strand the rest of
+            // the queue behind it - and so a throw in here can never escape
+            // into the drain timer, where Node's answer to an unhandled
+            // rejection is to kill the lobby and every game on it.
+            try {
+                this.onMessage(entries[key], 'nodemessage');
+            } catch (err) {
+                logger.error(`Failed to replay ${key} from the durable outbox`, err);
+            }
+        }
+    }
+
+    /**
+     * ARCHON (N10): clear an outbox entry whose game is now recorded.
+     *
+     * Best effort: a failure here leaves the entry to be replayed on the next
+     * drain, which costs an idempotent re-record and nothing else. The
+     * dangerous direction is the other one - acknowledging a result that was
+     * not written - so this is only ever called after `update` resolves.
+     *
+     * @param {string} [key] absent on messages sent the ordinary way
+     */
+    ackOutbox(key) {
+        if (!key) {
+            return;
+        }
+
+        Promise.resolve(this.publisher.hDel(OUTBOX_KEY, key)).catch((err) =>
+            logger.error(`Failed to clear ${key} from the durable outbox`, err)
+        );
+    }
+
+    /**
      * ARCHON (N48): file a finished human game in the training diary.
      *
      * The node captured the rows live (gamenode/humancapture.js); the diary
@@ -408,8 +499,18 @@ class GameRouter extends EventEmitter {
                 this.recordHumanLadderGame(message.arg);
 
                 Promise.resolve(this.gameService.update(message.arg.game))
-                    .then(() =>
-                        Promise.allSettled([
+                    .then(() => {
+                        // ARCHON (N10): the game is recorded, so the durable
+                        // copy has done its job. Cleared here rather than
+                        // after the replay and rating below because those are
+                        // independent of it and idempotent on their own - and
+                        // deliberately NOT in the catch, so a database fault
+                        // leaves the result queued for the next drain instead
+                        // of dropping exactly the game the outbox exists to
+                        // protect.
+                        this.ackOutbox(message.outboxKey);
+
+                        return Promise.allSettled([
                             this.gameService.saveReplay(
                                 message.arg.game.gameId,
                                 message.arg.replay
@@ -422,8 +523,8 @@ class GameRouter extends EventEmitter {
                             message.arg.game && message.arg.game.botGame
                                 ? Promise.resolve({ skipped: true })
                                 : this.ratingService.processGame(message.arg.game.gameId)
-                        ])
-                    )
+                        ]);
+                    })
                     .then(([replay, rating]) => {
                         // Reported separately so the log names which one failed.
                         // "Failed to save/rate" told you neither.

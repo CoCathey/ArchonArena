@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button as HeroButton, toast } from '@heroui/react';
 
@@ -13,12 +13,41 @@ import { useGetAdaptiveStateQuery, useTournamentActionMutation } from '../../red
  * by bidding CHAINS for the right to pilot one of them. The bid is a
  * handicap, so bidding higher means claiming you can win with that deck even
  * burdened by the chains you took on.
+ *
+ * The bid is on a clock. It has to be shown: an auction that settles itself
+ * while a player is still thinking about it would be a worse surprise than
+ * the stall the clock exists to prevent.
  */
 const AdaptiveBidding = ({ tournamentId, matchId, players }) => {
     const { t } = useTranslation();
     const [chains, setChains] = useState(1);
     const { data, refetch } = useGetAdaptiveStateQuery({ id: tournamentId, matchId });
     const [tournamentAction] = useTournamentActionMutation();
+    const [now, setNow] = useState(() => Date.now());
+
+    const bidding = data?.bidding || {};
+    const deadline =
+        !bidding.resolved && bidding.turnStartedAt && bidding.timeoutMinutes
+            ? Date.parse(bidding.turnStartedAt) + bidding.timeoutMinutes * 60 * 1000
+            : null;
+
+    useEffect(() => {
+        if (!deadline) {
+            return undefined;
+        }
+
+        const tick = setInterval(() => setNow(Date.now()), 1000);
+
+        return () => clearInterval(tick);
+    }, [deadline]);
+
+    // The server settles an expired bid when the table is next read, so asking
+    // again is what turns a run-out clock into a result on screen.
+    useEffect(() => {
+        if (deadline && now >= deadline) {
+            refetch();
+        }
+    }, [deadline, now, refetch]);
 
     if (!data?.success) {
         return null;
@@ -38,8 +67,6 @@ const AdaptiveBidding = ({ tournamentId, matchId, players }) => {
             </Panel>
         );
     }
-
-    const bidding = data.bidding || {};
 
     const act = async (action, body, message) => {
         try {
@@ -62,6 +89,14 @@ const AdaptiveBidding = ({ tournamentId, matchId, players }) => {
 
     if (bidding.resolved) {
         const winner = bidding.highBidderId;
+        // All three routes out of an auction reach the same outcome, and they
+        // are very different things to have happened to you - so the panel
+        // says which one it was rather than leaving a player to work out why
+        // the bidding ended without them.
+        const settledBy = {
+            timeout: t('The bid clock ran out.'),
+            organizer: t('The organizer settled the bid.')
+        }[bidding.resolvedBy];
 
         return (
             <Panel title={t('Adaptive series - game 3')}>
@@ -73,6 +108,7 @@ const AdaptiveBidding = ({ tournamentId, matchId, players }) => {
                     })}
                 </div>
                 <div className='mt-1 text-xs text-muted'>
+                    {settledBy ? `${settledBy} ` : ''}
                     {t('The other player takes the remaining deck with no chains.')}
                 </div>
             </Panel>
@@ -80,6 +116,13 @@ const AdaptiveBidding = ({ tournamentId, matchId, players }) => {
     }
 
     const myTurn = bidding.turnUserId;
+    const remaining = deadline ? Math.max(0, deadline - now) : 0;
+    const formatRemaining = () => {
+        const totalSeconds = Math.ceil(remaining / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+
+        return `${minutes}:${String(totalSeconds % 60).padStart(2, '0')}`;
+    };
 
     return (
         <Panel title={t('Adaptive series - bid for game 3')}>
@@ -97,6 +140,14 @@ const AdaptiveBidding = ({ tournamentId, matchId, players }) => {
                 </div>
                 <div className='text-xs text-muted'>
                     {t('Waiting on {{name}}.', { name: nameOf(myTurn) })}
+                    {deadline && (
+                        <>
+                            {' '}
+                            {remaining > 0
+                                ? t('{{clock}} left to answer.', { clock: formatRemaining() })
+                                : t('Time is up - settling the bid.')}
+                        </>
+                    )}
                 </div>
                 <div className='flex flex-wrap items-center gap-2'>
                     <input

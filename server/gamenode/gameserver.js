@@ -26,6 +26,9 @@ const BotDriver = require('./botdriver.js');
 // same clicks the engine gets.
 const HumanCapture = require('./humancapture.js');
 const { rolesIndex: warmCardKnowledge } = require('../services/membership/cardKnowledge');
+// ARCHON (N10): the outbox key a finished game is filed under, so a result
+// published while the lobby is restarting is not lost.
+const { gameWinKey } = require('../nodeoutbox');
 
 class GameServer {
     constructor() {
@@ -616,25 +619,41 @@ class GameServer {
      * @param {import("../game/player")} winner
      */
     gameWon(game, reason, winner) {
-        this.gameSocket.send('GAMEWIN', {
-            game: game.getSaveState(),
-            winner: winner.name,
-            reason: reason,
-            // ARCHON: recorded play-by-play for the replay viewer.
-            replay: game.getReplay(),
-            // ARCHON (N48): and what the human seats decided, for the learning
-            // loop. Null on every table that was not capturing, which the
-            // lobby's handler treats as "nothing to file".
-            humanGame: game.humanCapture ? game.humanCapture.harvest(winner.name, reason) : null,
-            // ARCHON (N50): who at this table was the bot, and which model it
-            // was playing - the two facts the human ladder needs and the save
-            // state has never carried. The lobby knows a table was a bot game
-            // (`botGame`) but not which SEAT, and the champion can be promoted
-            // between a game starting and finishing, so reading the current
-            // version at file time would credit the wrong model.
-            botSeats: game.botDriver ? game.botDriver.botNames : [],
-            botPolicyVersion: game.botPolicyVersion || 0
-        });
+        const saveState = game.getSaveState();
+
+        // ARCHON (N10): durable, because this is the one message whose loss
+        // costs a game its record. A deploy restarts the lobby, and anything
+        // published to `nodemessage` while it is down goes to nobody - so a
+        // game finishing in that window was never recorded, rated or
+        // replayed. Keyed by the game so a redelivery overwrites rather than
+        // queues a second copy. Every other message here stays ordinary: they
+        // describe a table that still exists, and the next HELLO re-syncs it.
+        this.gameSocket.sendDurable(
+            'GAMEWIN',
+            {
+                game: saveState,
+                winner: winner.name,
+                reason: reason,
+                // ARCHON: recorded play-by-play for the replay viewer.
+                replay: game.getReplay(),
+                // ARCHON (N48): and what the human seats decided, for the
+                // learning loop. Null on every table that was not capturing,
+                // which the lobby's handler treats as "nothing to file".
+                humanGame: game.humanCapture
+                    ? game.humanCapture.harvest(winner.name, reason)
+                    : null,
+                // ARCHON (N50): who at this table was the bot, and which model
+                // it was playing - the two facts the human ladder needs and
+                // the save state has never carried. The lobby knows a table
+                // was a bot game (`botGame`) but not which SEAT, and the
+                // champion can be promoted between a game starting and
+                // finishing, so reading the current version at file time would
+                // credit the wrong model.
+                botSeats: game.botDriver ? game.botDriver.botNames : [],
+                botPolicyVersion: game.botPolicyVersion || 0
+            },
+            gameWinKey(saveState.gameId)
+        );
     }
 
     /**

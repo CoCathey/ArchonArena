@@ -435,6 +435,32 @@ const MatchRow = ({ tournament, match, user, act, actionPending }) => {
                             {t('Reopen table')}
                         </HeroButton>
                     )}
+                    {/* ARCHON (N9): a chain bid neither player will finish
+                        used to hold the round open with nothing in the engine
+                        able to move it. The bid clock settles it on its own;
+                        this is for the organizer who cannot wait out the
+                        clock. It applies the bidding rules rather than
+                        overriding them - the standing high bidder takes the
+                        deck at their bid. */}
+                    {tournament.adaptiveBo3 &&
+                        match.player1Wins === 1 &&
+                        match.player2Wins === 1 && (
+                            <HeroButton
+                                size='sm'
+                                variant='tertiary'
+                                className='!h-6 !px-2 text-xs'
+                                onPress={() => {
+                                    act(
+                                        `matches/${match.id}/adaptive-resolve`,
+                                        {},
+                                        t('Chain bid settled')
+                                    );
+                                    setShowTools(false);
+                                }}
+                            >
+                                {t('Settle chain bid')}
+                            </HeroButton>
+                        )}
                 </div>
             )}
         </div>

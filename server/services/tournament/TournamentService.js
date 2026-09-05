@@ -148,7 +148,12 @@ const DEFAULT_TOURNAMENT_CONFIG = {
     sasPerChain: 5,
     // Never assign more handicap chains than this (24 is the deepest
     // official chain tier).
-    maxHandicapChains: 24
+    maxHandicapChains: 24,
+    // ARCHON (N9): how long a player has to answer a standing Adaptive chain
+    // bid before the auction settles without them. 0 disables the clock, which
+    // is the right setting for an unhurried league and the wrong one for a
+    // one-day event where a stalled auction holds up the whole round.
+    adaptiveBidTimeoutMinutes: 10
 };
 
 /**
@@ -4690,7 +4695,14 @@ class TournamentService {
 
         const { match } = context;
         const gameNumber = this.adaptiveGameNumber(match);
-        const state = this.parseJsonColumn(match.AdaptiveState) || {};
+        let state = this.parseJsonColumn(match.AdaptiveState) || {};
+
+        // ARCHON (N9): reading the table is what starts and enforces the bid
+        // clock - see syncAdaptiveClock. Only at game three, because that is
+        // the only point an auction exists to run out.
+        if (gameNumber === 3) {
+            state = await this.syncAdaptiveClock(match, state);
+        }
 
         return {
             success: true,
@@ -4705,6 +4717,12 @@ class TournamentService {
                           highBidderId: state.highBidderId ?? null,
                           turnUserId: state.turnUserId ?? this.adaptiveFirstBidder(match),
                           resolved: !!state.resolved,
+                          // ARCHON (N9): so the table can show the clock, and
+                          // say afterwards whether the auction was conceded,
+                          // timed out, or settled by the organizer.
+                          turnStartedAt: state.turnStartedAt || null,
+                          timeoutMinutes: Math.floor(this.adaptiveBidTimeoutMs() / 60000),
+                          resolvedBy: state.resolvedBy || null,
                           chains: state.chains || null,
                           decks: state.decks || null
                       }
@@ -4732,6 +4750,128 @@ class TournamentService {
         ]);
     }
 
+    /**
+     * ARCHON (N9): settle the auction as though the player on the clock passed.
+     *
+     * The bid had no clock and no way out: `AdaptiveState` recorded who was on
+     * the clock but never when their turn began, and nothing could settle the
+     * auction without one of the two players acting. A pair who neither bid
+     * nor passed held game three, and their round, open indefinitely.
+     *
+     * The rule enforced here is the one already written rather than a new one:
+     * running out of time IS a pass. That matters because the alternative -
+     * inventing an outcome for an expired auction - would give the players a
+     * result no reading of the bidding rules produces.
+     *
+     * `resolvedBy` distinguishes a concession from an expiry from an organizer
+     * stepping in. All three settle identically, and they are very different
+     * conversations to have with a player afterwards.
+     *
+     * @param {object} match
+     * @param {object} state the current AdaptiveState
+     * @param {number} passerId whoever was on the clock
+     * @param {'player'|'timeout'|'organizer'} resolvedBy
+     */
+    buildResolvedAdaptiveState(match, state, passerId, resolvedBy) {
+        const bidDeckOwnerId = state.bidDeckOwnerId ?? match.Player1Id;
+        const otherDeckOwnerId =
+            bidDeckOwnerId === match.Player1Id ? match.Player2Id : match.Player1Id;
+        const opponentId = passerId === match.Player1Id ? match.Player2Id : match.Player1Id;
+
+        // Nobody bid. Passing first concedes the choice: the opponent takes
+        // the nominated deck at zero chains rather than the series
+        // deadlocking on two players who both refuse to open.
+        const winnerOfBid = state.highBidderId || opponentId;
+        const chains = state.highBidderId ? state.currentBid ?? 0 : 0;
+
+        return {
+            ...state,
+            bidDeckOwnerId,
+            currentBid: chains,
+            highBidderId: winnerOfBid,
+            turnUserId: null,
+            turnStartedAt: null,
+            resolved: true,
+            resolvedBy,
+            chains: { [winnerOfBid]: chains, [passerId]: 0 },
+            decks: { [winnerOfBid]: bidDeckOwnerId, [passerId]: otherDeckOwnerId }
+        };
+    }
+
+    /** The bid clock in milliseconds, or 0 when the clock is switched off. */
+    adaptiveBidTimeoutMs() {
+        const minutes = parseInt(this.getConfig().adaptiveBidTimeoutMinutes, 10);
+
+        return Number.isNaN(minutes) || minutes <= 0 ? 0 : minutes * 60 * 1000;
+    }
+
+    /**
+     * ARCHON (N9): has the player on the clock run out of time?
+     *
+     * A state with no `turnStartedAt` never expires. Auctions opened before
+     * the clock existed have no timestamp, and reading a missing one as
+     * "infinitely old" would settle every one of them the moment this shipped
+     * - so the clock starts for those when somebody next looks at the table.
+     */
+    adaptiveBidExpired(state) {
+        const timeout = this.adaptiveBidTimeoutMs();
+
+        if (!timeout || state.resolved || !state.turnStartedAt) {
+            return false;
+        }
+
+        const startedAt = Date.parse(state.turnStartedAt);
+
+        if (Number.isNaN(startedAt)) {
+            return false;
+        }
+
+        return Date.now() - startedAt >= timeout;
+    }
+
+    /**
+     * ARCHON (N9): the clock, evaluated wherever the auction is touched.
+     *
+     * Lazily rather than on a sweep because nothing is waiting on an auction
+     * nobody is looking at: the two players poll this table, and so does the
+     * organizer who wants the round to move. It also starts the clock for an
+     * auction that has none, which is both the pre-clock backfill and the
+     * genuine "bidding just opened" case - before this, the opening player's
+     * turn had no start time at all, so a pair who BOTH refused to open (the
+     * deadlock in the defect) could never time out.
+     *
+     * @returns {object} the state, settled or clock-started if it needed it
+     */
+    async syncAdaptiveClock(match, state) {
+        if (state.resolved) {
+            return state;
+        }
+
+        if (this.adaptiveBidExpired(state)) {
+            const passerId = state.turnUserId ?? this.adaptiveFirstBidder(match);
+            const resolved = this.buildResolvedAdaptiveState(match, state, passerId, 'timeout');
+
+            await this.saveAdaptiveState(match.Id, resolved);
+
+            return resolved;
+        }
+
+        if (!state.turnStartedAt && this.adaptiveBidTimeoutMs()) {
+            const started = {
+                ...state,
+                bidDeckOwnerId: state.bidDeckOwnerId ?? match.Player1Id,
+                turnUserId: state.turnUserId ?? this.adaptiveFirstBidder(match),
+                turnStartedAt: new Date().toISOString()
+            };
+
+            await this.saveAdaptiveState(match.Id, started);
+
+            return started;
+        }
+
+        return state;
+    }
+
     async adaptiveBid(tournamentId, matchId, actor, chains) {
         const context = await this.adaptiveContext(tournamentId, matchId, actor);
 
@@ -4745,7 +4885,13 @@ class TournamentService {
             return { success: false, message: 'Bidding only happens before game three' };
         }
 
-        const state = this.parseJsonColumn(match.AdaptiveState) || {};
+        // ARCHON (N9): the clock is enforced before the bid is read, so a bid
+        // that arrives after time loses to the auction it was too late for
+        // rather than reopening it.
+        const state = await this.syncAdaptiveClock(
+            match,
+            this.parseJsonColumn(match.AdaptiveState) || {}
+        );
 
         if (state.resolved) {
             return { success: false, message: 'The bid is already settled' };
@@ -4778,6 +4924,11 @@ class TournamentService {
             currentBid: bid,
             highBidderId: actor.id,
             turnUserId: opponentId,
+            // ARCHON (N9): the clock restarts for whoever now has to answer.
+            // Each player gets the full time to think about the bid actually
+            // in front of them, rather than inheriting what the auction has
+            // already spent.
+            turnStartedAt: new Date().toISOString(),
             resolved: false
         };
 
@@ -4799,7 +4950,12 @@ class TournamentService {
             return { success: false, message: 'Bidding only happens before game three' };
         }
 
-        const state = this.parseJsonColumn(match.AdaptiveState) || {};
+        // ARCHON (N9): as in adaptiveBid - an auction that has already run out
+        // of time is settled, and a pass arriving after that changes nothing.
+        const state = await this.syncAdaptiveClock(
+            match,
+            this.parseJsonColumn(match.AdaptiveState) || {}
+        );
 
         if (state.resolved) {
             return { success: false, message: 'The bid is already settled' };
@@ -4811,54 +4967,74 @@ class TournamentService {
             return { success: false, message: 'It is not your turn' };
         }
 
-        if (!state.highBidderId) {
-            // Nobody has bid. Passing first concedes the choice: the opponent
-            // takes the nominated deck at zero chains rather than the series
-            // deadlocking on two players who both refuse to open.
-            const opponentId = actor.id === match.Player1Id ? match.Player2Id : match.Player1Id;
-            const bidDeckOwnerId = state.bidDeckOwnerId ?? match.Player1Id;
-
-            const resolved = {
-                ...state,
-                bidDeckOwnerId,
-                currentBid: 0,
-                highBidderId: opponentId,
-                turnUserId: null,
-                resolved: true,
-                chains: { [opponentId]: 0, [actor.id]: 0 },
-                decks: {
-                    [opponentId]: bidDeckOwnerId,
-                    [actor.id]:
-                        bidDeckOwnerId === match.Player1Id ? match.Player2Id : match.Player1Id
-                }
-            };
-
-            await this.saveAdaptiveState(match.Id, resolved);
-
-            return { success: true, resolved: true, winnerOfBid: opponentId, chains: 0 };
-        }
-
-        const bidDeckOwnerId = state.bidDeckOwnerId ?? match.Player1Id;
-        const otherDeckOwnerId =
-            bidDeckOwnerId === match.Player1Id ? match.Player2Id : match.Player1Id;
-
-        const resolved = {
-            ...state,
-            turnUserId: null,
-            resolved: true,
-            // The high bidder pilots the nominated deck carrying the chains
-            // they bid; the other player takes the remaining deck unchained.
-            chains: { [state.highBidderId]: state.currentBid ?? 0, [actor.id]: 0 },
-            decks: { [state.highBidderId]: bidDeckOwnerId, [actor.id]: otherDeckOwnerId }
-        };
+        // The high bidder pilots the nominated deck carrying the chains they
+        // bid; the other player takes the remaining deck unchained. With no
+        // bid standing, passing concedes the deck at zero. Both live in
+        // buildResolvedAdaptiveState, which the clock and the organizer settle
+        // through too - so all three routes out produce the same outcome.
+        const resolved = this.buildResolvedAdaptiveState(match, state, actor.id, 'player');
 
         await this.saveAdaptiveState(match.Id, resolved);
 
         return {
             success: true,
             resolved: true,
-            winnerOfBid: state.highBidderId,
-            chains: state.currentBid ?? 0
+            winnerOfBid: resolved.highBidderId,
+            chains: resolved.currentBid
+        };
+    }
+
+    /**
+     * ARCHON (N9): let the organizer settle a stuck bid.
+     *
+     * The clock covers a player who has gone quiet; this covers the organizer
+     * who cannot wait for it - a round to close, a venue with an hour left,
+     * a pair who have agreed something at the table. Without it the only way
+     * past a stalled auction was to take a paper result for a game the
+     * platform was ready to run.
+     *
+     * Settles exactly where the clock would, so an organizer using it is
+     * applying the bidding rules rather than overriding them.
+     */
+    async adaptiveForceResolve(tournamentId, matchId, actor) {
+        const context = await this.adaptiveContext(tournamentId, matchId, actor);
+
+        if (context.error) {
+            return { success: false, message: context.error };
+        }
+
+        const { tournament, match } = context;
+
+        // adaptiveContext admits both players as well as staff, so this is
+        // the check that keeps a player from ending an auction they are
+        // losing by calling it a stuck one.
+        if (!(await this.canManage(actor, tournament))) {
+            return {
+                success: false,
+                message: 'Only the organizer can settle a bid for the players'
+            };
+        }
+
+        if (this.adaptiveGameNumber(match) !== 3) {
+            return { success: false, message: 'Bidding only happens before game three' };
+        }
+
+        const state = this.parseJsonColumn(match.AdaptiveState) || {};
+
+        if (state.resolved) {
+            return { success: false, message: 'The bid is already settled' };
+        }
+
+        const passerId = state.turnUserId ?? this.adaptiveFirstBidder(match);
+        const resolved = this.buildResolvedAdaptiveState(match, state, passerId, 'organizer');
+
+        await this.saveAdaptiveState(match.Id, resolved);
+
+        return {
+            success: true,
+            resolved: true,
+            winnerOfBid: resolved.highBidderId,
+            chains: resolved.currentBid
         };
     }
 
@@ -5403,33 +5579,41 @@ class TournamentService {
         };
 
         const sasByDeckId = {};
+        const nameByDeckId = {};
 
-        if (tournament.SasChainHandicap) {
-            const deckIds = [
-                ...new Set(
-                    playable
-                        .flatMap((match) => {
-                            const gameNumber = nextGameNumber(match);
+        /**
+         * ARCHON: the deck each seat will be pinned to, by NAME as well as id.
+         *
+         * The table used to learn a deck's name only when it finished loading
+         * the deck into the seat, so until then - and forever, if the load
+         * failed - a locked seat read "No deck selected" with no picker to fix
+         * it. And the opponent's seat never showed a name at all, though the
+         * event page publishes both decks. The name rides along with the
+         * pairing so the table can say what each seat is locked to from the
+         * moment it exists. One query serves this and the SAS handicap.
+         */
+        const deckIds = [
+            ...new Set(
+                playable
+                    .flatMap((match) => {
+                        const gameNumber = nextGameNumber(match);
 
-                            return [
-                                deckIdFor(match, 1, gameNumber),
-                                deckIdFor(match, 2, gameNumber)
-                            ];
-                        })
-                        .filter((id) => !!id)
-                )
-            ];
+                        return [deckIdFor(match, 1, gameNumber), deckIdFor(match, 2, gameNumber)];
+                    })
+                    .filter((id) => !!id)
+            )
+        ];
 
-            if (deckIds.length > 0) {
-                const sasRows = await this.db.query(
-                    'SELECT d."Id", ds."SasRating" FROM "Decks" d ' +
-                        'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" WHERE d."Id" = ANY($1)',
-                    [deckIds]
-                );
+        if (deckIds.length > 0) {
+            const deckRows = await this.db.query(
+                'SELECT d."Id", d."Name", ds."SasRating" FROM "Decks" d ' +
+                    'LEFT JOIN "DeckSas" ds ON ds."Uuid" = d."Uuid" WHERE d."Id" = ANY($1)',
+                [deckIds]
+            );
 
-                for (const row of sasRows || []) {
-                    sasByDeckId[row.Id] = row.SasRating;
-                }
+            for (const row of deckRows || []) {
+                sasByDeckId[row.Id] = row.SasRating;
+                nameByDeckId[row.Id] = row.Name || null;
             }
         }
 
@@ -5516,7 +5700,8 @@ class TournamentService {
                 players: playerIds.map((playerId, side) => ({
                     userId: playerId,
                     username: playerById[playerId]?.Username,
-                    deckId: deckIds[side]
+                    deckId: deckIds[side],
+                    deckName: deckIds[side] ? nameByDeckId[deckIds[side]] || null : null
                 }))
             };
         });

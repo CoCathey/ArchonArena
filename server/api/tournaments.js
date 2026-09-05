@@ -476,6 +476,16 @@ module.exports.init = function (server) {
         )
     );
 
+    // ARCHON (N9): the organizer's way past an auction neither player will
+    // finish, for when the round cannot wait out the bid clock.
+    action('/api/tournaments/:id/matches/:matchId/adaptive-resolve', (req) =>
+        tournamentService.adaptiveForceResolve(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.matchId, 10),
+            req.user
+        )
+    );
+
     action('/api/tournaments/:id/finish', (req) =>
         tournamentService.finish(parseInt(req.params.id, 10), req.user, {
             // ARCHON: the organizer confirming an early finish. See finish().
