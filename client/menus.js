@@ -143,6 +143,9 @@ export const SidebarMenu = [
             { path: '/community/leaderboards', title: 'Leaderboards' },
             { path: '/community/friends', title: 'Friends' },
             { path: '/community/clubs', title: 'Grand Alliance Council' },
+            // ARCHON: direct messages - the conversation around the scheduler.
+            // After the people pages, which lead this section by design.
+            { path: '/messages', title: 'Messages', showOnlyWhenLoggedIn: true },
             { path: '/community/news', title: 'News', pageKey: 'news' },
             { path: '/community/articles', title: 'Articles', pageKey: 'articles' },
             { path: '/community/blogs', title: 'Blogs', pageKey: 'blogs' },

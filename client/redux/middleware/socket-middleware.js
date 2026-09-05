@@ -16,6 +16,7 @@ import {
     lobbyStartGameRequested
 } from '../socketActions';
 import { api } from '../api';
+import { TAG_TYPES } from '../apiTags';
 import { setAuthTokens } from '../slices/authSlice';
 
 let lobbySocket;
@@ -47,7 +48,12 @@ const lobbyMessages = [
     'motd',
     'cleargamestate',
     'gameerror',
-    'matchmaking'
+    'matchmaking',
+    // ARCHON: a sentence for THIS player from the lobby, toasted wherever they
+    // are - see LobbyNoticeToaster. 'gameerror' only shows inside a pending
+    // table, which is the one place a player who has just been cleared out of
+    // a finished tournament game is not.
+    'lobbynotice'
 ];
 
 export const socketMiddleware = (store) => (next) => (action) => {
@@ -105,6 +111,49 @@ export const socketMiddleware = (store) => (next) => (action) => {
                 store.dispatch(lobbyActions.messageReceived({ message, args: [arg] }));
             });
         }
+
+        /**
+         * ARCHON: a direct message for (or from) this player arrived live.
+         *
+         * Every open query about messages refetches - the inbox, the thread,
+         * the badge - and a message from somebody else surfaces as a toast
+         * unless that thread is the one on screen, where the refetch already
+         * shows it.
+         */
+        lobbySocket.on('directmessage', (message) => {
+            store.dispatch(api.util.invalidateTags([TAG_TYPES.MESSAGES]));
+
+            const me = store.getState().account.user?.username;
+
+            if (!message || !me || message.recipientUsername !== me) {
+                return;
+            }
+
+            const threadPath = `/messages/${encodeURIComponent(message.senderUsername)}`;
+
+            if (
+                typeof window !== 'undefined' &&
+                decodeURIComponent(window.location.pathname) === decodeURIComponent(threadPath)
+            ) {
+                return;
+            }
+
+            const text = String(message.text || '');
+            const excerpt = text.length > 120 ? `${text.slice(0, 117)}...` : text;
+
+            store.dispatch(
+                lobbyActions.messageReceived({
+                    message: 'lobbynotice',
+                    args: [
+                        {
+                            tone: 'info',
+                            message: `${message.senderUsername}: ${excerpt}`,
+                            url: threadPath
+                        }
+                    ]
+                })
+            );
+        });
 
         lobbySocket.on('gamestate', (game) => {
             const currentState = store.getState();

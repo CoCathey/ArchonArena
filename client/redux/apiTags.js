@@ -23,6 +23,8 @@ export const TAG_TYPES = {
     RATINGS: 'Ratings',
     BUG_REPORTS: 'BugReports',
     NOTIFICATIONS: 'Notifications',
+    // ARCHON: direct messages - the inbox, a thread, and the unread badge.
+    MESSAGES: 'Messages',
     // ARCHON (N7): team rosters and the team ladder.
     TEAMS: 'Teams',
     // ARCHON (N13): in-person (paper) games.

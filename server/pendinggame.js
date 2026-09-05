@@ -471,23 +471,57 @@ class PendingGame {
                       tournamentId: this.tournament.tournamentId,
                       matchId: this.tournament.matchId,
                       gameNumber: this.tournament.gameNumber,
+                      bestOf: this.tournament.bestOf,
                       round: this.tournament.round,
                       table: this.tournament.table,
                       players: this.tournament.players,
                       // ARCHON: the deck lock, as far as this viewer needs to
                       // know it. Whether THEIR seat is pinned and under which
-                      // policy - never which deck anyone else is pinned to,
-                      // which is decklist information and stays server side.
+                      // policy.
                       deckSwapPolicy: this.tournament.deckSwapPolicy || 'locked',
                       deckLocked: !!(
                           activePlayer &&
                           this.tournament.decks &&
                           this.tournament.decks[activePlayer]
-                      )
+                      ),
+                      seats: this.getTournamentSeats(activePlayer)
                   }
                 : undefined,
             useGameTimeLimit: this.useGameTimeLimit
         };
+    }
+
+    /**
+     * ARCHON: what each seat at a tournament table is locked to, by name.
+     *
+     * The seat used to learn its deck's name only once the deck had finished
+     * loading, and the opponent's seat never learned it at all - so a table
+     * the event had built for two registered decks opened reading "No deck
+     * selected" and "Not selected", and stayed that way for a seat whose
+     * auto-load failed. The event already publishes both decks on its own
+     * page, so naming them here gives nothing away the pairing did not.
+     *
+     * Deck names are decklist information under `hideDeckLists`, and there the
+     * same rule as the SAS badge applies: a player still sees their own.
+     *
+     * @param {string} [activePlayer] whose view this is
+     * @returns {Object<string, {locked: boolean, deckName?: string}>} by seat
+     */
+    getTournamentSeats(activePlayer) {
+        const seats = {};
+        const decks = (this.tournament && this.tournament.decks) || {};
+        const names = (this.tournament && this.tournament.deckNames) || {};
+
+        for (const username of (this.tournament && this.tournament.players) || []) {
+            const canSeeName = !this.hideDeckLists || activePlayer === username;
+
+            seats[username] = {
+                locked: !!decks[username],
+                deckName: canSeeName && names[username] ? names[username] : undefined
+            };
+        }
+
+        return seats;
     }
 
     getStartGameDetails() {

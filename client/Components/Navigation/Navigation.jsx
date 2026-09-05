@@ -12,6 +12,8 @@ import ProfileDropdown from './ProfileDropdown';
 import ServerStatus from './ServerStatus';
 // ARCHON (N2): in-app notification centre
 import NotificationBell from '../Site/NotificationBell';
+// ARCHON: the direct-message envelope, beside the bell.
+import MessageBadge from '../Site/MessageBadge';
 import GameContextMenu from './GameContextMenu';
 import Link from './Link';
 
@@ -299,6 +301,7 @@ const Navigation = (props) => {
                             />
                         )}
                         {renderMenuItems(RightMenu)}
+                        {props.user && <MessageBadge />}
                         {props.user && <NotificationBell />}
                         <ProfileDropdown menu={ProfileMenu} user={props.user} />
                         <LanguageSelector />
@@ -345,6 +348,7 @@ const Navigation = (props) => {
                                     />
                                 )}
                                 {renderMenuItems(RightMenu, { mobile: true })}
+                                {props.user && <MessageBadge mobile />}
                                 {props.user && <NotificationBell mobile />}
                                 <ProfileDropdown menu={ProfileMenu} user={props.user} mobile />
                                 <LanguageSelector mobile />

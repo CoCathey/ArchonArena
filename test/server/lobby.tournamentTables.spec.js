@@ -77,6 +77,12 @@ describe('Lobby tournament tables', function () {
             findTournamentGame: Lobby.prototype.findTournamentGame,
             seatTournamentPlayers: Lobby.prototype.seatTournamentPlayers,
             onTournamentNextGame: Lobby.prototype.onTournamentNextGame,
+            // The collaborators onTournamentNextGame grew: the per-match queue,
+            // the wait for the result to land, and the player notice.
+            runForMatch: Lobby.prototype.runForMatch,
+            awaitNextGameInfo: Lobby.prototype.awaitNextGameInfo,
+            notifyPlayers: Lobby.prototype.notifyPlayers,
+            nextGameRetryDelayMs: 0,
             staleTournamentTables: Lobby.prototype.staleTournamentTables,
             ensureTournamentGame: Lobby.prototype.ensureTournamentGame,
             createTournamentGame: Lobby.prototype.createTournamentGame,

@@ -29,6 +29,7 @@ import { isPatreonUnlinked, PatreonStatus } from '../../types';
 import Avatar from '../Site/Avatar';
 import ProfileLocation from './ProfileLocation';
 import ProfileBio from './ProfileBio';
+import ProfileTimeZone from './ProfileTimeZone';
 import ProfileRankCard from './ProfileRankCard';
 import Panel from '../Site/Panel';
 
@@ -229,6 +230,8 @@ const ProfileMain = ({ user, formProps, section }) => {
                 </Panel>
                 {/* ARCHON: location for rankings (Phase 6) */}
                 <ProfileLocation />
+                {/* ARCHON: the zone emailed match times are said in */}
+                <ProfileTimeZone user={user} />
                 {/* ARCHON (I3): optional short bio, shown on the public profile */}
                 <ProfileBio />
                 <Panel type='default' compactHeader title={t('Avatar')}>

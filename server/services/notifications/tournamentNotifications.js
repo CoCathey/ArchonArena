@@ -1,5 +1,6 @@
 const logger = require('../../log');
 const tournamentEvents = require('../tournament/tournamentEvents');
+const { formatWhen, formatWindow } = require('./timeLabel');
 
 /**
  * ARCHON: turn tournament engine events into player notifications (N2).
@@ -14,7 +15,36 @@ const tournamentEvents = require('../tournament/tournamentEvents');
  * pairing path, so a listener that threw would surface right there - hence the
  * try/catch around every one.
  */
-function install({ tournamentService, notificationService }) {
+/**
+ * @param {object} deps
+ * @param {object} deps.tournamentService
+ * @param {object} deps.notificationService
+ * @param {(userId: number) => Promise<string|null>} [deps.zoneFor] the IANA
+ *        zone a recipient reads the site from, or null when unknown. Optional:
+ *        without it every time is labelled in UTC, which is what the body used
+ *        to say for everyone.
+ */
+function install({ tournamentService, notificationService, zoneFor }) {
+    /**
+     * ARCHON: the recipient's own zone, never a failure.
+     *
+     * A lookup that throws or a service that has no idea costs the reader a
+     * UTC label, not the notification - the same rule as everything else here.
+     */
+    const zoneOf = async (userId) => {
+        if (!zoneFor || !userId) {
+            return null;
+        }
+
+        try {
+            return (await zoneFor(userId)) || null;
+        } catch (err) {
+            logger.warn(`Could not resolve a time zone for user ${userId}: ${err.message}`);
+
+            return null;
+        }
+    };
+
     const onRoundPaired = async ({ tournamentId }) => {
         try {
             const pairings = await tournamentService.getCurrentRoundPairings(tournamentId);
@@ -92,30 +122,32 @@ function install({ tournamentService, notificationService }) {
     const otherPlayerOf = (payload) =>
         payload.byUserId === payload.player1Id ? payload.player2Id : payload.player1Id;
 
-    // "Aug 14, 20:00 UTC" - the email/in-app body cannot know the reader's
-    // timezone, so it says the zone instead of guessing one.
-    const utcLabel = (value) => {
-        const time = new Date(
-            typeof value === 'string' && !value.endsWith('Z') ? `${value}Z` : value
-        );
-
-        if (Number.isNaN(time.getTime())) {
-            return 'an unknown time';
-        }
-
-        return `${time.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-    };
-
+    // ARCHON: times are said in the RECIPIENT's zone when the account has
+    // reported one ("Thu, Aug 20, 2:00 PM CDT"), and labelled UTC otherwise.
+    // The body used to be UTC for everyone, which handed the reader a sum to
+    // do - and the reader most likely to get it wrong is the one several zones
+    // from their opponent, who is exactly who an asynchronous event is for.
     const onMatchTimeProposed = async (payload) => {
         try {
+            const recipient = otherPlayerOf(payload);
+            const zone = await zoneOf(recipient);
+            // A window - "any time Thursday evening" - reads differently from
+            // an instant, and says so.
+            const offer = payload.endTime
+                ? `is free ${formatWindow(
+                      payload.time,
+                      payload.endTime,
+                      zone
+                  )} - any time in that window works for them`
+                : `suggests ${formatWhen(payload.time, zone)}`;
+
             await notificationService.notify({
-                userId: otherPlayerOf(payload),
+                userId: recipient,
                 category: 'tournament.schedule',
                 title: `${payload.byUsername} proposed a match time - ${payload.tournamentName}`,
                 body:
-                    `Round ${payload.round}: ${payload.byUsername} suggests ${utcLabel(
-                        payload.time
-                    )}.` + (payload.note ? ` "${payload.note}"` : ''),
+                    `Round ${payload.round}: ${payload.byUsername} ${offer}.` +
+                    (payload.note ? ` "${payload.note}"` : ''),
                 url: scheduleUrl(payload),
                 data: { tournamentId: payload.tournamentId, matchId: payload.matchId },
                 // The latest offer is the only live one, so newer proposals for
@@ -129,12 +161,16 @@ function install({ tournamentService, notificationService }) {
 
     const onMatchTimeAccepted = async (payload) => {
         try {
+            const recipient = otherPlayerOf(payload);
+            const zone = await zoneOf(recipient);
+
             await notificationService.notify({
-                userId: otherPlayerOf(payload),
+                userId: recipient,
                 category: 'tournament.schedule',
                 title: `Match time agreed - ${payload.tournamentName}`,
-                body: `Round ${payload.round}: ${payload.byUsername} accepted ${utcLabel(
-                    payload.time
+                body: `Round ${payload.round}: ${payload.byUsername} accepted ${formatWhen(
+                    payload.time,
+                    zone
                 )}. See you at the table.`,
                 url: scheduleUrl(payload),
                 data: { tournamentId: payload.tournamentId, matchId: payload.matchId },
@@ -157,12 +193,15 @@ function install({ tournamentService, notificationService }) {
                 }
 
                 try {
+                    const zone = await zoneOf(userId);
+
                     await notificationService.notify({
                         userId,
                         category: 'tournament.schedule',
                         title: `Round ends tomorrow - ${payload.tournamentName}`,
-                        body: `Round ${payload.round} closes ${utcLabel(
-                            payload.roundEndsAt
+                        body: `Round ${payload.round} closes ${formatWhen(
+                            payload.roundEndsAt,
+                            zone
                         )}. Your match is still unplayed - arrange a time or it may be decided without you.`,
                         url: scheduleUrl(payload),
                         data: { tournamentId: payload.tournamentId, matchId: match.matchId },
@@ -185,12 +224,15 @@ function install({ tournamentService, notificationService }) {
             }
 
             try {
+                const zone = await zoneOf(userId);
+
                 await notificationService.notify({
                     userId,
                     category: 'tournament.schedule',
                     title: `Your match starts soon - ${payload.tournamentName}`,
-                    body: `Round ${payload.round}: you agreed to play at ${utcLabel(
-                        payload.time
+                    body: `Round ${payload.round}: you agreed to play at ${formatWhen(
+                        payload.time,
+                        zone
                     )}.`,
                     url: scheduleUrl(payload),
                     data: { tournamentId: payload.tournamentId, matchId: payload.matchId },

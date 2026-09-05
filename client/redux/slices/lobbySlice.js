@@ -99,6 +99,10 @@ const handleMessage = (state, message, args) => {
         case 'lobbychat':
             state.messages = [...state.messages, args[0]];
             break;
+        case 'lobbynotice':
+            // Numbered so two identical notices in a row both show.
+            state.notice = { ...(args[0] || {}), id: ((state.notice && state.notice.id) || 0) + 1 };
+            break;
         case 'nochat':
             state.lobbyError = true;
             break;
@@ -227,6 +231,9 @@ const lobbySlice = createSlice({
         },
         clearGameError: (state) => {
             state.gameError = undefined;
+        },
+        clearNotice: (state) => {
+            state.notice = undefined;
         },
         windowBlur: (state) => {
             state.windowBlurred = true;

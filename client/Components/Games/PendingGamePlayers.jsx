@@ -48,6 +48,12 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                   'This event runs on the deck you registered for this round. Change it on the event page before your match starts.'
               )
             : t('This event locks you to one deck for the whole run.');
+    // ARCHON: what the event pinned each seat to, by name, from the moment the
+    // table exists - not only after the deck has finished loading into the
+    // seat, and for the opponent's seat too. Older servers send no `seats`;
+    // everything below degrades to the previous behaviour without it.
+    const tournamentSeats = currentGame.tournament?.seats || {};
+    const seatLock = (player) => (player ? tournamentSeats[player.name] : undefined);
 
     const getSeatReadiness = (player) => {
         if (!player || !player.deck || !player.deck.selected) {
@@ -57,6 +63,16 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                 return {
                     label: t('Deck rolled at start'),
                     tone: 'text-violet-700 bg-violet-500/12 border-violet-500/30 dark:text-violet-300 dark:bg-violet-500/10'
+                };
+            }
+
+            // A locked seat is not waiting on its player either: the table
+            // loads the event's deck itself. Saying "Waiting for deck" here
+            // sent people looking for a picker that does not exist.
+            if (seatLock(player)?.locked) {
+                return {
+                    label: t('Loading event deck'),
+                    tone: 'text-amber-700 bg-amber-500/12 border-amber-500/30 dark:text-amber-300 dark:bg-amber-500/10'
                 };
             }
 
@@ -115,7 +131,15 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                     }
 
                     const deckSelected = !!player.deck?.selected;
-                    const deckName = playerIsMe
+                    const lock = seatLock(player);
+                    // The event's name for the deck this seat is locked to.
+                    // Shown for either seat: the event page already publishes
+                    // both, and the server withholds it when decklists are
+                    // hidden.
+                    const lockedDeckName = lock?.deckName;
+                    const deckName = lockedDeckName
+                        ? lockedDeckName
+                        : playerIsMe
                         ? deckSelected
                             ? isSealed
                                 ? t('Sealed deck selected')
@@ -128,6 +152,7 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                         : isLuckyDice
                         ? t('Random deck at start')
                         : t('Not selected');
+                    const seatIsLocked = playerIsMe ? deckIsPinned : !!lock?.locked;
 
                     return (
                         <div
@@ -182,10 +207,16 @@ const PendingGamePlayers = ({ currentGame, user, onSelectDeck, onLuckyDice }) =>
                                         so offering the picker here would only
                                         be offering a click that gets rejected -
                                         say what the rule is instead. */}
-                                    {playerIsMe && deckIsPinned && (
+                                    {seatIsLocked && (
                                         <span
                                             className='shrink-0 inline-flex items-center gap-1 whitespace-nowrap rounded border border-amber-500/35 bg-amber-500/12 px-1.5 py-0 text-xs font-medium leading-4 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
-                                            title={pinnedDeckHint}
+                                            title={
+                                                playerIsMe
+                                                    ? pinnedDeckHint
+                                                    : t(
+                                                          'This seat is locked to the deck registered for the event.'
+                                                      )
+                                            }
                                         >
                                             <Icon icon={faLock} />
                                             {t('Event deck')}

@@ -10,6 +10,8 @@ import Sidebar from './Components/Navigation/Sidebar';
 import AppRoutes from './AppRoutes';
 import { tryParseJSON } from './util.jsx';
 import AlertPanel from './Components/Site/AlertPanel';
+// ARCHON: lobby notices addressed to this player, toasted on any page.
+import LobbyNoticeToaster from './Components/Site/LobbyNoticeToaster';
 import { setAuthTokens } from './redux/slices/authSlice';
 import {
     useGetCardsQuery,
@@ -18,6 +20,8 @@ import {
     useVerifyAuthenticationMutation
 } from './redux/api';
 import { lobbyAuthenticateRequested, lobbyConnectRequested } from './redux/socketActions';
+// ARCHON: tell the account which zone this browser is in.
+import useSyncTimeZone from './Components/Site/useSyncTimeZone';
 import { lobbyActions } from './redux/slices/lobbySlice';
 
 import Background from './assets/img/bgs/keyforge.png';
@@ -54,6 +58,7 @@ const Application = () => {
     useGetCardsQuery();
     useGetFactionsQuery();
     useGetStandaloneDecksQuery();
+    useSyncTimeZone(user);
 
     useEffect(() => {
         if (!localStorage) {
@@ -233,6 +238,7 @@ const Application = () => {
     // its full width.
     return (
         <div className='bg' ref={bgRef}>
+            <LobbyNoticeToaster />
             {gameBoardVisible ? (
                 <Navigation appName='Archon Arena' user={user} />
             ) : (

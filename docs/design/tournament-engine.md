@@ -242,6 +242,36 @@ per-event.
     match handed back, and the next round unblocked afterwards).
 -   `RatingService.spec.js`: unrated events never rate; rated events boost K.
 
+## Series continuation, seat locks, windows and local time (N57)
+
+Four fixes from a live best-of-three, recorded here because each changes a rule the
+engine or its tables rely on.
+
+-   **Per-match ordering in the lobby.** `GAMEWIN` (record the result, open the next
+    table) and `TOURNAMENTNEXTGAME` (seat both players at it) arrive seconds apart about
+    the same match, and the second used to read the score the first was still writing.
+    When the players' click beat the database the lobby asked which game the match
+    needed, was told "game one", built a second game-one table, seated them there, and
+    later discarded that game's result as a duplicate - while the real game-two table
+    sat unjoined. `Lobby.runForMatch` chains all tournament work per match in arrival
+    order, `awaitNextGameInfo` refuses to open a table whose game number does not match
+    what the finished table expects, and players who cannot be seated are told so over
+    the new `lobbynotice` channel. The pending screen names the game of the series it
+    is, and the game list flags a reserved table with "your match table is ready".
+-   **Seats know their deck by name.** `getMatchesNeedingGames` now returns each seat's
+    deck name with its id, the table carries them as `tournament.deckNames`, and the
+    summary exposes `tournament.seats` (`locked`, `deckName`) - withheld for other seats
+    under `hideDecklists`. A seat whose registered deck fails to load tells the player
+    (`gameerror`) instead of the server log.
+-   **Windows.** `TournamentMatchTimeSlots.SlotEnd` (migration 92) makes an offer a
+    window; `acceptMatchTime` takes a `time` inside it. `ON CONFLICT` on the same start
+    keeps the wider end. A window has to end after it starts, run at most seven days,
+    and sit entirely inside the round deadline.
+-   **Local time in mail.** `Users.Settings_TimeZone` (migration 91) is reported by the
+    browser after sign-in (`PUT /api/account/timezone`); `tournamentNotifications`
+    formats every scheduling time for the recipient through
+    `notifications/timeLabel.js`, falling back to the UTC label when no zone is known.
+
 ## Future considerations
 
 -   Hybrid events (paper + online results into one standing) — the result flow

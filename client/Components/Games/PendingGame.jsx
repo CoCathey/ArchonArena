@@ -6,6 +6,7 @@ import { Button, Input, toast } from '@heroui/react';
 import Panel from '../Site/Panel';
 import PlayerName from '../Site/PlayerName';
 import AlertPanel from '../Site/AlertPanel';
+import Link from '../Navigation/Link';
 import Messages from '../GameBoard/Messages';
 import SelectDeckModal from './SelectDeckModal';
 import {
@@ -438,6 +439,36 @@ const PendingGame = () => {
                         </span>
                         <span>{getGameStatus()}</span>
                     </div>
+
+                    {/* ARCHON: which game of which match this table is. Between
+                        game one ending and game two starting the players are
+                        moved from one table to another, and without this the
+                        second looked like a table somebody else had opened. */}
+                    {currentGame.tournament && (
+                        <AlertPanel type='info' className='!mb-2 !items-center !py-1.5'>
+                            <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-sm'>
+                                <span className='font-semibold'>
+                                    {currentGame.tournament.bestOf > 1
+                                        ? t('Game {{game}} of {{bestOf}} - tournament match', {
+                                              game: currentGame.tournament.gameNumber || 1,
+                                              bestOf: currentGame.tournament.bestOf
+                                          })
+                                        : t('Tournament match')}
+                                </span>
+                                <span>
+                                    {t(
+                                        'Decks are set by the event. The game starts on its own once both players are seated.'
+                                    )}
+                                </span>
+                                <Link
+                                    className='underline underline-offset-2 hover:text-foreground'
+                                    href={`/tournaments/${currentGame.tournament.tournamentId}`}
+                                >
+                                    {t('Event page')}
+                                </Link>
+                            </div>
+                        </AlertPanel>
+                    )}
 
                     {requiresDeckSelection && (
                         <AlertPanel

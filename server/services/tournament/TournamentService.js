@@ -98,20 +98,19 @@ const MAX_ENTRY_FEE_CENTS = 1000000;
 const FULL_SHARE_BPS = 10000;
 /**
  * An IANA time-zone name as the browser reports it ('America/Chicago'), or
- * null.
+ * null - see notifications/timeLabel, which the notification layer shares.
  *
  * Advisory throughout: it exists so an offer can be shown as "8pm your time,
  * 3am theirs", which is the sentence that stops somebody agreeing to a match at
  * three in the morning. Never computed with - the instant is UTC, as
  * everywhere else - so an unrecognised one costs only that sentence.
  */
-const cleanZone = (zone) => {
-    const text = String(zone || '').trim();
+const { cleanZone, formatWhen, asDate } = require('../notifications/timeLabel');
 
-    return /^[A-Za-z_+-]+\/[A-Za-z0-9_+-]+(\/[A-Za-z0-9_+-]+)?$|^UTC$/.test(text)
-        ? text.slice(0, 64)
-        : null;
-};
+// ARCHON: how long an offered WINDOW may run. "Any time this weekend" is a real
+// offer; a window longer than a week is a typo, and the round deadline bounds
+// the useful ones long before this does.
+const MAX_WINDOW_HOURS = 7 * 24;
 // House codes as stored in the Houses table.
 const HOUSE_CODES = [
     'brobnar',
@@ -1245,8 +1244,8 @@ class TournamentService {
                 // ARCHON: the live time offers for every match in one read.
                 // Per-match would be a query per row of the pairings table.
                 this.db.query(
-                    'SELECT s."Id", s."MatchId", s."SlotTime", s."ProposedBy", s."ProposerZone", ' +
-                        'u."Username" FROM "TournamentMatchTimeSlots" s ' +
+                    'SELECT s."Id", s."MatchId", s."SlotTime", s."SlotEnd", s."ProposedBy", ' +
+                        's."ProposerZone", u."Username" FROM "TournamentMatchTimeSlots" s ' +
                         'JOIN "Users" u ON u."Id" = s."ProposedBy" ' +
                         'JOIN "TournamentMatches" m ON m."Id" = s."MatchId" ' +
                         'WHERE m."TournamentId" = $1 ORDER BY s."SlotTime"',
@@ -1260,6 +1259,7 @@ class TournamentService {
             (slotsByMatch[row.MatchId] = slotsByMatch[row.MatchId] || []).push({
                 id: row.Id,
                 time: row.SlotTime,
+                end: row.SlotEnd || null,
                 proposedById: row.ProposedBy,
                 proposedBy: row.Username,
                 zone: row.ProposerZone || undefined
@@ -3228,7 +3228,7 @@ class TournamentService {
      * explicitly rather than as a Date so the column's meaning does not
      * depend on the server's timezone.
      */
-    async proposeMatchTime(tournamentId, matchId, actor, time, note, zone) {
+    async proposeMatchTime(tournamentId, matchId, actor, time, note, zone, endTime) {
         const context = await this.scheduleContext(tournamentId, matchId, actor);
 
         if (context.error) {
@@ -3241,13 +3241,39 @@ class TournamentService {
             return { success: false, message: 'That is not a valid date and time' };
         }
 
+        /**
+         * ARCHON: an offer may be a WINDOW - "any time Thursday evening" - rather
+         * than an instant. The other player accepts it by naming a time inside
+         * it, so everything downstream still deals in one agreed instant.
+         * `until` is null for the ordinary single-time offer.
+         */
+        const until = endTime ? new Date(endTime) : null;
+
+        if (until && Number.isNaN(until.getTime())) {
+            return { success: false, message: 'That is not a valid end time' };
+        }
+
+        if (until && until.getTime() <= when.getTime()) {
+            return { success: false, message: 'A window has to end after it starts' };
+        }
+
+        if (until && until.getTime() - when.getTime() > MAX_WINDOW_HOURS * 60 * 60 * 1000) {
+            return {
+                success: false,
+                message: `A window can run for at most ${MAX_WINDOW_HOURS / 24} days`
+            };
+        }
+
         const now = Date.now();
 
         if (when.getTime() < now - 60 * 1000) {
             return { success: false, message: 'Propose a time in the future' };
         }
 
-        if (when.getTime() > now + MAX_SCHEDULE_AHEAD_DAYS * 24 * 60 * 60 * 1000) {
+        // The whole window has to be inside the ceiling, not just its start.
+        const latest = until || when;
+
+        if (latest.getTime() > now + MAX_SCHEDULE_AHEAD_DAYS * 24 * 60 * 60 * 1000) {
             return {
                 success: false,
                 message: `Matches can be scheduled at most ${MAX_SCHEDULE_AHEAD_DAYS} days ahead`
@@ -3266,16 +3292,15 @@ class TournamentService {
         // players were shown when they were told how long they had.
         const roundEndsAt = context.tournament?.RoundEndsAt;
 
-        if (roundEndsAt && when.getTime() > new Date(roundEndsAt).getTime()) {
+        if (roundEndsAt && latest.getTime() > new Date(roundEndsAt).getTime()) {
+            // In the proposer's own zone when the browser told us it, so the
+            // refusal reads as a time they recognise rather than a UTC sum.
             return {
                 success: false,
-                message: `This round ends ${new Date(roundEndsAt)
-                    .toISOString()
-                    .replace('T', ' ')
-                    .slice(
-                        0,
-                        16
-                    )} UTC - pick a time before then, or ask the organizer for more time`
+                message: `This round ends ${formatWhen(
+                    roundEndsAt,
+                    cleanZone(zone)
+                )} - pick a time before then, or ask the organizer for more time`
             };
         }
 
@@ -3296,10 +3321,19 @@ class TournamentService {
          */
         await this.db.query(
             'INSERT INTO "TournamentMatchTimeSlots" ' +
-                '("MatchId", "ProposedBy", "SlotTime", "ProposerZone", "CreatedAt") ' +
-                "VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc') " +
-                'ON CONFLICT ("MatchId", "SlotTime") DO NOTHING',
-            [matchId, actor.id, when.toISOString(), cleanZone(zone)]
+                '("MatchId", "ProposedBy", "SlotTime", "ProposerZone", "SlotEnd", "CreatedAt") ' +
+                "VALUES ($1, $2, $3, $4, $5, now() AT TIME ZONE 'utc') " +
+                // The same start offered again is agreement; the wider of the
+                // two ends wins, and GREATEST ignores a NULL (single-time) end.
+                'ON CONFLICT ("MatchId", "SlotTime") DO UPDATE SET ' +
+                '"SlotEnd" = GREATEST("TournamentMatchTimeSlots"."SlotEnd", EXCLUDED."SlotEnd")',
+            [
+                matchId,
+                actor.id,
+                when.toISOString(),
+                cleanZone(zone),
+                until ? until.toISOString() : null
+            ]
         );
 
         if (cleanNote) {
@@ -3313,6 +3347,7 @@ class TournamentService {
 
         this.emitScheduleEvent('matchTimeProposed', context, actor, {
             time: when.toISOString(),
+            endTime: until ? until.toISOString() : null,
             note: cleanNote
         });
 
@@ -3324,7 +3359,8 @@ class TournamentService {
      */
     async getTimeSlots(matchId) {
         const rows = await this.db.query(
-            'SELECT s."Id", s."SlotTime", s."ProposedBy", s."ProposerZone", u."Username" ' +
+            'SELECT s."Id", s."SlotTime", s."SlotEnd", s."ProposedBy", s."ProposerZone", ' +
+                'u."Username" ' +
                 'FROM "TournamentMatchTimeSlots" s JOIN "Users" u ON u."Id" = s."ProposedBy" ' +
                 'WHERE s."MatchId" = $1 ORDER BY s."SlotTime"',
             [matchId]
@@ -3333,6 +3369,8 @@ class TournamentService {
         return (rows || []).map((row) => ({
             id: row.Id,
             time: row.SlotTime,
+            // The end of an offered window; null for a single time.
+            end: row.SlotEnd || null,
             proposedById: row.ProposedBy,
             proposedBy: row.Username,
             zone: row.ProposerZone || undefined
@@ -3373,7 +3411,7 @@ class TournamentService {
      * The opponent agrees to the proposed time: it becomes the match's
      * scheduled time and the proposal is consumed.
      */
-    async acceptMatchTime(tournamentId, matchId, actor, slotId = null) {
+    async acceptMatchTime(tournamentId, matchId, actor, slotId = null, time = null) {
         const context = await this.scheduleContext(tournamentId, matchId, actor);
 
         if (context.error) {
@@ -3405,6 +3443,46 @@ class TournamentService {
 
         if (chosen.proposedById === actor.id) {
             return { success: false, message: 'The other player has to accept your proposal' };
+        }
+
+        /**
+         * ARCHON: a window is accepted by naming an instant inside it.
+         *
+         * Decided before the offer is consumed below, so a bad pick refuses
+         * without taking the offer off the table. A single-time offer is
+         * accepted as it stands: a `time` sent with one has to be that time,
+         * because "I accept Thursday at 8" cannot quietly book Thursday at 9.
+         */
+        const windowStart = asDate(chosen.time);
+        const windowEnd = chosen.end ? asDate(chosen.end) : null;
+        let agreed = windowStart;
+
+        if (time) {
+            const picked = new Date(time);
+
+            if (Number.isNaN(picked.getTime())) {
+                return { success: false, message: 'That is not a valid time' };
+            }
+
+            if (!windowEnd) {
+                if (picked.getTime() !== windowStart.getTime()) {
+                    return {
+                        success: false,
+                        message: 'That offer is for one time - accept it as offered'
+                    };
+                }
+            } else if (
+                picked.getTime() < windowStart.getTime() ||
+                picked.getTime() > windowEnd.getTime()
+            ) {
+                return { success: false, message: 'Pick a time inside the offered window' };
+            }
+
+            agreed = picked;
+        } else if (windowEnd) {
+            // Accepting a window without naming a time takes its start: the
+            // earliest moment the proposer said works for them.
+            agreed = windowStart;
         }
 
         /**
@@ -3443,7 +3521,7 @@ class TournamentService {
                 // A newly agreed time is a new thing to be reminded about.
                 '"ProposedTime" = NULL, "ProposedBy" = NULL, "ScheduleRemindedAt" = NULL ' +
                 'WHERE "Id" = $1',
-            [matchId, new Date(claimed[0].SlotTime).toISOString()]
+            [matchId, agreed.toISOString()]
         );
 
         // The rest of the offers are moot now that a time is agreed.
@@ -3452,7 +3530,7 @@ class TournamentService {
         ]);
 
         this.emitScheduleEvent('matchTimeAccepted', context, actor, {
-            time: claimed[0].SlotTime
+            time: agreed.toISOString()
         });
 
         return { success: true };
