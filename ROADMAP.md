@@ -4435,5 +4435,33 @@ but not a window; the email said UTC; and the two players had no way to talk to 
 -   [x] `timeLabel.spec.js`, `tournamentNotificationZones.spec.js`: each recipient in their own
         zone; UTC when unknown, when the lookup fails, and when no lookup is installed.
 -   [x] `DirectMessageService.spec.js`, `lobby.directMessages.spec.js`, `messagesRoutes.spec.js`.
--   [ ] Verified on a live stack with two browsers — not possible from the machine this was
-        built on (no Docker), so the client half is verified by lint and typecheck only.
+-   [x] **Verified on a live stack with two browsers (2026-09-05).** A real PostgreSQL 16 +
+        Redis + lobby + game node, driven through actual Chromium sessions as `test0` and
+        `test1`: a Bo3 single-elim event from creation through both seats' locked deck
+        names, the `lobbynotice` "your match table is ready" banner, a conceded game 1
+        chaining to exactly one new game-2 table (never a second game-one), the match
+        closing 0-2 with no game 3 offered, and a direct-message thread sent and read by
+        both players. Two real defects turned up by actually doing this, neither caught by
+        the unit suite because both need a real Postgres or a real second browser tab to
+        surface:
+    -   **`createTournamentGame` built its owner from `getUserByUsername`, whose plain row
+        has no `hasUserBlocked` method** — `PendingGame.isVisibleFor` calls
+        `owner.hasUserBlocked(...)` on every game-list broadcast, so once a tournament table
+        existed, every subsequent broadcast to every connected socket threw. The throw
+        landed inside `createTournamentGame` itself, before `sendGameState` /
+        `startTournamentGameIfReady` ran, so both seats showed "joined" in chat but the
+        table sat on "Loading event deck" forever — the exact stuck-table failure N57 was
+        written to fix, reintroduced one level up. Fixed by building the owner from
+        `getFullUserByUsername` (a real `User`, matching every other table-owner call site)
+        instead. `lobby.tournamentSeries.spec.js` and `lobby.tournamentTables.spec.js`
+        mocked `hasUserBlocked` directly onto their fake user objects, so this shape of bug
+        could not fail there; both now mock `getFullUserByUsername` too.
+    -   **`DirectMessageService.thread` could not read a thread it had itself just written
+        to.** `LEAST($1, $2) `/`GREATEST($1, $2)` have no column on the same side to infer a
+        type from, so Postgres defaulted the untyped parameters to `text` and then
+        `integer = text` had no operator — every `GET /api/messages/with/:username` failed
+        against real Postgres, though `POST` (plain `"SenderId" = $1` comparisons, typed by
+        the column) worked fine. The fake in-memory `db` the unit tests run against never
+        applies Postgres's type-inference rules, so 22 passing tests coexisted with a
+        thread view that could not open. Fixed by casting both parameters explicitly
+        (`LEAST($1::integer, $2::integer)`).

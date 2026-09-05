@@ -3245,8 +3245,18 @@ class Lobby {
     }
 
     async createTournamentGame(matchInfo) {
+        // ARCHON: a real `User`, not the plain row `getUserByUsername` returns -
+        // `users[0]` becomes the table's owner, and `PendingGame.isVisibleFor`
+        // calls `owner.hasUserBlocked(...)` on every broadcast. A plain object
+        // has no such method, so every game-list broadcast while this table
+        // exists threw, and the throw landed inside `createTournamentGame`
+        // itself - before `sendGameState`/`startTournamentGameIfReady` ran -
+        // leaving both seats joined but the table stuck forever on "Loading
+        // event deck".
         const users = await Promise.all(
-            matchInfo.players.map((player) => this.userService.getUserByUsername(player.username))
+            matchInfo.players.map((player) =>
+                this.userService.getFullUserByUsername(player.username)
+            )
         );
 
         if (users.some((user) => !user)) {
