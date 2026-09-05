@@ -1076,6 +1076,22 @@ module.exports.init = function (server, options) {
         })
     );
 
+    /**
+     * ARCHON: the browser tells the server what zone it is in.
+     *
+     * Sent by the client after sign-in whenever the zone it detects differs
+     * from the one on the account, so nobody has to find a setting for the
+     * email times to read correctly. Before the parameterised PUT below, or
+     * 'timezone' is parsed as somebody's username and refused.
+     */
+    server.put(
+        '/api/account/timezone',
+        passport.authenticate('jwt', { session: false }),
+        wrapAsync(async (req, res) => {
+            res.send(await userService.setTimeZone(req.user.id, req.body.zone));
+        })
+    );
+
     server.put(
         '/api/account/:username',
         passport.authenticate('jwt', { session: false }),

@@ -10,6 +10,7 @@ import RoundTimer from '../Components/Tournaments/RoundTimer';
 import RoundDeadline from '../Components/Tournaments/RoundDeadline';
 import BracketView from '../Components/Tournaments/BracketView';
 import MyMatchPanel from '../Components/Tournaments/MyMatchPanel';
+import { toLocalInputValue, toServerTime } from '../Components/Tournaments/localTime';
 // ARCHON (N9): kiosk check-in QR and the Adaptive Bo3 chain bid
 import CheckInKiosk from '../Components/Tournaments/CheckInKiosk';
 import AdaptiveBidding from '../Components/Tournaments/AdaptiveBidding';
@@ -278,10 +279,11 @@ const TournamentDetail = () => {
             pacing: tournament.pacing || 'live',
             roundDeadlineDays: text(tournament.roundDeadlineDays || 3),
             roundCount: text(tournament.roundCount),
-            // datetime-local wants 'YYYY-MM-DDTHH:mm' and nothing after it.
-            startTime: tournament.startTime
-                ? new Date(tournament.startTime).toISOString().slice(0, 16)
-                : '',
+            // datetime-local wants 'YYYY-MM-DDTHH:mm' in the organizer's OWN
+            // clock. This used to slice an ISO string, which is UTC - so an
+            // organizer in Chicago opened the settings to find their 7pm event
+            // reading midnight, and saving moved it.
+            startTime: tournament.startTime ? toLocalInputValue(tournament.startTime) : '',
             playerCap: text(tournament.playerCap),
             bestOf: text(tournament.bestOf || 1),
             playoffBestOf: text(tournament.playoffBestOf || 3),
@@ -317,7 +319,7 @@ const TournamentDetail = () => {
         roundCount: settings.roundCount || undefined,
         roundDeadlineDays:
             settings.pacing === 'async' ? settings.roundDeadlineDays || undefined : undefined,
-        startTime: settings.startTime || undefined,
+        startTime: toServerTime(settings.startTime),
         playerCap: settings.playerCap || undefined,
         cutTo: settings.format === 'swiss' ? settings.cutTo || undefined : undefined,
         playoffBestOf:

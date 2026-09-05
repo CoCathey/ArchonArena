@@ -3,6 +3,8 @@ const crypto = require('crypto');
 const EventEmitter = require('events');
 
 const logger = require('../log');
+// ARCHON: the zone a player reads the site from - see setTimeZone.
+const { cleanZone, zoneIsUsable } = require('./notifications/timeLabel');
 const { membershipFromDbRow } = require('./membership/mapRow');
 // ARCHON (N12): profile cosmetics, loaded with the user so a lobby seat can
 // render them without a lookup per player.
@@ -572,6 +574,56 @@ class UserService extends EventEmitter {
         return crypto.timingSafeEqual(bufferA, bufferB);
     }
 
+    /**
+     * ARCHON: remember the zone a player reads the site from.
+     *
+     * The browser reports it after sign-in; email and push have no browser to
+     * ask, so this is what lets a notification say "Thu 8:00 PM CDT" instead
+     * of "01:00 UTC". Stored as an IANA name; anything that is not one is
+     * refused rather than written.
+     *
+     * @param {number} userId
+     * @param {string} zone
+     */
+    async setTimeZone(userId, zone) {
+        const clean = cleanZone(zone);
+
+        if (!clean || !zoneIsUsable(clean)) {
+            return { success: false, message: 'That is not a time zone this server recognises' };
+        }
+
+        try {
+            await db.query('UPDATE "Users" SET "Settings_TimeZone" = $2 WHERE "Id" = $1', [
+                userId,
+                clean
+            ]);
+        } catch (err) {
+            logger.error(`Failed to save time zone for user ${userId}`, err);
+
+            return { success: false, message: 'Could not save your time zone' };
+        }
+
+        return { success: true, timeZone: clean };
+    }
+
+    /**
+     * The stored zone for one account, or null when it has never been reported.
+     * Cheap on purpose: the notification layer asks this once per recipient.
+     */
+    async getTimeZone(userId) {
+        try {
+            const rows = await db.query('SELECT "Settings_TimeZone" FROM "Users" WHERE "Id" = $1', [
+                userId
+            ]);
+
+            return (rows && rows[0] && rows[0].Settings_TimeZone) || null;
+        } catch (err) {
+            logger.warn(`Could not read time zone for user ${userId}: ${err.message}`);
+
+            return null;
+        }
+    }
+
     async updateRefreshTokenUsage(tokenId, ip) {
         try {
             await db.query(
@@ -959,7 +1011,12 @@ class UserService extends EventEmitter {
                             ? dbUser.Settings_ShowAccolades
                             : true,
                     hideHandOnOpponentTurn: !!dbUser.Settings_HideHandOnOpponentTurn
-                }
+                },
+                // ARCHON: the zone the player reads the site from, as the
+                // browser last reported it. Written only by setTimeZone - it is
+                // deliberately NOT part of update(), so a profile save from a
+                // client that does not know about it cannot blank it.
+                timeZone: dbUser.Settings_TimeZone || null
             },
             verified: dbUser.Verified,
             disabled: dbUser.Disabled,

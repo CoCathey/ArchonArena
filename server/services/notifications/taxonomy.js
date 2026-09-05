@@ -82,6 +82,17 @@ const CATEGORIES = {
         description: 'A club owner invited you to join their club.',
         defaults: { inApp: true, email: true, push: false }
     },
+    // ARCHON: a direct message to somebody who is not on the site. Mails and
+    // buzzes by default because the message is usually "can we play at 8
+    // instead?", which is worth little an hour later. The lobby raises it only
+    // for a recipient who is not connected, and at most once an hour per
+    // sender, so a conversation is not a stream of emails.
+    'message.direct': {
+        group: 'Community',
+        label: 'Direct messages',
+        description: 'Someone sent you a direct message while you were away from the site.',
+        defaults: { inApp: true, email: true, push: true }
+    },
     // ARCHON (N13): an in-person game is stuck until the other player files
     // their report, and neither of them is on the site when it happens - the
     // whole exchange takes place across a table. So this mails by default:

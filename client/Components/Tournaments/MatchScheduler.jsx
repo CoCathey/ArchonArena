@@ -17,6 +17,10 @@ import { Button as HeroButton, Input } from '@heroui/react';
  * could spend a day of a three-day round finding out that Thursday does not
  * work either.
  *
+ * An offer can also be a WINDOW - "any time Thursday evening" - which the
+ * other player accepts by picking an instant inside it. Before windows, that
+ * sentence was five separate offers or a note nobody could act on.
+ *
  * All times are entered and shown in the reader's OWN timezone - the input is
  * a plain datetime-local, converted to UTC on the way out and back on the way
  * in. A cross-timezone event is the normal case for an async league, so a
@@ -58,6 +62,17 @@ const defaultProposal = () => {
     date.setHours(19, 0, 0, 0);
 
     return toLocalInputValue(date);
+};
+
+/** Three hours after a start, as the default end of a window. */
+const defaultWindowEnd = (startValue) => {
+    const start = new Date(startValue);
+
+    if (Number.isNaN(start.getTime())) {
+        return '';
+    }
+
+    return toLocalInputValue(new Date(start.getTime() + 3 * 60 * 60 * 1000));
 };
 
 /** The reader's own zone, as the browser knows it. */
@@ -123,11 +138,32 @@ const formatWhen = (date, t) => {
     });
 };
 
+/**
+ * A window, as "Thu, Aug 20, 7:00 PM - 10:00 PM" when both ends share a day
+ * and with the end dated in full when they do not.
+ */
+const formatWindow = (start, end, t) => {
+    if (!end || !start || end.getTime() <= start.getTime()) {
+        return formatWhen(start, t);
+    }
+
+    const sameDay = start.toDateString() === end.toDateString();
+    const endLabel = sameDay
+        ? end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+        : formatWhen(end, t);
+
+    return `${formatWhen(start, t)} - ${endLabel}`;
+};
+
 const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = false }) => {
     const { t } = useTranslation();
     const [proposing, setProposing] = useState(false);
     const [time, setTime] = useState(defaultProposal);
+    const [asWindow, setAsWindow] = useState(false);
+    const [endTime, setEndTime] = useState('');
     const [note, setNote] = useState('');
+    // Which window the reader is picking a time inside, and the time so far.
+    const [picking, setPicking] = useState(null);
 
     if (!match || !user) {
         return null;
@@ -158,6 +194,7 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
 
         if (ok) {
             setProposing(false);
+            setPicking(null);
             setNote('');
         }
 
@@ -177,16 +214,35 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
             return;
         }
 
+        const until = asWindow && endTime ? new Date(endTime) : null;
+
+        if (until && (Number.isNaN(until.getTime()) || until.getTime() <= when.getTime())) {
+            // The button is disabled in this state; this is the belt to that
+            // brace. The server refuses it too.
+            return;
+        }
+
         send(
             'propose-time',
             {
                 time: when.toISOString(),
+                endTime: until ? until.toISOString() : undefined,
                 note: note.trim() || undefined,
                 // So the other player can be shown "8pm your time, 3am theirs".
                 zone: myZone()
             },
-            t('Time offered - your opponent has been notified')
+            until
+                ? t('Window offered - your opponent has been notified')
+                : t('Time offered - your opponent has been notified')
         );
+    };
+
+    const startWindow = (on) => {
+        setAsWindow(on);
+
+        if (on && !endTime) {
+            setEndTime(defaultWindowEnd(time));
+        }
     };
 
     const proposeForm = (
@@ -197,7 +253,7 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
                         className='mb-1 block text-xs text-muted'
                         htmlFor={`schedule-time-${match.id}`}
                     >
-                        {t('Your local time')}
+                        {asWindow ? t('From (your local time)') : t('Your local time')}
                     </label>
                     <Input
                         id={`schedule-time-${match.id}`}
@@ -206,6 +262,23 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
                         onChange={(event) => setTime(event.target.value)}
                     />
                 </div>
+                {asWindow && (
+                    <div className='min-w-0 flex-1'>
+                        <label
+                            className='mb-1 block text-xs text-muted'
+                            htmlFor={`schedule-end-${match.id}`}
+                        >
+                            {t('Until')}
+                        </label>
+                        <Input
+                            id={`schedule-end-${match.id}`}
+                            type='datetime-local'
+                            value={endTime}
+                            min={time}
+                            onChange={(event) => setEndTime(event.target.value)}
+                        />
+                    </div>
+                )}
                 <div className='min-w-0 flex-1'>
                     <label
                         className='mb-1 block text-xs text-muted'
@@ -222,9 +295,32 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
                     />
                 </div>
             </div>
+            {/* ARCHON: "any time Thursday evening" is one offer, not five. The
+                other player picks the exact time inside it. */}
+            <label className='flex items-center gap-2 text-xs text-muted'>
+                <input
+                    type='checkbox'
+                    checked={asWindow}
+                    onChange={(event) => startWindow(event.target.checked)}
+                />
+                {t('Offer a window - I am free any time between these')}
+            </label>
+            {asWindow && endTime && new Date(endTime).getTime() <= new Date(time).getTime() && (
+                <div className='text-xs text-red-400'>
+                    {t('The window has to end after it starts.')}
+                </div>
+            )}
             <div className='flex flex-wrap gap-2'>
-                <HeroButton size='sm' variant='primary' onPress={submitProposal}>
-                    {t('Send proposal')}
+                <HeroButton
+                    size='sm'
+                    variant='primary'
+                    isDisabled={
+                        asWindow &&
+                        (!endTime || new Date(endTime).getTime() <= new Date(time).getTime())
+                    }
+                    onPress={submitProposal}
+                >
+                    {asWindow ? t('Offer this window') : t('Send proposal')}
                 </HeroButton>
                 <HeroButton size='sm' variant='tertiary' onPress={() => setProposing(false)}>
                     {t('Cancel')}
@@ -261,6 +357,71 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
         );
     }
 
+    /**
+     * Accepting a window means naming the instant inside it. The picker is
+     * bounded to the window in the reader's local clock, starts at the
+     * window's start, and hands the server UTC like everything else.
+     */
+    const renderPicker = (offer, start, end) => {
+        const value = picking?.time || toLocalInputValue(start);
+        const chosen = new Date(value);
+        const inside =
+            !Number.isNaN(chosen.getTime()) &&
+            chosen.getTime() >= start.getTime() &&
+            chosen.getTime() <= end.getTime();
+
+        return (
+            <div className='mt-1 flex w-full flex-wrap items-end gap-2 border-t border-border/40 pt-1'>
+                <div className='min-w-0 flex-1'>
+                    <label
+                        className='mb-1 block text-xs text-muted'
+                        htmlFor={`pick-time-${offer.id}`}
+                    >
+                        {t('Play at (inside their window, your local time)')}
+                    </label>
+                    <Input
+                        id={`pick-time-${offer.id}`}
+                        type='datetime-local'
+                        value={value}
+                        min={toLocalInputValue(start)}
+                        max={toLocalInputValue(end)}
+                        onChange={(event) =>
+                            setPicking({ slotId: offer.id, time: event.target.value })
+                        }
+                    />
+                </div>
+                {!inside && (
+                    <span className='text-xs text-red-400'>
+                        {t('Pick a time inside the window')}
+                    </span>
+                )}
+                <HeroButton
+                    size='sm'
+                    variant='primary'
+                    className='!h-7 !px-2 text-xs'
+                    isDisabled={!inside}
+                    onPress={() =>
+                        send(
+                            'accept-time',
+                            { slotId: offer.id, time: chosen.toISOString() },
+                            t('Match time agreed')
+                        )
+                    }
+                >
+                    {t('Play then')}
+                </HeroButton>
+                <HeroButton
+                    size='sm'
+                    variant='tertiary'
+                    className='!h-7 !px-2 text-xs'
+                    onPress={() => setPicking(null)}
+                >
+                    {t('Cancel')}
+                </HeroButton>
+            </div>
+        );
+    };
+
     // Live offers: the recipient picks one or adds their own; the proposer
     // waits, or takes one back without cancelling the whole negotiation.
     if (offers.length > 0) {
@@ -292,15 +453,28 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
                 <div className='space-y-1'>
                     {offers.map((offer) => {
                         const when = asUtc(offer.time);
+                        const until = asUtc(offer.end);
+                        const isWindow = !!until && when && until.getTime() > when.getTime();
                         const mine = offer.proposedById === user.id;
                         const theirs = inTheirZone(when, offer.zone);
+                        const isPicking = picking && picking.slotId === offer.id;
 
                         return (
                             <div
                                 key={offer.id}
                                 className='flex flex-wrap items-center gap-2 rounded border border-border/50 bg-surface-secondary/40 px-2 py-1 text-sm'
                             >
-                                <span className='text-foreground'>{formatWhen(when, t)}</span>
+                                {isWindow && (
+                                    <span
+                                        className='rounded border border-border/60 px-1 py-0 text-[0.65rem] uppercase tracking-wide text-muted'
+                                        title={t('Any time in this window works for them')}
+                                    >
+                                        {t('window')}
+                                    </span>
+                                )}
+                                <span className='text-foreground'>
+                                    {isWindow ? formatWindow(when, until, t) : formatWhen(when, t)}
+                                </span>
                                 {/* The one sentence the stored zone exists for.
                                     Only when the two zones actually disagree -
                                     otherwise it is noise on every row. */}
@@ -328,6 +502,22 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
                                         >
                                             {t('Withdraw')}
                                         </HeroButton>
+                                    ) : isWindow ? (
+                                        !isPicking && (
+                                            <HeroButton
+                                                size='sm'
+                                                variant='primary'
+                                                className='!h-6 !px-2 text-xs'
+                                                onPress={() =>
+                                                    setPicking({
+                                                        slotId: offer.id,
+                                                        time: toLocalInputValue(when)
+                                                    })
+                                                }
+                                            >
+                                                {t('Pick a time')}
+                                            </HeroButton>
+                                        )
                                     ) : (
                                         <HeroButton
                                             size='sm'
@@ -345,6 +535,7 @@ const MatchScheduler = ({ match, user, opponentName, act, deadline, compact = fa
                                         </HeroButton>
                                     )}
                                 </span>
+                                {isWindow && isPicking && renderPicker(offer, when, until)}
                             </div>
                         );
                     })}

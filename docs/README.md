@@ -54,3 +54,4 @@ Longer notes on how each platform system works and why it is shaped the way it i
 | [Onboarding](design/onboarding.md)                          | The new-player welcome and the Learn-to-Play walkthrough |
 | [Game state sync](design/game-state-sync.md)                | How board state reaches the client                       |
 | [Game leave resilience](design/game-leave-resilience.md)    | Disconnects, reconnects and abandonment                  |
+| [Direct messages](design/direct-messages.md)                | Player-to-player threads around the match scheduler      |

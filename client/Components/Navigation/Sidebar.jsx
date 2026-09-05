@@ -9,6 +9,8 @@ import Avatar from '../Site/Avatar';
 import BugReportModal from '../Site/BugReportModal';
 import LanguageSelector from './LanguageSelector';
 import Link from './Link';
+// ARCHON: the unread direct-message count, where a signed-in player looks.
+import MessageBadge from '../Site/MessageBadge';
 
 import BrandMark from '../../assets/img/aa_mark.svg';
 import { hasCapability } from '../../membership';
@@ -267,6 +269,7 @@ const Sidebar = ({ appName, user }) => {
                     </span>
                     {t('Report a bug')}
                 </button>
+                {user && <MessageBadge sidebar onNavigate={closeAll} />}
                 {authControls}
                 <div className='flex items-center justify-between'>
                     <Link

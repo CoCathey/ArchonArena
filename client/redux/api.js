@@ -1305,6 +1305,45 @@ export const api = createApi({
             query: () => '/notifications/preferences',
             providesTags: [{ type: TAG_TYPES.NOTIFICATIONS, id: 'PREFS' }]
         }),
+        // ARCHON: the zone the browser is in, so emailed match times read in
+        // it. Sent whenever it differs from what the account remembers.
+        setTimeZone: builder.mutation({
+            query: (zone) => ({ url: '/account/timezone', method: 'PUT', body: { zone } })
+        }),
+        // ARCHON: direct messages.
+        getConversations: builder.query({
+            query: () => '/messages/conversations',
+            providesTags: [TAG_TYPES.MESSAGES]
+        }),
+        getUnreadMessageCount: builder.query({
+            query: () => '/messages/unread-count',
+            providesTags: [TAG_TYPES.MESSAGES]
+        }),
+        getMessageThread: builder.query({
+            query: ({ username, before, limit }) => ({
+                url: `/messages/with/${encodeURIComponent(username)}`,
+                params: { before, limit }
+            }),
+            providesTags: (result, error, { username }) => [
+                TAG_TYPES.MESSAGES,
+                { type: TAG_TYPES.MESSAGES, id: username }
+            ]
+        }),
+        sendDirectMessage: builder.mutation({
+            query: ({ username, text, matchId }) => ({
+                url: `/messages/with/${encodeURIComponent(username)}`,
+                method: 'POST',
+                body: { text, matchId }
+            }),
+            invalidatesTags: [TAG_TYPES.MESSAGES]
+        }),
+        markThreadRead: builder.mutation({
+            query: (username) => ({
+                url: `/messages/with/${encodeURIComponent(username)}/read`,
+                method: 'POST'
+            }),
+            invalidatesTags: [TAG_TYPES.MESSAGES]
+        }),
         setNotificationPreference: builder.mutation({
             query: (body) => ({ url: '/notifications/preferences', method: 'POST', body }),
             invalidatesTags: [{ type: TAG_TYPES.NOTIFICATIONS, id: 'PREFS' }]
@@ -1511,7 +1550,13 @@ export const {
     useGetNotificationPreferencesQuery,
     useSetNotificationPreferenceMutation,
     useGetGameRatingQuery,
-    useRemoveLobbyMessageMutation
+    useRemoveLobbyMessageMutation,
+    useSetTimeZoneMutation,
+    useGetConversationsQuery,
+    useGetUnreadMessageCountQuery,
+    useGetMessageThreadQuery,
+    useSendDirectMessageMutation,
+    useMarkThreadReadMutation
 } = api;
 
 export default api;

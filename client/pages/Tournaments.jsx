@@ -8,6 +8,7 @@ import Panel from '../Components/Site/Panel';
 import Link from '../Components/Navigation/Link';
 import MySchedulePanel from '../Components/Tournaments/MySchedulePanel';
 import EventForm from '../Components/Tournaments/EventForm';
+import { toServerTime } from '../Components/Tournaments/localTime';
 import {
     describeEvent,
     defaultEventForm as defaultForm
@@ -72,7 +73,10 @@ const Tournaments = () => {
                 roundCount: form.roundCount || undefined,
                 roundDeadlineDays:
                     form.pacing === 'async' ? form.roundDeadlineDays || undefined : undefined,
-                startTime: form.startTime || undefined,
+                // The form holds the organizer's local wall clock; the server
+                // parses in ITS zone (UTC in production), so it is handed an
+                // instant rather than a clock reading.
+                startTime: toServerTime(form.startTime),
                 playerCap: form.playerCap || undefined,
                 cutTo: form.format === 'swiss' ? form.cutTo || undefined : undefined,
                 playoffBestOf:

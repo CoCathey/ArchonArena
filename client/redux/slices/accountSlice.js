@@ -91,6 +91,16 @@ const accountSlice = createSlice({
                     state.user.onboarded = true;
                 }
             })
+            // ARCHON: the account remembers the browser's zone; keep the copy
+            // in the store in step so the sync does not fire again this session.
+            .addMatcher(api.endpoints.setTimeZone.matchFulfilled, (state, action) => {
+                if (state.user && action.payload?.success && action.payload.timeZone) {
+                    state.user.settings = {
+                        ...(state.user.settings || {}),
+                        timeZone: action.payload.timeZone
+                    };
+                }
+            })
             .addMatcher(api.endpoints.setAvatar.matchFulfilled, (state, action) => {
                 if (state.user && action.payload.avatar) {
                     state.user.avatar = action.payload.avatar;

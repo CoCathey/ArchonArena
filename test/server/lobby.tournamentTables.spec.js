@@ -64,7 +64,8 @@ describe('Lobby tournament tables', function () {
             },
             tournamentService: {
                 attachGame: vi.fn(async (...args) => attached.push(args)),
-                getMatchesNeedingGames: vi.fn(async () => [])
+                getMatchesNeedingGames: vi.fn(async () => []),
+                describeMatchReadiness: vi.fn(async () => ({ state: 'complete' }))
             },
             router: { startGame: vi.fn().mockReturnValue({ identity: 'node1' }) },
             sendGameState: vi.fn(),
@@ -77,6 +78,12 @@ describe('Lobby tournament tables', function () {
             findTournamentGame: Lobby.prototype.findTournamentGame,
             seatTournamentPlayers: Lobby.prototype.seatTournamentPlayers,
             onTournamentNextGame: Lobby.prototype.onTournamentNextGame,
+            // The collaborators onTournamentNextGame grew: the per-match queue,
+            // the wait for the result to land, and the player notice.
+            runForMatch: Lobby.prototype.runForMatch,
+            awaitNextGameInfo: Lobby.prototype.awaitNextGameInfo,
+            notifyPlayers: Lobby.prototype.notifyPlayers,
+            nextGameRetryDelayMs: 0,
             staleTournamentTables: Lobby.prototype.staleTournamentTables,
             ensureTournamentGame: Lobby.prototype.ensureTournamentGame,
             createTournamentGame: Lobby.prototype.createTournamentGame,

@@ -386,7 +386,9 @@ module.exports.init = function (server) {
                 req.body.note,
                 // The browser's own zone, so an offer can be shown as "8pm
                 // your time, 3am theirs". Advisory - see cleanZone.
-                req.body.zone
+                req.body.zone,
+                // Present when the offer is a window rather than an instant.
+                req.body.endTime
             ),
         matchTrafficLimit
     );
@@ -400,7 +402,10 @@ module.exports.init = function (server) {
                 req.user,
                 // Which of the offered times. Absent means "the only one",
                 // which is what an older client sends.
-                req.body.slotId
+                req.body.slotId,
+                // The instant chosen inside an offered window. Absent for a
+                // single-time offer, or to take a window's start.
+                req.body.time
             ),
         matchTrafficLimit
     );

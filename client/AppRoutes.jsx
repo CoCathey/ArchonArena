@@ -28,6 +28,8 @@ import BugReportsAdmin from './pages/BugReportsAdmin';
 import Tournaments from './pages/Tournaments';
 import TournamentDetail from './pages/TournamentDetail';
 import Friends from './pages/Friends';
+// ARCHON: direct messages
+import DirectMessages from './pages/DirectMessages';
 import Members from './pages/Members';
 import Clubs from './pages/Clubs';
 import ClubDetail from './pages/ClubDetail';
@@ -274,6 +276,9 @@ const AppRoutes = ({ currentGame, user }) => {
             <Route path='/watch' element={<Watch />} />
             <Route path='/welcome' element={<Onboarding />} />
             <Route path='/community/friends' element={<Friends />} />
+            {/* ARCHON: direct messages - the inbox, and a thread by username */}
+            <Route path='/messages' element={<DirectMessages />} />
+            <Route path='/messages/:username' element={<DirectMessages />} />
             <Route path='/community/clubs' element={<Clubs />} />
             <Route path='/community/clubs/:id' element={<ClubDetail />} />
             {/* ARCHON (N7): teams */}

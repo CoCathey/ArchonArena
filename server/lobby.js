@@ -21,6 +21,9 @@ const ConfigService = require('./services/ConfigService');
 // ARCHON: native tournaments create/report lobby games automatically
 const TournamentService = require('./services/tournament/TournamentService');
 const tournamentEvents = require('./services/tournament/tournamentEvents');
+// ARCHON: direct messages are written by the API and delivered from here,
+// because this is where the sockets are.
+const directMessageEvents = require('./services/community/directMessageEvents');
 // ARCHON: Quick Match matchmaking queue (Amber-based pairing)
 const MatchmakingService = require('./services/matchmaking/MatchmakingService');
 // ARCHON (F9): the practice bots - one per house, always hosting a table
@@ -84,6 +87,7 @@ class Lobby {
         tournamentEvents.on('roundPaired', this.onTournamentRoundPaired.bind(this));
         tournamentEvents.on('ensureMatchGame', this.onTournamentEnsureMatchGame.bind(this));
         tournamentEvents.on('deckRegistered', this.onTournamentDeckRegistered.bind(this));
+        directMessageEvents.on('sent', this.onDirectMessageSent.bind(this));
 
         // ARCHON: tell paired players their round is up (N2). A separate
         // listener on the same bridge, so a notification failure cannot affect
@@ -98,7 +102,9 @@ class Lobby {
         this.moderationService = options.moderationService || null;
         tournamentNotifications.install({
             tournamentService: this.tournamentService,
-            notificationService: this.notificationService
+            notificationService: this.notificationService,
+            // So an emailed match time reads in the recipient's own zone.
+            zoneFor: (userId) => this.userService.getTimeZone(userId)
         });
 
         // ARCHON: Quick Match matchmaking - queue players and pair them by Amber.
@@ -1942,13 +1948,43 @@ class Lobby {
         // Joining a game means leaving any matchmaking queue.
         this.matchmaking?.dequeue(socket.user.username);
 
-        let existingGame = this.findGameForUser(socket.user.username);
-        if (existingGame) {
+        let game = this.games[gameId];
+        if (!game) {
             return;
         }
 
-        let game = this.games[gameId];
-        if (!game) {
+        let existingGame = this.findGameForUser(socket.user.username);
+        if (existingGame && existingGame.id !== game.id) {
+            /**
+             * ARCHON: already in a game, and this used to return in silence.
+             *
+             * The common case is a tournament player still counted as sitting
+             * at the game of their match that just finished - the lobby keeps
+             * a started table's seats until somebody leaves - pressing "Join
+             * your table" for the next game. That is one series and one
+             * intention, so the finished seat is given up for them. Anything
+             * else gets told, because a button that does nothing is the
+             * complaint this whole area started from.
+             */
+            const sameSeries =
+                existingGame.started &&
+                existingGame.tournament &&
+                game.tournament &&
+                existingGame.tournament.matchId === game.tournament.matchId;
+
+            if (!sameSeries) {
+                socket.send('lobbynotice', {
+                    tone: 'warning',
+                    message: 'Leave the game you are in before joining another table.'
+                });
+
+                return;
+            }
+
+            existingGame.leave(socket.user.username);
+            socket.leaveChannel(existingGame.id);
+            this.broadcastGameMessage('updategame', existingGame);
+        } else if (existingGame) {
             return;
         }
 
@@ -1979,9 +2015,39 @@ class Lobby {
                 : Promise.resolve();
 
             selection
-                .catch((err) => logger.error('Failed to auto-select tournament deck', err))
+                .catch((err) => {
+                    logger.error('Failed to auto-select tournament deck', err);
+                    this.reportAutoSelectFailure(game, socket.user.username, err);
+                })
                 .then(() => this.startTournamentGameIfReady(game));
         }
+    }
+
+    /**
+     * ARCHON: a locked seat whose deck did not load has to say so.
+     *
+     * The seat is pinned, so the table shows no picker - and until this the
+     * failure went to the server log and nowhere else. The player saw "Waiting
+     * for deck" on a seat they could do nothing about, which reads as the
+     * platform having forgotten their deck. Now the table tells them what
+     * happened and what to do, and the game refuses to start on a wrong deck
+     * in the meantime exactly as before.
+     */
+    reportAutoSelectFailure(game, username, err) {
+        const socket = this.socketsByName[username];
+
+        if (!socket) {
+            return;
+        }
+
+        const reason = err && err.playerMessage ? ` ${err.playerMessage}` : '';
+
+        socket.send(
+            'gameerror',
+            `Your registered deck could not be loaded for this table.${reason} ` +
+                'Refresh the page to try again, or ask the organizer to check your deck registration.'
+        );
+        this.sendGameState(game);
     }
 
     onStartGame(socket, gameId) {
@@ -2936,9 +3002,18 @@ class Lobby {
                 return await this.ensureTournamentGame(matchInfo);
             }
 
-            // Nothing needs a game: the match already has its table, and the
+            // Nothing needs a game: if the match has a table waiting, the
             // player should be sent to it rather than told nothing happened.
-            return this.findTournamentGame(matchId);
+            // Only a table that has not started - handing back a finished
+            // game's table sent the player into a "Game full" refusal - and
+            // an explicit null when there is none, which the service turns
+            // into the reason (a pick or a bid still outstanding).
+            return (
+                Object.values(this.games).find(
+                    (game) =>
+                        game.tournament && game.tournament.matchId === matchId && !game.started
+                ) || null
+            );
         } catch (err) {
             logger.error(`Failed to open game for tournament match ${matchId}`, err);
 
@@ -2972,6 +3047,13 @@ class Lobby {
         for (const game of tables) {
             game.tournament.decks[username] = deckId || null;
 
+            // The recorded name belongs to the deck they just replaced. The
+            // seat shows the loaded deck's name once it arrives; until then
+            // an empty name is honest and a stale one is not.
+            if (game.tournament.deckNames) {
+                game.tournament.deckNames[username] = null;
+            }
+
             const player = game.getPlayerByName(username);
 
             if (!player || !deckId) {
@@ -2993,31 +3075,130 @@ class Lobby {
         }
     }
 
-    async onTournamentGameWin(gameSave) {
-        if (!gameSave || !gameSave.tournament) {
+    /**
+     * ARCHON: a direct message was written; get it to the people in it.
+     *
+     * Both ends hear it live when they are connected - the sender too, so a
+     * second tab of theirs shows what the first one sent. A recipient who is
+     * not here gets a notification instead, through the same centre as a
+     * pairing: in-app, and email or push if their preferences allow. The
+     * dedupe key rolls over hourly per sender, so a conversation with somebody
+     * away from the site is one email an hour, not one per line.
+     *
+     * "Connected" means connected to THIS lobby process. Under several lobbies
+     * a recipient on another one is treated as away and gets the notification
+     * as well as the live copy their own lobby will not send - the harmless
+     * direction to be wrong in.
+     */
+    onDirectMessageSent({ message }) {
+        if (!message) {
             return;
         }
 
-        try {
-            const result = await this.tournamentService.recordGameWin(gameSave);
+        const recipientSocket = this.socketsByName[message.recipientUsername];
+        const senderSocket = this.socketsByName[message.senderUsername];
 
-            if (result?.handled && result.matchComplete === false && result.nextGameNumber) {
-                // Series continues: put the next game up right away so
-                // the players find their table when they leave this one.
-                const matches = await this.tournamentService.getMatchesNeedingGames(
-                    gameSave.tournament.tournamentId
-                );
-                const matchInfo = matches.find(
-                    (entry) => entry.matchId === gameSave.tournament.matchId
-                );
-
-                if (matchInfo) {
-                    await this.ensureTournamentGame(matchInfo);
-                }
-            }
-        } catch (err) {
-            logger.error('Failed to process tournament game result', err);
+        if (recipientSocket) {
+            recipientSocket.send('directmessage', message);
         }
+
+        if (senderSocket) {
+            senderSocket.send('directmessage', message);
+        }
+
+        if (recipientSocket || !this.notificationService) {
+            return;
+        }
+
+        const hour = Math.floor(Date.now() / (60 * 60 * 1000));
+        const text = String(message.text || '');
+        const excerpt = text.length > 140 ? `${text.slice(0, 137)}...` : text;
+
+        this.notificationService.notify({
+            userId: message.recipientId,
+            category: 'message.direct',
+            title: `New message from ${message.senderUsername}`,
+            body: excerpt,
+            url: `/messages/${encodeURIComponent(message.senderUsername)}`,
+            data: {
+                senderId: message.senderId,
+                senderUsername: message.senderUsername,
+                messageId: message.id,
+                matchId: message.matchId || null
+            },
+            dedupeKey: `message.direct:${message.recipientId}:${message.senderId}:${hour}`
+        });
+    }
+
+    /**
+     * ARCHON: one piece of tournament work at a time per match.
+     *
+     * Two things arrive from the game node about the same match seconds apart:
+     * GAMEWIN, whose handler records the result and opens the next table, and
+     * TOURNAMENTNEXTGAME, whose handler seats the players at that table. The
+     * second reads the match score the first is still writing. When the
+     * players' click beat the database - a busy lobby, a slow write - the
+     * next-game handler saw the score BEFORE the result, asked which game the
+     * match needed, was told "game one", and built a second game-one table.
+     * The players were seated there and played it; its result was thrown away
+     * on arrival as a duplicate of a game already decided; and the real
+     * game-two table sat unjoined in the lobby list with nothing pointing at it.
+     *
+     * Redis delivers a node's messages in order and the router dispatches them
+     * synchronously, so chaining each match's work on the previous piece makes
+     * the ordering the code relies on the ordering it actually gets. The chain
+     * is registered synchronously by every caller, before its first await -
+     * that is what makes it a queue rather than a suggestion.
+     *
+     * @param {number} matchId
+     * @param {() => Promise<any>} work
+     * @returns {Promise<any>} whatever `work` resolves to
+     */
+    runForMatch(matchId, work) {
+        this.tournamentMatchWork = this.tournamentMatchWork || new Map();
+
+        const previous = this.tournamentMatchWork.get(matchId) || Promise.resolve();
+        const run = previous.catch(() => {}).then(work);
+        const settled = run
+            .catch(() => {})
+            .then(() => {
+                if (this.tournamentMatchWork.get(matchId) === settled) {
+                    this.tournamentMatchWork.delete(matchId);
+                }
+            });
+
+        this.tournamentMatchWork.set(matchId, settled);
+
+        return run;
+    }
+
+    onTournamentGameWin(gameSave) {
+        if (!gameSave || !gameSave.tournament || !gameSave.tournament.matchId) {
+            return Promise.resolve();
+        }
+
+        return this.runForMatch(gameSave.tournament.matchId, async () => {
+            try {
+                const result = await this.tournamentService.recordGameWin(gameSave);
+
+                if (result?.handled && result.matchComplete === false && result.nextGameNumber) {
+                    // Series continues: put the next game up right away so
+                    // the players find their table when they leave this one.
+                    const matches = await this.tournamentService.getMatchesNeedingGames(
+                        gameSave.tournament.tournamentId
+                    );
+                    const matchInfo = matches.find(
+                        (entry) => entry.matchId === gameSave.tournament.matchId
+                    );
+
+                    if (matchInfo) {
+                        await this.ensureTournamentGame(matchInfo);
+                    }
+                }
+            } catch (err) {
+                logger.error('Failed to process tournament game result', err);
+            }
+        });
     }
 
     /**
@@ -3115,7 +3296,16 @@ class Lobby {
                 deckSwapPolicy: matchInfo.deckSwapPolicy || 'locked',
                 decks: Object.fromEntries(
                     matchInfo.players.map((player) => [player.username, player.deckId])
-                )
+                ),
+                // And what those decks are called, so the table can say what
+                // each seat is locked to before (or without) loading the deck
+                // into it. See PendingGame.getTournamentSeats.
+                deckNames: Object.fromEntries(
+                    matchInfo.players.map((player) => [player.username, player.deckName || null])
+                ),
+                // The series score so far, so the engine's post-game menu can
+                // tell a decided match from one with games left.
+                wins: matchInfo.wins || {}
             }
         });
 
@@ -3174,22 +3364,37 @@ class Lobby {
      * sit them at another is never right.
      */
     async seatTournamentPlayers(game, matchInfo) {
+        // Who could NOT be sat down, and why - so a caller that promised the
+        // players a table can tell them to come and find it instead of
+        // leaving them to notice its absence.
+        const unseated = [];
+
         for (const player of matchInfo.players) {
             const socket = this.socketsByName[player.username];
 
-            if (!socket || game.getPlayerByName(player.username)) {
+            if (game.getPlayerByName(player.username)) {
+                continue;
+            }
+
+            if (!socket) {
+                unseated.push({ username: player.username, reason: 'offline' });
+
                 continue;
             }
 
             const busyIn = this.findGameForUser(player.username);
 
             if (busyIn && busyIn.id !== game.id) {
+                unseated.push({ username: player.username, reason: 'busy' });
+
                 continue;
             }
 
             const joinError = game.join(socket.id, socket.user);
 
             if (joinError) {
+                unseated.push({ username: player.username, reason: joinError });
+
                 continue;
             }
 
@@ -3203,9 +3408,12 @@ class Lobby {
                         `Failed to auto-select deck ${player.deckId} for ${player.username}`,
                         err
                     );
+                    this.reportAutoSelectFailure(game, player.username, err);
                 }
             }
         }
+
+        return unseated;
     }
 
     /**
@@ -3221,45 +3429,185 @@ class Lobby {
      * decks, the series number. That is the whole reason this is not a
      * rematch, which would have built a table the event knows nothing about.
      */
-    async onTournamentNextGame(oldGame) {
-        const finished = this.games[oldGame.gameId];
+    onTournamentNextGame(oldGame) {
+        const finished = oldGame && this.games[oldGame.gameId];
 
         if (!finished || !finished.tournament) {
-            return;
+            return Promise.resolve();
         }
 
-        const { tournamentId, matchId } = finished.tournament;
+        const { tournamentId, matchId, gameNumber } = finished.tournament;
+        const usernames = Array.isArray(finished.tournament.players)
+            ? finished.tournament.players
+            : Object.keys(finished.players || {});
+        const eventUrl = `/tournaments/${tournamentId}`;
 
         // The finished table has done its job. Removing it first also frees
         // both players from it, so the seating below can find them idle.
         this.broadcastGameMessage('removegame', finished);
         delete this.games[finished.id];
 
-        try {
+        // Queued behind the GAMEWIN that preceded it - see runForMatch.
+        return this.runForMatch(matchId, async () => {
+            try {
+                // The table knows which game it was. The event has to agree
+                // before anything is built: a table for the wrong game number
+                // is the failure this whole handler exists to prevent.
+                const expected = (gameNumber || 1) + 1;
+                const answer = await this.awaitNextGameInfo(tournamentId, matchId, expected);
+
+                if (answer.complete) {
+                    // The match is over - the game just played decided it.
+                    // Nothing to open, and the event page has the result.
+                    logger.info(`Match ${matchId} needs no further game; series is over`);
+                    this.notifyPlayers(usernames, {
+                        tone: 'success',
+                        message:
+                            'That game decided your match - the result is recorded. See the event page for your standing.',
+                        url: eventUrl
+                    });
+
+                    return;
+                }
+
+                if (answer.blocked) {
+                    // Open, but waiting on the players for something the
+                    // event page handles - the chain bid before game three,
+                    // a Triad pick. Telling them "decided" here was wrong.
+                    logger.info(`Match ${matchId}: next game not ready - ${answer.blocked}`);
+                    this.notifyPlayers(usernames, {
+                        tone: 'info',
+                        message: `${answer.blocked}. Your table opens there once that is done.`,
+                        url: eventUrl
+                    });
+
+                    return;
+                }
+
+                const matchInfo = answer.info;
+
+                if (!matchInfo) {
+                    // The result has not been recorded yet and we will not
+                    // guess. The players get told, rather than being seated at
+                    // a table for a game they already played.
+                    logger.error(
+                        `Match ${matchId}: result of game ${gameNumber} not recorded in time; not opening game ${expected}`
+                    );
+                    this.notifyPlayers(usernames, {
+                        tone: 'warning',
+                        message: `Your last result is still being recorded. Open game ${expected} from the event page in a moment.`,
+                        url: eventUrl
+                    });
+
+                    return;
+                }
+
+                const game = await this.ensureTournamentGame(matchInfo);
+
+                if (!game) {
+                    return;
+                }
+
+                const unseated = await this.seatTournamentPlayers(game, matchInfo);
+
+                for (const missing of unseated) {
+                    // Somebody the table could not seat has to be pointed at
+                    // it; the old behaviour was a table appearing in the list
+                    // with nothing saying it was theirs.
+                    this.notifyPlayers([missing.username], {
+                        tone: 'warning',
+                        message: `Game ${matchInfo.gameNumber} of your match is ready. Join your table from the event page.`,
+                        url: eventUrl
+                    });
+                }
+
+                this.sendGameState(game);
+                this.broadcastGameMessage('updategame', game);
+                this.startTournamentGameIfReady(game);
+            } catch (err) {
+                logger.error(`Failed to continue tournament match ${matchId} at its table`, err);
+            }
+        });
+    }
+
+    /**
+     * ARCHON: the pairing for the game the players are about to start - once
+     * the event agrees that IS the game they need.
+     *
+     * Ordinarily the GAMEWIN chained ahead of us has already recorded the last
+     * result and this returns on the first read. The retries are for the case
+     * the queue cannot cover: a result that reached the lobby late (a durable
+     * replay after a restart) or not at all. Waiting a few seconds costs the
+     * players a moment at the pending screen; opening the wrong table costs
+     * them a game.
+     *
+     * @returns {Promise<{info?: object, complete?: boolean, blocked?: string}>}
+     * `info` is the pairing to build; `complete` means the match needs no more
+     * games; `blocked` names what the players still have to do on the event
+     * page; an empty object means the event still shows the game just played
+     * as unplayed after every retry
+     */
+    async awaitNextGameInfo(tournamentId, matchId, expectedGameNumber, options = {}) {
+        const attempts = options.attempts || 10;
+        // Overridable on the instance so a test does not have to wait out the
+        // real clock to prove the retry happens.
+        const delayMs =
+            options.delayMs !== undefined
+                ? options.delayMs
+                : this.nextGameRetryDelayMs !== undefined
+                ? this.nextGameRetryDelayMs
+                : 500;
+
+        for (let attempt = 0; attempt < attempts; attempt++) {
             const matches = await this.tournamentService.getMatchesNeedingGames(tournamentId);
             const matchInfo = matches.find((entry) => entry.matchId === matchId);
 
             if (!matchInfo) {
-                // The match is over - the game just played decided it. Nothing
-                // to open, and the event page has the result.
-                logger.info(`Match ${matchId} needs no further game; not continuing the series`);
+                // Absent from the list is not the same as decided - see
+                // TournamentService.describeMatchReadiness.
+                const readiness = await this.tournamentService.describeMatchReadiness(
+                    tournamentId,
+                    matchId
+                );
 
-                return;
+                if (readiness.state === 'blocked') {
+                    return { blocked: readiness.message };
+                }
+
+                if (readiness.state === 'complete') {
+                    return { complete: true };
+                }
+
+                // 'ready' but not listed yet: the result has not landed.
+            } else if (matchInfo.gameNumber >= expectedGameNumber) {
+                return { info: matchInfo };
             }
 
-            const game = await this.ensureTournamentGame(matchInfo);
-
-            if (!game) {
-                return;
+            if (attempt < attempts - 1 && delayMs > 0) {
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
             }
+        }
 
-            await this.seatTournamentPlayers(game, matchInfo);
+        return {};
+    }
 
-            this.sendGameState(game);
-            this.broadcastGameMessage('updategame', game);
-            this.startTournamentGameIfReady(game);
-        } catch (err) {
-            logger.error(`Failed to continue tournament match ${matchId} at its table`, err);
+    /**
+     * ARCHON: a sentence for specific players, wherever on the site they are.
+     *
+     * 'gameerror' only shows inside a pending table, and the players this is
+     * for have just been cleared out of one. The client toasts these from a
+     * component that is always mounted.
+     *
+     * @param {string[]} usernames
+     * @param {{message: string, tone?: string, url?: string}} notice
+     */
+    notifyPlayers(usernames, notice) {
+        for (const username of usernames || []) {
+            const socket = this.socketsByName[username];
+
+            if (socket) {
+                socket.send('lobbynotice', notice);
+            }
         }
     }
 

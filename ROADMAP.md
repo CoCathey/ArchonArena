@@ -3493,9 +3493,10 @@ much stronger deck pays less.
         by typing one; the invitee gets a notification and an Accept/Decline (**N7**).
 -   [x] **Profile customisation** — accent colour, banner, avatar frame, title, name effect and a
         longer bio, gated per option by membership tier (**N12**).
--   [ ] Friend activity feed, DMs (moderated), block-list integration. **Unowned:** no current
-        backlog item covers these; N5 built the moderation the DM feature would have needed, but
-        not the feature. Sequence behind **N16**/**N6** if it is picked up.
+-   [x] **DMs (moderated), block-list integration** → **N57**: one thread per pair of players,
+        live over the lobby socket, notified when the recipient is away, the block list honoured
+        both ways and lobby mutes enforced. See `docs/design/direct-messages.md`.
+-   [ ] Friend activity feed. **Unowned** — still no backlog item covers it.
 -   [ ] Store follow-ups: map view, store-hosted event listings, verified/official badges.
         **Unowned** — N7 shipped clubs and teams and did not reach these.
 -   [ ] Onboarding asks each new account how well they know KeyForge, and (if they do) how well
@@ -4343,3 +4344,96 @@ does not. What was wrong was which way to relax.
         `TEST-BASELINE.md` and all fifteen notes under `docs/design/`. `AGENTS.md` also points
         at this roadmap and describes `server/gamenode/`, `server/services/` and `mobile/`, none
         of which the pre-fork overview mentioned.
+
+#### N57 — The table that says what it is, and the two players who can talk _(done)_
+
+**Why:** a player's report from a live best-of-three, in five parts: the table did not show
+the locked deck; "Play Game 2" built a table nobody was told to join; a time could be offered
+but not a window; the email said UTC; and the two players had no way to talk to each other.
+
+**Tasks**
+
+-   [x] **Seats show what they are locked to.** A tournament seat learned its deck's name only
+        once the deck had finished loading, and the opponent's seat never learned it at all — so a
+        table the event built for two registered decks opened reading "No deck selected" and
+        "Not selected", and a seat whose auto-load failed stayed that way with no picker and no
+        error. The pairing now carries each seat's deck **name** with its id, the table exposes
+        `tournament.seats` (lock state and name, withheld for other seats under `hideDecklists`),
+        both seats wear the lock badge, a locked seat still loading says "Loading event deck",
+        and a load that fails tells the player instead of the log.
+-   [x] **"Play Game 2" is safe against its own result.** The handler that seats both players
+        for the next game read the match score while the GAMEWIN handler was still writing it.
+        When the click beat the database the lobby asked which game the match needed, was told
+        "game one", built a **second game-one table**, seated them there, and discarded that
+        game's result on arrival as a duplicate — while the real game-two table sat unjoined in
+        the list with nothing pointing at it. `Lobby.runForMatch` now chains all tournament
+        work per match in arrival order (Redis delivers a node's messages in order; the router
+        dispatches synchronously; the chain is registered before the first await), and
+        `awaitNextGameInfo` refuses to build a table whose game number is not the one the
+        finished table expects, waiting briefly for a late result rather than guessing.
+-   [x] **Players are told.** A new `lobbynotice` socket message toasts a sentence to a
+        specific player wherever they are: the match is decided, the result is still being
+        recorded, or their next table is waiting on the event page. The pending screen says
+        "Game 2 of 3 — tournament match" with a link to the event, and the game list carries a
+        "your match table is ready — Join" banner for any unstarted table reserved for you.
+-   [x] **Windows** (migration 92). An offer can run from a start to an end; the other player
+        accepts it by naming an instant inside it, which becomes `ScheduledAt` exactly as
+        before, so reminders and the schedule panel learn nothing new. A window ends after it
+        starts, runs at most seven days, and sits entirely inside the round deadline; the same
+        start offered again keeps the wider end. Notifications say "is free Thu, Aug 20,
+        7:00 PM - 10:00 PM CDT — any time in that window works for them".
+-   [x] **Local time in email** (migration 91). `Users.Settings_TimeZone`, reported by the
+        browser after sign-in whenever it differs from what the account remembers, shown
+        read-only on the Account page. Every scheduling notification formats its times for the
+        **recipient** through `notifications/timeLabel.js` — "Thu, Aug 20, 2:00 PM CDT" — and
+        falls back to the UTC label it always used when no zone is known. The round-deadline
+        refusal on a proposal reads in the proposer's zone too.
+-   [x] **Direct messages** (migration 93) — `docs/design/direct-messages.md`. One thread per
+        pair, `/messages` and `/messages/:username`, an envelope with the unread count in the
+        top bar and the sidebar, "Message _opponent_" on the match panel. Live over the lobby
+        socket to both ends; a recipient who is away gets a `message.direct` notification once
+        an hour per sender; a connected recipient not looking at the thread gets a toast. Block
+        list both ways, lobby mutes enforced, the lobby content filter applied, sending rate
+        limited.
+
+-   [x] **Audit follow-ups**, found while reading the surrounding code:
+    -   The post-game menu offered "Play Game 3" to a decided 2-0 series, because the engine
+        only knew the game number. Seats now carry the series score (`tournament.wins` →
+        `PendingGame` players → `game.setWins`), and `GameWonPrompt.seriesDecided()` reads it.
+    -   A match absent from "matches needing games" was read as decided; at 1-1 in an Adaptive
+        Bo3 (bid pending) or before a Triad pick that told the players their match was over.
+        `TournamentService.describeMatchReadiness` distinguishes ready / blocked / complete, the
+        lobby uses it for the next-game notice, and `ensureGameForMatch` now refuses with the
+        reason instead of returning success with no table.
+    -   "Open my table" could hand back a **finished** table (the first one found for the match),
+        which the client joined into a "Game full" refusal. Only unstarted tables are returned.
+    -   Pressing "Join your table" while still counted as seated at the finished game of the same
+        match did nothing, silently. The finished seat is given up automatically; any other
+        "already in a game" case now says so.
+    -   A deck re-registered between rounds kept showing the old deck's name on the seat; the
+        recorded name is cleared and the loaded deck's name takes precedence.
+    -   `myOpenMatches.needsAction` read "waiting" when I had offered the soonest time and my
+        opponent a later one; an EXISTS over the other player's offers decides "respond".
+    -   Organizer start times: the create and edit forms sent the datetime-local value as typed,
+        which the server parsed in ITS zone (UTC), and the edit form read the instant back
+        through `toISOString()` - a Chicago 7pm event was stored as 7pm UTC and displayed as
+        midnight when edited. Both directions go through `Tournaments/localTime.js`.
+
+**Acceptance criteria**
+
+-   [x] `GameWonPrompt.tournament.spec.js`, `matchReadiness.spec.js`,
+        `tournamentLocalTime.spec.js`, and the added cases in `lobby.tournamentSeries.spec.js`
+        and `pendinggame.tournamentSeats.spec.js`.
+-   [x] `lobby.tournamentSeries.spec.js`: a slow GAMEWIN and a fast TOURNAMENTNEXTGAME build one
+        game-two table, never a second game-one; a result that never lands opens nothing and
+        tells both players; a decided match tells both players; an unseated player is pointed
+        at the event page.
+-   [x] `pendinggame.tournamentSeats.spec.js`, `matchDeckNames.spec.js`: both seats named and
+        locked from the moment the table exists; hidden decklists hide the other seat only.
+-   [x] `matchTimeWindows.spec.js`: window validation, widening on conflict, accepting inside /
+        outside / without a time, single-time offers unchanged.
+-   [x] `timeLabel.spec.js`, `tournamentNotificationZones.spec.js`: each recipient in their own
+        zone; UTC when unknown, when the lookup fails, and when no lookup is installed.
+-   [x] `DirectMessageService.spec.js`, `lobby.directMessages.spec.js`, `messagesRoutes.spec.js`.
+-   [ ] Verified on a live stack with two browsers — not possible from the machine this was
+        built on (no Docker), so the client half is verified by lint and typecheck only.

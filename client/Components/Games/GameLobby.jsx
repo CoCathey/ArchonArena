@@ -270,8 +270,55 @@ const GameLobby = ({ gameId }) => {
         dispatch(lobbyActions.clearGameError());
     }, [currentGame, dispatch, gameError, t]);
 
+    /**
+     * ARCHON: a tournament table that is waiting for THIS player.
+     *
+     * The event opens the next game of a series the moment a result is
+     * recorded, and it opens tables for players who were away when the round
+     * was paired. Either way the table appeared in this list looking like any
+     * other, and nothing said it was theirs - which is how "there is no
+     * indication you have to join a different table" was reported. Only while
+     * they are not already sitting at a table, because then the seat is the
+     * indication.
+     */
+    const waitingTable =
+        user && !currentGame
+            ? visibleGames.find(
+                  (game) =>
+                      game.tournament &&
+                      !game.started &&
+                      Array.isArray(game.tournament.players) &&
+                      game.tournament.players.includes(user.username) &&
+                      !(game.players && game.players[user.username])
+              )
+            : null;
+
     return (
         <div className='mx-auto w-full max-w-6xl' ref={topRef}>
+            {waitingTable && (
+                <AlertPanel type='info' className='!mb-3 !items-center'>
+                    <div className='flex flex-wrap items-center gap-2'>
+                        <span className='text-sm'>
+                            {waitingTable.tournament.gameNumber > 1
+                                ? t('Game {{game}} of your tournament match is ready: {{name}}', {
+                                      game: waitingTable.tournament.gameNumber,
+                                      name: waitingTable.name
+                                  })
+                                : t('Your tournament table is ready: {{name}}', {
+                                      name: waitingTable.name
+                                  })}
+                        </span>
+                        <Button
+                            className='ml-auto'
+                            size='sm'
+                            variant='primary'
+                            onPress={() => dispatch(lobbySendMessage('joingame', waitingTable.id))}
+                        >
+                            {t('Join your table')}
+                        </Button>
+                    </div>
+                </AlertPanel>
+            )}
             {newGame && <NewGame key={`new-game-${newGameInstance}`} />}
             {showQuickMatch && !currentGame && (
                 <QuickMatchPanel onClose={() => setShowQuickMatch(false)} />

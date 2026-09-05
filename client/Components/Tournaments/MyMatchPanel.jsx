@@ -6,6 +6,7 @@ import { Button as HeroButton } from '@heroui/react';
 import Panel from '../Site/Panel';
 import AmberValue from '../Site/AmberValue';
 import PlayerName from '../Site/PlayerName';
+import Link from '../Navigation/Link';
 import MatchScheduler from './MatchScheduler';
 
 /**
@@ -262,6 +263,23 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                     {tournament.deckSwapPolicy === 'between-rounds'
                         ? ` - ${t('you may change it between rounds')}`
                         : ` - ${t('locked for this event')}`}
+                </div>
+            )}
+            {/* ARCHON: the conversation around the scheduler. Two people who
+                have to agree on a time had a proposal button and no way to say
+                "8 works but I might be ten minutes late". The thread opens by
+                username, so it is the same conversation from any event. */}
+            {opponent?.username && !decided && (
+                <div className='mt-2 text-sm'>
+                    <Link
+                        href={`/messages/${encodeURIComponent(opponent.username)}`}
+                        className='text-amber-300 underline-offset-2 hover:underline'
+                    >
+                        {t('Message {{name}}', { name: opponent.username })}
+                    </Link>
+                    <span className='ml-1 text-xs text-muted'>
+                        {t('to sort out timing or anything else about the match')}
+                    </span>
                 </div>
             )}
             {/* ARCHON (N14): asynchronous events give the players days to find
