@@ -4,6 +4,7 @@ const config = require('config');
 const logger = require('../log.js');
 const RedisClientFactory = require('../services/RedisClientFactory');
 const { detectBinary } = require('../util');
+const { OUTBOX_KEY } = require('../nodeoutbox');
 
 class GameSocket extends EventEmitter {
     /**
@@ -62,14 +63,19 @@ class GameSocket extends EventEmitter {
             });
     }
 
-    send(command, arg) {
-        let data = '';
-
+    /**
+     * @returns {string|null} the wire form, or null if it could not be encoded
+     */
+    serialize(command, arg, outboxKey) {
         try {
-            data = JSON.stringify({
+            return JSON.stringify({
                 command: command,
                 arg: arg,
-                identity: this.nodeName
+                identity: this.nodeName,
+                // ARCHON (N10): present only on a durable send. The lobby
+                // sends it back as the acknowledgement, so it travels with
+                // the message rather than being re-derived at the far end.
+                outboxKey: outboxKey
             });
         } catch (err) {
             logger.error('Failed to stringify node data', err);
@@ -77,7 +83,54 @@ class GameSocket extends EventEmitter {
                 logger.error(`Path: ${obj.path}, Type: ${obj.type}`);
             }
 
+            return null;
+        }
+    }
+
+    send(command, arg) {
+        const data = this.serialize(command, arg);
+
+        if (data === null) {
             return;
+        }
+
+        this.publisher.publish('nodemessage', data);
+    }
+
+    /**
+     * ARCHON (N10): a send that survives the lobby not being there.
+     *
+     * `nodemessage` is Redis pub/sub, which is at-most-once: a publish with no
+     * subscriber is discarded, and the lobby is the only subscriber. A deploy
+     * restarts it, so a game finishing in that window was never recorded,
+     * rated or replayed - and nothing told either player.
+     *
+     * The message is written to an outbox hash BEFORE it is published, so the
+     * record exists whether or not anybody is listening. Redis outlives the
+     * lobby (its own container, `appendonly yes` on a named volume), and the
+     * lobby drains the outbox when it comes back and clears each entry once
+     * the game is recorded.
+     *
+     * The outbox write is best effort and never gates the publish: if Redis
+     * refuses it we are exactly where we were before this existed, which is
+     * the one thing a safety net must never make worse.
+     *
+     * @param {string} command
+     * @param {object} arg
+     * @param {string} key stable per event, so a redelivery overwrites rather
+     * than accumulates - a game finishes once
+     */
+    async sendDurable(command, arg, key) {
+        const data = this.serialize(command, arg, key);
+
+        if (data === null) {
+            return;
+        }
+
+        try {
+            await this.publisher.hSet(OUTBOX_KEY, key, data);
+        } catch (err) {
+            logger.error(`Failed to file ${key} in the durable outbox`, err);
         }
 
         this.publisher.publish('nodemessage', data);

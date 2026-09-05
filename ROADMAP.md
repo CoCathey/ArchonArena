@@ -110,9 +110,11 @@ ends games in progress.
 -   **The zero-downtime deploy was built and reverted** (895b773 reverting aedefdd and
     86f5cfa): games could not be started on the deployed stack, which is worse than the problem
     it solved. `deploy/update.sh` runs `up -d --build` again, so a deploy still ends every game
-    in progress, and the node's health port is read-only. Reverted with it, and worth restating:
-    a game result published while the lobby is restarting is dropped with no retry, so that
-    game is never recorded, rated or replayed. → **N10**.
+    in progress, and the node's health port is read-only. The result-loss that came back with
+    the revert — a game finishing while the lobby restarted was never recorded, rated or
+    replayed — is fixed independently as of 2026-09-04: GAMEWIN is written to a durable outbox
+    before it is published, and replayed until the game is recorded. A deploy still costs those
+    players the game they were playing; it no longer costs them its record. → **N10**.
 -   **SAS on the lobby game list.** Deliberately skipped, not missed: decks are not chosen for
     open games, so there is nothing to show there yet. Everywhere else — deck lists, the deck
     view with its AERC breakdown, the pre-game screen, per-deck stats — is done (**N3**).
@@ -1002,6 +1004,15 @@ organizers will hit in practice.
         nobody has bid concedes it at zero rather than deadlocking two players who both refuse
         to open. The negotiation lives on the match row (`AdaptiveState`) because it happens
         between games and has to survive a reconnect and an organizer looking at the table.
+-   [x] **A clock on the bid, and a way for the organizer past it** _(2026-09-04)_. The
+        negotiation above shipped with no way to end it except the two players agreeing to: the
+        state said _who_ was on the clock but never _when_ their turn started, and nothing could
+        settle an auction without one of them acting. A pair who neither bid nor passed held
+        their round open indefinitely. `adaptiveBidTimeoutMinutes` **(admin-config)** now settles
+        it, and `adaptiveForceResolve` lets staff settle it sooner. Both apply the rule already
+        written rather than a new one — running out of time is a pass by the player on the clock
+        — so an expired auction lands exactly where an attentive one would, and `resolvedBy`
+        records which of the three routes ended it. Detailed under Known defects.
 
 **Depends on:** existing tournament engine.
 **Acceptance criteria**
@@ -1046,9 +1057,14 @@ keyteki card fixes need a routine path in.
             deploy step, a second node to roll onto) is still open.
     -   The per-node game cap is read from a key the config file does not document, so it is
         never enforced.
-    -   A game result published while the lobby is restarting is dropped with no retry, so a
-        game that finishes in that window is never recorded, rated or replayed. That bug
-        predates the reverted branch and is back.
+    -   [x] **Fixed 2026-09-04.** A game result published while the lobby was restarting was
+            dropped with no retry, so a game finishing in that window was never recorded, rated
+            or replayed. That bug predated the reverted branch and came back with it — and it
+            was never really the drain's to fix, because the cause is the transport: pub/sub is
+            at-most-once and the lobby is the only subscriber. GAMEWIN is now written to a
+            durable outbox before it is published and replayed by the lobby until the game is
+            recorded, so results survive a restart whether or not the drain is ever
+            re-attempted. See the entry under Known defects for the full note.
 -   `staging.archonarena.com` deploying from main. **Do this before re-attempting the drain** —
     the reverted attempt failed on the deployed stack in a way no local run reproduced, which is
     exactly the class of failure a staging environment exists to catch.
@@ -4284,16 +4300,46 @@ does not. What was wrong was which way to relax.
 
 ### Open, and currently true
 
--   [ ] **A game result published while the lobby is restarting is dropped with no retry.** The
-        game is never recorded, rated or replayed, and nothing tells either player. A fix landed
-        with the zero-downtime work and went back out with the revert, so this is live again.
-        → **N10**.
--   [ ] **`adaptiveBid` / `adaptivePass` have no timeout or force-resolve.** Game three of an
-        Adaptive Bo3 waits for the bid, so a pair who neither bid nor pass leave the round
-        waiting on them. The organizer can still award or take a paper result, which is why this
-        is a defect and not a blocker. → **N9**.
--   [ ] **`docs/README.md` and `AGENTS.md` still say "Keyteki".** Both describe the project by
-        its pre-fork name and neither lists the platform documentation (`DEVELOPMENT.md`,
-        `DEPLOYMENT.md`, `SECURITY.md`, `UPSTREAM.md`, `docs/design/`) that has been written
-        since. Engine-facing docs, so nothing is wrong in them — they are just addressed to a
-        project this is no longer only a fork of.
+-   [x] **Fixed 2026-09-04. A game result published while the lobby is restarting is dropped
+        with no retry.** The game was never recorded, rated or replayed, and nothing told either
+        player. The cause was the transport, not the handler: `nodemessage` is Redis pub/sub,
+        which is at-most-once, and the lobby is its only subscriber — so a deploy restarting it
+        meant Redis delivered the `GAMEWIN` to nobody and discarded it. GAMEWIN now goes out
+        **durably**: the node writes it to an outbox hash before publishing (`sendDurable`,
+        keyed by game so a redelivery overwrites rather than queues), and the lobby drains that
+        outbox on the way up and once a minute after, clearing each entry only once the game is
+        actually recorded. A database fault therefore leaves the result queued rather than
+        acknowledged, which also buys a retry the old path never had. Replaying is free because
+        all three consequences were already idempotent — `update` is an UPDATE by GameId,
+        `saveReplay` is `ON CONFLICT DO NOTHING`, and `processGame` returns early on a game that
+        has already rated. Redis outlives the lobby by construction (its own container,
+        `appendonly yes` on a named volume), and the outbox write can never gate the publish, so
+        the safety net cannot become the hole. This is independent of the drain work below and
+        does not depend on re-attempting it. → **N10**.
+-   [x] **Fixed 2026-09-04. `adaptiveBid` / `adaptivePass` have no timeout or force-resolve.**
+        `AdaptiveState` recorded _who_ was on the clock (`turnUserId`) but never _when_ their
+        turn began, and nothing could settle the auction without one of the two players acting —
+        so a pair who neither bid nor passed held game three, and their round, open
+        indefinitely. Both halves are now closed, and neither invents a rule: **running out of
+        time is a pass by the player on the clock**, which settles exactly where an attentive
+        auction would have (the standing high bidder takes the deck at their bid; with no bid
+        standing, the opening player concedes it at zero, which is what passing first has always
+        done). The clock is `adaptiveBidTimeoutMinutes` — **(admin-config)**, Site Settings >
+        Tournaments, default 10, 0 disables it — it restarts for whoever has to answer each new
+        bid, and it is evaluated lazily wherever the auction is touched rather than on a sweep,
+        because nothing is waiting on a table nobody is looking at. An auction with no
+        `turnStartedAt` never expires; it gets a clock on first read, so bids opened before this
+        shipped are not all settled the moment it deploys, and the pre-existing case where
+        _both_ players refused to open now times out too. Alongside it, `adaptiveForceResolve`
+        (organizer/staff only, `Settle chain bid` in the round's match tools) settles a stuck bid
+        without waiting for the clock. `resolvedBy` records which of the three routes ended it —
+        conceded, timed out, or organizer — because they reach the same outcome and are very
+        different conversations to have with a player afterwards, and the bidding panel shows
+        both the running clock and how a settled auction ended. → **N9**.
+-   [x] **Fixed 2026-09-04. `docs/README.md` and `AGENTS.md` still say "Keyteki".** Both now
+        name Archon Arena, state the prime directive and the keyteki lineage (so the inherited
+        engine references still read correctly as what they are), and index the platform
+        documentation — `DEVELOPMENT.md`, `DEPLOYMENT.md`, `SECURITY.md`, `UPSTREAM.md`,
+        `TEST-BASELINE.md` and all fifteen notes under `docs/design/`. `AGENTS.md` also points
+        at this roadmap and describes `server/gamenode/`, `server/services/` and `mobile/`, none
+        of which the pre-fork overview mentioned.

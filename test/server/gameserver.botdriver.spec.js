@@ -62,7 +62,14 @@ const buildServer = () => {
     server.games = {};
     server.sent = [];
     server.cardData = {};
-    server.gameSocket = { send: (command, arg) => server.sent.push({ command, arg }) };
+    server.gameSocket = {
+        send: (command, arg) => server.sent.push({ command, arg }),
+        // ARCHON (N10): a finished game goes out durably - written to the
+        // outbox before it is published, so a lobby restarting as the game
+        // ends cannot lose the result. Recorded here the same way, so the
+        // assertions below still read one list of what the node sent.
+        sendDurable: (command, arg, key) => server.sent.push({ command, arg, key })
+    };
     server.sendGameState = () => {};
 
     return server;

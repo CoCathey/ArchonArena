@@ -1251,6 +1251,13 @@ const REGISTRY = {
                 min: 1,
                 max: 24,
                 default: 24
+            },
+            adaptiveBidTimeoutMinutes: {
+                type: 'number',
+                label: 'Adaptive chain bid: settle the auction after this many minutes (0 = never)',
+                min: 0,
+                max: 1440,
+                default: 10
             }
         }
     },

@@ -9,10 +9,17 @@ You are an expert developer for this project. Use your deep understanding of the
 
 ## Project Overview
 
-Keyteki is an open-source implementation of the KeyForge card game. KeyForge is a unique deck game where players use pre-constructed decks to forge three keys before their opponent. The project consists of:
+Archon Arena is a competitive KeyForge platform — ratings, tournaments, rankings and community — built on a fork of [keyteki](https://github.com/keyteki/keyteki), the engine behind The Crucible Online. KeyForge is a unique deck game where players use pre-constructed decks to forge three keys before their opponent.
+
+**The prime directive:** gameplay stays compatible with upstream keyteki and always remains stable. New systems are built _around_ the gameplay engine as loosely-coupled services under `server/services/`, never by rewriting working gameplay. That is why the engine-facing docs below still read as keyteki's — they are, and they are correct.
+
+The project consists of:
 
 -   **Game Server** (`server/game/`) - Core game engine handling rules, cards, and game state
+-   **Game Node** (`server/gamenode/`) - The process games actually run in, one game per node slot
+-   **Platform Services** (`server/services/`) - Ratings, tournaments, decks, membership, moderation, notifications and the rest, each independent of the engine
 -   **Web Client** (`client/`) - React-based frontend for playing games
+-   **Mobile** (`mobile/`) - The Expo iOS app (TypeScript)
 -   **Card Data** (`master-vault-data/packs/`) - JSON files containing card metadata for each set
 
 ### Key Game Concepts
@@ -26,9 +33,24 @@ Keyteki is an open-source implementation of the KeyForge card game. KeyForge is 
 
 ## Additional Guides
 
+Engine and cards:
+
 -   [Server Implementation Guide](server/AGENTS.md) - Architecture, code style, and card implementation
 -   [Testing Guide](test/AGENTS.md) - Running tests and writing test cases
 -   [New Set Implementation Guide](docs/new-sets.md) - Steps for adding a new KeyForge set
+
+Platform:
+
+-   [Documentation index](docs/README.md) - Everything below, plus the engine references
+-   [Development](docs/DEVELOPMENT.md) - Services, migrations, and platform conventions
+-   [Deployment](docs/DEPLOYMENT.md) - Production stack, health checks, and the deploy script
+-   [Security](docs/SECURITY.md) - Security posture and how to report a vulnerability
+-   [Upstream Sync](docs/UPSTREAM.md) - Merging keyteki card fixes, and the gate they pass
+-   [Design notes](docs/design/) - How each platform system works, and why it is shaped that way
+
+Planning:
+
+-   [ROADMAP.md](ROADMAP.md) - Every feature and task lives here **before** it is built. Items carry an ID (`I1`, `N19`, `F9`), dependencies and acceptance criteria; the Prioritized backlog says what to build next, not the phase numbers.
 
 ### Canonical Style Reference
 
