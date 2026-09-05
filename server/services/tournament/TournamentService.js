@@ -1104,7 +1104,13 @@ class TournamentService {
                 'CASE WHEN m."Player1Id" = $1 THEN u2."Username" ELSE u1."Username" END ' +
                 'AS "OpponentName", ' +
                 'CASE WHEN m."Player1Id" = $1 THEN m."Player2Id" ELSE m."Player1Id" END ' +
-                'AS "OpponentId" ' +
+                'AS "OpponentId", ' +
+                // Whether anything on the table is the OTHER player's offer.
+                // ProposedBy only names whoever made the soonest one, so a
+                // player who offered Thursday while their opponent offered
+                // Friday read as "waiting" when they had something to answer.
+                'EXISTS (SELECT 1 FROM "TournamentMatchTimeSlots" s ' +
+                'WHERE s."MatchId" = m."Id" AND s."ProposedBy" <> $1) AS "TheirOffer" ' +
                 'FROM "TournamentMatches" m ' +
                 'JOIN "Tournaments" t ON t."Id" = m."TournamentId" ' +
                 'LEFT JOIN "Users" u1 ON u1."Id" = m."Player1Id" ' +
@@ -1136,14 +1142,33 @@ class TournamentService {
             roundEndsAt: row.RoundEndsAt,
             // What the player has to DO, decided here so every surface that
             // shows this list agrees about it.
-            needsAction: row.ProposedTime
-                ? row.ProposedBy === actor.id
-                    ? 'waiting'
-                    : 'respond'
-                : row.ScheduledAt
-                ? 'play'
-                : 'propose'
+            needsAction: this.scheduleActionFor(row, actor.id)
         }));
+    }
+
+    /**
+     * ARCHON: 'respond' when the other player has an offer on the table,
+     * whoever made the soonest one; 'waiting' when every live offer is mine;
+     * 'play' when a time is agreed; 'propose' when nothing is.
+     *
+     * `TheirOffer` is the EXISTS from myOpenMatches. A row without it (an
+     * older shape) falls back to reading the soonest offer's proposer.
+     */
+    scheduleActionFor(row, actorId) {
+        const theirOffer =
+            row.TheirOffer === undefined || row.TheirOffer === null
+                ? !!row.ProposedTime && row.ProposedBy !== actorId
+                : row.TheirOffer === true || row.TheirOffer === 't';
+
+        if (theirOffer) {
+            return 'respond';
+        }
+
+        if (row.ProposedTime) {
+            return 'waiting';
+        }
+
+        return row.ScheduledAt ? 'play' : 'propose';
     }
 
     async getTournamentRow(tournamentId) {
@@ -5774,6 +5799,18 @@ class TournamentService {
                 gameNumber,
                 knownGameUuids: games.map((game) => game.GameUuid),
                 previousWinner: previousWinnerId ? playerById[previousWinnerId]?.Username : null,
+                // ARCHON: the series score so far, by seat. It rides the table
+                // into the engine (PendingGame seats carry wins), which is how
+                // the post-game menu knows a 2-0 in a best of three is over
+                // and stops offering "Play Game 3" to a decided match.
+                wins: Object.fromEntries(
+                    playerIds
+                        .map((playerId, side) => [
+                            playerById[playerId]?.Username,
+                            side === 0 ? match.Player1Wins || 0 : match.Player2Wins || 0
+                        ])
+                        .filter(([username]) => !!username)
+                ),
                 startingChains: Object.keys(startingChains).length > 0 ? startingChains : null,
                 players: playerIds.map((playerId, side) => ({
                     userId: playerId,
@@ -5914,6 +5951,67 @@ class TournamentService {
     }
 
     /**
+     * ARCHON: why a match that has no table is not getting one.
+     *
+     * getMatchesNeedingGames answers "which matches want a table" with a list,
+     * and a match missing from it could mean three different things: it is
+     * decided, it is not in the current round, or it is open but waiting on
+     * something - a Triad ban and pick, the Adaptive chain bid before game
+     * three. The lobby used to read every absence as "decided" and told two
+     * players at 1-1 that their match was over. This is the distinction.
+     *
+     * @returns {Promise<{state: 'ready'|'complete'|'blocked', message?: string}>}
+     */
+    async describeMatchReadiness(tournamentId, matchId) {
+        const tournament = await this.getTournamentRow(tournamentId);
+
+        if (!tournament || tournament.Status !== 'active') {
+            return { state: 'complete', message: 'This event is not running' };
+        }
+
+        const match = await this.getMatchRow(tournamentId, matchId);
+
+        if (!match) {
+            return { state: 'complete', message: 'No such match' };
+        }
+
+        if (match.WinnerId || match.ResultType) {
+            return { state: 'complete', message: 'This match already has a result' };
+        }
+
+        if (match.Round !== tournament.CurrentRound) {
+            return { state: 'complete', message: 'This match is not in the current round' };
+        }
+
+        if (!match.Player1Id || !match.Player2Id) {
+            return { state: 'blocked', message: 'This match does not have both players yet' };
+        }
+
+        if (tournament.Triad && !(match.P1DeckId && match.P2DeckId)) {
+            return {
+                state: 'blocked',
+                message:
+                    'Both players have to finish the Triad ban and pick on the event page before the table opens'
+            };
+        }
+
+        const nextGame = (match.Player1Wins || 0) + (match.Player2Wins || 0) + 1;
+
+        if (
+            tournament.AdaptiveBo3 &&
+            nextGame === 3 &&
+            this.parseJsonColumn(match.AdaptiveState)?.resolved !== true
+        ) {
+            return {
+                state: 'blocked',
+                message: 'Game three opens once the chain bid is settled on the event page'
+            };
+        }
+
+        return { state: 'ready' };
+    }
+
+    /**
      * Participant / organizer request to (re)create the lobby game for
      * a match - the recovery path when a pending game was lost (server
      * restart) or was never spawned. The lobby answers the event.
@@ -5946,6 +6044,11 @@ class TournamentService {
         }
 
         try {
+            // Whether anybody is there to answer at all. `request` folds a
+            // listener's null into "no answer", so this is how "the lobby said
+            // nothing to open" is told apart from "no lobby in this process".
+            const lobbyListening = tournamentEvents.listenerCount('ensureMatchGame') > 0;
+
             // Waited on, not fired and forgotten: the caller is a player who
             // pressed a button and is looking at it. Returning before the table
             // exists is what made them press it again - see tournamentEvents.
@@ -5959,10 +6062,26 @@ class TournamentService {
                 // waiting to notice it in the lobby list.
                 return { success: true, gameId: game.id };
             }
+
+            // The lobby answered, and the answer was "nothing to open". Saying
+            // why beats a green toast over a table that did not appear - the
+            // usual reasons are a Triad pick or a chain bid still outstanding.
+            if (lobbyListening) {
+                const readiness = await this.describeMatchReadiness(tournamentId, matchId);
+
+                return {
+                    success: false,
+                    message:
+                        readiness.message ||
+                        'No table could be opened right now - try again in a moment'
+                };
+            }
         } catch (err) {
             logger.error(`Failed to open the table for match ${match.Id}`, err);
         }
 
+        // No lobby is listening in this process (or it failed): the table will
+        // appear through the ordinary sweep, as it always did.
         return { success: true };
     }
 }

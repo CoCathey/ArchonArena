@@ -102,6 +102,30 @@ describe('PendingGame tournament seats', function () {
         });
     });
 
+    it('seats each player on the series score the event recorded', function () {
+        const game = makeTable({ wins: { alice: 1, bob: 0 } });
+
+        expect(game.players.alice.wins).toBe(1);
+        expect(game.players.bob.wins).toBe(0);
+        // And it reaches the engine with the start details.
+        expect(game.getStartGameDetails().players.alice.wins).toBe(1);
+    });
+
+    it('starts a seat on zero when the event recorded no score', function () {
+        expect(makeTable().players.alice.wins).toBe(0);
+    });
+
+    it('prefers the deck actually in the seat over the recorded name', function () {
+        const game = makeTable();
+
+        game.selectDeck('bob', { id: 999, name: 'Charlie Deck' });
+
+        const summary = game.getSummary('alice');
+
+        expect(summary.tournament.seats.bob.deckName).toBe('Charlie Deck');
+        expect(summary.tournament.seats.alice.deckName).toBe('Alpha Deck');
+    });
+
     it('has no seats block on an ordinary table', function () {
         const game = new PendingGame(alice, { gameFormat: 'normal', name: 'casual' });
 

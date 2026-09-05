@@ -57,16 +57,45 @@ class GameWonPrompt extends AllPlayerPrompt {
     seriesContinues() {
         const { gameNumber, bestOf } = this.game.tournament || {};
 
-        return !!bestOf && bestOf > 1 && (gameNumber || 1) < bestOf;
+        if (!bestOf || bestOf <= 1 || (gameNumber || 1) >= bestOf) {
+            return false;
+        }
+
+        return !this.seriesDecided();
+    }
+
+    /**
+     * ARCHON: whether somebody has already won enough games.
+     *
+     * The seats carry the series score the event recorded (see PendingGame
+     * and Lobby.createTournamentGame), and the win just recorded is on the
+     * winner's count by the time this prompt exists. Before the score
+     * travelled with the table, a 2-0 in a best of three still offered "Play
+     * Game 3", and the lobby had to send the players away again.
+     */
+    seriesDecided() {
+        const { bestOf } = this.game.tournament || {};
+
+        if (!bestOf || bestOf <= 1) {
+            return false;
+        }
+
+        const needed = Math.floor(bestOf / 2) + 1;
+
+        return this.game.getPlayers().some((player) => (player.wins || 0) >= needed);
     }
 
     whatHappensNext() {
         if (!this.seriesContinues()) {
             const { bestOf } = this.game.tournament || {};
 
-            return bestOf && bestOf > 1
-                ? 'That is the last game of the series. Leave the game to see the result on the event page.'
-                : 'Leave the game to report back to the event - the result is already recorded.';
+            if (bestOf && bestOf > 1) {
+                return this.seriesDecided()
+                    ? 'That decided the series. Leave the game to see the result on the event page.'
+                    : 'That is the last game of the series. Leave the game to see the result on the event page.';
+            }
+
+            return 'Leave the game to report back to the event - the result is already recorded.';
         }
 
         return (

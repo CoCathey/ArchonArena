@@ -140,7 +140,12 @@ class PendingGame {
             name: user.username,
             owner: this.owner.username === user.username,
             user: user,
-            wins: 0
+            // ARCHON: at a tournament table the seat starts on the series
+            // score the event recorded, so the engine knows whether the game
+            // about to be played can decide the match. See Lobby.
+            wins:
+                (this.tournament && this.tournament.wins && this.tournament.wins[user.username]) ||
+                0
         };
     }
 
@@ -514,10 +519,15 @@ class PendingGame {
 
         for (const username of (this.tournament && this.tournament.players) || []) {
             const canSeeName = !this.hideDeckLists || activePlayer === username;
+            // The deck actually in the seat wins over the name the pairing
+            // arrived with: a player who changed decks between rounds has the
+            // new one loaded and the old one recorded.
+            const loaded = this.players[username] && this.players[username].deck;
+            const deckName = (loaded && loaded.name) || names[username] || undefined;
 
             seats[username] = {
                 locked: !!decks[username],
-                deckName: canSeeName && names[username] ? names[username] : undefined
+                deckName: canSeeName ? deckName : undefined
             };
         }
 

@@ -64,7 +64,8 @@ describe('Lobby tournament tables', function () {
             },
             tournamentService: {
                 attachGame: vi.fn(async (...args) => attached.push(args)),
-                getMatchesNeedingGames: vi.fn(async () => [])
+                getMatchesNeedingGames: vi.fn(async () => []),
+                describeMatchReadiness: vi.fn(async () => ({ state: 'complete' }))
             },
             router: { startGame: vi.fn().mockReturnValue({ identity: 'node1' }) },
             sendGameState: vi.fn(),

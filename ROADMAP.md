@@ -4396,8 +4396,34 @@ but not a window; the email said UTC; and the two players had no way to talk to 
         list both ways, lobby mutes enforced, the lobby content filter applied, sending rate
         limited.
 
+-   [x] **Audit follow-ups**, found while reading the surrounding code:
+    -   The post-game menu offered "Play Game 3" to a decided 2-0 series, because the engine
+        only knew the game number. Seats now carry the series score (`tournament.wins` →
+        `PendingGame` players → `game.setWins`), and `GameWonPrompt.seriesDecided()` reads it.
+    -   A match absent from "matches needing games" was read as decided; at 1-1 in an Adaptive
+        Bo3 (bid pending) or before a Triad pick that told the players their match was over.
+        `TournamentService.describeMatchReadiness` distinguishes ready / blocked / complete, the
+        lobby uses it for the next-game notice, and `ensureGameForMatch` now refuses with the
+        reason instead of returning success with no table.
+    -   "Open my table" could hand back a **finished** table (the first one found for the match),
+        which the client joined into a "Game full" refusal. Only unstarted tables are returned.
+    -   Pressing "Join your table" while still counted as seated at the finished game of the same
+        match did nothing, silently. The finished seat is given up automatically; any other
+        "already in a game" case now says so.
+    -   A deck re-registered between rounds kept showing the old deck's name on the seat; the
+        recorded name is cleared and the loaded deck's name takes precedence.
+    -   `myOpenMatches.needsAction` read "waiting" when I had offered the soonest time and my
+        opponent a later one; an EXISTS over the other player's offers decides "respond".
+    -   Organizer start times: the create and edit forms sent the datetime-local value as typed,
+        which the server parsed in ITS zone (UTC), and the edit form read the instant back
+        through `toISOString()` - a Chicago 7pm event was stored as 7pm UTC and displayed as
+        midnight when edited. Both directions go through `Tournaments/localTime.js`.
+
 **Acceptance criteria**
 
+-   [x] `GameWonPrompt.tournament.spec.js`, `matchReadiness.spec.js`,
+        `tournamentLocalTime.spec.js`, and the added cases in `lobby.tournamentSeries.spec.js`
+        and `pendinggame.tournamentSeats.spec.js`.
 -   [x] `lobby.tournamentSeries.spec.js`: a slow GAMEWIN and a fast TOURNAMENTNEXTGAME build one
         game-two table, never a second game-one; a result that never lands opens nothing and
         tells both players; a decided match tells both players; an unseated player is pointed

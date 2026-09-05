@@ -76,7 +76,10 @@ describe('Lobby tournament series continuation', function () {
             tournamentService: {
                 attachGame: vi.fn(async (...args) => attached.push(args)),
                 getMatchesNeedingGames: vi.fn(async () => []),
-                recordGameWin: vi.fn(async () => ({ handled: true, matchComplete: false }))
+                recordGameWin: vi.fn(async () => ({ handled: true, matchComplete: false })),
+                // What an absent match means. 'ready' is the "result has not
+                // landed" case, which the handler retries.
+                describeMatchReadiness: vi.fn(async () => ({ state: 'ready' }))
             },
             router: { startGame: vi.fn().mockReturnValue({ identity: 'node1' }) },
             sendGameState: vi.fn(),
@@ -91,6 +94,9 @@ describe('Lobby tournament series continuation', function () {
             seatTournamentPlayers: Lobby.prototype.seatTournamentPlayers,
             onTournamentNextGame: Lobby.prototype.onTournamentNextGame,
             onTournamentGameWin: Lobby.prototype.onTournamentGameWin,
+            onTournamentEnsureMatchGame: Lobby.prototype.onTournamentEnsureMatchGame,
+            onTournamentDeckRegistered: Lobby.prototype.onTournamentDeckRegistered,
+            onJoinGame: Lobby.prototype.onJoinGame,
             runForMatch: Lobby.prototype.runForMatch,
             awaitNextGameInfo: Lobby.prototype.awaitNextGameInfo,
             notifyPlayers: Lobby.prototype.notifyPlayers,
@@ -241,6 +247,10 @@ describe('Lobby tournament series continuation', function () {
 
             gameTwo.started = true;
             lobby.tournamentService.getMatchesNeedingGames = vi.fn(async () => []);
+            lobby.tournamentService.describeMatchReadiness = vi.fn(async () => ({
+                state: 'complete',
+                message: 'This match already has a result'
+            }));
 
             await lobby.onTournamentNextGame({ gameId: gameTwo.id });
 
@@ -315,6 +325,166 @@ describe('Lobby tournament series continuation', function () {
             );
 
             expect(game.tournament.deckNames).toEqual({ alice: 'Alpha Deck', bob: null });
+        });
+    });
+
+    describe('a match that is open but not ready', function () {
+        /**
+         * Adaptive best-of-three at 1-1: game three waits for the chain bid,
+         * so the event lists no game for the match. That used to read as
+         * "decided" - two players who had just levelled the series were told
+         * it was over.
+         */
+        it('tells the players what they still have to do, not that the match is over', async function () {
+            const gameTwo = await lobby.ensureTournamentGame(matchInfo(2));
+
+            gameTwo.started = true;
+            lobby.tournamentService.getMatchesNeedingGames = vi.fn(async () => []);
+            lobby.tournamentService.describeMatchReadiness = vi.fn(async () => ({
+                state: 'blocked',
+                message: 'Game three opens once the chain bid is settled on the event page'
+            }));
+
+            await lobby.onTournamentNextGame({ gameId: gameTwo.id });
+
+            expect(tablesForMatch(7)).toHaveLength(0);
+
+            for (const username of ['alice', 'bob']) {
+                const [notice] = noticesFor(username);
+
+                expect(notice.tone).toBe('info');
+                expect(notice.message).toMatch(/chain bid/);
+                expect(notice.message).not.toMatch(/decided/);
+            }
+        });
+
+        it('does not keep retrying a blocked match', async function () {
+            const gameTwo = await lobby.ensureTournamentGame(matchInfo(2));
+
+            gameTwo.started = true;
+            lobby.tournamentService.getMatchesNeedingGames = vi.fn(async () => []);
+            lobby.tournamentService.describeMatchReadiness = vi.fn(async () => ({
+                state: 'blocked',
+                message: 'waiting'
+            }));
+
+            await lobby.onTournamentNextGame({ gameId: gameTwo.id });
+
+            expect(lobby.tournamentService.getMatchesNeedingGames).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('answering an open-table request', function () {
+        it('never hands back a table that has already started', async function () {
+            const gameOne = await lobby.ensureTournamentGame(matchInfo(1));
+
+            gameOne.started = true;
+            lobby.tournamentService.getMatchesNeedingGames = vi.fn(async () => []);
+
+            const answer = await lobby.onTournamentEnsureMatchGame({ tournamentId: 5, matchId: 7 });
+
+            // null, not undefined: "there is nothing to open", which the
+            // service turns into a reason rather than a green toast.
+            expect(answer).toBeNull();
+        });
+
+        it('hands back the unstarted table when one is waiting', async function () {
+            const gameOne = await lobby.ensureTournamentGame(matchInfo(1));
+
+            gameOne.started = true;
+
+            const gameTwo = await lobby.ensureTournamentGame(matchInfo(2));
+
+            lobby.tournamentService.getMatchesNeedingGames = vi.fn(async () => []);
+
+            expect(await lobby.onTournamentEnsureMatchGame({ tournamentId: 5, matchId: 7 })).toBe(
+                gameTwo
+            );
+        });
+    });
+
+    describe('joining the next table from the finished one', function () {
+        /**
+         * The lobby keeps a started table's seats until somebody leaves, so a
+         * player still at the board of game one who presses "Join your table"
+         * for game two was "already in a game" - and the join did nothing, in
+         * silence.
+         */
+        it('gives up the seat at the finished game of the same match', async function () {
+            const gameOne = await lobby.ensureTournamentGame(matchInfo(1));
+
+            gameOne.started = true;
+
+            // Bob was not seated at game two when it was built - he is at game one.
+            const gameTwo = new PendingGame(alice, {
+                gameFormat: 'normal',
+                name: 'game two',
+                tournament: {
+                    ...matchInfo(2),
+                    decks: { alice: 101, bob: 201 },
+                    players: ['alice', 'bob']
+                }
+            });
+
+            gameTwo.newGame('sock-alice', alice, undefined, true);
+            lobby.games[gameTwo.id] = gameTwo;
+
+            const bobSocket = lobby.socketsByName.bob;
+
+            bobSocket.leaveChannel = vi.fn();
+
+            lobby.onJoinGame(bobSocket, gameTwo.id);
+
+            expect(gameOne.players.bob.left).toBe(true);
+            expect(Object.keys(gameTwo.getPlayers()).sort()).toEqual(['alice', 'bob']);
+            expect(bobSocket.leaveChannel).toHaveBeenCalledWith(gameOne.id);
+            expect(noticesFor('bob')).toHaveLength(0);
+        });
+
+        it('says so when the player is in an unrelated game', async function () {
+            const casual = new PendingGame(bob, { gameFormat: 'normal', name: 'casual' });
+
+            casual.newGame('sock-bob', bob, undefined, true);
+            casual.started = true;
+            lobby.games[casual.id] = casual;
+
+            const table = await lobby.ensureTournamentGame(
+                matchInfo(1, {
+                    players: [
+                        { username: 'alice', deckId: 101 },
+                        { username: 'bob', deckId: 201 }
+                    ]
+                })
+            );
+
+            // ensureTournamentGame skipped bob (busy); he now presses Join.
+            expect(table.getPlayerByName('bob')).toBeUndefined();
+
+            lobby.onJoinGame(lobby.socketsByName.bob, table.id);
+
+            expect(table.getPlayerByName('bob')).toBeUndefined();
+
+            const [notice] = noticesFor('bob');
+
+            expect(notice.tone).toBe('warning');
+            expect(notice.message).toMatch(/Leave the game you are in/);
+        });
+    });
+
+    describe('changing the registered deck', function () {
+        it('forgets the old deck’s name until the new one loads', async function () {
+            const table = await lobby.ensureTournamentGame(matchInfo(1));
+
+            expect(table.tournament.deckNames.bob).toBe('Bravo Deck');
+
+            await lobby.onTournamentDeckRegistered({
+                tournamentId: 5,
+                username: 'bob',
+                deckId: 999
+            });
+
+            expect(table.tournament.decks.bob).toBe(999);
+            expect(table.tournament.deckNames.bob).toBeNull();
         });
     });
 

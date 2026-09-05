@@ -1948,13 +1948,43 @@ class Lobby {
         // Joining a game means leaving any matchmaking queue.
         this.matchmaking?.dequeue(socket.user.username);
 
-        let existingGame = this.findGameForUser(socket.user.username);
-        if (existingGame) {
+        let game = this.games[gameId];
+        if (!game) {
             return;
         }
 
-        let game = this.games[gameId];
-        if (!game) {
+        let existingGame = this.findGameForUser(socket.user.username);
+        if (existingGame && existingGame.id !== game.id) {
+            /**
+             * ARCHON: already in a game, and this used to return in silence.
+             *
+             * The common case is a tournament player still counted as sitting
+             * at the game of their match that just finished - the lobby keeps
+             * a started table's seats until somebody leaves - pressing "Join
+             * your table" for the next game. That is one series and one
+             * intention, so the finished seat is given up for them. Anything
+             * else gets told, because a button that does nothing is the
+             * complaint this whole area started from.
+             */
+            const sameSeries =
+                existingGame.started &&
+                existingGame.tournament &&
+                game.tournament &&
+                existingGame.tournament.matchId === game.tournament.matchId;
+
+            if (!sameSeries) {
+                socket.send('lobbynotice', {
+                    tone: 'warning',
+                    message: 'Leave the game you are in before joining another table.'
+                });
+
+                return;
+            }
+
+            existingGame.leave(socket.user.username);
+            socket.leaveChannel(existingGame.id);
+            this.broadcastGameMessage('updategame', existingGame);
+        } else if (existingGame) {
             return;
         }
 
@@ -2972,9 +3002,18 @@ class Lobby {
                 return await this.ensureTournamentGame(matchInfo);
             }
 
-            // Nothing needs a game: the match already has its table, and the
+            // Nothing needs a game: if the match has a table waiting, the
             // player should be sent to it rather than told nothing happened.
-            return this.findTournamentGame(matchId);
+            // Only a table that has not started - handing back a finished
+            // game's table sent the player into a "Game full" refusal - and
+            // an explicit null when there is none, which the service turns
+            // into the reason (a pick or a bid still outstanding).
+            return (
+                Object.values(this.games).find(
+                    (game) =>
+                        game.tournament && game.tournament.matchId === matchId && !game.started
+                ) || null
+            );
         } catch (err) {
             logger.error(`Failed to open game for tournament match ${matchId}`, err);
 
@@ -3007,6 +3046,13 @@ class Lobby {
 
         for (const game of tables) {
             game.tournament.decks[username] = deckId || null;
+
+            // The recorded name belongs to the deck they just replaced. The
+            // seat shows the loaded deck's name once it arrives; until then
+            // an empty name is honest and a stale one is not.
+            if (game.tournament.deckNames) {
+                game.tournament.deckNames[username] = null;
+            }
 
             const player = game.getPlayerByName(username);
 
@@ -3256,7 +3302,10 @@ class Lobby {
                 // into it. See PendingGame.getTournamentSeats.
                 deckNames: Object.fromEntries(
                     matchInfo.players.map((player) => [player.username, player.deckName || null])
-                )
+                ),
+                // The series score so far, so the engine's post-game menu can
+                // tell a decided match from one with games left.
+                wins: matchInfo.wins || {}
             }
         });
 
@@ -3405,9 +3454,9 @@ class Lobby {
                 // before anything is built: a table for the wrong game number
                 // is the failure this whole handler exists to prevent.
                 const expected = (gameNumber || 1) + 1;
-                const matchInfo = await this.awaitNextGameInfo(tournamentId, matchId, expected);
+                const answer = await this.awaitNextGameInfo(tournamentId, matchId, expected);
 
-                if (matchInfo === null) {
+                if (answer.complete) {
                     // The match is over - the game just played decided it.
                     // Nothing to open, and the event page has the result.
                     logger.info(`Match ${matchId} needs no further game; series is over`);
@@ -3420,6 +3469,22 @@ class Lobby {
 
                     return;
                 }
+
+                if (answer.blocked) {
+                    // Open, but waiting on the players for something the
+                    // event page handles - the chain bid before game three,
+                    // a Triad pick. Telling them "decided" here was wrong.
+                    logger.info(`Match ${matchId}: next game not ready - ${answer.blocked}`);
+                    this.notifyPlayers(usernames, {
+                        tone: 'info',
+                        message: `${answer.blocked}. Your table opens there once that is done.`,
+                        url: eventUrl
+                    });
+
+                    return;
+                }
+
+                const matchInfo = answer.info;
 
                 if (!matchInfo) {
                     // The result has not been recorded yet and we will not
@@ -3476,9 +3541,11 @@ class Lobby {
      * players a moment at the pending screen; opening the wrong table costs
      * them a game.
      *
-     * @returns {Promise<object|null|undefined>} the pairing; null when the
-     * match needs no more games; undefined when the event still shows the
-     * game just played as unplayed after every retry
+     * @returns {Promise<{info?: object, complete?: boolean, blocked?: string}>}
+     * `info` is the pairing to build; `complete` means the match needs no more
+     * games; `blocked` names what the players still have to do on the event
+     * page; an empty object means the event still shows the game just played
+     * as unplayed after every retry
      */
     async awaitNextGameInfo(tournamentId, matchId, expectedGameNumber, options = {}) {
         const attempts = options.attempts || 10;
@@ -3496,11 +3563,24 @@ class Lobby {
             const matchInfo = matches.find((entry) => entry.matchId === matchId);
 
             if (!matchInfo) {
-                return null;
-            }
+                // Absent from the list is not the same as decided - see
+                // TournamentService.describeMatchReadiness.
+                const readiness = await this.tournamentService.describeMatchReadiness(
+                    tournamentId,
+                    matchId
+                );
 
-            if (matchInfo.gameNumber >= expectedGameNumber) {
-                return matchInfo;
+                if (readiness.state === 'blocked') {
+                    return { blocked: readiness.message };
+                }
+
+                if (readiness.state === 'complete') {
+                    return { complete: true };
+                }
+
+                // 'ready' but not listed yet: the result has not landed.
+            } else if (matchInfo.gameNumber >= expectedGameNumber) {
+                return { info: matchInfo };
             }
 
             if (attempt < attempts - 1 && delayMs > 0) {
@@ -3508,7 +3588,7 @@ class Lobby {
             }
         }
 
-        return undefined;
+        return {};
     }
 
     /**

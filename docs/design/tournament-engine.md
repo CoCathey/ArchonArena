@@ -267,6 +267,12 @@ engine or its tables rely on.
     window; `acceptMatchTime` takes a `time` inside it. `ON CONFLICT` on the same start
     keeps the wider end. A window has to end after it starts, run at most seven days,
     and sit entirely inside the round deadline.
+-   **The seats carry the score.** `getMatchesNeedingGames` returns `wins` by seat, the
+    table pins them on its players, and the engine's post-game menu
+    (`GameWonPrompt.seriesDecided`) uses them - so a 2-0 no longer offers game three.
+    `describeMatchReadiness` tells the lobby and `ensureGameForMatch` whether a match
+    with no listed game is complete or merely blocked (Triad pick, chain bid), and the
+    lobby only ever hands back an unstarted table.
 -   **Local time in mail.** `Users.Settings_TimeZone` (migration 91) is reported by the
     browser after sign-in (`PUT /api/account/timezone`); `tournamentNotifications`
     formats every scheduling time for the recipient through
