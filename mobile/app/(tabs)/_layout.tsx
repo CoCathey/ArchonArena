@@ -4,6 +4,7 @@ import { AppState, ColorValue, Pressable, Text, View } from 'react-native';
 import { connectLobby } from '../../src/net/lobbySocket';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useFriendsStore } from '../../src/stores/friendsStore';
+import { useMessagesStore } from '../../src/stores/messagesStore';
 import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { colors } from '../../src/theme';
 
@@ -110,14 +111,20 @@ export default function TabsLayout() {
         };
     }, [loadFriends, token]);
 
-    // The bell's badge, on the same terms as the friends one.
+    // The bell's badge, on the same terms as the friends one. Unread direct
+    // messages ride along: they arrive over the lobby socket while the app is
+    // open, so this only has to be right for somebody who has just launched it.
     useEffect(() => {
         if (!token) {
             useNotificationsStore.getState().reset();
+            useMessagesStore.getState().reset();
             return undefined;
         }
 
-        const refresh = () => useNotificationsStore.getState().refreshCount();
+        const refresh = () => {
+            useNotificationsStore.getState().refreshCount();
+            useMessagesStore.getState().refreshUnread();
+        };
         const poll = () => {
             if (AppState.currentState === 'active') {
                 refresh();

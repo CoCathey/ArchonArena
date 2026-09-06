@@ -1290,6 +1290,30 @@ class Lobby {
         });
     }
 
+    /**
+     * ARCHON: the game a client means, not the first one it is in.
+     *
+     * The client says which game it is leaving (or failed to reach), and the
+     * lobby used to throw that away and ask "which game is this user in?"
+     * instead. That question has two answers while a tournament series moves
+     * between tables, and the wrong one is destructive: pressing "Back to
+     * Lobby" on the game just finished gave up the seat at the NEXT game's
+     * table, which the player had already taken. Falls back to the old
+     * behaviour when no id is sent, for clients that do not send one.
+     *
+     * @param {object} socket
+     * @param {string} [gameId]
+     */
+    gameForSocket(socket, gameId) {
+        const named = gameId && this.games[gameId];
+
+        if (named && named.getPlayerOrSpectator(socket.user.username)) {
+            return named;
+        }
+
+        return this.findGameForUser(socket.user.username);
+    }
+
     getUserList() {
         let userList = Object.values(this.users).map((user) => {
             return user.getShortSummary();
@@ -1651,6 +1675,17 @@ class Lobby {
                     return;
                 }
 
+                // ARCHON: a socket that dropped while the user was being
+                // looked up must not be registered as that player's lobby
+                // socket. Its disconnect has already run, so nothing will ever
+                // remove it again - and the lobby then believes the player is
+                // here, seats them at tables and sends handoffs into a closed
+                // connection. Which is one of the ways a tournament table came
+                // to start against somebody who was not there.
+                if (this.sockets[socket.id] !== socket) {
+                    return;
+                }
+
                 this.users[dbUser.username] = dbUser;
                 this.socketsByName[dbUser.username] = socket;
 
@@ -1671,6 +1706,24 @@ class Lobby {
         delete this.sockets[socket.id];
 
         if (!socket.user) {
+            return;
+        }
+
+        /**
+         * ARCHON: a superseded socket closing is not the player leaving.
+         *
+         * A reconnect (or a second tab) replaces socketsByName before the old
+         * socket's disconnect arrives, and this used to run anyway: it deleted
+         * the LIVE socket from the registry, announced the player as gone, and
+         * un-seated them from the unstarted table they were sitting at. The
+         * game node has had this guard since it grew the same problem; the
+         * lobby never did.
+         */
+        if (this.socketsByName[socket.user.username] !== socket) {
+            logger.info(
+                `superseded socket for '${socket.user.username}' closed: ${reason} (still connected)`
+            );
+
             return;
         }
 
@@ -1985,6 +2038,19 @@ class Lobby {
             socket.leaveChannel(existingGame.id);
             this.broadcastGameMessage('updategame', existingGame);
         } else if (existingGame) {
+            /**
+             * ARCHON: already at this very table. If it is running, this is a
+             * player asking to get back to their board - the "Rejoin game"
+             * button - and the answer is the handoff they are missing, not
+             * silence. Silence is what sent people to `watchgame` instead,
+             * which takes a seated player and turns them into a spectator of
+             * their own game.
+             */
+            if (existingGame.started && existingGame.node) {
+                socket.joinChannel(existingGame.id);
+                this.sendHandoff(socket, existingGame.node, existingGame.id);
+            }
+
             return;
         }
 
@@ -2266,8 +2332,8 @@ class Lobby {
         }
     }
 
-    onLeaveGame(socket) {
-        let game = this.findGameForUser(socket.user.username);
+    onLeaveGame(socket, gameId) {
+        let game = this.gameForSocket(socket, gameId);
         if (!game) {
             return;
         }
@@ -2818,8 +2884,8 @@ class Lobby {
         }
     }
 
-    onConnectFailed(socket) {
-        let game = this.findGameForUser(socket.user.username);
+    onConnectFailed(socket, gameId) {
+        let game = this.gameForSocket(socket, gameId);
         if (!game) {
             return;
         }
@@ -2993,13 +3059,26 @@ class Lobby {
      * handed back so the service can give its id to the client, which then
      * walks straight to the table instead of waiting to notice it appear.
      */
-    async onTournamentEnsureMatchGame({ tournamentId, matchId }) {
+    async onTournamentEnsureMatchGame({ tournamentId, matchId, requestedBy }) {
         try {
             const matches = await this.tournamentService.getMatchesNeedingGames(tournamentId);
             const matchInfo = matches.find((entry) => entry.matchId === matchId);
 
             if (matchInfo) {
-                return await this.ensureTournamentGame(matchInfo);
+                /**
+                 * ARCHON: one player asking for a table is one player saying
+                 * they are ready.
+                 *
+                 * This path is a button press, at a moment of that player's
+                 * choosing - not the start of a round, when both players are
+                 * known to be waiting for one. Seating the opponent from the
+                 * mere fact that they have a lobby socket open, and then
+                 * starting the game because both seats are full, took somebody
+                 * reading the event page elsewhere on the site and dropped them
+                 * into a live game they had not agreed to play. They are told
+                 * the table is theirs and left to walk to it.
+                 */
+                return await this.ensureTournamentGame(matchInfo, { seatOnly: requestedBy });
             }
 
             // Nothing needs a game: if the match has a table waiting, the
@@ -3208,12 +3287,30 @@ class Lobby {
      * from the lobby or the event page. The game starts itself once
      * both players are seated with decks.
      */
-    async ensureTournamentGame(matchInfo) {
+    async ensureTournamentGame(matchInfo, options = {}) {
         // The table for THIS game of the match. Anything else - the finished
         // previous game, a duplicate - is not it. See findTournamentGame.
         const existing = this.findTournamentGame(matchInfo.matchId, matchInfo.gameNumber);
 
         if (existing) {
+            /**
+             * ARCHON: a started table is only an answer for somebody sitting
+             * at it.
+             *
+             * The caller hands this back to a client that walks straight in
+             * with `joingame`, and a started table refuses that with "Game
+             * full" - so a player whose game is already under way somewhere
+             * else (another tab, a phone) was told their table had failed to
+             * open. The fallback branch of onTournamentEnsureMatchGame learned
+             * this; this one, which answers first and far more often, did not.
+             * Returning null lets the service say what is actually true.
+             */
+            const seat = options.seatOnly && existing.getPlayerByName(options.seatOnly);
+
+            if (options.seatOnly && existing.started && (!seat || seat.left)) {
+                return null;
+            }
+
             return existing;
         }
 
@@ -3238,13 +3335,13 @@ class Lobby {
         this.pendingTournamentTables.add(key);
 
         try {
-            return await this.createTournamentGame(matchInfo);
+            return await this.createTournamentGame(matchInfo, options);
         } finally {
             this.pendingTournamentTables.delete(key);
         }
     }
 
-    async createTournamentGame(matchInfo) {
+    async createTournamentGame(matchInfo, options = {}) {
         const users = await Promise.all(
             matchInfo.players.map((player) => this.userService.getUserByUsername(player.username))
         );
@@ -3317,14 +3414,54 @@ class Lobby {
 
         this.games[game.id] = game;
 
-        await this.tournamentService.attachGame(
+        /**
+         * ARCHON: the event's row for this game of the match can only name one
+         * table, and that name is how a result finds its way home.
+         *
+         * If it already names a table that is still standing, this one is a
+         * duplicate - throw it away and hand back the real one, rather than
+         * taking the binding and leaving the players' game unrecordable. If the
+         * named table is gone (a lobby restart lost it) then repointing is
+         * exactly the recovery this path exists for, so ask again and say so.
+         */
+        let attached = await this.tournamentService.attachGame(
             matchInfo.tournamentId,
             matchInfo.matchId,
             matchInfo.gameNumber,
             game.id
         );
 
-        await this.seatTournamentPlayers(game, matchInfo);
+        if (!attached.success && attached.gameUuid && attached.gameUuid !== game.id) {
+            const holder = this.games[attached.gameUuid];
+
+            if (holder) {
+                logger.info(
+                    `Match ${matchInfo.matchId} game ${matchInfo.gameNumber} is already table ${holder.id}; discarding the duplicate`
+                );
+                delete this.games[game.id];
+
+                return holder;
+            }
+
+            attached = await this.tournamentService.attachGame(
+                matchInfo.tournamentId,
+                matchInfo.matchId,
+                matchInfo.gameNumber,
+                game.id,
+                { replace: true }
+            );
+        }
+
+        if (!attached.success && attached.recorded) {
+            // The event has a result for this game already. A table for it can
+            // only mislead the people who sit at it.
+            logger.info(
+                `Match ${matchInfo.matchId} game ${matchInfo.gameNumber} already has a result; not opening a table`
+            );
+            delete this.games[game.id];
+
+            return null;
+        }
 
         /**
          * Clear away any unstarted table left over for this match.
@@ -3333,13 +3470,50 @@ class Lobby {
          * lobby that already has duplicates from before those guards existed -
          * which is not hypothetical, since that is how this was reported. A
          * started table is never touched: its players are in it.
+         *
+         * Before the seating, not after: a player sitting at the table about to
+         * be removed reads as busy, so seating first skipped them and the sweep
+         * then deleted the only table they were at. They ended up seated
+         * nowhere, at an event that believed it had given them a game.
          */
         for (const stale of this.staleTournamentTables(matchInfo.matchId, game.id)) {
             logger.info(
                 `Removing duplicate tournament table ${stale.id} for match ${matchInfo.matchId}`
             );
+
+            // Take the clients out of the channel as well as off the list -
+            // otherwise they keep receiving a table that no longer exists.
+            for (const seat of Object.values(stale.getPlayersAndSpectators())) {
+                this.socketForSeat(seat)?.leaveChannel(stale.id);
+            }
+
             this.broadcastGameMessage('removegame', stale);
             delete this.games[stale.id];
+        }
+
+        const unseated = await this.seatTournamentPlayers(game, matchInfo, options);
+
+        /**
+         * Anybody the table could not seat has to be pointed at it.
+         *
+         * The lobby list shows the table like any other game, with nothing
+         * saying it belongs to them - "there is no indication you have to join
+         * a different table" is how that was reported. Somebody offline will
+         * find it when they arrive; everybody else gets a sentence now.
+         */
+        for (const missing of unseated) {
+            if (missing.reason === 'offline') {
+                continue;
+            }
+
+            this.notifyPlayers([missing.username], {
+                tone: 'info',
+                message:
+                    matchInfo.bestOf > 1
+                        ? `Game ${matchInfo.gameNumber} of your match is ready. Join your table when you are.`
+                        : 'Your tournament table is ready. Join it when you are.',
+                url: `/tournaments/${matchInfo.tournamentId}`
+            });
         }
 
         this.broadcastGameMessage('newgame', game);
@@ -3363,7 +3537,7 @@ class Lobby {
      * they leave it, and dragging somebody out of a game they are playing to
      * sit them at another is never right.
      */
-    async seatTournamentPlayers(game, matchInfo) {
+    async seatTournamentPlayers(game, matchInfo, options = {}) {
         // Who could NOT be sat down, and why - so a caller that promised the
         // players a table can tell them to come and find it instead of
         // leaving them to notice its absence.
@@ -3373,6 +3547,24 @@ class Lobby {
             const socket = this.socketsByName[player.username];
 
             if (game.getPlayerByName(player.username)) {
+                continue;
+            }
+
+            /**
+             * ARCHON: seat the player who asked, invite the one who did not.
+             *
+             * Being connected to the lobby is not consent to start a game. When
+             * a table is opened on demand - one player pressing "Open my table"
+             * on the event page, which is the whole of how an asynchronous
+             * event works - seating both of them filled the table, and a full
+             * table starts itself. The opponent was reading the standings and
+             * found themselves at a board. `seatOnly` limits the seating to the
+             * player whose click it was; the other is told the table is theirs,
+             * by the caller, from this list.
+             */
+            if (options.seatOnly && player.username !== options.seatOnly) {
+                unseated.push({ username: player.username, reason: 'not asked' });
+
                 continue;
             }
 
@@ -3505,6 +3697,23 @@ class Lobby {
                 const game = await this.ensureTournamentGame(matchInfo);
 
                 if (!game) {
+                    /**
+                     * A table could not be built: another creation for this
+                     * game of the match is already in flight, or the event
+                     * turns out to have a result for it. Either way the two
+                     * players have just been cleared out of the table they
+                     * finished on and are looking at nothing, so this cannot be
+                     * a bare return - the silence is the complaint.
+                     */
+                    logger.info(
+                        `Match ${matchId}: no table for game ${matchInfo.gameNumber} right now`
+                    );
+                    this.notifyPlayers(usernames, {
+                        tone: 'warning',
+                        message: `Your table for game ${matchInfo.gameNumber} is still being set up. Open it from the event page in a moment.`,
+                        url: eventUrl
+                    });
+
                     return;
                 }
 
@@ -3627,8 +3836,44 @@ class Lobby {
             return;
         }
 
+        // A seat somebody gave up is not a seat. `leave` on a started table
+        // keeps the row and marks it left (see PendingGame.leave), and a
+        // tournament table can inherit such a row when a series moves.
+        if (players.some((player) => player.left)) {
+            return;
+        }
+
         // ARCHON: the deck lock, second gate - see refuseUnpinnedStart.
         if (this.refuseUnpinnedStart(game)) {
+            return;
+        }
+
+        /**
+         * ARCHON: every seat has to be reachable before the game begins.
+         *
+         * A seat holds the socket id it was filled with, and that id goes stale
+         * - the player reconnected, or was seated from a lobby socket that has
+         * since closed. The handoff for such a seat used to be logged and
+         * stepped over, and the game started anyway: one player at a board, an
+         * opponent who never learns the game exists, and a result that the
+         * abandonment rules then hand to whoever is standing there. A
+         * tournament game must not start against somebody who cannot be told
+         * it has.
+         *
+         * Nothing is lost by waiting. The table stays pending and this runs
+         * again the moment anything about it changes - a join, a deck, a
+         * reconnect - which is how the player who is actually there gets their
+         * game as soon as their opponent arrives.
+         */
+        const unreachable = players.filter((player) => !this.socketForSeat(player));
+
+        if (unreachable.length > 0) {
+            logger.info(
+                `Tournament game ${game.id} not started: no live socket for ${unreachable
+                    .map((player) => player.name)
+                    .join(', ')}`
+            );
+
             return;
         }
 
@@ -3646,15 +3891,41 @@ class Lobby {
         this.broadcastGameMessage('updategame', game);
 
         for (const player of Object.values(game.getPlayersAndSpectators())) {
-            const socket = this.sockets[player.id];
+            const socket = this.socketForSeat(player);
 
-            if (!socket || !socket.user) {
+            if (!socket) {
                 logger.error(`Wanted to handoff to ${player.name}, but couldn't find a socket`);
                 continue;
             }
 
             this.sendHandoff(socket, gameNode, game.id);
         }
+    }
+
+    /**
+     * ARCHON: the live socket for a seat, by id and then by name.
+     *
+     * A seat records the socket id it was filled with, and that is the right
+     * answer while it lasts - it is the only way to tell one of a player's tabs
+     * from another. But it goes stale on every reconnect, and a stale id read
+     * as "this player is not here" is what let a tournament table start without
+     * handing one of its players off. The player's current lobby socket is the
+     * honest fallback: they are here, on a different connection.
+     */
+    socketForSeat(player) {
+        if (!player) {
+            return undefined;
+        }
+
+        const byId = this.sockets[player.id];
+
+        if (byId && byId.user) {
+            return byId;
+        }
+
+        const byName = this.socketsByName[player.name];
+
+        return byName && byName.user ? byName : undefined;
     }
 
     /**
@@ -4153,6 +4424,14 @@ class Lobby {
             syncGame.node = this.router.workers[nodeName];
             syncGame.password = game.password;
             syncGame.started = game.started;
+            // ARCHON: a tournament table restored from a node is still a
+            // tournament table. Without this the lobby treats it as an
+            // ordinary game and the event builds a duplicate for a pairing
+            // that is mid-game. See Game.getSummary.
+            syncGame.tournament = game.tournament;
+            syncGame.hideDeckLists = game.hideDeckLists;
+            syncGame.gameTimeLimit = game.gameTimeLimit;
+            syncGame.useGameTimeLimit = game.useGameTimeLimit;
 
             for (let player of Object.values(game.players)) {
                 syncGame.players[player.name] = {

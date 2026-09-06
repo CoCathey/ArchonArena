@@ -5,6 +5,7 @@ import { colors } from '../theme';
 import { CARD_ASPECT, CARDBACK, cardImageUrl } from './cardImages';
 import { STATUS_TOKEN_ICONS, enhancementPip } from './cardIcons';
 import { canDragCard, useDragDrop, type DropZoneName } from './DragDrop';
+import { cardAccessibilityLabel } from './cardLabel';
 import type { CardSummary } from './types';
 
 function TokenPip(props: { value: number; color: string; label?: string; upright?: boolean }) {
@@ -145,6 +146,9 @@ export default function CardTile(props: {
                 onLongPress={() => props.onLongPress?.(card)}
                 delayLongPress={450}
                 disabled={props.disabled}
+                accessibilityRole='button'
+                accessibilityLabel={cardAccessibilityLabel(card)}
+                accessibilityState={{ disabled: !!props.disabled, selected: !!card.selected }}
                 style={({ pressed }) => [
                     { width, height },
                     pressed && { opacity: 0.8 }

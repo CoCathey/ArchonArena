@@ -7,6 +7,7 @@ import { checkAuth, refreshAuthToken } from '../src/api/client';
 import { registerForPush, routeForNotification } from '../src/push';
 import { resyncGame } from '../src/net/gameSocket';
 import { connectLobby } from '../src/net/lobbySocket';
+import LobbyNotices from '../src/lobby/LobbyNotices';
 import { useAuthStore } from '../src/stores/authStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
 import { colors } from '../src/theme';
@@ -115,6 +116,9 @@ export default function RootLayout() {
     return (
         <>
             <StatusBar style='light' />
+            {/* Renders nothing; it exists so a notice the lobby sends to this
+                player is said whatever screen they are on. */}
+            <LobbyNotices />
             <Stack
                 screenOptions={{
                     headerStyle: { backgroundColor: colors.bgElevated },
@@ -153,7 +157,19 @@ export default function RootLayout() {
                 />
                 <Stack.Screen
                     name='tournament/new'
-                    options={{ title: 'New event', presentation: 'modal' }}
+                    options={{
+                        title: 'New event',
+                        presentation: 'modal',
+                        // A modal has no back button; without this the only
+                        // way out was a swipe nothing on screen suggests.
+                        headerLeft: () => (
+                            <Pressable onPress={() => router.back()} hitSlop={8}>
+                                <Text style={{ color: colors.accent, fontSize: 16, fontWeight: '600' }}>
+                                    Cancel
+                                </Text>
+                            </Pressable>
+                        )
+                    }}
                 />
                 <Stack.Screen
                     name='deck/[id]'
@@ -162,6 +178,17 @@ export default function RootLayout() {
                 <Stack.Screen
                     name='notifications'
                     options={{ title: 'Notifications', headerBackTitle: 'Back' }}
+                />
+                {/* ARCHON: direct messages. The push notification for one has
+                    been reaching phones since the website grew an inbox; until
+                    these screens existed the tap had nowhere to land. */}
+                <Stack.Screen
+                    name='messages/index'
+                    options={{ title: 'Messages', headerBackTitle: 'Back' }}
+                />
+                <Stack.Screen
+                    name='messages/[username]'
+                    options={{ title: 'Conversation', headerBackTitle: 'Messages' }}
                 />
                 <Stack.Screen
                     name='forgot-password'

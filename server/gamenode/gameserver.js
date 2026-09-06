@@ -428,7 +428,7 @@ class GameServer {
      * @param {string} username
      */
     findGameForUser(username) {
-        return Object.values(this.games).find((game) => {
+        const seated = Object.values(this.games).filter((game) => {
             const player = game.playersAndSpectators[username];
 
             if (!player || player.left) {
@@ -437,6 +437,22 @@ class GameServer {
 
             return true;
         });
+
+        /**
+         * ARCHON: a finished game is the last place a reconnecting player
+         * wants to land.
+         *
+         * The node keeps a decided game for twenty minutes so its players can
+         * read the result in their own time, and a tournament player is in
+         * their NEXT game well inside that window - so "the first game this
+         * user is seated at" is, for the whole of a best-of series, the game
+         * they just finished. Landing there replays its win screen: the table
+         * appears to start and instantly hand out a result nobody played for,
+         * which is how this was reported. Callers that know which game they
+         * mean pass an id (see seatConnection); this is the fallback, and it
+         * prefers a game that is still being played.
+         */
+        return seated.find((game) => !game.winner && !game.finishedAt) || seated[0];
     }
 
     /**
@@ -608,6 +624,21 @@ class GameServer {
 
                 socket.request.user = user;
             });
+        }
+
+        /**
+         * ARCHON: which game this connection was handed off to.
+         *
+         * Deliberately its own handshake field rather than a claim inside the
+         * token: the client re-reads the auth token on every reconnect and the
+         * ordinary refresh flow replaces it, so anything carried inside it
+         * quietly disappears the first time a player's session is refreshed
+         * mid-game. See seatConnection for what it is for.
+         */
+        const gameId = socket.handshake.auth?.gameId || socket.handshake.query?.gameId;
+
+        if (gameId && gameId !== 'undefined') {
+            socket.request.gameId = String(gameId);
         }
 
         next();
@@ -948,9 +979,43 @@ class GameServer {
             return;
         }
 
-        let game = this.findGameForUser(ioSocket.request.user.username);
+        const username = ioSocket.request.user.username;
+
+        /**
+         * ARCHON: seat the connection at the game it was handed off to.
+         *
+         * The lobby's handoff names a game (Lobby.sendHandoff), and until this
+         * the node threw that away and asked "which of my games is this user
+         * in?" instead. For a tournament series that question has more than one
+         * answer for twenty minutes after every game - the finished one and the
+         * one the event has just opened - and the node answered with whichever
+         * it happened to hold first, which is the older, decided game. A player
+         * joining game two was put back into game one and shown its win screen:
+         * a table that appeared to start itself, award a win nobody played for,
+         * and offer the next game. That is the bug this exists to close.
+         *
+         * The id is honoured only for a game that really holds this user, so it
+         * cannot be used to reach somebody else's table; without one (an older
+         * client) the behaviour is what it always was.
+         */
+        const requestedId = ioSocket.request.gameId;
+        let game = requestedId ? this.games[requestedId] : undefined;
+
+        if (requestedId && (!game || !game.playersAndSpectators[username])) {
+            logger.info(
+                `${username} asked for game ${requestedId}, which is not theirs or is gone; disconnecting`
+            );
+            ioSocket.disconnect();
+
+            return;
+        }
+
         if (!game) {
-            logger.info(`No game for ${ioSocket.request.user.username} disconnecting`);
+            game = this.findGameForUser(username);
+        }
+
+        if (!game) {
+            logger.info(`No game for ${username} disconnecting`);
             ioSocket.disconnect();
             return;
         }

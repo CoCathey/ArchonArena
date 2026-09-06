@@ -179,6 +179,22 @@ export default function PlayerProfileScreen() {
                                         onPress={addFriend}
                                         style={{ flex: 1 }}
                                     />
+                                    {/* The one place a conversation can be
+                                        started from: every other route into
+                                        messages is a reply to one. */}
+                                    <Button
+                                        small
+                                        variant='secondary'
+                                        title='Message'
+                                        onPress={() =>
+                                            router.push(
+                                                `/messages/${encodeURIComponent(
+                                                    profile.username
+                                                )}`
+                                            )
+                                        }
+                                        style={{ flex: 1 }}
+                                    />
                                     <Button
                                         small
                                         variant='secondary'

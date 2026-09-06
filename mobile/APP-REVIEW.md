@@ -178,3 +178,14 @@ Reviewers differ, and the most common objection to this shape is to the
 
 Do not add an external link back "just for iOS" without re-reading 3.1.1 — that
 is the specific change that turns an approved build into a rejected one.
+
+## Camera permission string
+
+`NSCameraUsageDescription` is written by **two** config plugins in `app.json`:
+`expo-camera` (the QR check-in scanner needs it) and `expo-image-picker` (the
+profile picture only ever opens the photo library). Each plugin deletes a key
+it is told is `false`, and the plugins run after one another, so setting
+`cameraPermission: false` on the image picker removed the string the scanner
+needs and the built app crashed on "Scan check-in" with
+"This app is missing NSCameraUsageDescription". Both entries therefore carry
+the same scanner text; `test/appConfig.test.ts` fails the build if they drift.

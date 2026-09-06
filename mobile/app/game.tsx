@@ -434,9 +434,16 @@ export default function GameScreen() {
                                 {rootState.name}
                             </Text>
                             <Text style={styles.phase}>
-                                {String(perspective.phase ?? '')}
-                                {rootState.manualMode ? ' · manual' : ''}
-                                {isSpectator ? ' · spectating' : ''}
+                                {/* Joined rather than concatenated: once the
+                                    game is over the phase is blank, and a
+                                    fixed separator left " · manual" hanging. */}
+                                {[
+                                    String(perspective.phase ?? ''),
+                                    rootState.manualMode ? 'manual' : '',
+                                    isSpectator ? 'spectating' : ''
+                                ]
+                                    .filter(Boolean)
+                                    .join(' · ')}
                             </Text>
                         </View>
                         {status === 'failed' ? (
@@ -726,7 +733,7 @@ export default function GameScreen() {
                 <PileViewer
                     title={`${
                         pileView.player === 'me' ? perspective.name : opponent?.name ?? 'Opponent'
-                    } · ${pileView.pile}`}
+                    } · ${pileView.pile.charAt(0).toUpperCase()}${pileView.pile.slice(1)}`}
                     cards={pileCards}
                     onClose={() => setPileView(undefined)}
                     onCardZoom={setZoomCard}

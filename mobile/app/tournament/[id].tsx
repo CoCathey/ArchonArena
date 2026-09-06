@@ -32,6 +32,7 @@ import DeckRow from '../../src/decks/DeckRow';
 import { useDeckLibrary } from '../../src/decks/useDeckLibrary';
 import MyMatchCard from '../../src/tournaments/MyMatchCard';
 import { localTime, relativeTime, statusLabel, tournamentFormatLabel } from '../../src/tournaments/format';
+import { isDecided } from '../../src/tournaments/matchState';
 import { useAuthStore } from '../../src/stores/authStore';
 import { colors, radius, spacing } from '../../src/theme';
 import { Button, Card, EmptyState, ErrorBanner, TextField } from '../../src/ui/primitives';
@@ -61,7 +62,9 @@ function Row(props: { label: string; value?: string | null }) {
 function MatchLine(props: { match: TournamentMatch; myUserId?: number }) {
     const { match } = props;
     const mine = match.player1Id === props.myUserId || match.player2Id === props.myUserId;
-    const decided = !!match.winnerId;
+    // A double loss is decided and has no winner, so reading winnerId alone
+    // listed it among the round's open matches forever.
+    const decided = isDecided(match);
 
     return (
         <View style={[styles.matchLine, mine && styles.matchLineMine]}>
@@ -73,7 +76,9 @@ function MatchLine(props: { match: TournamentMatch; myUserId?: number }) {
             <Text style={[styles.matchResult, decided && { color: colors.text }]}>
                 {decided
                     ? `${match.player1Wins ?? 0}–${match.player2Wins ?? 0}${
-                          match.confirmed ? '' : '?'
+                          // The trailing "?" is a winner nobody has agreed to
+                          // yet, which a match nobody won cannot have.
+                          match.winnerId ? (match.confirmed ? '' : '?') : ' both lost'
                       }`
                     : match.scheduledAt
                     ? (localTime(match.scheduledAt) ?? '')

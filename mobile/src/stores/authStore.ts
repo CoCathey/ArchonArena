@@ -20,6 +20,32 @@ interface AuthState {
     clear: () => Promise<void>;
 }
 
+/**
+ * Finishing the welcome flow is one-way, but not every copy of the user the
+ * app receives knows it happened. The lobby sends one with every game
+ * handoff, taken from its socket's own user object - loaded when the socket
+ * connected, so a flow finished since then still reads `onboarded: false`
+ * there. Adopting that copy as-is sent a player back to step one the moment
+ * they joined or watched a game. So for the same account, a completion the
+ * app has already seen wins over an incoming copy that has not caught up.
+ */
+function withCompletedOnboarding(
+    previous: UserDetails | undefined,
+    incoming: UserDetails
+): UserDetails {
+    const sameAccount =
+        !!previous &&
+        (previous.id !== undefined && incoming.id !== undefined
+            ? String(previous.id) === String(incoming.id)
+            : previous.username === incoming.username);
+
+    if (sameAccount && previous?.onboarded === true && incoming.onboarded === false) {
+        return { ...incoming, onboarded: true };
+    }
+
+    return incoming;
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
     token: undefined,
     refreshToken: undefined,
@@ -42,11 +68,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
     },
     setAuth: async ({ token, refreshToken, user }) => {
+        const merged = user ? withCompletedOnboarding(get().user, user) : get().user;
         set({
             token: token ?? get().token,
             refreshToken: refreshToken ?? get().refreshToken,
-            user: user ?? get().user
+            user: merged
         });
+        user = merged;
         try {
             if (refreshToken) {
                 await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, JSON.stringify(refreshToken));

@@ -5,6 +5,7 @@ import {
     FlatList,
     Modal,
     Pressable,
+    ScrollView,
     StyleSheet,
     Text,
     View,
@@ -135,6 +136,7 @@ export function CardMenuSheet(props: {
 }) {
     const { card } = props;
     const insets = useSafeAreaInsets();
+    const { height: windowHeight } = useWindowDimensions();
 
     if (!card) {
         return null;
@@ -154,21 +156,40 @@ export function CardMenuSheet(props: {
                 <Text style={styles.sheetTitle} numberOfLines={1}>
                     {card.name ?? 'Card'}
                 </Text>
-                {menu.map((item, index) => (
-                    <Pressable
-                        key={index}
-                        style={({ pressed }) => [styles.sheetItem, pressed && { opacity: 0.6 }]}
-                        onPress={() => props.onItem(card, item)}
-                    >
-                        <Text style={styles.sheetItemText}>{String(item.text ?? 'Option')}</Text>
-                    </Pressable>
-                ))}
-                <Pressable
-                    style={({ pressed }) => [styles.sheetItem, pressed && { opacity: 0.6 }]}
-                    onPress={() => props.onZoom?.(card)}
+                {/* Manual mode hands a creature twenty-odd options (tokens,
+                    control, zones, facing). Laid out as a plain column the
+                    sheet grew past the top of the screen and the first
+                    entries - Ready among them - could not be reached. So the
+                    list scrolls, capped to leave the title and Cancel in
+                    view. */}
+                <ScrollView
+                    style={{ maxHeight: windowHeight * 0.6 }}
+                    bounces={false}
+                    showsVerticalScrollIndicator
                 >
-                    <Text style={styles.sheetItemText}>View card</Text>
-                </Pressable>
+                    {menu.map((item, index) => (
+                        <Pressable
+                            key={index}
+                            style={({ pressed }) => [
+                                styles.sheetItem,
+                                pressed && { opacity: 0.6 }
+                            ]}
+                            onPress={() => props.onItem(card, item)}
+                            accessibilityRole='button'
+                        >
+                            <Text style={styles.sheetItemText}>
+                                {String(item.text ?? 'Option')}
+                            </Text>
+                        </Pressable>
+                    ))}
+                    <Pressable
+                        style={({ pressed }) => [styles.sheetItem, pressed && { opacity: 0.6 }]}
+                        onPress={() => props.onZoom?.(card)}
+                        accessibilityRole='button'
+                    >
+                        <Text style={styles.sheetItemText}>View card</Text>
+                    </Pressable>
+                </ScrollView>
                 <Pressable
                     style={({ pressed }) => [
                         styles.sheetItem,
@@ -176,6 +197,7 @@ export function CardMenuSheet(props: {
                         pressed && { opacity: 0.6 }
                     ]}
                     onPress={props.onClose}
+                    accessibilityRole='button'
                 >
                     <Text style={[styles.sheetItemText, { color: colors.textDim }]}>Cancel</Text>
                 </Pressable>
@@ -397,8 +419,10 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '800',
         marginBottom: spacing.sm,
-        flexShrink: 1,
-        textTransform: 'capitalize'
+        flexShrink: 1
+        // No text transform: a username is an identity, and "capitalize" was
+        // rewriting "test1 · Discard" as "Test1 · Discard". The pile word is
+        // capitalised where the title is built instead.
     },
     sheetItem: {
         paddingVertical: 13,

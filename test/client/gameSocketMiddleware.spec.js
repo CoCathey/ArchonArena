@@ -205,11 +205,31 @@ describe('game socket middleware', function () {
         it('presents the newest token at the next handshake', function () {
             const socket = gameSocket();
 
-            expect(socket.auth()).toEqual({ token: 'game-jwt' });
+            expect(socket.auth()).toEqual({ token: 'game-jwt', gameId: 'game-1' });
 
             state.auth.token = 'refreshed-jwt';
 
-            expect(socket.auth()).toEqual({ token: 'refreshed-jwt' });
+            expect(socket.auth()).toEqual({ token: 'refreshed-jwt', gameId: 'game-1' });
+        });
+
+        /**
+         * ARCHON: the handshake names the game this socket was handed off to.
+         *
+         * The node used to work that out from the username, which during a
+         * best-of series has two answers for twenty minutes - the game just
+         * finished and the one just opened - and it answered with the older
+         * one. A player joining game two was put back into game one and shown
+         * its win screen. The id is read from the socket's own handoff, not
+         * from a shared variable, so a later handoff to another table cannot
+         * redirect this socket's reconnects.
+         */
+        it('keeps naming its own game after a handoff to a different one', function () {
+            const first = gameSocket();
+
+            lobbySocket().fire('handoff', handoff({ gameId: 'game-2' }));
+
+            expect(first.auth()).toEqual({ token: 'game-jwt', gameId: 'game-1' });
+            expect(gameSocket().auth()).toEqual({ token: 'game-jwt', gameId: 'game-2' });
         });
     });
 

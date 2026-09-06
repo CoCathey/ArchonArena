@@ -44,6 +44,13 @@ function applySetupTest(options, ctx) {
     player1.selectDeck(player1Deck);
     player2.selectDeck(player2Deck);
 
+    // Both seats are at the board: a test player is by definition somebody who
+    // reached the game node. Without this the abandonment rules - which refuse
+    // to score a game against a seat that never connected - would read every
+    // test's opponent as absent. See Player.connectionSucceeded.
+    player1.player.connectionSucceeded = true;
+    player2.player.connectionSucceeded = true;
+
     // Set chains before game start so they affect the first-player draw
     if (options.player1.setupChains) {
         player1.player.chains = options.player1.setupChains;

@@ -1,9 +1,17 @@
 import { io, Socket } from 'socket.io-client';
 import { refreshAuthToken } from '../api/client';
-import type { GameSummary, HandoffMessage, LobbyMessage, NewGameRequest } from '../api/types';
+import type { DirectMessage } from '../api/messages';
+import type {
+    GameSummary,
+    HandoffMessage,
+    LobbyMessage,
+    LobbyNotice,
+    NewGameRequest
+} from '../api/types';
 import { useAuthStore } from '../stores/authStore';
 import { useGameStore } from '../stores/gameStore';
 import { useLobbyStore, type MatchmakingState } from '../stores/lobbyStore';
+import { useMessagesStore, otherPartyOf } from '../stores/messagesStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { connectToGame } from './gameSocket';
 
@@ -81,7 +89,9 @@ export async function connectLobby(): Promise<void> {
     });
 
     socket.on('updategame', (games: GameSummary[]) => {
-        useLobbyStore.getState().updateGames(games ?? []);
+        // Named, because the update is also how we learn our own seat is gone
+        // — and a spectator, who never had one, must not be treated the same.
+        useLobbyStore.getState().updateGames(games ?? [], useAuthStore.getState().user?.username);
     });
 
     socket.on('removegame', (games: GameSummary[]) => {
@@ -140,6 +150,59 @@ export async function connectLobby(): Promise<void> {
 
     socket.on('banner', (notice: string) => {
         useLobbyStore.getState().setBanner(notice);
+    });
+
+    /**
+     * ARCHON: the lobby's only way of saying something to one named player
+     * wherever they are (server/lobby.js `notifyPlayers`).
+     *
+     * Everything else the lobby says privately — 'gameerror', 'passworderror'
+     * — renders inside a pending table, and the players these notices are for
+     * have just been cleared out of one: "that game decided your match", "your
+     * last result is still being recorded", "join your table from the event
+     * page". Dropping them, which is what the app did until now, is exactly
+     * the button-did-nothing complaint this work exists to end.
+     *
+     * The store holds it and LobbyNotices, mounted at the root, says it.
+     */
+    socket.on('lobbynotice', (notice: LobbyNotice) => {
+        if (notice?.message) {
+            useLobbyStore.getState().setNotice(notice);
+        }
+    });
+
+    /**
+     * ARCHON: a direct message for (or from) this player arrived live.
+     *
+     * The lobby sends it to both ends, so a message sent from a browser shows
+     * up in the thread open on the phone. One that is not already on screen
+     * becomes a notice, which is how a message reaches somebody sitting on the
+     * game list — the same choice the web client makes, and the same route the
+     * push notification for it opens.
+     */
+    socket.on('directmessage', (message: DirectMessage) => {
+        const me = useAuthStore.getState().user?.username;
+        const messages = useMessagesStore.getState();
+        const other = otherPartyOf(message, me);
+
+        messages.receive(message, me);
+
+        if (!other || !me || message.senderUsername === me) {
+            return;
+        }
+
+        if (messages.viewing?.toLowerCase() === other.toLowerCase()) {
+            return;
+        }
+
+        const text = String(message.text ?? '');
+        const excerpt = text.length > 120 ? `${text.slice(0, 117)}...` : text;
+
+        useLobbyStore.getState().setNotice({
+            tone: 'info',
+            message: `${message.senderUsername}: ${excerpt}`,
+            url: `/messages/${encodeURIComponent(message.senderUsername ?? '')}`
+        });
     });
 
     socket.on('motd', (motd: { message?: string }) => {

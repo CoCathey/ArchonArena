@@ -38,7 +38,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Archon Arena uses your photos so you can choose a profile picture.",
-          "cameraPermission": false,
+          "cameraPermission": "Archon Arena uses the camera to scan the QR code on an event check-in sheet.",
           "microphonePermission": false
         }
       ],

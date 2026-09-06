@@ -45,6 +45,16 @@ class Player extends GameObject {
 
         this.left = false;
         this.disconnectedAt = null;
+        /**
+         * ARCHON: whether this seat's socket ever reached the game node.
+         *
+         * Set by GameServer.seatConnection. `disconnectedAt` cannot answer
+         * this - it is null both for somebody who is sitting here right now and
+         * for somebody who never arrived - and the difference decides whether a
+         * game can honestly be scored against them. See
+         * Game.recordAbandonmentResultOnLeave and Game.checkAbandonment.
+         */
+        this.connectionSucceeded = false;
         this.lastEventAt = Date.now();
         this.inactive = false;
 

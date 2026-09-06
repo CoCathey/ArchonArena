@@ -85,6 +85,7 @@ describe('Lobby tournament series continuation', function () {
             sendGameState: vi.fn(),
             broadcastGameMessage: vi.fn(),
             sendHandoff: vi.fn(),
+            socketForSeat: Lobby.prototype.socketForSeat,
             findGameForUser: Lobby.prototype.findGameForUser,
             applyDeckSelection: vi.fn(async () => {}),
             refuseUnpinnedStart: vi.fn(() => false),
@@ -464,9 +465,11 @@ describe('Lobby tournament series continuation', function () {
 
             expect(table.getPlayerByName('bob')).toBeUndefined();
 
-            const [notice] = noticesFor('bob');
+            // He was told his table was open while he was busy elsewhere; what
+            // is being checked here is the answer to pressing Join anyway.
+            const notice = noticesFor('bob').find((entry) => entry.tone === 'warning');
 
-            expect(notice.tone).toBe('warning');
+            expect(notice).toBeTruthy();
             expect(notice.message).toMatch(/Leave the game you are in/);
         });
     });

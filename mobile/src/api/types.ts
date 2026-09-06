@@ -141,6 +141,53 @@ export interface GamePlayerSummary {
     [key: string]: unknown;
 }
 
+/**
+ * ARCHON: one seat at a tournament table, as the event set it up.
+ *
+ * `locked` means the event registered a deck for that seat, so the table
+ * loads it rather than the player picking one — the lobby refuses anything
+ * else (server/lobby.js onSelectDeck). The name is published for both seats
+ * because the event page already publishes both pairings; it is withheld when
+ * the game hides decklists, except from the seat's own player.
+ */
+export interface TournamentSeat {
+    locked?: boolean;
+    deckName?: string;
+}
+
+/**
+ * ARCHON: the tournament match this table belongs to
+ * (server/pendinggame.js getSummary).
+ *
+ * Present only on tournament tables. Everything here is about which game of
+ * which match this is and what the event has already decided — a table that
+ * looks like any other table is exactly how a player ends up believing they
+ * opened somebody else's game between games one and two of their own match.
+ */
+export interface TournamentTable {
+    tournamentId?: number | string;
+    matchId?: number | string;
+    /** Which game of the series this table is, counting from 1. */
+    gameNumber?: number;
+    bestOf?: number;
+    round?: number;
+    table?: number;
+    /** The pairing, by username. Only these two may sit down. */
+    players?: string[];
+    /**
+     * 'locked' pins a player to one deck for the whole run; 'between-rounds'
+     * lets them change it on the event page before the next round. Neither
+     * can be acted on from the table, which is why the two need different
+     * wording rather than one "you cannot change this".
+     */
+    deckSwapPolicy?: 'locked' | 'between-rounds' | string;
+    /** Whether THIS viewer's seat is pinned to the event's deck. */
+    deckLocked?: boolean;
+    /** Every seat's lock, by username. Absent on older servers. */
+    seats?: Record<string, TournamentSeat>;
+    [key: string]: unknown;
+}
+
 export interface GameSummary {
     id: string;
     name: string;
@@ -168,6 +215,8 @@ export interface GameSummary {
     luckyDice?: boolean;
     /** Only decks whose SAS sits in this range may be played. */
     sasBound?: { min: number; max: number };
+    /** Set when this table is a game in a tournament match. */
+    tournament?: TournamentTable;
     createdAt?: string;
     players: Record<string, GamePlayerSummary>;
     spectators?: { id?: string; name: string }[];
@@ -200,6 +249,22 @@ export interface LobbyMessage {
     time?: string;
     user?: { username?: string; avatar?: string; role?: string; [key: string]: unknown };
     [key: string]: unknown;
+}
+
+/**
+ * ARCHON: a sentence the lobby has for one named player (server/lobby.js
+ * `notifyPlayers`), delivered as 'lobbynotice'.
+ *
+ * The lobby's other private channel, 'gameerror', only renders inside a
+ * pending table, and the players this exists for have usually just been
+ * cleared out of one — "that game decided your match", "your next table is
+ * waiting on the event page". `url` is the site path the notice is about, so
+ * acting on it is one press rather than a search.
+ */
+export interface LobbyNotice {
+    message: string;
+    tone?: 'info' | 'success' | 'warning';
+    url?: string;
 }
 
 /**

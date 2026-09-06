@@ -93,6 +93,21 @@ export interface TournamentPlayer {
     triadDecks?: { deckId: number; name?: string }[];
 }
 
+/**
+ * One time currently on the table for a match. Several can be live at once —
+ * the match's own `proposedTime` is only a cache of the soonest of them, so
+ * accepting one means naming it by id.
+ */
+export interface MatchTimeSlot {
+    id: number;
+    time: string;
+    /** End of an offered window; null for a single time. */
+    end?: string | null;
+    proposedById: number;
+    proposedBy?: string;
+    zone?: string;
+}
+
 export interface TournamentMatch {
     id: number;
     round: number;
@@ -118,6 +133,7 @@ export interface TournamentMatch {
     proposedTime?: string | null;
     proposedBy?: number | null;
     scheduleNote?: string | null;
+    timeSlots?: MatchTimeSlot[];
     p1BannedDeckId?: number | null;
     p2BannedDeckId?: number | null;
     p1DeckId?: number | null;
@@ -316,8 +332,13 @@ export function proposeMatchTime(id: number, matchId: number, time: string, note
     return post(`/api/tournaments/${id}/matches/${matchId}/propose-time`, { time, note });
 }
 
-export function acceptMatchTime(id: number, matchId: number) {
-    return post(`/api/tournaments/${id}/matches/${matchId}/accept-time`);
+/**
+ * `slotId` names which of the offered times is being accepted. Omitting it is
+ * what an older client sends and the server only lets that stand when exactly
+ * one offer is live — with two on the table an unnamed accept is refused.
+ */
+export function acceptMatchTime(id: number, matchId: number, slotId?: number) {
+    return post(`/api/tournaments/${id}/matches/${matchId}/accept-time`, { slotId });
 }
 
 export function clearMatchTime(id: number, matchId: number) {
