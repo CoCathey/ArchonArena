@@ -18,7 +18,6 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
     const { t } = useTranslation();
     const socket = useSelector((state) => state.lobby.socket);
     const lobbyGames = useSelector((state) => state.lobby.games);
-    const currentGameId = useSelector((state) => state.games.gameId);
     // The table request is a round trip that used to be invisible. See the
     // button.
     const [opening, setOpening] = useState(false);
@@ -191,14 +190,15 @@ const MyMatchPanel = ({ tournament, matches, players, user, act }) => {
                             <HeroButton
                                 size='sm'
                                 variant='primary'
-                                isDisabled={!!currentGameId && lobbyGame.started}
-                                onPress={() =>
-                                    socket &&
-                                    socket.emit(
-                                        lobbyGame.started ? 'watchgame' : 'joingame',
-                                        lobbyGame.id
-                                    )
-                                }
+                                // ARCHON: 'joingame' for both states. A started
+                                // table used to send 'watchgame', which is the
+                                // spectator door - it either did nothing or
+                                // replaced this player's own seat with a
+                                // spectator of their own game. The lobby
+                                // answers a join at a table you are already
+                                // seated at with the handoff back to the
+                                // board, which is what "Rejoin" means.
+                                onPress={() => socket && socket.emit('joingame', lobbyGame.id)}
                             >
                                 {lobbyGame.started ? t('Rejoin game') : t('Join your table')}
                             </HeroButton>

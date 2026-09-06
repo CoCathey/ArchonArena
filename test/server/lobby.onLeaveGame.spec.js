@@ -40,6 +40,7 @@ describe('Lobby.onLeaveGame (started game)', function () {
             broadcastGameMessage: (msg, g) => broadcasts.push({ msg, id: g.id }),
             sendGameState: () => {},
             findGameForUser: Lobby.prototype.findGameForUser,
+            gameForSocket: Lobby.prototype.gameForSocket,
             onLeaveGame: Lobby.prototype.onLeaveGame
         };
     });

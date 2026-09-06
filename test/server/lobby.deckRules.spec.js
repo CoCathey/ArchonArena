@@ -86,6 +86,7 @@ describe('Lobby deck rules', function () {
             sendGameState: vi.fn(),
             broadcastGameMessage: vi.fn(),
             sendHandoff: vi.fn(),
+            socketForSeat: Lobby.prototype.socketForSeat,
             applyDeckSelection: Lobby.prototype.applyDeckSelection,
             checkSasBound: Lobby.prototype.checkSasBound,
             // The Unchained set rule. These decks carry no expansion, so it has

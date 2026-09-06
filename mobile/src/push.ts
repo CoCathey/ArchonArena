@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { registerPushToken, removePushToken } from './api/client';
+import { routeForSiteUrl } from './appRoutes';
 
 /**
  * ARCHON: push notifications.
@@ -148,14 +149,9 @@ export function routeForNotification(data: Record<string, unknown> | undefined):
         return `/tournament/${tournamentId}`;
     }
 
-    // Fall back to parsing the web url, which is what non-tournament
-    // categories carry.
-    const url = typeof data.url === 'string' ? data.url : undefined;
-    const match = url?.match(/^\/tournaments\/(\d+)/);
-
-    if (match) {
-        return `/tournament/${match[1]}`;
-    }
-
-    return undefined;
+    // Fall back to the web url, which is what non-tournament categories carry —
+    // a direct message reaches the phone with nothing but `/messages/<name>` to
+    // say where it came from. Shared with lobby notices so the two never
+    // disagree about which site paths the app can open.
+    return routeForSiteUrl(data.url);
 }

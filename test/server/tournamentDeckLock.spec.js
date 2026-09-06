@@ -101,6 +101,7 @@ describe('tournament deck lock', function () {
             sendGameState: vi.fn(),
             broadcastGameMessage: vi.fn(),
             sendHandoff: vi.fn(),
+            socketForSeat: Lobby.prototype.socketForSeat,
             applyDeckSelection: Lobby.prototype.applyDeckSelection,
             checkSasBound: Lobby.prototype.checkSasBound,
             // Called by onSelectDeck on every selection; these decks carry no

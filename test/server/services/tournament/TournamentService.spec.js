@@ -765,6 +765,21 @@ const createFakeDb = () => {
                 return [];
             }
 
+            // The series score moves by an atomic increment in the database
+            // rather than a read-modify-write in Node, so two results landing
+            // together cannot lose one of each other. See recordGameWin.
+            if (sql.includes('"Player1Wins" = COALESCE("Player1Wins", 0) + $2')) {
+                const match = state.matches.find((entry) => entry.Id === params[0]);
+                if (!match) {
+                    return [];
+                }
+
+                match.Player1Wins = (match.Player1Wins || 0) + params[1];
+                match.Player2Wins = (match.Player2Wins || 0) + params[2];
+
+                return [{ Player1Wins: match.Player1Wins, Player2Wins: match.Player2Wins }];
+            }
+
             if (sql.includes('SET "Player1Wins" = $2, "Player2Wins" = $3')) {
                 const match = state.matches.find((entry) => entry.Id === params[0]);
                 if (match) {
@@ -847,13 +862,24 @@ const createFakeDb = () => {
 
             // ---- TournamentMatchGames ---------------------------------------
             if (sql.includes('INSERT INTO "TournamentMatchGames"')) {
+                const replace = params[4];
                 const existing = state.matchGames.find(
                     (entry) => entry.MatchId === params[1] && entry.GameNumber === params[2]
                 );
                 if (existing) {
-                    if (!existing.WinnerId) {
-                        existing.GameUuid = params[3];
+                    // A row that already names a table keeps it unless the
+                    // caller has looked and says that table is gone: the uuid
+                    // is how a result finds its row, so taking it from another
+                    // table throws that table's game away. See attachGame.
+                    const claimable =
+                        !existing.WinnerId &&
+                        (replace || !existing.GameUuid || existing.GameUuid === params[3]);
+
+                    if (!claimable) {
+                        return [];
                     }
+
+                    existing.GameUuid = params[3];
                 } else {
                     state.matchGames.push({
                         Id: state.nextId++,
@@ -864,7 +890,15 @@ const createFakeDb = () => {
                         WinnerId: null
                     });
                 }
-                return [];
+                return [{ GameUuid: params[3] }];
+            }
+
+            if (sql.includes('SELECT "GameUuid", "WinnerId" FROM "TournamentMatchGames"')) {
+                return state.matchGames
+                    .filter(
+                        (entry) => entry.MatchId === params[0] && entry.GameNumber === params[1]
+                    )
+                    .map((entry) => ({ GameUuid: entry.GameUuid, WinnerId: entry.WinnerId }));
             }
 
             if (sql.includes('UPDATE "TournamentMatchGames" SET "WinnerId"')) {
@@ -2100,6 +2134,58 @@ describe('TournamentService', function () {
             expect(match.WinnerId).toBe(match.Player1Id);
             expect(match.ResultType).toBe('played');
             expect(match.Player1Wins).toBe(2);
+        });
+
+        /**
+         * ARCHON: the row for a game of a match names ONE table, and that name
+         * is how a result finds its way home.
+         *
+         * The attach used to overwrite it unconditionally, so a duplicate table
+         * - which the lobby could build several ways - silently disinherited
+         * the table the players were actually sitting at. They finished their
+         * game, its GAMEWIN arrived quoting a uuid no row mentioned, and the
+         * result was dropped as a duplicate. The match then sat there needing a
+         * game it had already played.
+         */
+        it('will not let a second table take the game a first one is bound to', async function () {
+            const id = await createSwiss(2, { bestOf: 3 });
+            await service.start(id, organizer);
+            const match = db.state.matches[0];
+
+            expect(await service.attachGame(id, match.Id, 1, 'the-real-table')).toEqual({
+                success: true,
+                gameUuid: 'the-real-table'
+            });
+
+            const stolen = await service.attachGame(id, match.Id, 1, 'a-duplicate');
+
+            expect(stolen.success).toBe(false);
+            expect(stolen.gameUuid).toBe('the-real-table');
+
+            // And the game played at the real table is still recordable.
+            const result = await service.recordGameWin({
+                gameId: 'the-real-table',
+                winner: `user${match.Player1Id}`,
+                tournament: { tournamentId: id, matchId: match.Id }
+            });
+
+            expect(result.handled).toBe(true);
+            expect(match.Player1Wins).toBe(1);
+        });
+
+        it('repoints the row when the caller knows the old table is gone', async function () {
+            const id = await createSwiss(2, { bestOf: 3 });
+            await service.start(id, organizer);
+            const match = db.state.matches[0];
+
+            await service.attachGame(id, match.Id, 1, 'lost-to-a-restart');
+
+            const repointed = await service.attachGame(id, match.Id, 1, 'rebuilt', {
+                replace: true
+            });
+
+            expect(repointed.success).toBe(true);
+            expect(repointed.gameUuid).toBe('rebuilt');
         });
 
         it('ignores GAMEWIN for decided matches and unknown winners', async function () {

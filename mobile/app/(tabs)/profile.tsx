@@ -15,6 +15,7 @@ import { disconnectLobby } from '../../src/net/lobbySocket';
 import { unregisterPush } from '../../src/push';
 import { closeGameSocket } from '../../src/net/gameSocket';
 import { useAuthStore } from '../../src/stores/authStore';
+import { useMessagesStore } from '../../src/stores/messagesStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { updateAccount } from '../../src/api/account';
 import { TIER_COLORS } from '../../src/membership/capabilities';
@@ -50,6 +51,7 @@ function SettingRow(props: {
 
 export default function ProfileScreen() {
     const user = useAuthStore((state) => state.user);
+    const unreadMessages = useMessagesStore((state) => state.unread);
     const groupHandByHouse = useSettingsStore((state) => state.groupHandByHouse);
     const setGroupHandByHouse = useSettingsStore((state) => state.setGroupHandByHouse);
     const hideHandOnOpponentTurn = useSettingsStore((state) => state.hideHandOnOpponentTurn);
@@ -423,6 +425,21 @@ export default function ProfileScreen() {
                         <Text style={styles.sectionTitle}>Security</Text>
                         <Text style={styles.hint}>
                             Password, email, and every device signed in to this account.
+                        </Text>
+                    </View>
+                    <Text style={styles.chevron}>›</Text>
+                </Pressable>
+                {/* ARCHON: the message inbox. Here rather than behind a tab
+                    because the way you reach a conversation is a push
+                    notification or the other player's profile — this is the
+                    way back to one you have already had. */}
+                <Pressable onPress={() => router.push('/messages')} style={styles.communityRow}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.sectionTitle}>
+                            Messages{unreadMessages > 0 ? ` (${unreadMessages})` : ''}
+                        </Text>
+                        <Text style={styles.hint}>
+                            Arranging a game with the player you were paired against.
                         </Text>
                     </View>
                     <Text style={styles.chevron}>›</Text>

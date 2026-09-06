@@ -1295,6 +1295,21 @@ class Game extends EventEmitter {
             return false;
         }
 
+        /**
+         * ARCHON: a player of this game cannot become a spectator of it.
+         *
+         * The seat, its deck, its hand and its clock all live on the Player
+         * object this would replace with a Spectator - the player would be
+         * watching a game they are still notionally in, with their own side of
+         * it gone. Reached from the event page's "Rejoin game" button, which
+         * sent `watchgame` for a table that had already started.
+         */
+        const seated = this.playersAndSpectators[user.username];
+
+        if (seated && !this.isSpectator(seated)) {
+            return false;
+        }
+
         this.playersAndSpectators[user.username] = new Spectator(socketId, user);
         this.addAlert(
             'info',
@@ -1387,6 +1402,27 @@ class Game extends EventEmitter {
 
         const opponent = opponents[0];
 
+        /**
+         * ARCHON: you cannot abandon a game you never arrived at.
+         *
+         * `checkAbandonment` has always known this - it excludes a
+         * `connectFailed` seat from the players it will charge - and this half
+         * of the same rule did not, so a game that started against somebody who
+         * never reached the board was scored in full the instant the other
+         * player pressed Leave. In a tournament that is a recorded result: the
+         * event counts the game, advances the series and opens the next one,
+         * for a game in which no card was ever played. Reported exactly that
+         * way from a live event.
+         *
+         * `connectionSucceeded` is set by the game node when a seat's socket
+         * actually reaches the game (see GameServer.seatConnection), so this
+         * covers the quieter case too: a handoff that never arrived at all, and
+         * so never produced a `connectFailed` report either.
+         */
+        if (!opponent.connectionSucceeded || opponent.connectFailed) {
+            return;
+        }
+
         if (opponent.left || opponent.disconnectedAt) {
             this.recordWinner(leaver, 'abandoned');
         }
@@ -1459,6 +1495,19 @@ class Game extends EventEmitter {
 
             // Somebody who left of their own accord is not owed the game.
             if (opponent.left) {
+                return false;
+            }
+
+            /**
+             * ARCHON: nor is somebody who never got here.
+             *
+             * `away` already excludes a `connectFailed` seat from being charged
+             * with abandonment - but excluding them from that list is what
+             * makes them the last player standing, so the game they never
+             * reached was awarded TO them. A game with only one seat ever
+             * occupied has no honest result; record none and let it close.
+             */
+            if (!opponent.connectionSucceeded || opponent.connectFailed) {
                 return false;
             }
 
@@ -1621,6 +1670,20 @@ class Game extends EventEmitter {
         player.socket = socket;
         player.disconnectedAt = undefined;
         player.connectFailed = false;
+        player.connectionSucceeded = true;
+
+        /**
+         * ARCHON: a game somebody has just walked back into is not finished.
+         *
+         * `failedConnect` stamps `finishedAt` so a table nobody ever reached is
+         * swept away, which is right - but the stamp survived the player
+         * arriving on their second attempt, and the node's twenty-minute sweep
+         * then closed a game that was being played. Only ever cleared while
+         * there is no winner: a decided game stays decided.
+         */
+        if (!this.winner) {
+            this.finishedAt = undefined;
+        }
 
         this.jsonForUsers[player.name] = undefined;
 
@@ -2458,6 +2521,11 @@ class Game extends EventEmitter {
             createdAt: this.createdAt,
             gameFormat: this.gameFormat,
             gamePrivate: this.gamePrivate,
+            // Both ride the sync for the same reason as `tournament` below: a
+            // restarted lobby rebuilds the table from this, and an event's
+            // hidden decklists and clock are part of what the table is.
+            gameTimeLimit: this.gameTimeLimit,
+            hideDeckLists: this.hideDeckLists,
             id: this.id,
             manualMode: this.manualMode,
             messages: this.gameChat.messages,
@@ -2477,6 +2545,19 @@ class Game extends EventEmitter {
             started: this.started,
             startedAt: this.startedAt,
             swap: this.swap,
+            useGameTimeLimit: this.useGameTimeLimit,
+            /**
+             * ARCHON: the event this table belongs to rides the node sync.
+             *
+             * A lobby restart rebuilds its game list from the nodes, and
+             * without this the rebuilt table came back as an ordinary game -
+             * so the event could not find it, opened a SECOND table for a
+             * pairing already being played, and the result of the real game
+             * arrived quoting a table the event had stopped listening for.
+             * Everything the lobby does for a tournament table is gated on
+             * this field being present.
+             */
+            tournament: this.tournament,
             winner: this.winner ? this.winner.name : undefined
         };
     }

@@ -278,6 +278,55 @@ engine or its tables rely on.
     formats every scheduling time for the recipient through
     `notifications/timeLabel.js`, falling back to the UTC label when no zone is known.
 
+## The table a player is actually sent to (N57 follow-up)
+
+The N57 work was reported broken from a live event: "when I opened and joined my table
+it said my opponent joined and it auto started the game and then gave me the win and
+opened the next game." No such game was played. Three rules were missing, and all three
+are now enforced.
+
+-   **A game connection goes to the game it was handed off to.** The handoff names a
+    game (`Lobby.sendHandoff`), and the node used to throw that away and ask "which of my
+    games is this user in?" (`GameServer.findGameForUser`). For twenty minutes after
+    every game of a series that question has two answers - the finished table, which the
+    node keeps so its players can read the result, and the one the event has just opened
+    -   and it answered with the older one. The player joining game two was re-seated in
+        game one and shown its state: the opponent's join, the start, the win, and the
+        button offering game two. `gameId` now travels in the game socket's handshake auth
+        (its own field, not a claim inside the token, which the refresh flow replaces), and
+        `seatConnection` resolves that game and refuses a connection for a game that does not
+        hold the user. `findGameForUser` remains the fallback for older clients and prefers a
+        game that is still being played.
+-   **Being connected is not agreeing to play.** `seatTournamentPlayers` seats a player
+    from the mere existence of a lobby socket, and a table with both seats full starts
+    itself - so one player pressing "Open my table" dropped their opponent, wherever they
+    were on the site, into a live game. That is right when a round is paired (both
+    players are waiting for exactly this) and wrong on demand, which is the whole of how
+    an asynchronous event is played. `ensureGameForMatch` now passes `requestedBy`
+    through to `ensureTournamentGame({ seatOnly })`: the asker is seated, the opponent is
+    told their table is ready and walks to it themselves.
+-   **A game must not start against a seat nobody can reach.** A seat holds the socket id
+    it was filled with, and that id goes stale on every reconnect. A missing handoff used
+    to be logged and stepped over, leaving one player at a board and an opponent who
+    never learned the game existed. `startTournamentGameIfReady` now requires a live
+    socket for every seat (`Lobby.socketForSeat`, which falls back from the seat's id to
+    the player's current lobby socket) and leaves the table pending otherwise.
+
+Two engine rules back that up, because a game that starts wrong must not be scoreable.
+`Player.connectionSucceeded` records whether a seat's socket ever reached the node;
+`Game.recordAbandonmentResultOnLeave` and `Game.checkAbandonment` both refuse to award a
+game for or against a seat that never arrived. Without that, whoever was standing there
+was handed the win, `recordGameWin` counted it, and the series advanced on a game in
+which no card was played.
+
+Finally, `TournamentMatchGames.GameUuid` is the only way a result finds its row, so
+`attachGame` no longer overwrites it. A duplicate table is refused and discarded rather
+than disinheriting the table the players are sitting at; repointing needs an explicit
+`{ replace: true }` from a caller that has looked and found the old table gone. The
+series score moves by an atomic increment in the database rather than a
+read-modify-write in Node, and `Game.getSummary` carries `tournament` across a node sync
+so a lobby restart does not lose a table's event.
+
 ## Future considerations
 
 -   Hybrid events (paper + online results into one standing) — the result flow

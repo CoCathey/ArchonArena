@@ -73,9 +73,40 @@ const handleMessage = (state, message, args) => {
             const updatedGames = state.games.slice(0);
             for (const game of args[0]) {
                 const index = _.findIndex(updatedGames, (g) => g.id === game.id);
-                updatedGames[index] = game;
+
+                // ARCHON: an update for a game this client has not seen listed
+                // yet - a tournament table opened for a match while the lobby
+                // list was filtered, say - used to be written to index -1 and
+                // dropped. Add it instead: an update is the server saying this
+                // game exists, and a table nobody can see is a table nobody
+                // joins.
+                if (index === -1) {
+                    updatedGames.push(game);
+                } else {
+                    updatedGames[index] = game;
+                }
             }
             state.games = updatedGames;
+
+            /**
+             * Keep the one flag the list is authoritative about in step.
+             *
+             * `currentGame` otherwise holds whatever `gamestate` last said, and
+             * a table that starts is announced by `updategame` alone - so the
+             * copy the client is looking at stayed unstarted forever. That
+             * matters below: `removegame` reads `started` to decide whether a
+             * table that disappeared had timed out, and a tournament table
+             * disappearing mid-series is the ordinary end of a game, not a
+             * failure. Only `started` - the rest of this summary is the lobby
+             * list's view, not the seated player's.
+             */
+            if (state.currentGame) {
+                const mine = args[0].find((game) => game.id === state.currentGame.id);
+
+                if (mine) {
+                    state.currentGame.started = mine.started;
+                }
+            }
             break;
         }
         case 'users':

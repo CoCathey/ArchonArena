@@ -31,6 +31,33 @@ describe('Game.checkAbandonment', function () {
     });
 
     describe('one player gone', function () {
+        /**
+         * ARCHON: a seat that never reached the board cannot win the game
+         * either.
+         *
+         * Excluding a `connectFailed` player from the away list is what stops
+         * them being charged with abandoning - and it is also what leaves them
+         * as the last player standing, so the game they never arrived at was
+         * awarded TO them. A game only one seat was ever occupied in has no
+         * honest result.
+         */
+        it('records nothing when the surviving seat never reached the game', function () {
+            this.p1.connectionSucceeded = false;
+            this.p2.disconnectedAt = this.wentAt(this.game.abandonmentTimeoutMs + 1000);
+
+            expect(this.game.checkAbandonment()).toBe(false);
+            expect(this.game.winner).toBeFalsy();
+            expect(this.game.router.gameWon).not.toHaveBeenCalled();
+        });
+
+        it('records nothing when the surviving seat’s handoff failed', function () {
+            this.p1.connectFailed = true;
+            this.p2.disconnectedAt = this.wentAt(this.game.abandonmentTimeoutMs + 1000);
+
+            expect(this.game.checkAbandonment({ closing: true })).toBe(false);
+            expect(this.game.winner).toBeFalsy();
+        });
+
         it('awards the game once the timeout has passed', function () {
             this.p2.disconnectedAt = this.wentAt(this.game.abandonmentTimeoutMs + 1000);
 

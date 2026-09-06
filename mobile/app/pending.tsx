@@ -24,10 +24,16 @@ import { formatLabel, isUnchainedFormat } from '../src/game/gameFormats';
 import {
     allPlayersReady,
     choosesOwnDeck as gameChoosesOwnDeck,
-    deckStatusLabel,
     isLuckyDiceGame,
     isSealedGame,
-    startHint
+    offersLuckyDice,
+    pinnedDeckHint,
+    seatDeckLabel,
+    seatIsLocked,
+    SEALED_DEAL_TIMEOUT_MS,
+    startHint,
+    tournamentHeadline,
+    tournamentPlacement
 } from '../src/game/pendingGame';
 import { lobby } from '../src/net/lobbySocket';
 import BotTableControls from '../src/lobby/BotTableControls';
@@ -62,7 +68,13 @@ export default function PendingGameScreen() {
     const isSealed = isSealedGame(currentGame);
     const isLuckyDice = isLuckyDiceGame(currentGame);
     const sasBound = currentGame?.sasBound;
-    const choosesOwnDeck = gameChoosesOwnDeck(currentGame);
+    // A tournament seat the event pinned a deck to has nothing to pick either,
+    // and never rolls: the lobby refuses both (server/lobby.js onSelectDeck,
+    // onSelectRandomDeck).
+    const tournament = currentGame?.tournament;
+    const tournamentPlace = tournamentPlacement(currentGame);
+    const choosesOwnDeck = gameChoosesOwnDeck(currentGame, username);
+    const canRollDice = offersLuckyDice(currentGame, username);
 
     // The collection pages in from the server (search/sort/house filter all run
     // there), so every deck is reachable rather than just the first page. The
@@ -98,6 +110,22 @@ export default function PendingGameScreen() {
             lobby.getSealedDeck(currentGame.id);
         }
     }, [currentGame, isSealed]);
+
+    // The lobby deals in the background and, when it cannot, says nothing:
+    // no gameerror, no state change. Time is the only signal, so after a
+    // generous wait the hint stops promising a deck that is not coming. Keyed
+    // on whether *our* seat has a deck rather than on the game object, which
+    // every chat line replaces and would otherwise restart the clock.
+    const myDeckSelected = !!(username && currentGame?.players?.[username]?.deck?.selected);
+    const [sealedStalled, setSealedStalled] = useState(false);
+    useEffect(() => {
+        if (!isSealed || !currentGame || myDeckSelected) {
+            setSealedStalled(false);
+            return undefined;
+        }
+        const timer = setTimeout(() => setSealedStalled(true), SEALED_DEAL_TIMEOUT_MS);
+        return () => clearTimeout(timer);
+    }, [isSealed, currentGame?.id, myDeckSelected]);
 
     // If the pending game disappears (we left / it timed out), close.
     useEffect(() => {
@@ -202,6 +230,42 @@ export default function PendingGameScreen() {
                     </Text>
                 ) : null}
 
+                {/* ARCHON: which game of which match this table is. Between one
+                    game of a series ending and the next opening, both players
+                    are moved to a new table - and without this the new one read
+                    as a game somebody else had opened, which is how a player
+                    comes to believe a result was awarded in a game they never
+                    played. */}
+                {tournament ? (
+                    <Card style={styles.tournamentCard}>
+                        <View style={styles.tournamentHeaderRow}>
+                            <Text style={styles.tournamentTitle}>
+                                {tournamentHeadline(currentGame)}
+                            </Text>
+                            {tournamentPlace ? (
+                                <Text style={styles.ruleBadge}>{tournamentPlace}</Text>
+                            ) : null}
+                        </View>
+                        <Text style={styles.tournamentHint}>
+                            Decks are set by the event. The game starts on its own once both
+                            players are seated.
+                        </Text>
+                        {tournament.deckLocked ? (
+                            <Text style={styles.tournamentHint}>{pinnedDeckHint(currentGame)}</Text>
+                        ) : null}
+                        {tournament.tournamentId != null ? (
+                            <Button
+                                small
+                                variant='secondary'
+                                title='Event page'
+                                onPress={() =>
+                                    router.push(`/tournament/${tournament.tournamentId}`)
+                                }
+                            />
+                        ) : null}
+                    </Card>
+                ) : null}
+
                 <ErrorBanner message={gameError} />
 
                 {players.map((player) => (
@@ -228,11 +292,7 @@ export default function PendingGameScreen() {
                                     ]}
                                     numberOfLines={1}
                                 >
-                                    {player.deck?.selected
-                                        ? player.name === username && player.deck.name
-                                            ? player.deck.name
-                                            : 'Deck selected'
-                                        : deckStatusLabel(currentGame)}
+                                    {seatDeckLabel(currentGame, player, username)}
                                 </Text>
                                 {/* The server sends the opponent's SAS too, unless
                                     the game hides decklists. */}
@@ -240,6 +300,13 @@ export default function PendingGameScreen() {
                                     <Text style={styles.deckSas}>
                                         {Math.round(player.deck.sasRating)} SAS
                                     </Text>
+                                ) : null}
+                                {/* ARCHON: a seat the event has pinned to a deck.
+                                    Saying so is the whole answer to "where is the
+                                    deck picker" - there is nothing to pick, and a
+                                    button here could only be refused. */}
+                                {seatIsLocked(currentGame, player.name, username) ? (
+                                    <Text style={styles.lockBadge}>🔒 Event deck</Text>
                                 ) : null}
                             </View>
                         </View>
@@ -253,13 +320,16 @@ export default function PendingGameScreen() {
                                 />
                                 {/* Rolled server side: it draws from the whole
                                     collection, which the app only ever holds a
-                                    page of. */}
-                                <Button
-                                    small
-                                    variant='ghost'
-                                    title='🎲 Lucky Dice'
-                                    onPress={() => lobby.selectRandomDeck(currentGame.id)}
-                                />
+                                    page of. Never at a tournament table, where
+                                    onSelectRandomDeck refuses it outright. */}
+                                {canRollDice ? (
+                                    <Button
+                                        small
+                                        variant='ghost'
+                                        title='🎲 Lucky Dice'
+                                        onPress={() => lobby.selectRandomDeck(currentGame.id)}
+                                    />
+                                ) : null}
                             </View>
                         ) : null}
                     </Card>
@@ -289,7 +359,9 @@ export default function PendingGameScreen() {
                                 disabled={!everyoneReady}
                                 onPress={() => lobby.startGame(currentGame.id)}
                             />
-                            <Text style={styles.startHint}>{startHint(currentGame)}</Text>
+                            <Text style={styles.startHint}>
+                                {startHint(currentGame, { sealedStalled })}
+                            </Text>
                         </View>
                     ) : (
                         <Text style={styles.waiting}>
@@ -297,7 +369,7 @@ export default function PendingGameScreen() {
                                 ? 'Spectating — the game will open when it starts.'
                                 : everyoneReady
                                 ? 'Waiting for the host to start the game…'
-                                : startHint(currentGame)}
+                                : startHint(currentGame, { sealedStalled })}
                         </Text>
                     )}
                 </View>
@@ -563,6 +635,9 @@ const styles = StyleSheet.create({
     deckStatusRow: {
         flexDirection: 'row',
         alignItems: 'center',
+        // The lock badge sits beside a deck name of any length, and a phone
+        // has no room to hold both on one line.
+        flexWrap: 'wrap',
         gap: spacing.sm,
         marginTop: 3
     },
@@ -601,6 +676,39 @@ const styles = StyleSheet.create({
         fontSize: 11,
         lineHeight: 15,
         marginBottom: spacing.sm
+    },
+    tournamentCard: {
+        marginBottom: spacing.sm,
+        borderColor: colors.brandDark,
+        gap: 6
+    },
+    tournamentHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: spacing.sm
+    },
+    tournamentTitle: {
+        color: colors.text,
+        fontSize: 15,
+        fontWeight: '800'
+    },
+    tournamentHint: {
+        color: colors.textDim,
+        fontSize: 12,
+        lineHeight: 17
+    },
+    lockBadge: {
+        color: colors.warning,
+        fontSize: 11,
+        fontWeight: '800',
+        backgroundColor: colors.surface,
+        borderColor: colors.warning,
+        borderWidth: 1,
+        borderRadius: radius.pill,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        overflow: 'hidden'
     },
     seatActions: {
         gap: 4

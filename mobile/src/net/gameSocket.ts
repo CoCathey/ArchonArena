@@ -71,7 +71,23 @@ export function connectToGame(handoff: HandoffMessage): void {
         auth: (cb) => {
             // Prefer the freshest JWT we hold; the handoff token was newest at
             // handoff time, but reconnects may happen much later.
-            cb({ token: useAuthStore.getState().token || handoff.authToken });
+            //
+            // `gameId` is what the node routes this connection by. Without it
+            // the node has to find the game by username, which is the routing
+            // that seated a tournament player at the wrong table: one account
+            // can be known to more than one game at a time (a finished table
+            // whose seats are still held, plus the next game of the series),
+            // and "the game this player is in" is then a guess.
+            //
+            // It is read from this socket's own handoff, deliberately not from
+            // the module-level `currentGameId`. A handoff for a different table
+            // can arrive while this socket is still reconnecting, and a shared
+            // variable would re-point an in-flight reconnection at a game the
+            // player is no longer joining.
+            cb({
+                token: useAuthStore.getState().token || handoff.authToken,
+                gameId: handoff.gameId
+            });
         }
     });
 

@@ -291,7 +291,17 @@ export const socketMiddleware = (store) => (next) => (action) => {
             // now that a handoff for the game in progress keeps the connection,
             // the token has to reach it this way instead.
             auth: (cb) => {
-                cb({ token: store.getState().auth.token || undefined });
+                cb({
+                    token: store.getState().auth.token || undefined,
+                    // ARCHON: which game this socket is for. The node used to
+                    // work it out from the username, and for a tournament
+                    // series that is ambiguous for twenty minutes after every
+                    // game - it would seat the player back in the one they had
+                    // just finished. Read from the closure rather than the
+                    // module-level `gameSocketGameId`, so a later handoff to a
+                    // different table cannot redirect this socket's reconnects.
+                    gameId: gameId
+                });
             }
         });
 
@@ -344,7 +354,10 @@ export const socketMiddleware = (store) => (next) => (action) => {
             // on a live game, marking it finished and leaving the player staring
             // at a board whose buttons (e.g. the mulligan prompt) did nothing.
             if (lobbySocket && !socket.tHasConnected) {
-                lobbySocket.emit('connectfailed');
+                // Say WHICH handoff failed: the lobby otherwise reports it
+                // against whichever game it finds this player in, which during
+                // a tournament series is the one they are still playing.
+                lobbySocket.emit('connectfailed', gameId);
             }
             store.dispatch(gamesActions.socketConnectError());
         });

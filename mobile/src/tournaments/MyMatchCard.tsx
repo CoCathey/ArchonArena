@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { router } from 'expo-router';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
     acceptMatchTime,
     clearMatchTime,
@@ -16,6 +16,16 @@ import { lobby } from '../net/lobbySocket';
 import { colors, radius, spacing } from '../theme';
 import { Button, ErrorBanner, TextField } from '../ui/primitives';
 import { localTime, parseUtc, relativeTime } from './format';
+import {
+    hasOnlineTable,
+    isDecided,
+    liveOffers,
+    planReport,
+    reportSource,
+    seriesLabel,
+    seriesScore,
+    type ReportPlan
+} from './matchState';
 
 /** Quick offers, so proposing a time is not a date-picker expedition. */
 const QUICK_OFFERS = [
@@ -62,15 +72,19 @@ export default function MyMatchCard(props: {
     const [note, setNote] = useState('');
     const [showOffers, setShowOffers] = useState(false);
     const [disputing, setDisputing] = useState(false);
+    /** An armed match report, waiting for the second tap that writes it. */
+    const [confirming, setConfirming] = useState<
+        { winner: 'mine' | 'theirs'; plan: Extract<ReportPlan, { ok: true }> } | undefined
+    >();
 
     const amPlayer1 = match.player1Id === myUserId;
     const opponent = amPlayer1 ? match.player2 : match.player1;
     const opponentId = amPlayer1 ? match.player2Id : match.player1Id;
-    const decided = !!match.winnerId;
+    const decided = isDecided(match);
     const iReported = match.reportedBy === myUserId;
     const scheduled = parseUtc(match.scheduledAt);
-    const proposed = parseUtc(match.proposedTime);
-    const theyProposed = !!match.proposedTime && match.proposedBy !== myUserId;
+    const offers = liveOffers(match);
+    const score = seriesScore(match, myUserId);
 
     const run = async (key: string, action: () => Promise<{ success: boolean; message?: string }>) => {
         setBusy(key);
@@ -112,6 +126,29 @@ export default function MyMatchCard(props: {
         }
     };
 
+    /**
+     * Arm a match report, or say why it cannot be made.
+     *
+     * Nothing is sent here. Reporting ends the whole series and overwrites what
+     * the platform recorded from the games themselves, so it takes a second,
+     * deliberate tap against a sentence naming the score it will write.
+     */
+    const armReport = (winner: 'mine' | 'theirs') => {
+        const plan = planReport(
+            match,
+            myUserId,
+            winner === 'mine' ? myUserId : (opponentId as number)
+        );
+
+        if (!plan.ok) {
+            setError(plan.reason);
+            return;
+        }
+
+        setError(undefined);
+        setConfirming({ winner, plan });
+    };
+
     if (!opponentId) {
         return (
             <View style={styles.card}>
@@ -130,17 +167,61 @@ export default function MyMatchCard(props: {
                 {match.table ? <Text style={styles.table}>Table {match.table}</Text> : null}
             </View>
 
+            {/* ---- The series ---- */}
+            {seriesLabel(score) ? <Text style={styles.series}>{seriesLabel(score)}</Text> : null}
+
             {/* ---- When ---- */}
             {scheduled ? (
                 <Text style={styles.when}>
                     Agreed for {localTime(match.scheduledAt)} ({relativeTime(match.scheduledAt)})
                 </Text>
-            ) : proposed ? (
-                <Text style={styles.when}>
-                    {theyProposed ? `${opponent} proposed` : 'You proposed'}{' '}
-                    {localTime(match.proposedTime)}
-                    {match.scheduleNote ? ` — “${match.scheduleNote}”` : ''}
-                </Text>
+            ) : !decided && offers.length ? (
+                // Only while the match is live: the server refuses every
+                // scheduling call once it has a result, so an offer left
+                // standing on a decided match is not one to answer.
+                <View style={styles.offerList}>
+                    {offers.map((offer) => {
+                        const theirs = offer.proposedById !== myUserId;
+
+                        return (
+                            <View key={offer.id ?? offer.time} style={styles.offerLine}>
+                                <View style={styles.offerWhenBox}>
+                                    <Text style={styles.when}>
+                                        {localTime(offer.time)}
+                                        {offer.end ? ` until ${localTime(offer.end)}` : ''}
+                                    </Text>
+                                    <Text style={styles.offerBy}>
+                                        {theirs
+                                            ? `${offer.proposedBy ?? opponent} offered this`
+                                            : 'you offered this'}
+                                        {offer.end ? ' — any time in the window' : ''}
+                                    </Text>
+                                </View>
+                                {/* Accepting names the offer: the server refuses
+                                    an unnamed accept once two are on the table. */}
+                                {theirs ? (
+                                    <Button
+                                        small
+                                        title='Play then'
+                                        loading={busy === `accept-${offer.id}`}
+                                        onPress={() =>
+                                            run(`accept-${offer.id}`, () =>
+                                                acceptMatchTime(
+                                                    tournament.id,
+                                                    match.id,
+                                                    offer.id ?? undefined
+                                                )
+                                            )
+                                        }
+                                    />
+                                ) : null}
+                            </View>
+                        );
+                    })}
+                    {match.scheduleNote ? (
+                        <Text style={styles.whenMuted}>“{match.scheduleNote}”</Text>
+                    ) : null}
+                </View>
             ) : tournament.pacing === 'async' ? (
                 <Text style={styles.whenMuted}>No time agreed yet.</Text>
             ) : null}
@@ -151,13 +232,14 @@ export default function MyMatchCard(props: {
             {decided ? (
                 <View>
                     <Text style={styles.body}>
-                        {match.winnerId === myUserId ? 'You won' : `${opponent} won`}
-                        {typeof match.player1Wins === 'number' &&
-                        typeof match.player2Wins === 'number'
-                            ? ` ${amPlayer1 ? match.player1Wins : match.player2Wins}–${
-                                  amPlayer1 ? match.player2Wins : match.player1Wins
-                              }`
-                            : ''}
+                        {match.winnerId === myUserId
+                            ? 'You won'
+                            : match.winnerId
+                            ? `${opponent} won`
+                            : // No winner and a result all the same: the
+                              // organizer's ruling that nobody took this one.
+                              'Recorded as a loss for both of you'}
+                        {score.recorded ? ` ${score.mine}–${score.theirs}` : ''}
                         {match.confirmed ? ' · confirmed' : ''}
                     </Text>
                     {/* The opponent's account of a match is not final until
@@ -216,39 +298,24 @@ export default function MyMatchCard(props: {
                 </View>
             ) : (
                 <>
-                    {/* ---- Scheduling (async events) ---- */}
+                    {/* ---- Scheduling (async events) ----
+                        Accepting is per offer, up with the times themselves;
+                        what is left here is adding one and clearing them. */}
                     {tournament.pacing === 'async' ? (
                         <View style={styles.actions}>
-                            {theyProposed ? (
-                                <>
-                                    <Button
-                                        small
-                                        title='Accept'
-                                        loading={busy === 'accept'}
-                                        onPress={() =>
-                                            run('accept', () =>
-                                                acceptMatchTime(tournament.id, match.id)
-                                            )
-                                        }
-                                    />
-                                    <Button
-                                        small
-                                        variant='secondary'
-                                        title='Suggest another'
-                                        onPress={() => setShowOffers((open) => !open)}
-                                    />
-                                </>
-                            ) : (
-                                <Button
-                                    small
-                                    variant='secondary'
-                                    title={
-                                        scheduled || proposed ? 'Change the time' : 'Propose a time'
-                                    }
-                                    onPress={() => setShowOffers((open) => !open)}
-                                />
-                            )}
-                            {scheduled || proposed ? (
+                            <Button
+                                small
+                                variant='secondary'
+                                title={
+                                    scheduled
+                                        ? 'Change the time'
+                                        : offers.length
+                                        ? 'Offer another time'
+                                        : 'Propose a time'
+                                }
+                                onPress={() => setShowOffers((open) => !open)}
+                            />
+                            {scheduled || offers.length ? (
                                 <Button
                                     small
                                     variant='ghost'
@@ -306,42 +373,93 @@ export default function MyMatchCard(props: {
                         </View>
                     ) : null}
 
-                    {/* ---- Play ---- */}
-                    <View style={styles.actions}>
-                        <Button
-                            small
-                            title='Open the table'
-                            loading={busy === 'table'}
-                            onPress={openTable}
-                        />
-                        <Button
-                            small
-                            variant='secondary'
-                            title='I won'
-                            loading={busy === 'won'}
-                            onPress={() =>
-                                run('won', () =>
-                                    reportResult(tournament.id, match.id, myUserId, {
-                                        source: Platform.OS === 'web' ? undefined : 'app'
-                                    })
-                                )
-                            }
-                        />
-                        <Button
-                            small
-                            variant='ghost'
-                            title='They won'
-                            loading={busy === 'lost'}
-                            onPress={() =>
-                                run('lost', () =>
-                                    reportResult(tournament.id, match.id, opponentId)
-                                )
-                            }
-                        />
-                    </View>
+                    {/* ---- Play ----
+                        An irl event is played across a table and the server
+                        refuses to open a game for one, so the button was a
+                        guaranteed error message on every irl pairing. */}
+                    {hasOnlineTable(tournament) ? (
+                        <View style={styles.actions}>
+                            <Button
+                                small
+                                title={
+                                    score.recorded
+                                        ? `Open the table for game ${score.recorded + 1}`
+                                        : 'Open the table'
+                                }
+                                loading={busy === 'table'}
+                                onPress={openTable}
+                            />
+                        </View>
+                    ) : null}
+
+                    {/* ---- Report the whole match ---- */}
+                    {confirming ? (
+                        <View style={styles.confirmBox}>
+                            <Text style={styles.confirmText}>
+                                This ends the match, not a game: it records the series as{' '}
+                                {confirming.winner === 'mine'
+                                    ? 'won by you'
+                                    : `won by ${opponent}`}
+                                , {confirming.plan.mine}–{confirming.plan.theirs}.
+                                {confirming.plan.kept
+                                    ? ` The ${
+                                          confirming.plan.kept === 1
+                                              ? 'game'
+                                              : `${confirming.plan.kept} games`
+                                      } already recorded ${
+                                          confirming.plan.kept === 1 ? 'is' : 'are'
+                                      } kept.`
+                                    : ''}
+                            </Text>
+                            <View style={styles.actions}>
+                                <Button
+                                    small
+                                    variant='danger'
+                                    title={`Record ${confirming.plan.mine}–${confirming.plan.theirs}`}
+                                    loading={busy === 'report'}
+                                    onPress={() =>
+                                        run('report', () =>
+                                            reportResult(
+                                                tournament.id,
+                                                match.id,
+                                                confirming.winner === 'mine'
+                                                    ? myUserId
+                                                    : opponentId,
+                                                {
+                                                    ...confirming.plan.scores,
+                                                    source: reportSource(tournament)
+                                                }
+                                            )
+                                        ).then(() => setConfirming(undefined))
+                                    }
+                                />
+                                <Button
+                                    small
+                                    variant='ghost'
+                                    title='Not yet'
+                                    onPress={() => setConfirming(undefined)}
+                                />
+                            </View>
+                        </View>
+                    ) : (
+                        <View style={styles.actions}>
+                            <Button
+                                small
+                                variant='secondary'
+                                title='Report the match: I won it'
+                                onPress={() => armReport('mine')}
+                            />
+                            <Button
+                                small
+                                variant='ghost'
+                                title={`Report the match: ${opponent} won it`}
+                                onPress={() => armReport('theirs')}
+                            />
+                        </View>
+                    )}
                     <Text style={styles.hint}>
-                        A game played on the table reports itself; these are for a result the
-                        engine did not see.
+                        Games played on the table report themselves. These two end the whole
+                        match — use them only for a result the engine did not see.
                     </Text>
                 </>
             )}
@@ -375,6 +493,12 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '700'
     },
+    series: {
+        color: colors.text,
+        fontSize: 13,
+        fontWeight: '700',
+        marginTop: 6
+    },
     when: {
         color: colors.brand,
         fontSize: 13,
@@ -385,6 +509,23 @@ const styles = StyleSheet.create({
         color: colors.textFaint,
         fontSize: 13,
         marginTop: 6
+    },
+    offerList: {
+        marginTop: 2
+    },
+    offerLine: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: spacing.sm
+    },
+    offerWhenBox: {
+        flexShrink: 1
+    },
+    offerBy: {
+        color: colors.textFaint,
+        fontSize: 11,
+        marginTop: 2
     },
     body: {
         color: colors.textDim,
@@ -435,6 +576,19 @@ const styles = StyleSheet.create({
     },
     disputeBox: {
         marginTop: spacing.md
+    },
+    confirmBox: {
+        marginTop: spacing.md,
+        backgroundColor: colors.bgElevated,
+        borderColor: colors.danger,
+        borderWidth: 1,
+        borderRadius: radius.md,
+        padding: spacing.sm
+    },
+    confirmText: {
+        color: colors.text,
+        fontSize: 12,
+        lineHeight: 17
     },
     disputed: {
         color: colors.warning,

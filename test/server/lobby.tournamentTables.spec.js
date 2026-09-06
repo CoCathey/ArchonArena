@@ -71,6 +71,7 @@ describe('Lobby tournament tables', function () {
             sendGameState: vi.fn(),
             broadcastGameMessage: vi.fn(),
             sendHandoff: vi.fn(),
+            socketForSeat: Lobby.prototype.socketForSeat,
             findGameForUser: vi.fn(() => null),
             applyDeckSelection: vi.fn(),
             refuseUnpinnedStart: vi.fn(() => false),

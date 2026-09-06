@@ -3350,8 +3350,17 @@ class TournamentService {
                 "VALUES ($1, $2, $3, $4, $5, now() AT TIME ZONE 'utc') " +
                 // The same start offered again is agreement; the wider of the
                 // two ends wins, and GREATEST ignores a NULL (single-time) end.
+                //
+                // ARCHON: but only the player who made the offer may widen it.
+                // Without the ProposedBy guard, offering the same start as your
+                // opponent took over their row and stretched it: they had
+                // offered 8pm, and their offer now read 8pm to 11pm and could
+                // be booked at 10:40 - a time they never put forward, in their
+                // own name. An identical start from the other player is still
+                // agreement; it is just agreement with the offer as written.
                 'ON CONFLICT ("MatchId", "SlotTime") DO UPDATE SET ' +
-                '"SlotEnd" = GREATEST("TournamentMatchTimeSlots"."SlotEnd", EXCLUDED."SlotEnd")',
+                '"SlotEnd" = GREATEST("TournamentMatchTimeSlots"."SlotEnd", EXCLUDED."SlotEnd") ' +
+                'WHERE "TournamentMatchTimeSlots"."ProposedBy" = EXCLUDED."ProposedBy"',
             [
                 matchId,
                 actor.id,
@@ -5847,17 +5856,58 @@ class TournamentService {
     /**
      * Record that the lobby created game N of a match.
      */
-    async attachGame(tournamentId, matchId, gameNumber, gameUuid) {
+    /**
+     * ARCHON: bind a lobby table to a game of a match - without stealing the
+     * binding from a table that already has it.
+     *
+     * `recordGameWin` finds its row by GameUuid, so whichever table this row
+     * names is the only one whose result can ever be recorded. The attach used
+     * to overwrite the uuid unconditionally, which meant a second table for the
+     * same game number silently disinherited the first: the players finished
+     * their game at the table they were already sitting at, its GAMEWIN arrived
+     * for a uuid no row mentioned, and the result was dropped on the floor. A
+     * match that had genuinely been played sat there needing a game.
+     *
+     * So a row that already names a table is left alone and the caller is told
+     * which table that is. Repointing is still possible - a table really can be
+     * lost, to a restart - but only when the caller has looked and says so.
+     *
+     * @param {boolean} [options.replace] repoint a row that already names a
+     * table, because that table is known to be gone
+     * @returns {Promise<{success: boolean, gameUuid?: string, recorded?: boolean}>}
+     * `gameUuid` is the table the row names after the call
+     */
+    async attachGame(tournamentId, matchId, gameNumber, gameUuid, options = {}) {
         try {
-            await this.db.query(
+            const claimed = await this.db.query(
                 'INSERT INTO "TournamentMatchGames" ("TournamentId", "MatchId", "GameNumber", "GameUuid", "CreatedAt") ' +
                     "VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc') " +
                     'ON CONFLICT ("MatchId", "GameNumber") DO UPDATE SET "GameUuid" = EXCLUDED."GameUuid" ' +
-                    'WHERE "TournamentMatchGames"."WinnerId" IS NULL',
-                [tournamentId, matchId, gameNumber, gameUuid]
+                    'WHERE "TournamentMatchGames"."WinnerId" IS NULL ' +
+                    'AND ($5::boolean OR "TournamentMatchGames"."GameUuid" IS NULL ' +
+                    'OR "TournamentMatchGames"."GameUuid" = EXCLUDED."GameUuid") ' +
+                    'RETURNING "GameUuid"',
+                [tournamentId, matchId, gameNumber, gameUuid, !!options.replace]
             );
 
-            return { success: true };
+            if (claimed && claimed.length > 0) {
+                return { success: true, gameUuid };
+            }
+
+            // Not claimed: either the game is already decided or another table
+            // holds it. Both are things the caller has to be able to act on.
+            const existing = await this.db.query(
+                'SELECT "GameUuid", "WinnerId" FROM "TournamentMatchGames" ' +
+                    'WHERE "MatchId" = $1 AND "GameNumber" = $2',
+                [matchId, gameNumber]
+            );
+            const row = existing && existing[0];
+
+            return {
+                success: false,
+                gameUuid: (row && row.GameUuid) || null,
+                recorded: !!(row && row.WinnerId)
+            };
         } catch (err) {
             logger.error(`Failed to attach game ${gameUuid} to match ${matchId}`, err);
 
@@ -5913,8 +5963,35 @@ class TournamentService {
                 return { handled: true, duplicate: true };
             }
 
-            const p1Wins = (match.Player1Wins || 0) + (winnerId === match.Player1Id ? 1 : 0);
-            const p2Wins = (match.Player2Wins || 0) + (winnerId === match.Player2Id ? 1 : 0);
+            /**
+             * ARCHON: move the score in the database, not in Node.
+             *
+             * The score was read at the top of this function, incremented here
+             * and written back as an absolute value - so two results landing
+             * close together (both games of a simultaneous pair of tables, a
+             * durable GAMEWIN replayed after a restart) each wrote from the
+             * same stale read and one of them vanished. The row is also the
+             * only record of how far a series has got: if the write is lost the
+             * match needs a game it has already played, forever.
+             */
+            const scored = await this.db.query(
+                'UPDATE "TournamentMatches" SET ' +
+                    '"Player1Wins" = COALESCE("Player1Wins", 0) + $2, ' +
+                    '"Player2Wins" = COALESCE("Player2Wins", 0) + $3 ' +
+                    'WHERE "Id" = $1 RETURNING "Player1Wins", "Player2Wins"',
+                [
+                    match.Id,
+                    winnerId === match.Player1Id ? 1 : 0,
+                    winnerId === match.Player2Id ? 1 : 0
+                ]
+            );
+            const row = scored && scored[0];
+            const p1Wins = row
+                ? Number(row.Player1Wins)
+                : (match.Player1Wins || 0) + (winnerId === match.Player1Id ? 1 : 0);
+            const p2Wins = row
+                ? Number(row.Player2Wins)
+                : (match.Player2Wins || 0) + (winnerId === match.Player2Id ? 1 : 0);
             const needed = matchWinsNeeded(match.BestOf);
 
             if (p1Wins >= needed || p2Wins >= needed) {
@@ -5932,11 +6009,6 @@ class TournamentService {
 
                 return { handled: true, matchComplete: true };
             }
-
-            await this.db.query(
-                'UPDATE "TournamentMatches" SET "Player1Wins" = $2, "Player2Wins" = $3 WHERE "Id" = $1',
-                [match.Id, p1Wins, p2Wins]
-            );
 
             return {
                 handled: true,
@@ -6054,7 +6126,12 @@ class TournamentService {
             // exists is what made them press it again - see tournamentEvents.
             const game = await tournamentEvents.request('ensureMatchGame', {
                 tournamentId,
-                matchId: match.Id
+                matchId: match.Id,
+                // ARCHON: who asked. One player pressing "Open my table" is
+                // that player saying they are ready, and nothing about their
+                // opponent - so the lobby seats the asker and invites the
+                // other rather than sitting them both down and starting.
+                requestedBy: actor && actor.username
             });
 
             if (game && game.id) {
@@ -6068,6 +6145,23 @@ class TournamentService {
             // usual reasons are a Triad pick or a chain bid still outstanding.
             if (lobbyListening) {
                 const readiness = await this.describeMatchReadiness(tournamentId, matchId);
+
+                /**
+                 * ARCHON: 'ready' means nothing is stopping this match - so
+                 * the reason there is no table is timing, not a refusal. Saying
+                 * "no table could be opened" to somebody whose table is being
+                 * built at that moment (their own double-click, or the result
+                 * of their last game still landing) reads as a failure and is
+                 * what makes them click again. Only a blocked or finished match
+                 * has something to report.
+                 */
+                if (readiness.state === 'ready') {
+                    return {
+                        success: false,
+                        pending: true,
+                        message: 'Your table is being opened - give it a moment.'
+                    };
+                }
 
                 return {
                     success: false,
