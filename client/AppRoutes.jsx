@@ -25,6 +25,8 @@ import Leaderboards from './pages/Leaderboards';
 import Matches from './pages/Matches';
 import Placeholder from './pages/Placeholder';
 import BugReportsAdmin from './pages/BugReportsAdmin';
+import IosBeta from './pages/IosBeta';
+import IosBetaRequestsAdmin from './pages/IosBetaRequestsAdmin';
 import Tournaments from './pages/Tournaments';
 import TournamentDetail from './pages/TournamentDetail';
 import Friends from './pages/Friends';
@@ -168,6 +170,11 @@ const AppRoutes = ({ currentGame, user }) => {
                 path='/admin/bug-reports'
                 element={requirePermission('isAdmin', <BugReportsAdmin />)}
             />
+            {/* ARCHON (N14): the TestFlight request queue */}
+            <Route
+                path='/admin/ios-beta-requests'
+                element={requirePermission('isAdmin', <IosBetaRequestsAdmin />)}
+            />
             {/* ARCHON: runtime site settings (admin only) */}
             <Route
                 path='/admin/settings'
@@ -230,15 +237,7 @@ const AppRoutes = ({ currentGame, user }) => {
             {/* ARCHON (N13): record a game played across a table */}
             <Route path='/play/in-person' element={<InPersonGames />} />
             <Route path='/play/in-person/:id' element={<InPersonGames />} />
-            <Route
-                path='/mobile/ios'
-                element={
-                    <Placeholder
-                        title='iPhone App'
-                        description='The Archon Arena iPhone app is on its way to the App Store. Until then, the site works great in Safari on your phone.'
-                    />
-                }
-            />
+            <Route path='/mobile/ios' element={<IosBeta />} />
             <Route
                 path='/mobile/android'
                 element={

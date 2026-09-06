@@ -675,6 +675,27 @@ export const api = createApi({
             }),
             invalidatesTags: [TAG_TYPES.BUG_REPORTS]
         }),
+        // ARCHON (N14): self-serve TestFlight requests
+        submitIosBetaRequest: builder.mutation({
+            query: (body) => ({ url: '/ios-beta-requests', method: 'POST', body }),
+            invalidatesTags: [TAG_TYPES.IOS_BETA_REQUESTS]
+        }),
+        getMyIosBetaRequest: builder.query({
+            query: () => '/ios-beta-requests/mine',
+            providesTags: [TAG_TYPES.IOS_BETA_REQUESTS]
+        }),
+        getIosBetaRequests: builder.query({
+            query: (params) => ({ url: '/ios-beta-requests', params }),
+            providesTags: [TAG_TYPES.IOS_BETA_REQUESTS]
+        }),
+        setIosBetaRequestStatus: builder.mutation({
+            query: ({ id, status }) => ({
+                url: `/ios-beta-requests/${id}/status`,
+                method: 'POST',
+                body: { status }
+            }),
+            invalidatesTags: [TAG_TYPES.IOS_BETA_REQUESTS]
+        }),
         // ARCHON: community (friends, members, clubs)
         getFriends: builder.query({
             query: () => '/friends',
@@ -1451,6 +1472,10 @@ export const {
     useSubmitBugReportMutation,
     useGetBugReportsQuery,
     useSetBugReportStatusMutation,
+    useSubmitIosBetaRequestMutation,
+    useGetMyIosBetaRequestQuery,
+    useGetIosBetaRequestsQuery,
+    useSetIosBetaRequestStatusMutation,
     useGetFriendsQuery,
     useFriendActionMutation,
     useGetMembersQuery,

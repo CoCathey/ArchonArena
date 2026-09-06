@@ -16,5 +16,7 @@ moves (new cards, new tests).
 | 2026-08-18 | merged with main (challenge bot, priors)     | 2833 passed, 3 skipped | 40,852       | 0      | 66      |
 | 2026-08-27 | + mute-spectators click-target regression    | 2856 passed, 3 skipped | 41,091       | 0      | 66      |
 | 2026-08-28 | + admin node Restart no longer shells to pm2 | 2858 passed, 3 skipped | 41,095       | 0      | 66      |
+| 2026-09-02 | + self-serve iOS TestFlight request queue    | 2859 passed, 3 skipped | 41,100       | 0      | 66      |
+| 2026-09-02 | + fix ReDoS in the TestFlight email check    | 2859 passed, 3 skipped | 41,101       | 0      | 66      |
 
 Command: `npx vitest run` (~2.5 min). The skips are inherited from upstream.
