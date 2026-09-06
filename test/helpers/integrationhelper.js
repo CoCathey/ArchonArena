@@ -1,5 +1,3 @@
-const _ = require('underscore');
-
 // Fail tests if Node emits a circular-dependency warning during module load.
 // These warnings ("Accessing non-existent property 'X' of module exports
 // inside circular dependency") indicate a require cycle that can cause subtle
@@ -154,7 +152,7 @@ const customMatchers = {
     },
     toHavePromptButton: function (actual, expected) {
         const buttons = actual.currentButtons;
-        const pass = _.any(buttons, (button) => button === expected);
+        const pass = buttons.some((button) => button === expected);
 
         return {
             pass,
@@ -162,7 +160,7 @@ const customMatchers = {
                 if (pass) {
                     return `Expected ${actual.name} not to have prompt button "${expected}" but it did.`;
                 } else {
-                    const buttonText = _.map(buttons, (button) => '[' + button + ']').join('\n');
+                    const buttonText = buttons.map((button) => '[' + button + ']').join('\n');
                     return `Expected ${actual.name} to have prompt button "${expected}" but it had buttons:\n${buttonText}`;
                 }
             }
@@ -171,11 +169,11 @@ const customMatchers = {
     toHavePromptCardButton: function (actual, card) {
         const buttons = actual.currentPrompt().buttons;
 
-        if (_.isString(card)) {
+        if (typeof card === 'string') {
             card = actual.findCardByName(card);
         }
 
-        const pass = _.any(buttons, (button) => (button.card ? button.card.id : '') === card.id);
+        const pass = buttons.some((button) => (button.card ? button.card.id : '') === card.id);
 
         return {
             pass,
@@ -183,10 +181,9 @@ const customMatchers = {
                 if (pass) {
                     return `Expected ${actual.name} not to have prompt button "${card.name}" but it did.`;
                 } else {
-                    const buttonText = _.map(
-                        buttons,
-                        (button) => '[' + (button.card ? button.card.name : '') + ']'
-                    ).join('\n');
+                    const buttonText = buttons
+                        .map((button) => '[' + (button.card ? button.card.name : '') + ']')
+                        .join('\n');
                     return `Expected ${actual.name} to have prompt button "${card.name}" but it had buttons:\n${buttonText}`;
                 }
             }
@@ -198,7 +195,7 @@ const customMatchers = {
         player.checkUnserializableGameState();
 
         const buttons = player.currentPrompt().buttons;
-        const pass = _.any(buttons, (button) => button.text === 'No');
+        const pass = buttons.some((button) => button.text === 'No');
 
         if (pass) {
             player.clickPrompt('No');
@@ -213,7 +210,7 @@ const customMatchers = {
         };
     },
     toBeAbleToSelect: function (player, card) {
-        if (_.isString(card)) {
+        if (typeof card === 'string') {
             card = player.findCardByName(card);
         }
 
@@ -228,7 +225,7 @@ const customMatchers = {
         };
     },
     toBeAbleToPlay: function (player, card) {
-        if (_.isString(card)) {
+        if (typeof card === 'string') {
             card = player.findCardByName(card);
         }
 
@@ -364,9 +361,9 @@ beforeEach(function () {
     this.player1 = this.flow.player1;
     this.player2 = this.flow.player2;
 
-    _.each(ProxiedGameFlowWrapperMethods, (method) => {
+    for (const method of ProxiedGameFlowWrapperMethods) {
         this[method] = (...args) => this.flow[method].apply(this.flow, args);
-    });
+    }
 
     this.buildDeck = function (faction, cards) {
         return deckBuilder.buildDeck(faction, cards);

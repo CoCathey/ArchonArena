@@ -2,9 +2,9 @@
     "$comment": "Tracks how far Archon Arena has pulled in from keyteki (The Crucible Online). Updated by `npm run sync:upstream`; see docs/UPSTREAM.md.",
     "remote": "https://github.com/keyteki/keyteki.git",
     "branch": "master",
-    "syncedCommit": "296c2742212db7e6652a0913ce21ae17b49d6e2e",
-    "syncedDate": "2026-06-28",
-    "note": "Initial import. This repository was created from a verbatim snapshot of the upstream tree, not a git fork, so there is no shared history to merge - the sync applies a path-restricted diff instead.",
+    "syncedCommit": "87d8041580eee4105f8cd9544ecd8191670c15dd",
+    "syncedDate": "2026-09-03",
+    "note": "Applied 2 upstream commit(s) touching 57 file(s). 14 files conflicted (the underscore-removal refactor collided with Archon Arena's secureRandom shuffles); resolved by hand keeping secureRandom and dropping the now-dead underscore require. AdaptiveDeckSelectionPrompt.js's new first-deck coin flip used underscore's Math.random-based shuffle; switched it to secureRandom to match the crypto-random invariant.",
     "$paths": "Upstream-owned and kept byte-identical, so a new set's cards, tests, card data and set flags arrive on their own. server/constants.js and client/constants.js are single files, not directories - the rest of client/ is ours and is never synced.",
     "paths": [
         "server/game",
