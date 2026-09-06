@@ -237,9 +237,12 @@ class DirectMessageService {
         const limit = Math.min(Math.max(parseInt(page.limit, 10) || PAGE_SIZE, 1), 200);
         const before = parseInt(page.before, 10);
         const params = [userId, other.Id];
+        // ARCHON: cast explicitly - LEAST/GREATEST are polymorphic, so with no
+        // column on the same side to infer a type from, Postgres defaults an
+        // untyped parameter to text and then "integer = text" has no operator.
         let where =
-            'WHERE LEAST("SenderId", "RecipientId") = LEAST($1, $2) ' +
-            'AND GREATEST("SenderId", "RecipientId") = GREATEST($1, $2)';
+            'WHERE LEAST("SenderId", "RecipientId") = LEAST($1::integer, $2::integer) ' +
+            'AND GREATEST("SenderId", "RecipientId") = GREATEST($1::integer, $2::integer)';
 
         if (Number.isFinite(before) && before > 0) {
             params.push(before);

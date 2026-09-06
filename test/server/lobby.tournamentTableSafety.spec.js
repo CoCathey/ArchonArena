@@ -83,7 +83,13 @@ describe('Lobby tournament table safety', function () {
             socketsByName: { alice: aliceSocket, bob: bobSocket },
             configService: { getValueForSection: () => 1000 },
             userService: {
-                getUserByUsername: vi.fn(async (username) => (username === 'alice' ? alice : bob))
+                getUserByUsername: vi.fn(async (username) => (username === 'alice' ? alice : bob)),
+                // ARCHON: the table's owner - a real user, not the plain row
+                // `getUserByUsername` returns - because `isVisibleFor` calls
+                // `owner.hasUserBlocked(...)` on every broadcast.
+                getFullUserByUsername: vi.fn(async (username) =>
+                    username === 'alice' ? alice : bob
+                )
             },
             tournamentService: {
                 attachGame: vi.fn(async () => ({ success: true })),

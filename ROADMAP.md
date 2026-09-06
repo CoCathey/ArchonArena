@@ -4435,5 +4435,44 @@ but not a window; the email said UTC; and the two players had no way to talk to 
 -   [x] `timeLabel.spec.js`, `tournamentNotificationZones.spec.js`: each recipient in their own
         zone; UTC when unknown, when the lookup fails, and when no lookup is installed.
 -   [x] `DirectMessageService.spec.js`, `lobby.directMessages.spec.js`, `messagesRoutes.spec.js`.
--   [ ] Verified on a live stack with two browsers — not possible from the machine this was
-        built on (no Docker), so the client half is verified by lint and typecheck only.
+-   [x] **Two real defects found and fixed, neither catchable by the unit suite because both
+        need a real Postgres or a real second browser tab to surface:**
+    -   **`createTournamentGame` built its owner from `getUserByUsername`, whose plain row
+        has no `hasUserBlocked` method.** `PendingGame.isVisibleFor` calls
+        `owner.hasUserBlocked(...)` on every game-list broadcast, so once a chained
+        tournament table existed, every subsequent broadcast threw — and the throw landed
+        before `sendGameState`/`startTournamentGameIfReady` ran, leaving both seats "joined"
+        in chat but the table stuck forever on "Loading event deck". This is the exact
+        stuck-table failure N57 was written to fix, reintroduced one level up. Fixed by
+        building the owner from `getFullUserByUsername` (a real `User`, matching every other
+        table-owner call site). `lobby.tournamentSeries.spec.js`,
+        `lobby.tournamentTables.spec.js` and `lobby.tournamentTableSafety.spec.js` mocked
+        `hasUserBlocked` directly onto their fake user objects — exactly the shape of
+        mismatch that let the bug ship — so all three now also mock `getFullUserByUsername`.
+    -   **`DirectMessageService.thread` could not read a thread it had itself just written
+        to.** `LEAST($1, $2)`/`GREATEST($1, $2)` have no column on the same side to infer a
+        type from, so Postgres defaulted the untyped parameters to `text`, and
+        `integer = text` has no operator — every `GET /api/messages/with/:username` failed
+        against real Postgres, though `POST` worked fine (it only does column-typed
+        `"SenderId" = $1` comparisons). The in-memory fake `db` the unit tests run against
+        never applies Postgres's type-inference rules, so 22 passing tests coexisted with a
+        thread view that could not open. Fixed by casting both parameters explicitly.
+-   [x] **Verified live (2026-09-06)** against a real PostgreSQL 16 + Redis + lobby + game
+        node (native install, seeded `test0`/`test1`/`admin`), driven through the actual
+        browser client (Chromium) with two real tournament-registered decks: created a Bo3
+        single-elim sealed event, started it, and played it through the actual UI. Game 1
+        completed by concession; the chained game 2 table was then created live —
+        `Created tournament game … (game 2)` logged with **zero** `hasUserBlocked` throw and
+        no stuck "Loading event deck" — confirming the fix holds against real Postgres, not
+        just the in-memory test double. Separately confirmed the direct-message fix: `test0`
+        sent a message, `test1` opened the thread and read it (the exact `GET
+/api/messages/with/:username` call that used to fail against real Postgres), replied,
+        and `test0` saw the reply on reload.
+        Found and worked around, not fixed (out of scope here — candidate for a future
+        pass): the local dev CSP's `connect-src` in development only allows `ws:`/`wss:`
+        schemes for the game node's own port, which blocks socket.io's initial `http://`
+        polling handshake to a game node on a different port than the lobby — the exact
+        topology both the Docker and non-Docker local dev setups use. Without a workaround, a
+        local non-Docker session (and Docker dev, which exposes the same two ports to the
+        host) cannot actually connect to a live game at all; production is unaffected because
+        every node sits behind the same reverse proxy there, so `'self'` covers it.
