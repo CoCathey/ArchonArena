@@ -3342,8 +3342,26 @@ class Lobby {
     }
 
     async createTournamentGame(matchInfo, options = {}) {
+        /**
+         * ARCHON: a real `User`, not the plain row `getUserByUsername` hands
+         * back.
+         *
+         * `owner` becomes `game.owner` below, and `PendingGame.isVisibleFor`
+         * calls `hasUserBlocked` on it - a method the bare row does not have.
+         * Every broadcast that touched this table's visibility (a new game
+         * appearing for anyone else in the lobby, and the table's own
+         * `updategame` when it starts) threw before reaching the players it
+         * was for, which is why a tournament game could go seated-and-decked
+         * and still never hand off: `startTournamentGameIfReady` broadcasts
+         * `updategame` before it sends the handoffs, and that broadcast never
+         * returned. `getFullUserByUsername` is the same call the auth path
+         * uses to build a real `User` - see the `new User(...)` calls
+         * elsewhere in this file for the pattern.
+         */
         const users = await Promise.all(
-            matchInfo.players.map((player) => this.userService.getUserByUsername(player.username))
+            matchInfo.players.map((player) =>
+                this.userService.getFullUserByUsername(player.username)
+            )
         );
 
         if (users.some((user) => !user)) {

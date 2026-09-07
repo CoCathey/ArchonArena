@@ -3916,6 +3916,22 @@ Small, real, and worth clearing while touching the surrounding code. None is urg
         node now advertises `config.gameNode.maxGames`, matching the key `getNextAvailableGameNode`
         was always comparing against. Covered by `test/server/gameSocketMaxGames.spec.js`.
 
+-   [x] **A tournament table could seat both players and still never hand off.**
+        `createTournamentGame` built the `PendingGame`'s owner and each seat's `user` from
+        `UserService.getUserByUsername`, which — unlike `getFullUserByUsername` — hands back a
+        bare row, not a `User`. `PendingGame.isVisibleFor` calls `hasUserBlocked` on that owner
+        for every broadcast the table's visibility touches: another game appearing anywhere in
+        the lobby while the table existed, and — because `startTournamentGameIfReady` sends
+        `updategame` before it sends the handoffs — the table's own start. Both threw
+        `this.owner.hasUserBlocked is not a function` before reaching the code that mattered, so
+        a tournament table could go seated and decked on both sides and simply never hand off;
+        the players sat at a board that never arrived. Caught live: a two-client run against a
+        real Postgres + Redis + lobby + game-node stack (`config/local.json5`, no Docker
+        needed — see `docs/local-development.md`) reproduced it on the very first table, and the
+        same run confirmed the fix through a full best-of-three game one, concede, and game two
+        handoff, all on the real wire protocol. `createTournamentGame` now calls
+        `getFullUserByUsername`, the same call the auth path uses to build a real `User`.
+
 #### N50 — The rung that is a person _(done)_
 
 **Why:** "a bot has never beat me at the game and I need a way for them to get really good."
