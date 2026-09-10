@@ -238,8 +238,8 @@ class DirectMessageService {
         const before = parseInt(page.before, 10);
         const params = [userId, other.Id];
         let where =
-            'WHERE LEAST("SenderId", "RecipientId") = LEAST($1, $2) ' +
-            'AND GREATEST("SenderId", "RecipientId") = GREATEST($1, $2)';
+            'WHERE LEAST("SenderId", "RecipientId") = LEAST($1::integer, $2::integer) ' +
+            'AND GREATEST("SenderId", "RecipientId") = GREATEST($1::integer, $2::integer)';
 
         if (Number.isFinite(before) && before > 0) {
             params.push(before);

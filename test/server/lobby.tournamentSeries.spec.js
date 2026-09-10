@@ -71,7 +71,10 @@ describe('Lobby tournament series continuation', function () {
             nextGameRetryDelayMs: 0,
             configService: { getValueForSection: () => 1000 },
             userService: {
-                getUserByUsername: vi.fn(async (username) => (username === 'alice' ? alice : bob))
+                getUserByUsername: vi.fn(async (username) => (username === 'alice' ? alice : bob)),
+                getFullUserByUsername: vi.fn(async (username) =>
+                    username === 'alice' ? alice : bob
+                )
             },
             tournamentService: {
                 attachGame: vi.fn(async (...args) => attached.push(args)),

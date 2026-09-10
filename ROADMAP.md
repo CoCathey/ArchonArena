@@ -4435,5 +4435,26 @@ but not a window; the email said UTC; and the two players had no way to talk to 
 -   [x] `timeLabel.spec.js`, `tournamentNotificationZones.spec.js`: each recipient in their own
         zone; UTC when unknown, when the lookup fails, and when no lookup is installed.
 -   [x] `DirectMessageService.spec.js`, `lobby.directMessages.spec.js`, `messagesRoutes.spec.js`.
--   [ ] Verified on a live stack with two browsers — not possible from the machine this was
-        built on (no Docker), so the client half is verified by lint and typecheck only.
+-   [x] **Verified on a live stack with two browsers** (native Postgres 16 + Redis, no Docker,
+        dev-seeded `test0`/`test1`/`admin`), driven through the actual browser client end to end.
+        The run found and fixed two real defects the unit suite could not see, because its
+        in-memory fake `db` cannot reproduce either failure mode: - `Lobby.createTournamentGame` built each seat's user from `getUserByUsername`, whose
+        plain row has no `hasUserBlocked` method. `PendingGame.isVisibleFor` calls
+        `owner.hasUserBlocked(...)` on every game-list broadcast, so the very first tournament
+        table built this way threw on its next broadcast — reproduced live as a Bo3 match
+        whose game 1 table never advanced past "Loading event deck" once conceded. Fixed by
+        building the owner from `getFullUserByUsername` (a real `User`), matching every other
+        table-owner call site; `lobby.tournamentSeries.spec.js`,
+        `lobby.tournamentTables.spec.js` and `lobby.tournamentTableSafety.spec.js` now also
+        mock `getFullUserByUsername`. - `DirectMessageService.thread` could not read a thread it had itself just written to.
+        `LEAST($1, $2)`/`GREATEST($1, $2)` have no column on the same side to infer a type
+        from, so Postgres defaulted the untyped parameters to `text`, and `integer = text` has
+        no operator - every `GET /api/messages/with/:username` failed against real Postgres,
+        though `POST` worked fine (it only does column-typed `"SenderId" = $1` comparisons).
+        Fixed with explicit `::integer` casts on both parameters. - Confirmed clean afterward: created a Bo3 sealed single-elim tournament, joined and
+        started game 1 as both players, conceded — game 2's table was created and offered via
+        `lobbynotice` with no `hasUserBlocked` crash (reproduced across three separate
+        tournaments run back to back, each landing cleanly on "Game 2 of your match is
+        ready"). Sent a direct message test0 → test1, read it as test1 (the endpoint that was
+        broken), replied, and confirmed the reply appeared for test0 on reload - zero
+        `/api/messages` errors throughout.

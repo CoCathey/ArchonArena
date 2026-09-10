@@ -3343,7 +3343,9 @@ class Lobby {
 
     async createTournamentGame(matchInfo, options = {}) {
         const users = await Promise.all(
-            matchInfo.players.map((player) => this.userService.getUserByUsername(player.username))
+            matchInfo.players.map((player) =>
+                this.userService.getFullUserByUsername(player.username)
+            )
         );
 
         if (users.some((user) => !user)) {
