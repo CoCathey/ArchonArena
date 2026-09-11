@@ -4418,6 +4418,32 @@ but not a window; the email said UTC; and the two players had no way to talk to 
         which the server parsed in ITS zone (UTC), and the edit form read the instant back
         through `toISOString()` - a Chicago 7pm event was stored as 7pm UTC and displayed as
         midnight when edited. Both directions go through `Tournaments/localTime.js`.
+    -   **Found on the live verification below.** `createTournamentGame` built its table's
+        owner from `getUserByUsername`, whose plain row has no `hasUserBlocked` method.
+        `PendingGame.isVisibleFor` calls `owner.hasUserBlocked(...)` on every game-list
+        broadcast, so once a chained tournament table existed (exactly the "Play Game 2" table
+        this item's own fix builds), every subsequent broadcast threw — before `sendGameState`
+        ran — leaving both seats "joined" in chat but the table stuck on "Loading event deck"
+        forever. Fixed by building the owner from `getFullUserByUsername`, matching every other
+        table-owner call site; the two lobby tournament specs that mocked `hasUserBlocked`
+        directly onto a fake user (the exact shape of mismatch that let this ship) now also mock
+        `getFullUserByUsername`.
+    -   **Also found on the live verification below.** `DirectMessageService.thread()` compared
+        `LEAST("SenderId", "RecipientId") = LEAST($1, $2)` with two untyped parameters -
+        Postgres has no column on that side to infer a type from, so it defaulted both to
+        `text`, and `integer = text` has no operator. Every `GET /api/messages/with/:username`
+        failed against real Postgres, though `POST` worked fine (it only does column-typed
+        comparisons) and the in-memory fake `db` the unit tests run against never applies
+        Postgres's type-inference rules - so the thread view could not open despite a green
+        suite. Fixed with explicit `::integer` casts on both parameters.
+    -   **Also found on the live verification below**, and not specific to this item: the local
+        dev CSP allowed only `ws:`/`wss:` for the game node's own origin, but socket.io's
+        engine.io transport dials that origin over plain `http:`/`https:` for its polling
+        handshake before it ever upgrades to `ws:` - so a browser playing against a locally-run
+        game node (the documented topology in both `docker-compose.yml` and the native setup,
+        neither of which fronts the node with the Caddy that makes `'self'` cover it in
+        production) failed the handoff on its very first request. `server/csp.js` now allows
+        `http:`/`https:` too, dev-only.
 
 **Acceptance criteria**
 
@@ -4435,5 +4461,12 @@ but not a window; the email said UTC; and the two players had no way to talk to 
 -   [x] `timeLabel.spec.js`, `tournamentNotificationZones.spec.js`: each recipient in their own
         zone; UTC when unknown, when the lookup fails, and when no lookup is installed.
 -   [x] `DirectMessageService.spec.js`, `lobby.directMessages.spec.js`, `messagesRoutes.spec.js`.
--   [ ] Verified on a live stack with two browsers — not possible from the machine this was
-        built on (no Docker), so the client half is verified by lint and typecheck only.
+-   [x] **Verified on a live stack with two browsers** (native PostgreSQL 16 + Redis + lobby +
+        game node, dev-seeded `test0`/`test1`/`admin`): created a Bo3 single-elimination
+        tournament, registered both players with real decks, started it, started and conceded
+        game 1, then clicked "Play Game 2" from both seats and confirmed exactly one game-2
+        table was built and it loaded cleanly on both ends - locked deck names, both seats
+        connected to the game server, the first-player prompt live - rather than the stuck
+        "Loading event deck" the first defect below reproduced before its fix. Also sent and
+        read a direct message between the two players, confirming the second defect's fix
+        against real Postgres.

@@ -92,6 +92,23 @@ describe('Content-Security-Policy', function () {
             expect(dev.connectSrc).toContain('wss:');
         });
 
+        // ARCHON: the local game node runs on its own port next to the lobby
+        // (docker-compose.yml and the native setup both use :9500 beside the
+        // lobby's :4000), and socket.io dials it over plain http(s) for the
+        // engine.io polling handshake before it ever upgrades to ws: - so
+        // ws:/wss: alone left every local game unable to connect at all.
+        it('allows the game node origin in development, including its http(s) handshake', function () {
+            const dev = buildDirectives({ isDeveloping: true });
+
+            expect(dev.connectSrc).toContain('http:');
+            expect(dev.connectSrc).toContain('https:');
+        });
+
+        it('does not allow http(s) to arbitrary hosts in production', function () {
+            expect(prod.connectSrc).not.toContain('http:');
+            expect(prod.connectSrc).not.toContain('https:');
+        });
+
         it('allows explicitly configured game-node origins for a split-host deployment', function () {
             const split = buildDirectives({
                 isDeveloping: false,

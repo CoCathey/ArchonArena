@@ -122,7 +122,16 @@ function buildDirectives({ isDeveloping = false, sentryDsn, gameNodeOrigins: nod
     const devScript = isDeveloping ? ["'unsafe-inline'", "'unsafe-eval'"] : [];
     // Development talks to the Vite dev server and HMR over plain ws on a
     // possibly-different port; production is same-origin or explicitly listed.
-    const socketSchemes = isDeveloping ? ['ws:', 'wss:'] : gameNodeOrigins(nodes);
+    // The game node also lives on its own port locally (docker-compose.yml and
+    // the native setup both run it on :9500 next to the lobby's :4000, with no
+    // Caddy in front the way production has), and socket.io's engine.io
+    // transport dials that origin over plain http(s) for its polling handshake
+    // before ever upgrading to ws: - so allowing only ws:/wss: here left every
+    // local game unable to connect at all, failing the handoff on the very
+    // first request. http:/https: get the same dev-only allowance.
+    const socketSchemes = isDeveloping
+        ? ['ws:', 'wss:', 'http:', 'https:']
+        : gameNodeOrigins(nodes);
 
     return {
         defaultSrc: ["'self'"],
