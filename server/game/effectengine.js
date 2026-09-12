@@ -1,5 +1,3 @@
-const _ = require('underscore');
-
 const EventRegistrar = require('./eventregistrar.js');
 const PlayerEffect = require('./Effects/PlayerEffect');
 
@@ -54,7 +52,9 @@ class EffectEngine {
                 effect.target.type === 'player' ||
                 effect.target.location === 'play area'
         );
-        _.each(this.delayedEffects, (effect) => effect.checkEffect(events));
+        for (const effect of this.delayedEffects) {
+            effect.checkEffect(events);
+        }
     }
 
     checkTerminalConditions() {
@@ -176,11 +176,13 @@ class EffectEngine {
         const anotherTurn = anotherTurnEffects.length > 0;
 
         // Let the first 'another turn' effect to be removed with 'for remainder of turn' effects
-        anotherTurnEffects
-            .slice(0, 1)
-            .forEach((effect) => (effect.duration = 'untilPlayerTurnEnd'));
+        for (const effect of anotherTurnEffects.slice(0, 1)) {
+            effect.duration = 'untilPlayerTurnEnd';
+        }
         // Save the rest for consecutive turns
-        anotherTurnEffects.slice(1).forEach((effect) => (effect.duration = 'consecutiveTurn'));
+        for (const effect of anotherTurnEffects.slice(1)) {
+            effect.duration = 'consecutiveTurn';
+        }
 
         // Remove 'for remainder of turn' effects
         let effectsRemoved = this.unapplyAndRemove((effect) =>
@@ -207,7 +209,7 @@ class EffectEngine {
             ) || effectsRemoved;
 
         // Label effects that were added this turn and should last until a future turn
-        this.effects.forEach((effect) => {
+        for (const effect of this.effects) {
             if (effect.duration === 'untilPlayerNextTurnEnd') {
                 effect.duration = 'untilPlayerNextTurnEndInitiated';
             }
@@ -215,7 +217,7 @@ class EffectEngine {
             if (effect.duration === 'untilPlayerNextTurnStart') {
                 effect.duration = 'untilPlayerNextTurnStartInitiated';
             }
-        });
+        }
 
         // Add 'during your opponent's next turn' effects when switching players
         this.duringOpponentNextTurnEffects = this.duringOpponentNextTurnEffects.filter((effect) => {
@@ -326,23 +328,23 @@ class EffectEngine {
 
         let eventNames = Object.keys(effect.until);
         let handler = this.createCustomDurationHandler(effect);
-        _.each(eventNames, (eventName) => {
+        for (const eventName of eventNames) {
             this.customDurationEvents.push({
                 name: eventName,
                 handler: handler,
                 effect: effect
             });
             this.game.on(eventName, handler);
-        });
+        }
     }
 
     unregisterCustomDurationEvents(effect) {
         let eventsForEffect = this.customDurationEvents.filter((event) => event.effect === effect);
 
-        _.each(eventsForEffect, (event) => {
+        for (const event of eventsForEffect) {
             //console.log('unregisterCustomDurationEvents', effect.source.name, effect.effect.type, effect.targets.map(t => t.name), effect.match.name);
             this.game.removeListener(event.name, event.handler);
-        });
+        }
 
         this.customDurationEvents = this.customDurationEvents.filter(
             (event) => event.effect !== effect
@@ -363,13 +365,13 @@ class EffectEngine {
 
     unapplyAndRemove(match) {
         let matchingEffects = this.effects.filter(match);
-        _.each(matchingEffects, (effect) => {
+        for (const effect of matchingEffects) {
             //console.log('unapplyAndRemove', effect.source.name, effect.effect.type, effect.targets.map(t => t.name), effect.match.name);
             effect.cancel();
             if (effect.duration === 'custom') {
                 this.unregisterCustomDurationEvents(effect);
             }
-        });
+        }
         this.effects = this.effects.filter((effect) => !matchingEffects.includes(effect));
         return matchingEffects.length > 0;
     }

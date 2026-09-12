@@ -1,5 +1,6 @@
 const AllPlayerPrompt = require('../allplayerprompt');
 const ChainBiddingPrompt = require('./ChainBiddingPrompt');
+const secureRandom = require('../../secureRandom');
 
 class AdaptiveDeckSelectionPrompt extends AllPlayerPrompt {
     constructor(game) {
@@ -8,6 +9,9 @@ class AdaptiveDeckSelectionPrompt extends AllPlayerPrompt {
         this.adaptive = game.adaptive;
         this.clickedButton = {};
         this.players = game.getPlayers();
+        if (this.gameFormat === 'adaptive-bo1') {
+            this.firstDeck();
+        }
     }
 
     completionCondition(player) {
@@ -85,6 +89,13 @@ class AdaptiveDeckSelectionPrompt extends AllPlayerPrompt {
             if (player1.owner !== player1.player) {
                 this.game.reInitialisePlayers(true);
             }
+        }
+    }
+
+    firstDeck() {
+        if (!this.game.adaptiveFirstDeck) {
+            let allPlayersShuffled = secureRandom.shuffle(this.game.getPlayers());
+            this.game.adaptiveFirstDeck = allPlayersShuffled.shift().deckData;
         }
     }
 }
