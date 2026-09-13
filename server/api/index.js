@@ -23,6 +23,8 @@ const community = require('./community');
 const onboarding = require('./onboarding');
 // ARCHON: beta bug reports
 const bugReports = require('./bug-reports');
+// ARCHON (N14): self-serve TestFlight requests
+const iosBetaRequests = require('./ios-beta-requests');
 // ARCHON: in-app notification centre + delivery preferences
 const notifications = require('./notifications');
 // ARCHON: in-person (paper) game tracking
@@ -81,6 +83,7 @@ module.exports.init = function (server, options) {
     tournaments.init(server);
     // ARCHON: beta bug reports
     bugReports.init(server);
+    iosBetaRequests.init(server);
     // ARCHON: notification centre + preferences
     notifications.init(server);
     // ARCHON: in-person (paper) game tracking

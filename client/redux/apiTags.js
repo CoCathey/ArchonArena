@@ -22,6 +22,8 @@ export const TAG_TYPES = {
     STORES: 'Stores',
     RATINGS: 'Ratings',
     BUG_REPORTS: 'BugReports',
+    // ARCHON (N14): self-serve TestFlight requests.
+    IOS_BETA_REQUESTS: 'IosBetaRequests',
     NOTIFICATIONS: 'Notifications',
     // ARCHON: direct messages - the inbox, a thread, and the unread badge.
     MESSAGES: 'Messages',
